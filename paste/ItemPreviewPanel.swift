@@ -56,11 +56,8 @@ private struct ItemPreviewView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: item.typeIcon)
-                    .font(.system(size: 13, weight: .semibold))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.typeLabel)
-                        .font(.system(size: 12, weight: .semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    ItemTagStrip(tags: item.tags, maxVisible: 5, compact: false)
                     if let metadata = item.metadataSummary {
                         Text(metadata)
                             .font(.system(size: 10))

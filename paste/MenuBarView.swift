@@ -318,13 +318,7 @@ struct ItemRow: View {
                     .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.12),
                                 in: RoundedRectangle(cornerRadius: 5))
 
-                HStack(spacing: 4) {
-                    Image(systemName: item.typeIcon)
-                        .font(.system(size: 9, weight: .semibold))
-                    Text(item.typeLabel)
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundColor(.secondary)
+                ItemTagStrip(tags: item.tags, maxVisible: 3, compact: true)
 
                 // Diff badge
                 if let badge = item.diffBadge {
@@ -572,11 +566,11 @@ struct InlineTransformRow: View {
                 Task {
                     let result = await transform.runAsync(item)
                     await MainActor.run {
-                        ClipboardManager.shared.applyTransformResult(result, restoring: item)
+                        ClipboardManager.shared.applyTransformResult(result, restoring: item, toolID: transform.id)
                     }
                 }
             } else if let result = transform.runSync?(item) {
-                ClipboardManager.shared.applyTransformResult(result, restoring: item)
+                ClipboardManager.shared.applyTransformResult(result, restoring: item, toolID: transform.id)
             }
         } label: {
             HStack(spacing: 8) {

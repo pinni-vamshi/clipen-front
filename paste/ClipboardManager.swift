@@ -97,10 +97,10 @@ class ClipboardManager: ObservableObject {
     /// dismisses without pasting.
     @Published var selectionArmed: Bool = true
 
-    /// Optional category filter. `nil` = Recents (everything). When set,
-    /// `displayItems` is filtered to items whose `category` matches. Cleared
+    /// Optional tag filter. `nil` = Recents (everything). When set,
+    /// `displayItems` is filtered to items that include that tag. Cleared
     /// on `dismissPreview` so each new ⌘V session starts at Recents.
-    @Published var categoryFilter: ClipboardCategory? = nil {
+    @Published var tagFilter: ClipboardTag? = nil {
         didSet {
             invalidateDisplayItems()
             // Reset selection — old index almost certainly points past the
@@ -206,8 +206,8 @@ class ClipboardManager: ObservableObject {
             source = items
         }
         let filtered: [ClipboardItem]
-        if let cat = categoryFilter {
-            filtered = source.filter { $0.category == cat }
+        if let tag = tagFilter {
+            filtered = source.filter { $0.tags.contains(tag) }
         } else {
             filtered = source
         }
@@ -222,13 +222,18 @@ class ClipboardManager: ObservableObject {
         displayItems = pinnedAtBottom ? unpinned + pinned : pinned + unpinned
     }
 
-    /// Categories that currently have at least one item in the full ring
-    /// (ignoring `categoryFilter` and `timeScrubDate`). Used to drive the
-    /// chip strip in the popover — empty buckets aren't worth a chip.
-    /// Sorted alphabetically by label.
-    var availableCategories: [ClipboardCategory] {
-        let present = Set(items.map { $0.category })
-        return present.sorted { $0.label < $1.label }
+    /// Tags that appear on at least one item in the full ring (ignoring
+    /// `tagFilter` and `timeScrubDate`). Drives the horizontal chip strip.
+    var availableTags: [ClipboardTag] {
+        var present = Set<ClipboardTag>()
+        for item in items {
+            for tag in item.tags { present.insert(tag) }
+        }
+        return present.sorted { $0.priority < $1.priority }
+    }
+
+    func itemCount(for tag: ClipboardTag) -> Int {
+        items.reduce(0) { $0 + ($1.tags.contains(tag) ? 1 : 0) }
     }
 
     let previewWindow  = PreviewOverlayWindow()
@@ -292,7 +297,7 @@ class ClipboardManager: ObservableObject {
     /// Seconds of inactivity before the row highlight clears (`softDisarm`).
     /// The popup stays open; releasing ⌘ while disarmed dismisses without
     /// pasting. `0` disables auto-clear (highlight stays until Esc or ⌘ up).
-    @Published var dismissTimeout: Double = UserDefaults.standard.object(forKey: "dismissTimeout") as? Double ?? 5.0 {
+    @Published var dismissTimeout: Double = UserDefaults.standard.object(forKey: "dismissTimeout") as? Double ?? 3.0 {
         didSet { UserDefaults.standard.set(dismissTimeout, forKey: "dismissTimeout") }
     }
 
@@ -842,6 +847,10 @@ class ClipboardManager: ObservableObject {
         }
 
         if key == 7 && previewWindow.isVisible { // X — enter transform, then cycle
+            // Ignore key-repeat while holding X — one step per physical press.
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
+                return nil
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.selectionArmed else { return }
                 if self.inTransformStage {
@@ -874,7 +883,7 @@ class ClipboardManager: ObservableObject {
             return
         }
         inTransformStage = true
-        transformDisplaysCache = ToolRegistry.displays(for: displayItems[selectedIndex])
+        refreshTransformDisplaysCache()
         guard !transformDisplaysCache.isEmpty else {
             inTransformStage = false
             return
@@ -918,6 +927,24 @@ class ClipboardManager: ObservableObject {
         itemPreviewPanel.hide()
         // Unfreeze and restart dismiss countdown
         scheduleDismissTimer()
+    }
+
+    /// Rebuild transform list from current usage scores; keep highlight on the same tool id.
+    private func refreshTransformDisplaysCache() {
+        guard !displayItems.isEmpty, selectedIndex < displayItems.count else {
+            transformDisplaysCache = []
+            return
+        }
+        let selectedID = transformDisplaysCache.indices.contains(transformIndex)
+            ? transformDisplaysCache[transformIndex].id
+            : nil
+        transformDisplaysCache = ToolRegistry.displays(for: displayItems[selectedIndex])
+        if let selectedID,
+           let newIdx = transformDisplaysCache.firstIndex(where: { $0.id == selectedID }) {
+            transformIndex = newIdx
+        } else {
+            transformIndex = min(transformIndex, max(0, transformDisplaysCache.count - 1))
+        }
     }
 
     private func updateTransformPanel() {
@@ -984,10 +1011,14 @@ class ClipboardManager: ObservableObject {
     }
 
     /// Single entry for applying any transform result (⌘X popup, menu bar, etc.).
-    func applyTransformResult(_ result: TransformOutput?, restoring source: ClipboardItem) {
+    func applyTransformResult(_ result: TransformOutput?, restoring source: ClipboardItem, toolID: String? = nil) {
         guard let result else {
             flashStatus("Transform returned nothing.")
             return
+        }
+
+        if let toolID, !toolID.isEmpty, transformResultCountsAsUsage(result) {
+            AuthManager.shared.registerToolUsage(toolID: toolID)
         }
 
         switch result {
@@ -1007,8 +1038,16 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    private func handleTransformResult(_ result: TransformOutput?, restoring source: ClipboardItem) {
-        applyTransformResult(result, restoring: source)
+    private func handleTransformResult(_ result: TransformOutput?, restoring source: ClipboardItem, toolID: String? = nil) {
+        applyTransformResult(result, restoring: source, toolID: toolID)
+    }
+
+    private func transformResultCountsAsUsage(_ result: TransformOutput) -> Bool {
+        switch result {
+        case .status: return false
+        case .text(let text): return !text.isEmpty
+        case .item, .files, .revealFiles: return true
+        }
     }
 
     private func pasteGeneratedItem(_ item: ClipboardItem, message: String, restoring source: ClipboardItem) {
@@ -1201,20 +1240,18 @@ class ClipboardManager: ObservableObject {
     /// flip categories without taking their hand off the keyboard. Opens the
     /// popup if it isn't already visible.
     private func cycleCategoryForward() {
-        let cats: [ClipboardCategory?] = [nil] + availableCategories
-        guard cats.count > 1 else { return }       // only Recents → nothing to cycle
+        let tags: [ClipboardTag?] = [nil] + availableTags
+        guard tags.count > 1 else { return }
 
         let isFirstOpen = !previewWindow.isVisible
         if isFirstOpen {
             cancelPendingFirstOpen()
-            // openPopupNow seeds cachedCaretPosition so the categoryFilter
-            // didSet's resize-show has something to work with.
             openPopupNow()
         }
 
-        let currentIdx = cats.firstIndex(of: categoryFilter) ?? 0
-        let nextIdx    = (currentIdx + 1) % cats.count
-        categoryFilter = cats[nextIdx]
+        let currentIdx = tags.firstIndex(of: tagFilter) ?? 0
+        let nextIdx    = (currentIdx + 1) % tags.count
+        tagFilter = tags[nextIdx]
 
         previewVisible = true
         cycleCount += 1
@@ -1456,7 +1493,7 @@ class ClipboardManager: ObservableObject {
         transformIndex   = 0
         selectedIndex    = 0
         selectionArmed   = true
-        categoryFilter   = nil
+        tagFilter   = nil
         dismissProgress  = 1.0
         timerFrozen      = false
         previewVisible   = false
@@ -1569,10 +1606,7 @@ class ClipboardManager: ObservableObject {
                         self.dismissTimer?.invalidate(); self.dismissTimer = nil
                         self.progressTimer?.invalidate(); self.progressTimer = nil
                         self.selectionArmed = true
-                        if result != nil {
-                            AuthManager.shared.registerToolUsage(toolID: selectedToolID)
-                        }
-                        self.handleTransformResult(result, restoring: item)
+                        self.handleTransformResult(result, restoring: item, toolID: selectedToolID)
                     }
                 }
                 return
@@ -1586,10 +1620,7 @@ class ClipboardManager: ObservableObject {
                 dismissTimer?.invalidate(); dismissTimer = nil
                 progressTimer?.invalidate(); progressTimer = nil
                 selectionArmed = true
-                if result != nil {
-                    AuthManager.shared.registerToolUsage(toolID: selectedToolID)
-                }
-                handleTransformResult(result, restoring: item)
+                handleTransformResult(result, restoring: item, toolID: selectedToolID)
                 return
             }
         }
@@ -2060,6 +2091,10 @@ struct ClipboardItem: Identifiable {
     /// Pre-computed at init so row renders don't redo traditional + semantic
     /// detectors. Content is immutable, so this can never go stale.
     let detectedType: ClipboardContentType
+    /// All detection tags (structural + plain-text signals).
+    let tags: [ClipboardTag]
+    /// Highest-priority tag — used for default filter chip ordering.
+    let primaryTag: ClipboardTag
     /// Same idea for color swatches.
     let detectedColor: NSColor?
     var isPinned:  Bool     = false
@@ -2075,6 +2110,8 @@ struct ClipboardItem: Identifiable {
         self.content   = content
         self.detectedColor = ContentDetector.detectedColor(for: content)
         self.detectedType  = ContentDetector.detectedType(for: content, color: self.detectedColor)
+        self.tags         = TagDetector.tags(for: content, color: self.detectedColor)
+        self.primaryTag   = TagDetector.primaryTag(from: self.tags)
     }
 
     var previewText: String {
@@ -2229,6 +2266,10 @@ struct ClipboardItem: Identifiable {
 
     var category: ClipboardCategory {
         ContentDetector.category(for: self)
+    }
+
+    func hasTag(_ tag: ClipboardTag) -> Bool {
+        tags.contains(tag)
     }
 
     func isDuplicate(of other: ClipboardItem) -> Bool {

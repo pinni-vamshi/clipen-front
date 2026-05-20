@@ -27,6 +27,8 @@
 		B10000000000000000000012 /* FileKindDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* FileKindDetector.swift */; };
 		B10000000000000000000013 /* TextSemanticDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* TextSemanticDetector.swift */; };
 		B10000000000000000000014 /* TextTraditionalDetectors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* TextTraditionalDetectors.swift */; };
+		B1000000000000000000001E /* ClipboardTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001E /* ClipboardTag.swift */; };
+		B1000000000000000000001F /* TagDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001F /* TagDetector.swift */; };
 		B10000000000000000000015 /* FileTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* FileTools.swift */; };
 		B10000000000000000000016 /* ImageTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* ImageTools.swift */; };
 		B10000000000000000000017 /* MediaTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* MediaTools.swift */; };
@@ -60,6 +62,8 @@
 		A10000000000000000000012 /* FileKindDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileKindDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000013 /* TextSemanticDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextSemanticDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* TextTraditionalDetectors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextTraditionalDetectors.swift; sourceTree = "<group>"; };
+		A1000000000000000000001E /* ClipboardTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardTag.swift; sourceTree = "<group>"; };
+		A1000000000000000000001F /* TagDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000015 /* FileTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTools.swift; sourceTree = "<group>"; };
 		A10000000000000000000016 /* ImageTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTools.swift; sourceTree = "<group>"; };
 		A10000000000000000000017 /* MediaTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaTools.swift; sourceTree = "<group>"; };
@@ -96,6 +100,8 @@
 				A10000000000000000000012 /* FileKindDetector.swift */,
 				A10000000000000000000013 /* TextSemanticDetector.swift */,
 				A10000000000000000000014 /* TextTraditionalDetectors.swift */,
+				A1000000000000000000001E /* ClipboardTag.swift */,
+				A1000000000000000000001F /* TagDetector.swift */,
 			);
 			path = Detection;
 			sourceTree = "<group>";
@@ -251,6 +257,8 @@
 				B10000000000000000000012 /* FileKindDetector.swift in Sources */,
 				B10000000000000000000013 /* TextSemanticDetector.swift in Sources */,
 				B10000000000000000000014 /* TextTraditionalDetectors.swift in Sources */,
+				B1000000000000000000001E /* ClipboardTag.swift in Sources */,
+				B1000000000000000000001F /* TagDetector.swift in Sources */,
 				B10000000000000000000015 /* FileTools.swift in Sources */,
 				B10000000000000000000016 /* ImageTools.swift in Sources */,
 				B10000000000000000000017 /* MediaTools.swift in Sources */,

@@ -704,19 +704,19 @@ struct MainWindowView: View {
                     label: "All",
                     icon: "square.grid.2x2",
                     count: manager.items.count,
-                    isSelected: manager.categoryFilter == nil
+                    isSelected: manager.tagFilter == nil
                 ) {
-                    manager.categoryFilter = nil
+                    manager.tagFilter = nil
                 }
 
-                ForEach(visibleTypeCategories, id: \.self) { category in
+                ForEach(manager.availableTags, id: \.self) { tag in
                     typeFilterPill(
-                        label: category.label,
-                        icon: category.icon,
-                        count: categoryCount(category),
-                        isSelected: manager.categoryFilter == category
+                        label: tag.label,
+                        icon: tag.icon,
+                        count: manager.itemCount(for: tag),
+                        isSelected: manager.tagFilter == tag
                     ) {
-                        manager.categoryFilter = category
+                        manager.tagFilter = tag
                     }
                 }
             }
@@ -724,16 +724,6 @@ struct MainWindowView: View {
             .padding(.vertical, 8)
         }
         .background(Color.surface)
-    }
-
-    private var visibleTypeCategories: [ClipboardCategory] {
-        ClipboardCategory.allCases.filter { categoryCount($0) > 0 }
-    }
-
-    private func categoryCount(_ category: ClipboardCategory) -> Int {
-        manager.items.reduce(0) { count, item in
-            count + (item.category == category ? 1 : 0)
-        }
     }
 
     private func typeFilterPill(label: String,
@@ -859,16 +849,7 @@ struct DarkItemRow: View {
                         .foregroundColor(isSelected ? .white : Color(hex: "#555555"))
                 }
 
-                // Type icon + label
-                HStack(spacing: 4) {
-                    Image(systemName: item.typeIcon)
-                        .font(.system(size: 9, weight: .semibold))
-                    Text(item.typeLabel)
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundColor(Color(hex: "#666666"))
-
-                ContentTypeBadge(type: item.detectedType)
+                ItemTagStrip(tags: item.tags, maxVisible: 4, compact: false)
 
                 // Diff badge
                 if let badge = item.diffBadge {
@@ -1355,7 +1336,7 @@ struct TutorialSheet: View {
             title:       "Hold ⌘ and tap V to cycle",
             detail:      "Hold ⌘ to open your clipboard ring near the cursor. Each tap of V moves to the next item; tap ⌥V to leap 5 forward. Release ⌘ to paste whichever item is highlighted.",
             practiceHint:"Click below, then hold ⌘ · tap V to cycle · release ⌘ to paste one of the lines you just copied."
-        ) { cycleAnimation(active: tick % 4) }
+        ) { cycleAnimation(active: tick % 5) }
     }
 
     private var transformPage: some View {
@@ -1363,7 +1344,7 @@ struct TutorialSheet: View {
             title:       "Pick with V, then transform with X",
             detail:      "First hold ⌘ and tap V to land on the item you want to change. Then tap X to apply a transform — UPPERCASE, lowercase, Base64, JSON pretty-print, URL encode and more. Tap X again to cycle through every transform that fits the picked item. Release ⌘ to paste the result.",
             practiceHint:"Click below, hold ⌘, tap V until the item you want is highlighted, then tap X to transform it. Tap X again to try the next transform."
-        ) { transformAnimation(active: tick % 6) }
+        ) { transformAnimation(active: tick % 10) }
     }
 
     private var deletePage: some View {
@@ -1453,126 +1434,247 @@ struct TutorialSheet: View {
 
     // MARK: Animations
 
-    /// 4-frame loop: ⌘ pressed → V tapped (row 0 selected) → V again (row 1)
-    /// → ⌘ released = paste confirmation.
+    private let tutorialRingSnippets = [
+        "Hello from Clipen",
+        "https://clipen.app",
+        "Made with care on macOS",
+    ]
+
+    /// Two ⌘+V taps in every tutorial animation (tap + dwell each).
+    private let tutorialVTapCount = 2
+    private var tutorialPickPhaseCount: Int { tutorialVTapCount * 2 }
+
+    /// 5-frame loop — hold ⌘, **two** V taps (row 0 → row 1), release ⌘ to paste.
     private func cycleAnimation(active: Int) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.surfaceHi)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
-            HStack(spacing: 14) {
-                animatedKey("⌘", isPressed: active <= 2)
-                animatedKey("V", isPressed: active == 1 || active == 2)
+        let releasePhase = tutorialPickPhaseCount
+        let phase = active % (releasePhase + 1)
+        let cmdHeld = phase < releasePhase
+        let vTap = cmdHeld && tutorialKeyIsTap(phase: phase)
+        let selectedIndex = cmdHeld
+            ? tutorialSelectedIndex(phase: phase, maxIndex: tutorialVTapCount - 1)
+            : tutorialVTapCount - 1
+
+        return tutorialAnimationCard {
+            HStack(spacing: 12) {
+                tutorialKeyCluster(
+                    cmdHeld: cmdHeld,
+                    vPressed: vTap,
+                    showReleaseHint: phase == releasePhase
+                )
                 Spacer()
-                if active <= 2 {
-                    popupIllustration(active: active >= 1, selectedIndex: max(0, active - 1))
+                if cmdHeld {
+                    ringListIllustration(
+                        snippets: tutorialRingSnippets,
+                        selectedIndex: selectedIndex,
+                        ringVisible: true
+                    )
                 } else {
                     pasteIllustration()
                 }
             }
-            .padding(.horizontal, 20)
         }
-        .frame(height: 140)
-        .animation(.easeInOut(duration: 0.35), value: active)
+        .animation(.easeInOut(duration: 0.35), value: phase)
     }
 
-    /// 6-frame, two-phase loop — first show ⌘V picking *which* item to act
-    /// on, then ⌘X cycling transforms on the picked item.
-    ///   0: ⌘ pressed, popup opens with row 0 highlighted (original text)
-    ///   1: ⌘+V again → row 1 highlighted (different item)
-    ///   2: ⌘+V again → row 2 highlighted (the one we'll transform)
-    ///   3: ⌘+X → row 2's text turns UPPER CASE
-    ///   4: ⌘+X again → lowercase
-    ///   5: ⌘+X again → Base64
+    /// 10-frame loop — two V taps (pick row 1), then three X taps on that row.
     private func transformAnimation(active: Int) -> some View {
-        let snippets = [
-            "Hello from Clipen",
-            "https://clipen.app",
-            "Made with care",
-        ]
+        let snippets = tutorialRingSnippets
         let transforms: [(name: String, sample: String)] = [
-            ("UPPER",  "MADE WITH CARE"),
-            ("lower",  "made with care"),
-            ("Base64", "TWFkZSB3aXRoIGNhcmU="),
+            ("UPPER",  "HTTPS://CLIPEN.APP"),
+            ("lower",  "https://clipen.app"),
+            ("Base64", "aHR0cHM6Ly9jbGlwZW4uYXBw"),
         ]
+        let pickedRow = tutorialVTapCount - 1
 
-        let inPickPhase = active <= 2
-        let pickIndex   = min(active, 2)
-        let xIndex      = max(0, active - 3)
-        let xPressed    = active >= 3
-        let rowText     = inPickPhase
+        let pickFrames = tutorialPickPhaseCount
+        let transformFrames = 6
+        let phase = active % (pickFrames + transformFrames)
+        let cmdHeld = true
+        let inPickPhase = phase < pickFrames
+        let inTransformPhase = !inPickPhase
+        let vTap = inPickPhase && tutorialKeyIsTap(phase: phase)
+        let xTap = inTransformPhase && tutorialKeyIsTap(phase: phase - pickFrames)
+        let pickIndex = inPickPhase
+            ? tutorialSelectedIndex(phase: phase, maxIndex: pickedRow)
+            : pickedRow
+        let xIndex = inTransformPhase
+            ? tutorialSelectedIndex(phase: phase - pickFrames, maxIndex: transforms.count - 1)
+            : 0
+        let rowText = inPickPhase
             ? snippets[pickIndex]
             : transforms[min(xIndex, transforms.count - 1)].sample
         let transformLabel = inPickPhase
             ? nil
             : transforms[min(xIndex, transforms.count - 1)].name
 
-        return ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.surfaceHi)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
+        return tutorialAnimationCard {
             HStack(spacing: 10) {
-                animatedKey("⌘", isPressed: true)
-                animatedKey("V", isPressed: inPickPhase)
-                Text("→")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.textDim)
-                animatedKey("X", isPressed: xPressed)
+                tutorialKeyCluster(
+                    cmdHeld: cmdHeld,
+                    vVisible: inPickPhase,
+                    vPressed: vTap,
+                    xVisible: inTransformPhase,
+                    xPressed: xTap
+                )
                 Spacer()
                 transformRowIllustration(
-                    pickIndex:      pickIndex,
+                    pickIndex:      inPickPhase ? pickIndex : pickedRow,
                     rowText:        rowText,
                     transformLabel: transformLabel
                 )
             }
-            .padding(.horizontal, 18)
         }
-        .frame(height: 140)
-        .animation(.easeInOut(duration: 0.35), value: active)
+        .animation(.easeInOut(duration: 0.35), value: phase)
     }
 
-    /// 6-frame, two-phase loop — first ⌘V picks *which* item to delete,
-    /// then ⌘⌫ removes the highlighted row (same rhythm as transform).
-    ///   0–2: pick phase — highlight walks rows 0 → 1 → 2
-    ///   3:   ⌫ pressed — row 2 marked for deletion
-    ///   4–5: row 2 gone — ring shows 2 items left
+    /// 6-frame loop — two V taps (pick row 1), one ⌫ tap to delete it.
     private func deleteAnimation(active: Int) -> some View {
-        let snippets = [
-            "Hello from Clipen",
-            "https://clipen.app",
-            "Made with care",
-        ]
-        let inPickPhase  = active <= 2
-        let pickIndex    = min(active, 2)
-        let deleteTarget = 2
-        let marking      = active == 3
-        let removed      = active >= 4
+        let snippets = tutorialRingSnippets
+        let pickedRow = tutorialVTapCount - 1
+        let pickFrames = tutorialPickPhaseCount
+        let phase = active % (pickFrames + 2)
+        let cmdHeld = phase < pickFrames + 1
+        let inPickPhase = phase < pickFrames
+        let vTap = inPickPhase && tutorialKeyIsTap(phase: phase)
+        let deleteTap = phase == pickFrames
+        let pickIndex = inPickPhase
+            ? tutorialSelectedIndex(phase: phase, maxIndex: pickedRow)
+            : pickedRow
+        let marking = deleteTap
+        let removed = phase == pickFrames + 1
 
-        return ZStack {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.surfaceHi)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
+        return tutorialAnimationCard {
             HStack(spacing: 10) {
-                animatedKey("⌘", isPressed: true)
-                animatedKey("V", isPressed: inPickPhase)
-                Text("→")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.textDim)
-                animatedKey("⌫", isPressed: marking)
+                tutorialKeyCluster(
+                    cmdHeld: cmdHeld,
+                    vVisible: inPickPhase,
+                    vPressed: vTap,
+                    deleteVisible: !inPickPhase,
+                    deletePressed: deleteTap
+                )
                 Spacer()
                 deleteRowIllustration(
                     snippets:    snippets,
-                    pickIndex:   inPickPhase ? pickIndex : deleteTarget,
-                    deleteIndex: deleteTarget,
+                    pickIndex:   inPickPhase ? pickIndex : pickedRow,
+                    deleteIndex: pickedRow,
                     marking:     marking,
                     removed:     removed,
-                    showDone:    active == 5
+                    showDone:    removed
                 )
             }
-            .padding(.horizontal, 18)
+        }
+        .animation(.easeInOut(duration: 0.35), value: phase)
+    }
+
+    private func tutorialAnimationCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.surfaceHi)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
+            content()
+                .padding(.horizontal, 18)
         }
         .frame(height: 140)
-        .animation(.easeInOut(duration: 0.35), value: active)
+    }
+
+    /// Even phase index = brief key tap; odd = key released while ⌘ stays held.
+    private func tutorialKeyIsTap(phase: Int) -> Bool { phase % 2 == 0 }
+
+    /// Selection advances after each ⌘+V tap pair (tap + release).
+    private func tutorialSelectedIndex(phase: Int, maxIndex: Int = 2) -> Int {
+        min(phase / 2, maxIndex)
+    }
+
+    private func tutorialKeyCluster(
+        cmdHeld: Bool,
+        vVisible: Bool = true,
+        vPressed: Bool = false,
+        xVisible: Bool = false,
+        xPressed: Bool = false,
+        deleteVisible: Bool = false,
+        deletePressed: Bool = false,
+        showReleaseHint: Bool = false
+    ) -> some View {
+        HStack(spacing: 6) {
+            tutorialKey("⌘", isPressed: cmdHeld, caption: cmdHeld ? "hold" : "release")
+
+            if !showReleaseHint {
+                if vVisible {
+                    Text("+")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.textDim)
+                    tutorialKey("V", isPressed: vPressed, caption: vPressed ? "tap" : nil)
+                }
+
+                if xVisible {
+                    if !vVisible {
+                        Text("+")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.textDim)
+                    }
+                    Text("→")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.textDim)
+                    tutorialKey("X", isPressed: xPressed, caption: xPressed ? "tap" : nil)
+                }
+
+                if deleteVisible {
+                    if !vVisible {
+                        Text("+")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.textDim)
+                    }
+                    Text("→")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.textDim)
+                    tutorialKey("⌫", isPressed: deletePressed, caption: deletePressed ? "tap" : nil)
+                }
+            }
+        }
+    }
+
+    private func tutorialKey(_ label: String, isPressed: Bool, caption: String?) -> some View {
+        VStack(spacing: 3) {
+            animatedKey(label, isPressed: isPressed)
+            Text(caption ?? " ")
+                .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .foregroundColor(isPressed ? .accent : .textDim)
+                .opacity(caption == nil ? 0 : 1)
+                .frame(height: 10)
+        }
+    }
+
+    /// Ring popup beside the keys — highlight jumps on each V **tap**, not while V is held.
+    private func ringListIllustration(snippets: [String],
+                                      selectedIndex: Int,
+                                      ringVisible: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(0..<snippets.count, id: \.self) { i in
+                let isSelected = i == selectedIndex
+                HStack(spacing: 6) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(isSelected ? Color.accent : Color.textDim.opacity(0.4))
+                        .frame(width: 12, height: 5)
+                    Text(snippets[i])
+                        .font(.system(size: 9, weight: isSelected ? .semibold : .regular, design: .monospaced))
+                        .foregroundColor(isSelected ? .textPri : .textSec)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: 150, alignment: .leading)
+                }
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .background(
+                    isSelected ? Color.accentDim : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 4)
+                )
+            }
+        }
+        .padding(10)
+        .background(Color.bg, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.border, lineWidth: 1))
+        .opacity(ringVisible ? 1 : 0.35)
+        .animation(.easeInOut(duration: 0.3), value: selectedIndex)
     }
 
     // MARK: Reusable illustration pieces
@@ -1593,34 +1695,6 @@ struct TutorialSheet: View {
             .shadow(color: isPressed ? Color.accent.opacity(0.4) : .clear, radius: 8, y: 2)
             .offset(y: isPressed ? 2 : 0)
             .animation(.easeOut(duration: 0.2), value: isPressed)
-    }
-
-    private func popupIllustration(active: Bool, selectedIndex: Int) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(0..<3) { i in
-                HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(i == selectedIndex ? Color.accent : Color.textDim.opacity(0.4))
-                        .frame(width: 14, height: 5)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.textDim.opacity(i == selectedIndex ? 0.9 : 0.3))
-                        .frame(width: 70, height: 5)
-                }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .background(
-                    i == selectedIndex ? Color.accentDim : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 4)
-                )
-            }
-        }
-        .padding(10)
-        .background(Color.bg, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.border, lineWidth: 1))
-        .opacity(active ? 1 : 0.3)
-        .scaleEffect(active ? 1 : 0.92)
-        .animation(.spring(response: 0.35), value: active)
-        .animation(.easeInOut(duration: 0.3), value: selectedIndex)
     }
 
     private func pasteIllustration() -> some View {
@@ -1703,7 +1777,9 @@ struct TutorialSheet: View {
                                        marking: Bool,
                                        removed: Bool,
                                        showDone: Bool) -> some View {
-        let visibleIndices: [Int] = removed ? [0, 1] : [0, 1, 2]
+        let visibleIndices: [Int] = removed
+            ? snippets.indices.filter { $0 != deleteIndex }
+            : Array(snippets.indices)
         return VStack(alignment: .leading, spacing: 4) {
             ForEach(visibleIndices, id: \.self) { i in
                 let isPicked   = !removed && i == pickIndex
@@ -1770,7 +1846,7 @@ struct TutorialSheet: View {
 
     private func startTick() {
         tickTimer?.invalidate()
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+        tickTimer = Timer.scheduledTimer(withTimeInterval: 0.85, repeats: true) { _ in
             tick &+= 1
         }
         RunLoop.main.add(tickTimer!, forMode: .common)

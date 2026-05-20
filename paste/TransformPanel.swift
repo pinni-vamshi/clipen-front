@@ -116,13 +116,6 @@ struct TransformView: View {
         return "\(words) words · \(chars) chars · \(lines) lines"
     }
 
-    private var groups: [String] {
-        var seen = Set<String>()
-        return displays.compactMap { d in
-            seen.insert(d.group).inserted ? d.group : nil
-        }
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
@@ -178,60 +171,31 @@ struct TransformView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(spacing: 6) {
-                            ForEach(groups, id: \.self) { group in
-                                let groupDisplays = displays.filter { $0.group == group }
-                                if !groupDisplays.isEmpty {
-                                    VStack(spacing: 0) {
-                                        HStack {
-                                            Text(group)
-                                                .font(.system(size: 9, weight: .semibold))
-                                                .foregroundColor(.secondary)
-                                                .tracking(1.5)
-                                            Spacer()
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.top, 6)
-                                        .padding(.bottom, 3)
-
-                                        VStack(spacing: 0) {
-                                            ForEach(Array(groupDisplays.enumerated()), id: \.element.id) { idx, display in
-                                                let globalIdx = displays.firstIndex(where: { $0.id == display.id }) ?? 0
-                                                let selected  = globalIdx == selectedTransformIndex
-                                                TransformRow(
-                                                    display:    display,
-                                                    isSelected: selected,
-                                                    isProcessing: selected && isProcessing
-                                                )
-                                                .id(display.id)
-                                                if idx < groupDisplays.count - 1 {
-                                                    Divider().padding(.leading, 36)
-                                                }
-                                            }
-                                        }
-                                        .background(.regularMaterial,
-                                                    in: RoundedRectangle(cornerRadius: 9))
-                                        .overlay(RoundedRectangle(cornerRadius: 9)
-                                            .stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                                        .padding(.horizontal, 8)
-                                    }
+                        VStack(spacing: 0) {
+                            ForEach(Array(displays.enumerated()), id: \.offset) { idx, display in
+                                TransformRow(
+                                    display:    display,
+                                    isSelected: idx == selectedTransformIndex,
+                                    isProcessing: idx == selectedTransformIndex && isProcessing
+                                )
+                                .id(idx)
+                                if idx < displays.count - 1 {
+                                    Divider().padding(.leading, 36)
                                 }
                             }
-                            .padding(.bottom, 6)
                         }
-                        .padding(.top, 4)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
                     }
                     .onChange(of: selectedTransformIndex) { _, newIdx in
                         guard displays.indices.contains(newIdx) else { return }
-                        let id = displays[newIdx].id
                         withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo(id, anchor: .center)
+                            proxy.scrollTo(newIdx, anchor: .center)
                         }
                     }
                     .onAppear {
                         guard displays.indices.contains(selectedTransformIndex) else { return }
-                        let id = displays[selectedTransformIndex].id
-                        proxy.scrollTo(id, anchor: .center)
+                        proxy.scrollTo(selectedTransformIndex, anchor: .center)
                     }
                 }
             }

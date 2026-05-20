@@ -1,0 +1,195 @@
+import SwiftUI
+
+/// Semantic / structural labels for a clipboard item. Multiple tags per item;
+/// filter chips and tool pools key off these (not a single pasteboard heading).
+enum ClipboardTag: String, Hashable, CaseIterable {
+    case image
+    case pdf
+    case file
+    case files
+    case video
+    case audio
+    case url
+    case json
+    case markdown
+    case latex
+    case table
+    case email
+    case phone
+    case address
+    case code
+    case color
+    case text
+    case html
+    case richText
+
+    /// Lower = shown first in chips and strip sort order.
+    var priority: Int {
+        switch self {
+        case .image:     return 10
+        case .pdf:       return 12
+        case .files:     return 14
+        case .file:      return 16
+        case .video:     return 18
+        case .audio:     return 20
+        case .url:       return 30
+        case .json:      return 32
+        case .table:     return 34
+        case .email, .phone, .address: return 36
+        case .code:      return 38
+        case .latex:     return 40
+        case .markdown:  return 42
+        case .color:     return 44
+        case .text:      return 50
+        case .html:      return 70
+        case .richText:  return 72
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .image:    return "Image"
+        case .pdf:      return "PDF"
+        case .file:     return "File"
+        case .files:    return "Files"
+        case .video:    return "Video"
+        case .audio:    return "Audio"
+        case .url:      return "URL"
+        case .json:     return "JSON"
+        case .markdown: return "MD"
+        case .latex:    return "LaTeX"
+        case .table:    return "Table"
+        case .email:    return "Email"
+        case .phone:    return "Phone"
+        case .address:  return "Address"
+        case .code:     return "Code"
+        case .color:    return "Color"
+        case .text:     return "Text"
+        case .html:     return "HTML"
+        case .richText: return "Rich"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .image:    return "photo"
+        case .pdf:      return "doc.richtext"
+        case .file:     return "doc"
+        case .files:    return "doc.on.doc"
+        case .video:    return "film"
+        case .audio:    return "waveform"
+        case .url:      return "link"
+        case .json:     return "curlybraces"
+        case .markdown: return "doc.plaintext"
+        case .latex:    return "function"
+        case .table:    return "tablecells"
+        case .email:    return "envelope"
+        case .phone:    return "phone"
+        case .address:  return "mappin.and.ellipse"
+        case .code:     return "chevron.left.forwardslash.chevron.right"
+        case .color:    return "paintpalette"
+        case .text:     return "doc.text"
+        case .html:     return "globe"
+        case .richText: return "doc.richtext"
+        }
+    }
+
+    var badgeColor: Color {
+        switch self {
+        case .json:             return .green
+        case .latex:            return .purple
+        case .markdown:         return .indigo
+        case .table:            return .mint
+        case .email, .phone, .address: return .orange
+        case .code:             return .blue
+        case .url:              return .cyan
+        case .image, .pdf:      return .pink
+        case .video, .audio:    return .teal
+        case .color:            return .yellow
+        default:                return .gray
+        }
+    }
+
+    static func from(_ type: ClipboardContentType) -> ClipboardTag? {
+        switch type {
+        case .plain:    return .text
+        case .url:      return .url
+        case .json:     return .json
+        case .latex:    return .latex
+        case .markdown: return .markdown
+        case .table:    return .table
+        case .email:    return .email
+        case .phone:    return .phone
+        case .address:  return .address
+        case .code:     return .code
+        case .hexColor: return .color
+        }
+    }
+}
+
+// MARK: - Shared tag display (popup, main window, menu bar)
+
+enum ItemTagStripStyle {
+    /// Colored capsule chips with icons.
+    case chips
+    /// Comma-separated labels only (popover rows).
+    case plainComma
+}
+
+struct ItemTagStrip: View {
+    let tags: [ClipboardTag]
+    var maxVisible: Int = 4
+    var compact: Bool = false
+    var style: ItemTagStripStyle = .chips
+
+    var body: some View {
+        switch style {
+        case .chips:
+            chipStrip
+        case .plainComma:
+            plainCommaStrip
+        }
+    }
+
+    private var chipStrip: some View {
+        HStack(spacing: compact ? 4 : 5) {
+            ForEach(Array(tags.prefix(maxVisible)), id: \.self) { tag in
+                TagChip(tag: tag, compact: compact)
+            }
+            if tags.count > maxVisible {
+                Text("+\(tags.count - maxVisible)")
+                    .font(.system(size: compact ? 8 : 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private var plainCommaStrip: some View {
+        let visible = Array(tags.prefix(maxVisible))
+        let labels = visible.map(\.label)
+        let suffix = tags.count > maxVisible ? ", +\(tags.count - maxVisible)" : ""
+        return Text(labels.joined(separator: ", ") + suffix)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundColor(.secondary.opacity(0.72))
+            .lineLimit(1)
+    }
+}
+
+struct TagChip: View {
+    let tag: ClipboardTag
+    var compact: Bool = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: tag.icon)
+                .font(.system(size: compact ? 8 : 9, weight: .semibold))
+            Text(tag.label)
+                .font(.system(size: compact ? 9 : 10, weight: .semibold))
+        }
+        .foregroundColor(tag.badgeColor)
+        .padding(.horizontal, compact ? 6 : 7)
+        .padding(.vertical, compact ? 2 : 3)
+        .background(tag.badgeColor.opacity(0.14), in: Capsule())
+        .overlay(Capsule().stroke(tag.badgeColor.opacity(0.35), lineWidth: 0.5))
+    }
+}

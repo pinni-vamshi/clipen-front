@@ -26,7 +26,7 @@ class PreviewOverlayWindow: NSPanel {
 
     func show(at caretPos: NSPoint) {
         let items = ClipboardManager.shared.displayItems
-        let rowH: CGFloat    = 90
+        let rowH: CGFloat    = 72
         // Header = title row with inline V/X/Paste hints (~44) + category
         // strip (~36). The standalone shortcut chip row is gone.
         let headerH: CGFloat = 80
@@ -134,7 +134,7 @@ struct PopoverPreviewView: View {
     ///   selectedIndex 4 → window [0..5)  selection at row 4 (bottom)
     ///   selectedIndex 5 → window [1..6)  selection at row 4 (list scrolled +1)
     ///   selectedIndex 9 → window [5..10) selection at row 4
-    private static let rowHeight: CGFloat = 90
+    private static let rowHeight: CGFloat = 72
 
     private var visibleRange: Range<Int> {
         let total = items.count
@@ -194,7 +194,7 @@ struct PopoverPreviewView: View {
                 // (nil filter) is pinned first, then categories present in
                 // the ring in alphabetical order. Mouse-driven for now;
                 // keyboard nav is a future enhancement.
-                CategoryStrip()
+                TagFilterStrip()
 
                 // First-time-ever cycle hint — appears on the very first
                 // ⌘V cycling and auto-disappears after a few seconds. Kept
@@ -231,7 +231,7 @@ struct PopoverPreviewView: View {
                 // Fixed-height row area — category changes swap content only.
                 VStack(spacing: 0) {
                     if items.isEmpty {
-                        Text("No items in this category")
+                        Text("No items with this tag")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -398,31 +398,21 @@ struct SpaceKeyFlatHint: View {
     }
 }
 
-// MARK: - Category strip
-//
-// Horizontal scrolling list of category filter pills. Lives between the
-// shortcut-chip row and the dismiss-progress strip. The pills are mouse-
-// clickable; clicks land on the panel because we set
-// `ignoresMouseEvents = false` (the panel is `.nonactivatingPanel`, so
-// clicks don't break the user's ⌘-hold).
+// MARK: - Tag filter strip
 
-struct CategoryStrip: View {
+struct TagFilterStrip: View {
     @ObservedObject private var manager = ClipboardManager.shared
 
     var body: some View {
-        let cats = manager.availableCategories
+        let tags = manager.availableTags
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                CategoryChip(label: "Recents",
-                             icon: "clock",
-                             selected: manager.categoryFilter == nil) {
-                    manager.categoryFilter = nil
+                TagFilterChip(tag: nil, selected: manager.tagFilter == nil) {
+                    manager.tagFilter = nil
                 }
-                ForEach(cats, id: \.self) { cat in
-                    CategoryChip(label: cat.label,
-                                 icon: cat.icon,
-                                 selected: manager.categoryFilter == cat) {
-                        manager.categoryFilter = (manager.categoryFilter == cat) ? nil : cat
+                ForEach(tags, id: \.self) { tag in
+                    TagFilterChip(tag: tag, selected: manager.tagFilter == tag) {
+                        manager.tagFilter = (manager.tagFilter == tag) ? nil : tag
                     }
                 }
             }
@@ -434,18 +424,17 @@ struct CategoryStrip: View {
     }
 }
 
-struct CategoryChip: View {
-    let label: String
-    let icon: String
+struct TagFilterChip: View {
+    let tag: ClipboardTag?
     let selected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: icon)
+                Image(systemName: tag?.icon ?? "clock")
                     .font(.system(size: 9, weight: .semibold))
-                Text(label)
+                Text(tag?.label ?? "Recents")
                     .font(.system(size: 10, weight: .semibold))
             }
             .foregroundColor(selected ? .white : .secondary)
@@ -507,13 +496,7 @@ struct PopoverRow: View {
                         .foregroundColor(isSelected ? .white : .secondary)
                 }
 
-                HStack(spacing: 4) {
-                    Image(systemName: item.typeIcon)
-                        .font(.system(size: 9, weight: .semibold))
-                    Text(item.typeLabel)
-                        .font(.system(size: 10, weight: .semibold))
-                }
-                .foregroundColor(.secondary)
+                ItemTagStrip(tags: item.tags, maxVisible: 4, style: .plainComma)
 
                 if let badge = item.diffBadge {
                     Text("∆ \(badge)")
@@ -525,8 +508,6 @@ struct PopoverRow: View {
                 }
 
                 Spacer()
-
-                ContentTypeBadge(type: item.detectedType)
 
                 if isSelected {
                     Image(systemName: "return")
@@ -593,7 +574,7 @@ struct PopoverRow: View {
                 case .image(let img, _, _):
                     VStack(alignment: .leading, spacing: 2) {
                         Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 280, maxHeight: 62)
+                            .frame(maxWidth: 280, maxHeight: 48)
                             .cornerRadius(5).clipped()
                         if let summary = item.metadataSummary {
                             Text(summary).font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)

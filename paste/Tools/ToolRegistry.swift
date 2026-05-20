@@ -3,24 +3,19 @@ import Foundation
 
 enum ToolRegistry {
     static func tools(for item: ClipboardItem) -> [ClipboardTool] {
-        switch item.content {
-        case .text, .richText, .html:
-            return applicable(TextTools.all + FileTools.all, to: item)
-        case .image(_, _, let dataType) where dataType.rawValue.contains("pdf"):
-            return applicable(PDFTools.all, to: item)
-        case .image:
-            return applicable(ImageTools.all, to: item)
-        case .file(let url) where url.pathExtension.lowercased() == "pdf":
-            return applicable(FileTools.all + PDFTools.all, to: item)
-        case .file(let url) where FileKindDetector.isImageFile(url):
-            return applicable(FileTools.all + ImageTools.all, to: item)
-        case .file(let url) where FileKindDetector.isMediaFile(url):
-            return applicable(FileTools.all + MediaTools.all, to: item)
-        case .file:
-            return applicable(FileTools.all + TextTools.all, to: item)
-        case .files:
-            return applicable(FileTools.all, to: item)
-        }
+        applicable(toolPool(for: item), to: item)
+    }
+
+    /// One primary pool per item so image/PDF/file tools sort among themselves
+    /// (usage scores), not buried under unrelated text tools.
+    private static func toolPool(for item: ClipboardItem) -> [ClipboardTool] {
+        let tags = Set(item.tags)
+        if tags.contains(.image) { return ImageTools.all }
+        if tags.contains(.pdf) { return PDFTools.all }
+        if tags.contains(.video) || tags.contains(.audio) { return MediaTools.all }
+        if tags.contains(.files) { return FileTools.all }
+        if tags.contains(.file) { return FileTools.all }
+        return mergedPools(for: item.tags)
     }
 
     static func displays(for item: ClipboardItem) -> [TransformDisplay] {
@@ -75,9 +70,38 @@ enum ToolRegistry {
         return tools[index].id
     }
 
+    /// Union tool lists for every tag on the item (deduped by tool id).
+    private static func mergedPools(for tags: [ClipboardTag]) -> [ClipboardTool] {
+        var seen = Set<String>()
+        var merged: [ClipboardTool] = []
+        merged.reserveCapacity(48)
+
+        for tag in tags.sorted(by: { $0.priority < $1.priority }) {
+            for tool in pool(for: tag) where seen.insert(tool.id).inserted {
+                merged.append(tool)
+            }
+        }
+        return merged
+    }
+
+    private static func pool(for tag: ClipboardTag) -> [ClipboardTool] {
+        switch tag {
+        case .image:
+            return ImageTools.all
+        case .pdf:
+            return PDFTools.all
+        case .file, .files:
+            return FileTools.all
+        case .video, .audio:
+            return MediaTools.all
+        case .html, .richText, .url, .json, .markdown, .latex, .table,
+             .email, .phone, .address, .code, .color, .text:
+            return TextTools.all + FileTools.all
+        }
+    }
+
     private static func applicable(_ tools: [ClipboardTool], to item: ClipboardItem) -> [ClipboardTool] {
         let filtered = tools.filter { tool in
-            // OCR tool can be remotely disabled via feature flags.
             if tool.id == "image.ocr", !AuthManager.shared.ocrEnabled { return false }
             if tool.preview(item) != nil { return true }
             if let runSync = tool.runSync {
@@ -85,15 +109,12 @@ enum ToolRegistry {
             }
             return false
         }
+        let catalogOrder = Dictionary(uniqueKeysWithValues: tools.enumerated().map { ($1.id, $0) })
         return filtered.sorted { lhs, rhs in
             let ls = AuthManager.shared.toolImportanceScore(for: lhs.id)
             let rs = AuthManager.shared.toolImportanceScore(for: rhs.id)
-            if ls == rs {
-                // Keep original declaration order stable for ties.
-                return (tools.firstIndex(where: { $0.id == lhs.id }) ?? .max)
-                    < (tools.firstIndex(where: { $0.id == rhs.id }) ?? .max)
-            }
-            return ls > rs
+            if ls != rs { return ls > rs }
+            return (catalogOrder[lhs.id] ?? .max) < (catalogOrder[rhs.id] ?? .max)
         }
     }
 
