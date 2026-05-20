@@ -108,13 +108,6 @@ class ClipboardManager: ObservableObject {
             selectedIndex = 0
             selectionArmed = true
             if previewWindow.isVisible {
-                // Resize the panel for the new (filtered) row count so the
-                // bubble doesn't leave dead space or squeeze images. Reuse
-                // the cached caret position — same ⌘-hold session, caret
-                // can't have moved.
-                if let pos = cachedCaretPosition {
-                    previewWindow.show(at: pos)
-                }
                 scheduleDismissTimer()
             }
         }

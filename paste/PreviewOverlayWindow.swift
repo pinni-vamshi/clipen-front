@@ -54,10 +54,12 @@ class PreviewOverlayWindow: NSPanel {
         // Determine how many rows fit in the larger free side
         let availableSpace = max(spaceAbove, spaceBelow) - headerH - arrowH - margin
         let maxRows        = max(1, Int(availableSpace / rowH))
-        let visCount       = min(min(items.count, maxVisible), maxRows)
-        let footerH: CGFloat = items.isEmpty ? 0 : 26
+        // Fixed slot count keeps popup height stable when switching categories
+        // (Images vs Recents can have very different item counts).
+        let slotCount      = min(maxVisible, maxRows)
+        let footerH: CGFloat = 26
 
-        let bodyH  = headerH + CGFloat(visCount) * rowH + footerH
+        let bodyH  = headerH + CGFloat(slotCount) * rowH + footerH
         let totalH = bodyH + arrowH
 
         // Prefer placing ABOVE the typing line (so it doesn't cover what's
@@ -84,7 +86,7 @@ class PreviewOverlayWindow: NSPanel {
         let arrowX = min(max(caretPos.x - x, 24), w - 24)
 
         let view = PopoverPreviewView(
-            visibleCount: visCount,
+            visibleCount: slotCount,
             arrowAtBottom: arrowAtBottom,
             arrowOffsetX: arrowX
         )
@@ -132,9 +134,12 @@ struct PopoverPreviewView: View {
     ///   selectedIndex 4 → window [0..5)  selection at row 4 (bottom)
     ///   selectedIndex 5 → window [1..6)  selection at row 4 (list scrolled +1)
     ///   selectedIndex 9 → window [5..10) selection at row 4
+    private static let rowHeight: CGFloat = 90
+
     private var visibleRange: Range<Int> {
         let total = items.count
-        let win   = min(max(visibleCount, 1), total)
+        guard total > 0 else { return 0..<0 }
+        let win   = min(visibleCount, total)
         let start: Int
         if selectedIndex < win {
             start = 0                                        // hasn't hit bottom yet
@@ -222,35 +227,35 @@ struct PopoverPreviewView: View {
 
                 Divider()
 
-                // Rows — stable identity by item.id, NOT by Int index. With
-                // index-based identity, filter changes (e.g. Text → Images)
-                // would update row 0 in place from a text row to an image
-                // row; SwiftUI's mid-flight layout / image scaling could
-                // leave the new content rendered at the old container's
-                // dimensions, which is what made Images look "shrunk" after
-                // switching categories twice. Tying identity to the item
-                // forces a fresh view per row when contents change.
-                ForEach(Array(items[visibleRange].enumerated()), id: \.element.id) { pair in
-                    let absoluteIndex = visibleRange.lowerBound + pair.offset
-                    PopoverRow(item: pair.element,
-                               index: absoluteIndex,
-                               isSelected: manager.selectionArmed && absoluteIndex == selectedIndex)
-                    if absoluteIndex < visibleRange.upperBound - 1 {
-                        Divider().padding(.leading, 38)
+                // Fixed-height row area — category changes swap content only.
+                VStack(spacing: 0) {
+                    if items.isEmpty {
+                        Text("No items in this category")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ForEach(Array(items[visibleRange].enumerated()), id: \.element.id) { pair in
+                            let absoluteIndex = visibleRange.lowerBound + pair.offset
+                            PopoverRow(item: pair.element,
+                                       index: absoluteIndex,
+                                       isSelected: manager.selectionArmed && absoluteIndex == selectedIndex)
+                            if absoluteIndex < visibleRange.upperBound - 1 {
+                                Divider().padding(.leading, 38)
+                            }
+                        }
                     }
                 }
+                .frame(height: Self.rowHeight * CGFloat(visibleCount))
 
-                // Footer counter — always shown when there's at least one
-                // item in the current view, so the user can see both their
-                // position and the total for the active category.
-                if !items.isEmpty {
-                    Divider()
-                    Text("\(min(selectedIndex + 1, items.count)) of \(items.count)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
+                Divider()
+                Text(items.isEmpty
+                     ? "0 of 0"
+                     : "\(min(selectedIndex + 1, items.count)) of \(items.count)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
             }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
