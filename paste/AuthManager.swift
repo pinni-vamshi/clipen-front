@@ -55,6 +55,9 @@ final class AuthManager: ObservableObject {
     private let backendURLKey = "backendFeatureFlagsURL"
     private let toolUsageCountsKey = "backendToolUsageCounts"
     private let toolUsageTotalsKey = "backendToolUsageTotals"
+    private let toolLastUsedAtKey = "backendToolLastUsedAt"
+    private let toolBucketUsageKey = "backendToolBucketUsage"
+    private let globalBucketUsageKey = "backendGlobalBucketUsage"
 
     private var refreshInFlight = false
 
@@ -90,6 +93,9 @@ final class AuthManager: ObservableObject {
     /// refresh call so we can attribute usage to a stable `device_id`.
     func registerToolUsage(toolID: String, count: Int = 1) {
         guard !toolID.isEmpty, count > 0 else { return }
+        let now = Date()
+        let bucket = currentTimeBucket(for: now)
+
         var counters = pendingToolUsageCounts()
         counters[toolID, default: 0] += count
         UserDefaults.standard.set(counters, forKey: toolUsageCountsKey)
@@ -97,12 +103,52 @@ final class AuthManager: ObservableObject {
         var totals = toolUsageTotals()
         totals[toolID, default: 0] += count
         UserDefaults.standard.set(totals, forKey: toolUsageTotalsKey)
+
+        var lastUsed = toolLastUsedAt()
+        lastUsed[toolID] = now.timeIntervalSince1970
+        UserDefaults.standard.set(lastUsed, forKey: toolLastUsedAtKey)
+
+        var perToolBucket = toolBucketUsage()
+        perToolBucket["\(toolID)|\(bucket)", default: 0] += count
+        UserDefaults.standard.set(perToolBucket, forKey: toolBucketUsageKey)
+
+        var globalBucket = globalBucketUsage()
+        globalBucket[bucket, default: 0] += count
+        UserDefaults.standard.set(globalBucket, forKey: globalBucketUsageKey)
     }
 
-    /// Local ranking signal used by the transform/tool panels to keep the
-    /// user's most-used tool near the top for each content type.
-    func toolUsageCount(for toolID: String) -> Int {
-        toolUsageTotals()[toolID, default: 0]
+    /// Composite ranking signal (frequency + recency + time-context affinity)
+    /// used by transform/tool panels to prioritize relevant tools.
+    func toolImportanceScore(for toolID: String, now: Date = Date()) -> Double {
+        let totals = toolUsageTotals()
+        let totalCount = Double(totals[toolID, default: 0])
+        guard totalCount > 0 else { return 0 }
+
+        // 1) Frequency: saturating growth to avoid permanent lock-in.
+        let frequency = min(log1p(totalCount) / 5.0, 1.0)
+
+        // 2) Recency: exponential decay from last-use timestamp.
+        let lastUsedEpoch = toolLastUsedAt()[toolID] ?? 0
+        let recency: Double = {
+            guard lastUsedEpoch > 0 else { return 0 }
+            let ageHours = max(0, (now.timeIntervalSince1970 - lastUsedEpoch) / 3600.0)
+            let tauHours = 24.0 * 7.0 // 7-day half-life-ish window
+            return exp(-ageHours / tauHours)
+        }()
+
+        // 3) Time-context affinity: how often this tool is used in the
+        // current day-part/weekend bucket, smoothed to avoid cold-start jumps.
+        let bucket = currentTimeBucket(for: now)
+        let toolBucketCount = Double(toolBucketUsage()["\(toolID)|\(bucket)", default: 0])
+        let bucketTotal = Double(globalBucketUsage()[bucket, default: 0])
+        let distinctTools = Double(max(1, totals.count))
+        let alpha = 1.0
+        let timeAffinity = (toolBucketCount + alpha) / (bucketTotal + alpha * distinctTools)
+
+        let wFrequency = 0.45
+        let wRecency = 0.35
+        let wTimeAffinity = 0.20
+        return (wFrequency * frequency) + (wRecency * recency) + (wTimeAffinity * timeAffinity)
     }
 
     func refreshFeatureFlags(force: Bool = false, clickCount: Int? = nil) {
@@ -205,6 +251,72 @@ final class AuthManager: ObservableObject {
             if value > 0 { counts[k] = value }
         }
         return counts
+    }
+
+    private func toolLastUsedAt() -> [String: Double] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: toolLastUsedAtKey) else { return [:] }
+        var values: [String: Double] = [:]
+        for (k, v) in raw {
+            let value: Double
+            if let n = v as? Double {
+                value = n
+            } else if let n = v as? NSNumber {
+                value = n.doubleValue
+            } else {
+                continue
+            }
+            if value > 0 { values[k] = value }
+        }
+        return values
+    }
+
+    private func toolBucketUsage() -> [String: Int] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: toolBucketUsageKey) else { return [:] }
+        var counts: [String: Int] = [:]
+        for (k, v) in raw {
+            let value: Int
+            if let n = v as? Int {
+                value = n
+            } else if let n = v as? NSNumber {
+                value = n.intValue
+            } else {
+                continue
+            }
+            if value > 0 { counts[k] = value }
+        }
+        return counts
+    }
+
+    private func globalBucketUsage() -> [String: Int] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: globalBucketUsageKey) else { return [:] }
+        var counts: [String: Int] = [:]
+        for (k, v) in raw {
+            let value: Int
+            if let n = v as? Int {
+                value = n
+            } else if let n = v as? NSNumber {
+                value = n.intValue
+            } else {
+                continue
+            }
+            if value > 0 { counts[k] = value }
+        }
+        return counts
+    }
+
+    private func currentTimeBucket(for date: Date) -> String {
+        let calendar = Calendar.current
+        let hour = calendar.component(.hour, from: date)
+        let weekday = calendar.component(.weekday, from: date)
+        let dayType = (weekday == 1 || weekday == 7) ? "weekend" : "weekday"
+        let part: String
+        switch hour {
+        case 0..<6: part = "night"
+        case 6..<12: part = "morning"
+        case 12..<18: part = "afternoon"
+        default: part = "evening"
+        }
+        return "\(dayType)_\(part)"
     }
 
     private func loadCachedFeatureFlags() {

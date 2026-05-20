@@ -68,14 +68,14 @@ enum ToolRegistry {
             return false
         }
         return filtered.sorted { lhs, rhs in
-            let lc = AuthManager.shared.toolUsageCount(for: lhs.id)
-            let rc = AuthManager.shared.toolUsageCount(for: rhs.id)
-            if lc == rc {
+            let ls = AuthManager.shared.toolImportanceScore(for: lhs.id)
+            let rs = AuthManager.shared.toolImportanceScore(for: rhs.id)
+            if ls == rs {
                 // Keep original declaration order stable for ties.
                 return (tools.firstIndex(where: { $0.id == lhs.id }) ?? .max)
                     < (tools.firstIndex(where: { $0.id == rhs.id }) ?? .max)
             }
-            return lc > rc
+            return ls > rs
         }
     }
 }
