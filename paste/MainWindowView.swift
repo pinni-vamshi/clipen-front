@@ -185,14 +185,6 @@ struct MainWindowView: View {
                                 .buttonStyle(.plain)
                             }
                             cardDivider()
-                            cardRow(icon: "menubar.rectangle", label: "Menu bar") {
-                                Toggle("", isOn: Binding(
-                                    get: { AppDelegate.shared?.showMenuBarIcon ?? true },
-                                    set: { AppDelegate.shared?.showMenuBarIcon = $0 }
-                                ))
-                                .toggleStyle(.switch).controlSize(.mini).tint(.accent)
-                            }
-                            cardDivider()
                             cardRow(icon: "power", label: "Launch at Login") {
                                 Toggle("", isOn: Binding(
                                     get: { manager.launchAtLogin },

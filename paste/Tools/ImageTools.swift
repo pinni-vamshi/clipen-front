@@ -1,5 +1,6 @@
 import AppKit
 import Vision
+import webp
 
 enum ImageTools {
     static let all: [ClipboardTool] = [
@@ -28,7 +29,7 @@ enum ImageTools {
             label: "Extract Text (OCR)",
             group: "VISION",
             preview: { item in
-                ImageService.imageInput(for: item) == nil ? nil : ""
+                ImageService.imageInput(for: item) == nil ? nil : "Extract text from the image"
             },
             runAsync: { item in
                 guard let input = ImageService.imageInput(for: item) else { return nil }
@@ -39,13 +40,13 @@ enum ImageTools {
         ClipboardTool(
             id: "image.reduce-size",
             icon: "arrow.down.doc",
-            label: "Reduce File Size",
+            label: "Reduce Image Size",
             group: "OPTIMIZE",
             preview: { item in
-                ImageService.imageInput(for: item) == nil ? nil : ""
+                ImageService.imageInput(for: item) == nil ? nil : "Create a smaller WebP image copy"
             },
             runAsync: { item in
-                await ImageService.losslessReducedCopy(from: item)
+                await ImageService.reducedCopy(from: item)
             }
         )
     ]
@@ -73,6 +74,8 @@ enum OCRService {
 }
 
 enum ImageService {
+    static let webpPasteboardType = NSPasteboard.PasteboardType("public.webp")
+
     struct ImageInput {
         let image: NSImage
         let data: Data
@@ -124,29 +127,114 @@ enum ImageService {
         }
     }
 
-    static func losslessReducedCopy(from item: ClipboardItem) async -> TransformOutput? {
+    static func reducedCopy(from item: ClipboardItem) async -> TransformOutput? {
         guard let input = imageInput(for: item) else { return nil }
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                guard let pngData = input.image.pngData(), let pngImage = NSImage(data: pngData) else {
-                    continuation.resume(returning: nil)
-                    return
+                let encoder = WebPEncoder()
+                var bestData = input.data
+                var bestImage: NSImage?
+                var strategy: String?
+
+                func consider(_ data: Data, image: NSImage, strategyLabel: String) {
+                    guard data.count < bestData.count else { return }
+                    bestData = data
+                    bestImage = image
+                    strategy = strategyLabel
                 }
 
-                guard pngData.count < input.data.count else {
-                    continuation.resume(returning: .status("Image is already smaller than a lossless PNG copy."))
+                let qualityCandidates: [(Float, String)] = [
+                    (85, "WebP quality 85%"),
+                    (75, "WebP quality 75%"),
+                    (65, "WebP quality 65%"),
+                    (55, "WebP quality 55%")
+                ]
+
+                for (quality, label) in qualityCandidates {
+                    guard let webpData = encodeWebP(image: input.image, quality: quality, encoder: encoder),
+                          let webpImage = decodeWebP(data: webpData) else { continue }
+                    consider(webpData, image: webpImage, strategyLabel: label)
+                }
+
+                if bestImage == nil {
+                    let scaleCandidates: [(CGFloat, Float, String)] = [
+                        (0.9, 75, "scaled to 90% (WebP 75%)"),
+                        (0.8, 70, "scaled to 80% (WebP 70%)"),
+                        (0.7, 65, "scaled to 70% (WebP 65%)")
+                    ]
+                    for (scale, quality, label) in scaleCandidates {
+                        guard let scaledImage = scaledCopy(of: input.image, factor: scale) else { continue }
+                        let width = max(1, Int(scaledImage.size.width.rounded()))
+                        let height = max(1, Int(scaledImage.size.height.rounded()))
+                        guard let webpData = encodeWebP(
+                            image: scaledImage,
+                            quality: quality,
+                            encoder: encoder,
+                            width: width,
+                            height: height
+                        ),
+                        let webpImage = decodeWebP(data: webpData) else { continue }
+                        consider(webpData, image: webpImage, strategyLabel: label)
+                    }
+                }
+
+                guard let reducedImage = bestImage else {
+                    continuation.resume(returning: .item(
+                        ClipboardItem(content: .image(input.image, rawData: input.data, dataType: input.dataType)),
+                        message: "Image is already optimized. Pasted original image."
+                    ))
                     return
                 }
 
                 let before = ByteCountFormatter.string(fromByteCount: Int64(input.data.count), countStyle: .file)
-                let after  = ByteCountFormatter.string(fromByteCount: Int64(pngData.count), countStyle: .file)
+                let after = ByteCountFormatter.string(fromByteCount: Int64(bestData.count), countStyle: .file)
                 let compressed = ClipboardItem(
-                    content: .image(pngImage, rawData: pngData, dataType: .init("public.png"))
+                    content: .image(reducedImage, rawData: bestData, dataType: webpPasteboardType)
                 )
-                continuation.resume(returning: .item(compressed, message: "Reduced image: \(before) → \(after)"))
+                let mode = strategy.map { " (\($0))" } ?? ""
+                continuation.resume(returning: .item(compressed, message: "Reduced image: \(before) → \(after)\(mode)"))
             }
         }
+    }
+
+    private static func encodeWebP(
+        image: NSImage,
+        quality: Float,
+        encoder: WebPEncoder,
+        width: Int = 0,
+        height: Int = 0
+    ) -> Data? {
+        try? encoder.encode(
+            image,
+            config: .preset(.picture, quality: quality),
+            width: width,
+            height: height
+        )
+    }
+
+    private static func decodeWebP(data: Data) -> NSImage? {
+        guard let image = try? WebPDecoder().decode(toImage: data, options: WebpDecoderOptions()) as NSImage else {
+            return NSImage(data: data)
+        }
+        return image
+    }
+
+    private static func scaledCopy(of image: NSImage, factor: CGFloat) -> NSImage? {
+        guard factor > 0, factor < 1 else { return nil }
+        let target = NSSize(
+            width: max(1, image.size.width * factor),
+            height: max(1, image.size.height * factor)
+        )
+        let scaled = NSImage(size: target)
+        scaled.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(origin: .zero, size: target),
+                   from: NSRect(origin: .zero, size: image.size),
+                   operation: .copy,
+                   fraction: 1.0)
+        scaled.unlockFocus()
+        return scaled
     }
 
     private static func pasteboardType(for url: URL) -> NSPasteboard.PasteboardType {
@@ -155,6 +243,7 @@ enum ImageService {
         case "jpg", "jpeg": return .init("public.jpeg")
         case "heic": return .init("public.heic")
         case "gif": return .init("public.gif")
+        case "webp": return webpPasteboardType
         case "tif", "tiff": return .tiff
         case "pdf": return .init("com.adobe.pdf")
         default: return .init("public.image")

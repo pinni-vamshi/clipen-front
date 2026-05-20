@@ -10,7 +10,7 @@ enum MediaTools {
             group: "INFO",
             preview: { item in
                 guard let url = MediaService.mediaURL(for: item) else { return nil }
-                return url.lastPathComponent
+                return "Paste metadata for \(url.lastPathComponent)"
             },
             runAsync: { item in
                 guard let url = MediaService.mediaURL(for: item) else { return nil }
@@ -86,10 +86,17 @@ enum MediaService {
                 generator.requestedTimeToleranceAfter = .positiveInfinity
 
                 do {
-                    let cgImage = try generator.copyCGImage(
-                        at: CMTime(seconds: 0.1, preferredTimescale: 600),
-                        actualTime: nil
-                    )
+                    let cgImage: CGImage
+                    do {
+                        cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
+                    } catch {
+                        // Some codecs fail at exact zero; fallback to earliest
+                        // near-zero frame while keeping the label truthful.
+                        cgImage = try generator.copyCGImage(
+                            at: CMTime(seconds: 0.1, preferredTimescale: 600),
+                            actualTime: nil
+                        )
+                    }
                     let image = NSImage(
                         cgImage: cgImage,
                         size: NSSize(width: cgImage.width, height: cgImage.height)

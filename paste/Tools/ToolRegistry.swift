@@ -53,6 +53,22 @@ enum ToolRegistry {
         return await tools[index].runAsync(item)
     }
 
+    static func isAsync(item: ClipboardItem, toolID: String) -> Bool {
+        guard let tool = tool(for: item, toolID: toolID) else { return false }
+        return tool.isAsync
+    }
+
+    static func runSync(item: ClipboardItem, toolID: String) -> TransformOutput? {
+        guard let tool = tool(for: item, toolID: toolID),
+              let runSync = tool.runSync else { return nil }
+        return runSync(item)
+    }
+
+    static func run(item: ClipboardItem, toolID: String) async -> TransformOutput? {
+        guard let tool = tool(for: item, toolID: toolID) else { return nil }
+        return await tool.runAsync(item)
+    }
+
     static func toolID(item: ClipboardItem, index: Int) -> String? {
         let tools = tools(for: item)
         guard tools.indices.contains(index) else { return nil }
@@ -61,6 +77,8 @@ enum ToolRegistry {
 
     private static func applicable(_ tools: [ClipboardTool], to item: ClipboardItem) -> [ClipboardTool] {
         let filtered = tools.filter { tool in
+            // OCR tool can be remotely disabled via feature flags.
+            if tool.id == "image.ocr", !AuthManager.shared.ocrEnabled { return false }
             if tool.preview(item) != nil { return true }
             if let runSync = tool.runSync {
                 if case .status = runSync(item) { return false }
@@ -77,5 +95,9 @@ enum ToolRegistry {
             }
             return ls > rs
         }
+    }
+
+    private static func tool(for item: ClipboardItem, toolID: String) -> ClipboardTool? {
+        tools(for: item).first(where: { $0.id == toolID })
     }
 }

@@ -180,6 +180,7 @@ struct PopoverPreviewView: View {
                     FlatHint(key: "⇧V", label: "Category")
                     FlatHint(key: "X", label: "Transform",
                              enabled: auth.transformsEnabled)
+                    SpaceKeyFlatHint(label: "Preview")
                     FlatHint(key: "⌘",
                              label: manager.selectionArmed ? "Paste" : "Dismiss",
                              keyColor: manager.selectionArmed ? .green : .secondary,
@@ -364,6 +365,31 @@ struct FlatHint: View {
             Text(label)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(labelColor)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .fixedSize()
+        .opacity(enabled ? 1.0 : 0.35)
+    }
+}
+
+struct SpaceKeyFlatHint: View {
+    let label: String
+    var enabled: Bool = true
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .stroke(Color.primary.opacity(0.45), lineWidth: 1)
+                    .frame(width: 18, height: 10)
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(Color.primary.opacity(0.7))
+                    .frame(width: 10, height: 1.5)
+            }
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
                 .lineLimit(1)
                 .fixedSize()
         }

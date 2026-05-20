@@ -36,6 +36,7 @@
 		B1000000000000000000001B /* ToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001B /* ToolRegistry.swift */; };
 		B1000000000000000000001C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* Assets.xcassets */; };
 		EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68612FB7847C002CA5C3 /* Sparkle */; };
+		EE8C68652FB7847C002CA5C3 /* webp in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68642FB7847C002CA5C3 /* webp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -77,6 +78,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */,
+				EE8C68652FB7847C002CA5C3 /* webp in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -169,6 +171,7 @@
 			name = paste;
 			packageProductDependencies = (
 				EE8C68612FB7847C002CA5C3 /* Sparkle */,
+				EE8C68642FB7847C002CA5C3 /* webp */,
 			);
 			productName = paste;
 			productReference = EE8C684D2FB7847A002CA5C3 /* Clipen.app */;
@@ -200,6 +203,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp.swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EE8C684E2FB7847A002CA5C3 /* Products */;
@@ -488,6 +492,14 @@
 				minimumVersion = 2.6.0;
 			};
 		};
+		EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/awxkee/webp.swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -495,6 +507,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		EE8C68642FB7847C002CA5C3 /* webp */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp.swift" */;
+			productName = webp;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

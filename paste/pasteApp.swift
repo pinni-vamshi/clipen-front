@@ -15,10 +15,10 @@ struct pasteApp: App {
         .commands {
             // Remove "New Window" — only one main window
             CommandGroup(replacing: .newItem) {}
-            // Cmd+Q closes the window only. To truly quit, use menu bar → Quit Clipen.
+            // Menu-bar module is disabled for now, so Cmd+Q should quit normally.
             CommandGroup(replacing: .appTermination) {
-                Button("Close Window") {
-                    NSApp.keyWindow?.performClose(nil)
+                Button("Quit Clipen") {
+                    NSApp.terminate(nil)
                 }
                 .keyboardShortcut("q", modifiers: .command)
             }
@@ -37,12 +37,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuPanel: NSPanel?
     private var outsideClickMonitor: Any?
 
-    var showMenuBarIcon: Bool = UserDefaults.standard.object(forKey: "showMenuBarIcon") as? Bool ?? true {
+    var showMenuBarIcon: Bool = false {
         didSet {
-            UserDefaults.standard.set(showMenuBarIcon, forKey: "showMenuBarIcon")
+            // Keep persisted as false while this feature is disabled.
+            UserDefaults.standard.set(false, forKey: "showMenuBarIcon")
             applyMenuBarVisibility()
         }
     }
+
+    private let menuBarFeatureEnabled = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
@@ -57,49 +60,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             userDriverDelegate: self
         )
 
-        // .accessory = no dock icon, no Cmd+Tab, menu-bar-only (like Rectangle/Swish/Maccy).
-        // LSUIElement=YES in Info.plist achieves the same at launch; this enforces it at runtime too.
-        NSApp.setActivationPolicy(.accessory)
-
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let btn = statusItem?.button {
-            if let icon = NSImage(named: "MenuBarIcon") {
-                icon.isTemplate = true
-                icon.size = NSSize(width: 18, height: 18)
-                btn.image = icon
-            }
-            btn.action = #selector(statusItemClicked(_:))
-            btn.target = self
-            btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        }
-
-        // Build the panel once
-        let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 460),
-            styleMask: [.nonactivatingPanel, .borderless],
-            backing: .buffered,
-            defer: false
-        )
-        panel.level = .popUpMenu
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let menuRoot = MenuBarView()
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-            )
-        panel.contentView = NSHostingView(rootView: menuRoot)
-        menuPanel = panel
+        // Menu-bar panel is disabled for now; run as a standard app window.
+        NSApp.setActivationPolicy(.regular)
+        statusItem = nil
+        menuPanel = nil
 
         applyMenuBarVisibility()
         ClipboardManager.shared.startMonitoring()
 
-        // On first launch, open the main window so the user can complete onboarding.
-        // After that, app lives in the menu bar only.
+        // Open the main window on first launch for onboarding.
         if !UserDefaults.standard.bool(forKey: "hasLaunchedBefore") {
             UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -118,6 +87,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyMenuBarVisibility() {
+        guard menuBarFeatureEnabled else {
+            statusItem?.isVisible = false
+            hideMenu()
+            return
+        }
         statusItem?.isVisible = showMenuBarIcon
     }
 

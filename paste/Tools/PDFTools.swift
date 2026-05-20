@@ -17,7 +17,7 @@ enum PDFTools {
         make("pdf.pages-as-png", icon: "photo.stack", label: "Pages as PNG Images", group: "EXPORT") { pdf, data in
             await PDFService.exportPagesAsImages(from: pdf, originalData: data)
         },
-        make("pdf.reduce-size", icon: "arrow.down.doc", label: "Reduce File Size", group: "OPTIMIZE") { pdf, data in
+        make("pdf.reduce-size", icon: "arrow.down.doc", label: "Reduce PDF Size", group: "OPTIMIZE") { pdf, data in
             await PDFService.reducedCopy(from: pdf, originalData: data)
         },
     ]
@@ -34,7 +34,17 @@ enum PDFTools {
             icon: icon,
             label: label,
             group: group,
-            preview: { item in pdfInput(for: item) == nil ? nil : "" },
+            preview: { item in
+                guard pdfInput(for: item) != nil else { return nil }
+                switch id {
+                case "pdf.extract-all-text": return "Extract text from all pages"
+                case "pdf.first-page-text": return "Extract text from the first page"
+                case "pdf.page-count": return "Show total page count"
+                case "pdf.pages-as-png": return "Export each page as a PNG image"
+                case "pdf.reduce-size": return "Create a smaller PDF copy"
+                default: return ""
+                }
+            },
             runAsync: { item in
                 guard let input = pdfInput(for: item) else { return nil }
                 return await apply(input.pdf, input.data)

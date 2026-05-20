@@ -962,38 +962,19 @@ class ClipboardManager: ObservableObject {
     /// Synchronous sibling of `ToolRegistry.run` for tools that can finish
     /// immediately. Async tools still go through the Task path so the panel can
     /// show processing state.
-    private func applySyncTransform(item: ClipboardItem, index: Int) -> TransformOutput? {
-        ToolRegistry.runSync(item: item, index: index)
+    private func applySyncTransform(item: ClipboardItem, toolID: String) -> TransformOutput? {
+        ToolRegistry.runSync(item: item, toolID: toolID)
     }
 
-    func pasteTransformed(_ text: String) {
+    func pasteTransformed(_ text: String, restoring source: ClipboardItem? = nil) {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
-        lastChangeCount = pb.changeCount   // suppress poller from capturing the transform result
-
-        previewWindow.hide()
-        transformPanel.hide()
-        itemPreviewPanel.hide()
-        dismissTimer?.invalidate(); dismissTimer = nil
-        progressTimer?.invalidate(); progressTimer = nil
-        selectionArmed = true
-
-        isSimulatingPaste = true
-        let src  = CGEventSource(stateID: .combinedSessionState)
-        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-        let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-        down?.flags = .maskCommand; up?.flags = .maskCommand
-        down?.post(tap: .cgAnnotatedSessionEventTap)
-        up?.post(tap: .cgAnnotatedSessionEventTap)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.isSimulatingPaste = false
-            self?.selectedIndex = 0
-            self?.selectionArmed = true
-        }
+        lastChangeCount = pb.changeCount
+        finishTransformPaste(message: nil, restoring: source)
     }
 
-    private func handleTransformResult(_ result: TransformOutput?) {
+    private func handleTransformResult(_ result: TransformOutput?, restoring source: ClipboardItem) {
         guard let result else {
             flashStatus("Transform returned nothing.")
             return
@@ -1001,11 +982,11 @@ class ClipboardManager: ObservableObject {
 
         switch result {
         case .text(let text) where !text.isEmpty:
-            pasteTransformed(text)
+            pasteTransformed(text, restoring: source)
         case .item(let item, let message):
-            pasteGeneratedItem(item, message: message)
+            pasteGeneratedItem(item, message: message, restoring: source)
         case .files(let urls, let message):
-            pasteGeneratedFiles(urls, message: message)
+            pasteGeneratedFiles(urls, message: message, restoring: source)
         case .revealFiles(let urls, let message):
             NSWorkspace.shared.activateFileViewerSelecting(urls)
             flashStatus(message)
@@ -1016,60 +997,38 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    func pasteGeneratedItem(_ item: ClipboardItem, message: String) {
-        addItem(item)
-
+    private func pasteGeneratedItem(_ item: ClipboardItem, message: String, restoring source: ClipboardItem) {
         let pb = NSPasteboard.general
         pb.clearContents()
         write(item, to: pb)
         lastChangeCount = pb.changeCount
-
-        previewWindow.hide()
-        transformPanel.hide()
-        itemPreviewPanel.hide()
-        dismissTimer?.invalidate(); dismissTimer = nil
-        progressTimer?.invalidate(); progressTimer = nil
-        selectionArmed = true
-        flashStatus(message)
-
-        isSimulatingPaste = true
-        let src  = CGEventSource(stateID: .combinedSessionState)
-        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-        let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-        down?.flags = .maskCommand; up?.flags = .maskCommand
-        down?.post(tap: .cgAnnotatedSessionEventTap)
-        up?.post(tap: .cgAnnotatedSessionEventTap)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.isSimulatingPaste = false
-            self?.selectedIndex = 0
-            self?.selectionArmed = true
-        }
+        finishTransformPaste(message: message, restoring: source)
     }
 
-    func pasteGeneratedFiles(_ urls: [URL], message: String) {
+    private func pasteGeneratedFiles(_ urls: [URL], message: String, restoring source: ClipboardItem) {
         guard !urls.isEmpty else {
             flashStatus("No files were generated.")
             return
-        }
-
-        // addItem inserts at the front. Iterate in reverse so page-001 ends
-        // up as the newest/top item in the ring after exporting a PDF.
-        for url in urls.reversed() {
-            addItem(ClipboardItem(content: .file(url)))
         }
 
         let pb = NSPasteboard.general
         pb.clearContents()
         writeFileURLs(urls, to: pb)
         lastChangeCount = pb.changeCount
+        finishTransformPaste(message: message, restoring: source)
+    }
 
+    /// Paste transform output into the frontmost app, then put the original
+    /// source item back on the pasteboard. Transformed output is never added
+    /// to the Clipen ring.
+    private func finishTransformPaste(message: String?, restoring source: ClipboardItem?) {
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()
         dismissTimer?.invalidate(); dismissTimer = nil
         progressTimer?.invalidate(); progressTimer = nil
         selectionArmed = true
-        flashStatus(message)
+        if let message { flashStatus(message) }
 
         isSimulatingPaste = true
         let src  = CGEventSource(stateID: .combinedSessionState)
@@ -1079,9 +1038,16 @@ class ClipboardManager: ObservableObject {
         down?.post(tap: .cgAnnotatedSessionEventTap)
         up?.post(tap: .cgAnnotatedSessionEventTap)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.isSimulatingPaste = false
-            self?.selectedIndex = 0
-            self?.selectionArmed = true
+            guard let self else { return }
+            self.isSimulatingPaste = false
+            if let source {
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                self.write(source, to: pb)
+                self.lastChangeCount = pb.changeCount
+            }
+            self.selectedIndex = 0
+            self.selectionArmed = true
         }
     }
 
@@ -1539,18 +1505,22 @@ class ClipboardManager: ObservableObject {
         if inTransformStage {
             let item     = displayItems[selectedIndex]
             let idx      = transformIndex
-            let isAsync  = ToolRegistry.isAsync(item: item, index: idx)
-            if let toolID = ToolRegistry.toolID(item: item, index: idx) {
-                AuthManager.shared.registerToolUsage(toolID: toolID)
+            let selectedToolID = transformDisplaysCache.indices.contains(idx)
+                ? transformDisplaysCache[idx].id
+                : ToolRegistry.toolID(item: item, index: idx)
+            guard let selectedToolID else {
+                flashStatus("Selected tool is unavailable.")
+                return
             }
+            let isAsync  = ToolRegistry.isAsync(item: item, toolID: selectedToolID)
 
             if isAsync {
-                // Async path (OCR / PDF text extraction) — show "Processing…"
-                // in the panel, run the work, then paste & dismiss.
+                // Async path (OCR / PDF / export / optimization tools) — show
+                // "Processing…", run the work, then paste & dismiss.
                 updateTransformPanelProcessing(true)
                 Task { [weak self] in
                     guard let self else { return }
-                    let result = await ToolRegistry.run(item: item, index: idx)
+                    let result = await ToolRegistry.run(item: item, toolID: selectedToolID)
                     await MainActor.run {
                         self.updateTransformPanelProcessing(false)
                         self.inTransformStage = false
@@ -1561,13 +1531,16 @@ class ClipboardManager: ObservableObject {
                         self.dismissTimer?.invalidate(); self.dismissTimer = nil
                         self.progressTimer?.invalidate(); self.progressTimer = nil
                         self.selectionArmed = true
-                        self.handleTransformResult(result)
+                        if result != nil {
+                            AuthManager.shared.registerToolUsage(toolID: selectedToolID)
+                        }
+                        self.handleTransformResult(result, restoring: item)
                     }
                 }
                 return
             } else {
                 // Sync path — apply immediately
-                let result = applySyncTransform(item: item, index: idx)
+                let result = applySyncTransform(item: item, toolID: selectedToolID)
                 inTransformStage = false; transformIndex = 0
                 transformPanel.hide()
                 itemPreviewPanel.hide()
@@ -1575,7 +1548,10 @@ class ClipboardManager: ObservableObject {
                 dismissTimer?.invalidate(); dismissTimer = nil
                 progressTimer?.invalidate(); progressTimer = nil
                 selectionArmed = true
-                handleTransformResult(result)
+                if result != nil {
+                    AuthManager.shared.registerToolUsage(toolID: selectedToolID)
+                }
+                handleTransformResult(result, restoring: item)
                 return
             }
         }

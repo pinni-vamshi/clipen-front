@@ -571,7 +571,7 @@ struct InlineTransformRow: View {
             guard let result = transform.runSync?(item) else { return }
             switch result {
             case .text(let text) where !text.isEmpty:
-                ClipboardManager.shared.pasteTransformed(text)
+                ClipboardManager.shared.pasteTransformed(text, restoring: item)
             case .revealFiles(let urls, let message):
                 NSWorkspace.shared.activateFileViewerSelecting(urls)
                 ClipboardManager.shared.flashStatus(message)
