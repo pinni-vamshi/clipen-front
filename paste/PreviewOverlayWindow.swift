@@ -246,7 +246,7 @@ struct PopoverPreviewView: View {
                         }
                     }
                 }
-                .frame(height: Self.rowHeight * CGFloat(visibleCount))
+                .frame(height: Self.rowHeight * CGFloat(visibleCount), alignment: .top)
 
                 Divider()
                 Text(items.isEmpty

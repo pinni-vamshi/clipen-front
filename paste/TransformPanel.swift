@@ -24,7 +24,8 @@ class TransformPanel: NSPanel {
     func show(for item: ClipboardItem,
               near popupFrame: NSRect,
               selectedTransformIndex: Int = 0,
-              isProcessing: Bool = false) {
+              isProcessing: Bool = false,
+              displaysOverride: [TransformDisplay]? = nil) {
 
         let previewText: String? = {
             switch item.content {
@@ -37,7 +38,7 @@ class TransformPanel: NSPanel {
             }
         }()
 
-        let displays = ToolRegistry.displays(for: item)
+        let displays = displaysOverride ?? ToolRegistry.displays(for: item)
 
         let view = AnyView(TransformView(
             previewText:            previewText,

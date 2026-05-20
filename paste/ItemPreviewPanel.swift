@@ -39,7 +39,9 @@ final class ItemPreviewPanel: NSPanel {
         var x = popupFrame.maxX + 10
         if x + w > screen.maxX { x = popupFrame.minX - w - 10 }
         x = max(screen.minX + 10, x)
-        let y = max(screen.minY + 10, min(popupFrame.midY - h / 2, screen.maxY - h - 10))
+        // Align preview's top edge to popup's top edge (instead of vertical centering)
+        // so content starts from a stable top position while cycling items.
+        let y = max(screen.minY + 10, min(popupFrame.maxY - h, screen.maxY - h - 10))
 
         setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
         if !isVisible { orderFront(nil) }

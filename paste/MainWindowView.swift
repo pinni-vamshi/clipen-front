@@ -262,6 +262,11 @@ struct MainWindowView: View {
                                 )
                                 .tint(.accent)
                             }
+                            cardDivider()
+                            cardRow(icon: "text.cursor", label: "Popup everywhere") {
+                                Toggle("", isOn: $manager.showPopupOutsideTextInputs)
+                                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                            }
                         }
                     }
                     .padding(.horizontal, 14)

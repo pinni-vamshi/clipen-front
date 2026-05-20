@@ -309,6 +309,12 @@ class ClipboardManager: ObservableObject {
     @Published var firstOpenDelay: Double = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.12 {
         didSet { UserDefaults.standard.set(firstOpenDelay, forKey: "firstOpenDelay") }
     }
+    /// When false (default), popup mode can start only while a text input is
+    /// focused. This prevents accidental activation in non-typing contexts.
+    /// When true, popup can start anywhere (legacy behavior).
+    @Published var showPopupOutsideTextInputs: Bool = UserDefaults.standard.object(forKey: "showPopupOutsideTextInputs") as? Bool ?? false {
+        didSet { UserDefaults.standard.set(showPopupOutsideTextInputs, forKey: "showPopupOutsideTextInputs") }
+    }
 
     private var pollTimer: Timer?
     private var dismissTimer: Timer?
@@ -339,6 +345,9 @@ class ClipboardManager: ObservableObject {
     // Two-stage cycling: Stage 1 = items, Stage 2 = transforms for selected item
     private var inTransformStage = false
     private var transformIndex   = 0
+    /// Snapshot transform ordering for the current stage so ⌘X cycles in a
+    /// stable one-by-one sequence even if global usage rankings change.
+    private var transformDisplaysCache: [TransformDisplay] = []
 
     private var saveCancellable: AnyCancellable?
 
@@ -778,6 +787,14 @@ class ClipboardManager: ObservableObject {
 
         if key == 9 { // V — ⌘V cycle, ⌘⌥V jump+5, ⌘⇧V next category
             if isSimulatingPaste { return Unmanaged.passUnretained(event) }
+            // Optional strict mode: only activate popup flows while user is
+            // actively focused in a text-editable element.
+            if !previewWindow.isVisible,
+               !pendingFirstOpen,
+               !showPopupOutsideTextInputs,
+               focusedTextInputPosition() == nil {
+                return Unmanaged.passUnretained(event)
+            }
             if displayItems.isEmpty && !previewWindow.isVisible && !shift {
                 return Unmanaged.passUnretained(event)
             }
@@ -857,6 +874,11 @@ class ClipboardManager: ObservableObject {
             return
         }
         inTransformStage = true
+        transformDisplaysCache = ToolRegistry.displays(for: displayItems[selectedIndex])
+        guard !transformDisplaysCache.isEmpty else {
+            inTransformStage = false
+            return
+        }
         transformIndex   = 0
         transformStageActive = true
         // Freeze dismiss timer while inspecting transforms
@@ -872,10 +894,8 @@ class ClipboardManager: ObservableObject {
         transformCycleCount += 1
 
         // Unified cycling for ALL content types (text, richText, image, PDF, file)
-        let item     = displayItems[selectedIndex]
-        let displays = ToolRegistry.displays(for: item)
-        guard !displays.isEmpty else { return }
-        transformIndex = (transformIndex + 1) % displays.count
+        guard !transformDisplaysCache.isEmpty else { return }
+        transformIndex = (transformIndex + 1) % transformDisplaysCache.count
         updateTransformPanel()
     }
 
@@ -891,6 +911,7 @@ class ClipboardManager: ObservableObject {
     private func exitTransformStage() {
         inTransformStage = false
         transformIndex   = 0
+        transformDisplaysCache = []
         transformStageActive = false
         stageRevertTimer?.invalidate(); stageRevertTimer = nil
         transformPanel.hide()
@@ -903,7 +924,8 @@ class ClipboardManager: ObservableObject {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
         transformPanel.show(for: displayItems[selectedIndex],
                             near: previewWindow.frame,
-                            selectedTransformIndex: transformIndex)
+                            selectedTransformIndex: transformIndex,
+                            displaysOverride: inTransformStage ? transformDisplaysCache : nil)
     }
 
     /// Force-redraw the transform panel with the `isProcessing` flag toggled so
@@ -913,7 +935,8 @@ class ClipboardManager: ObservableObject {
         transformPanel.show(for: displayItems[selectedIndex],
                             near: previewWindow.frame,
                             selectedTransformIndex: transformIndex,
-                            isProcessing: processing)
+                            isProcessing: processing,
+                            displaysOverride: inTransformStage ? transformDisplaysCache : nil)
     }
 
     private func toggleSelectedItemPreview() {
@@ -1244,9 +1267,79 @@ class ClipboardManager: ObservableObject {
     /// AX query + cache write in one place so all three paths stay in sync.
     private func openPopupNow() {
         selectionArmed = true
-        let position = caretPosition()
+        // Prefer true text-focus caret anchoring when available.
+        let position = focusedTextInputPosition() ?? caretPosition()
         cachedCaretPosition = position
         previewWindow.show(at: position)
+    }
+
+    /// Returns caret/input position only when the current AX focused element
+    /// looks text-editable. Used for strict "typing-only popup" mode.
+    private func focusedTextInputPosition() -> NSPoint? {
+        let primaryH = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+                    ?? NSScreen.main?.frame.height
+                    ?? 0
+        guard let appEl = focusedApplicationAXElement(),
+              let axEl = focusedUIElement(in: appEl),
+              isTextInputElement(axEl) else { return nil }
+        return textCaretPoint(for: axEl, primaryH: primaryH) ?? elementPoint(axEl, primaryH: primaryH)
+    }
+
+    private func focusedApplicationAXElement() -> AXUIElement? {
+        let systemWide = AXUIElementCreateSystemWide()
+        var appRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &appRef) == .success,
+              let appEl = appRef as! AXUIElement? else { return nil }
+        return appEl
+    }
+
+    private func focusedUIElement(in appEl: AXUIElement) -> AXUIElement? {
+        var elRef: CFTypeRef?
+        let focusedOK = AXUIElementCopyAttributeValue(
+            appEl, kAXFocusedUIElementAttribute as CFString, &elRef
+        ) == .success
+        return focusedOK ? (elRef as! AXUIElement?) : nil
+    }
+
+    private func textCaretPoint(for axEl: AXUIElement, primaryH: CGFloat) -> NSPoint? {
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rangeVal = rangeRef else { return nil }
+        var boundsRef: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            axEl, kAXBoundsForRangeParameterizedAttribute as CFString,
+            rangeVal, &boundsRef
+        ) == .success, let boundsVal = boundsRef else { return nil }
+        var rect = CGRect.zero
+        guard AXValueGetValue(boundsVal as! AXValue, AXValueType.cgRect, &rect),
+              rect.origin.x.isFinite, rect.origin.y.isFinite,
+              rect.size.height > 0, rect.size.height < 200 else { return nil }
+        return NSPoint(x: rect.minX, y: primaryH - rect.maxY)
+    }
+
+    private func isTextInputElement(_ axEl: AXUIElement) -> Bool {
+        // Best signal: if the element exposes text range + bounds, it's a
+        // text-editable context (including rich web editors).
+        if textCaretPoint(for: axEl, primaryH: 1) != nil { return true }
+
+        var roleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(axEl, kAXRoleAttribute as CFString, &roleRef) == .success,
+              let role = roleRef as? String else { return false }
+        let knownTextRoles: Set<String> = [
+            kAXTextFieldRole as String,
+            kAXTextAreaRole as String,
+            kAXComboBoxRole as String,
+            "AXSearchField",
+            "AXWebArea"
+        ]
+        if knownTextRoles.contains(role) { return true }
+
+        var editableRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axEl, "AXEditable" as CFString, &editableRef) == .success,
+           let editable = editableRef as? Bool {
+            return editable
+        }
+        return false
     }
 
     private func cancelPendingFirstOpen() {
@@ -1386,41 +1479,16 @@ class ClipboardManager: ObservableObject {
                     ?? NSScreen.main?.frame.height
                     ?? 0
 
-        let systemWide = AXUIElementCreateSystemWide()
-
         // Focused app
-        var appRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &appRef) == .success,
-              let appEl = appRef as! AXUIElement? else {
+        guard let appEl = focusedApplicationAXElement() else {
             return NSEvent.mouseLocation
         }
 
         // Focused UI element (text field, web view, etc.)
-        var elRef: CFTypeRef?
-        let focusedOK = AXUIElementCopyAttributeValue(
-            appEl, kAXFocusedUIElementAttribute as CFString, &elRef
-        ) == .success
-        let axEl = focusedOK ? (elRef as! AXUIElement) : appEl
+        let axEl = focusedUIElement(in: appEl) ?? appEl
 
         // 1) Best path — real text caret bounds via parameterized attribute
-        var rangeRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-           let rangeVal = rangeRef {
-            var boundsRef: CFTypeRef?
-            if AXUIElementCopyParameterizedAttributeValue(
-                axEl, kAXBoundsForRangeParameterizedAttribute as CFString,
-                rangeVal, &boundsRef
-            ) == .success, let boundsVal = boundsRef {
-                var rect = CGRect.zero
-                if AXValueGetValue(boundsVal as! AXValue, AXValueType.cgRect, &rect),
-                   rect.origin.x.isFinite, rect.origin.y.isFinite,
-                   rect.size.height > 0,
-                   rect.size.height < 200 {            // sanity: reject absurd values
-                    // BOTTOM-LEFT of the caret in AppKit (rect.maxY in AX = bottom)
-                    return NSPoint(x: rect.minX, y: primaryH - rect.maxY)
-                }
-            }
-        }
+        if let caret = textCaretPoint(for: axEl, primaryH: primaryH) { return caret }
 
         // 2) Focused element frame — center bottom edge
         if let p = elementPoint(axEl, primaryH: primaryH) { return p }
