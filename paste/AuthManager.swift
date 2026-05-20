@@ -161,12 +161,27 @@ final class AuthManager: ObservableObject {
     }
 
     private func applyFeatureFlagsToRuntime() {
-        let manager = ClipboardManager.shared
-        manager.applyPlanLimits(ringLimit: ringLimit)
-        manager.captureRichText = richTextCapture
-        manager.fetchURLTitles = urlTitles
-        manager.captureFiles = fileCapture
-        AppDelegate.shared?.automaticallyChecksForUpdates = sparkleAutomaticChecks
+        let ringLimit = ringLimit
+        let richTextCapture = richTextCapture
+        let urlTitles = urlTitles
+        let sparkleAutomaticChecks = sparkleAutomaticChecks
+
+        DispatchQueue.main.async {
+            let manager = ClipboardManager.shared
+            manager.applyPlanLimits(ringLimit: ringLimit)
+            if manager.captureRichText != richTextCapture {
+                manager.captureRichText = richTextCapture
+            }
+            if manager.fetchURLTitles != urlTitles {
+                manager.fetchURLTitles = urlTitles
+            }
+            // File capture is core clipboard behavior now: files are snapshotted
+            // into Clipen storage, not treated as plain path text.
+            if !manager.captureFiles {
+                manager.captureFiles = true
+            }
+            AppDelegate.shared?.automaticallyChecksForUpdates = sparkleAutomaticChecks
+        }
     }
 }
 

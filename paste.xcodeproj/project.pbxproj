@@ -7,20 +7,69 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B10000000000000000000001 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* AuthManager.swift */; };
+		B10000000000000000000002 /* ClipboardManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ClipboardManager.swift */; };
+		B10000000000000000000003 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* Color+Hex.swift */; };
+		B10000000000000000000004 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* ContentView.swift */; };
+		B10000000000000000000005 /* FileSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* FileSnapshotStore.swift */; };
+		B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ItemPreviewPanel.swift */; };
+		B10000000000000000000007 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Keychain.swift */; };
+		B10000000000000000000008 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* MainWindowView.swift */; };
+		B10000000000000000000009 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* MenuBarView.swift */; };
+		B1000000000000000000000A /* pasteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* pasteApp.swift */; };
+		B1000000000000000000000B /* PreviewOverlayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000B /* PreviewOverlayWindow.swift */; };
+		B1000000000000000000000C /* TransformPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000C /* TransformPanel.swift */; };
+		B1000000000000000000000D /* ClipboardCategory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000D /* ClipboardCategory.swift */; };
+		B1000000000000000000000E /* ClipboardContentType.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000E /* ClipboardContentType.swift */; };
+		B1000000000000000000000F /* CodeLanguageDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000F /* CodeLanguageDetector.swift */; };
+		B10000000000000000000010 /* ContentDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* ContentDetector.swift */; };
+		B10000000000000000000011 /* DetectionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* DetectionTypes.swift */; };
+		B10000000000000000000012 /* FileKindDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* FileKindDetector.swift */; };
+		B10000000000000000000013 /* TextSemanticDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* TextSemanticDetector.swift */; };
+		B10000000000000000000014 /* TextTraditionalDetectors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* TextTraditionalDetectors.swift */; };
+		B10000000000000000000015 /* FileTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* FileTools.swift */; };
+		B10000000000000000000016 /* ImageTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* ImageTools.swift */; };
+		B10000000000000000000017 /* MediaTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* MediaTools.swift */; };
+		B10000000000000000000018 /* PDFTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* PDFTools.swift */; };
+		B10000000000000000000019 /* TextTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000019 /* TextTools.swift */; };
+		B1000000000000000000001A /* Tool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001A /* Tool.swift */; };
+		B1000000000000000000001B /* ToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001B /* ToolRegistry.swift */; };
+		B1000000000000000000001C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* Assets.xcassets */; };
 		EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68612FB7847C002CA5C3 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A10000000000000000000001 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
+		A10000000000000000000002 /* ClipboardManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardManager.swift; sourceTree = "<group>"; };
+		A10000000000000000000003 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
+		A10000000000000000000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A10000000000000000000005 /* FileSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSnapshotStore.swift; sourceTree = "<group>"; };
+		A10000000000000000000006 /* ItemPreviewPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemPreviewPanel.swift; sourceTree = "<group>"; };
+		A10000000000000000000007 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		A10000000000000000000008 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		A10000000000000000000009 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		A1000000000000000000000A /* pasteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = pasteApp.swift; sourceTree = "<group>"; };
+		A1000000000000000000000B /* PreviewOverlayWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewOverlayWindow.swift; sourceTree = "<group>"; };
+		A1000000000000000000000C /* TransformPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformPanel.swift; sourceTree = "<group>"; };
+		A1000000000000000000000D /* ClipboardCategory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardCategory.swift; sourceTree = "<group>"; };
+		A1000000000000000000000E /* ClipboardContentType.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardContentType.swift; sourceTree = "<group>"; };
+		A1000000000000000000000F /* CodeLanguageDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeLanguageDetector.swift; sourceTree = "<group>"; };
+		A10000000000000000000010 /* ContentDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentDetector.swift; sourceTree = "<group>"; };
+		A10000000000000000000011 /* DetectionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetectionTypes.swift; sourceTree = "<group>"; };
+		A10000000000000000000012 /* FileKindDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileKindDetector.swift; sourceTree = "<group>"; };
+		A10000000000000000000013 /* TextSemanticDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextSemanticDetector.swift; sourceTree = "<group>"; };
+		A10000000000000000000014 /* TextTraditionalDetectors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextTraditionalDetectors.swift; sourceTree = "<group>"; };
+		A10000000000000000000015 /* FileTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTools.swift; sourceTree = "<group>"; };
+		A10000000000000000000016 /* ImageTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTools.swift; sourceTree = "<group>"; };
+		A10000000000000000000017 /* MediaTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaTools.swift; sourceTree = "<group>"; };
+		A10000000000000000000018 /* PDFTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFTools.swift; sourceTree = "<group>"; };
+		A10000000000000000000019 /* TextTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextTools.swift; sourceTree = "<group>"; };
+		A1000000000000000000001A /* Tool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tool.swift; sourceTree = "<group>"; };
+		A1000000000000000000001B /* ToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRegistry.swift; sourceTree = "<group>"; };
+		A1000000000000000000001C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A1000000000000000000001D /* paste.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = paste.entitlements; sourceTree = "<group>"; };
 		EE8C684D2FB7847A002CA5C3 /* Clipen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipen.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
-
-/* Begin PBXFileSystemSynchronizedRootGroup section */
-		EE8C684F2FB7847A002CA5C3 /* paste */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = paste;
-			sourceTree = "<group>";
-		};
-/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		EE8C684A2FB7847A002CA5C3 /* Frameworks */ = {
@@ -34,6 +83,35 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		C10000000000000000000001 /* Detection */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000000D /* ClipboardCategory.swift */,
+				A1000000000000000000000E /* ClipboardContentType.swift */,
+				A1000000000000000000000F /* CodeLanguageDetector.swift */,
+				A10000000000000000000010 /* ContentDetector.swift */,
+				A10000000000000000000011 /* DetectionTypes.swift */,
+				A10000000000000000000012 /* FileKindDetector.swift */,
+				A10000000000000000000013 /* TextSemanticDetector.swift */,
+				A10000000000000000000014 /* TextTraditionalDetectors.swift */,
+			);
+			path = Detection;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000002 /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000015 /* FileTools.swift */,
+				A10000000000000000000016 /* ImageTools.swift */,
+				A10000000000000000000017 /* MediaTools.swift */,
+				A10000000000000000000018 /* PDFTools.swift */,
+				A10000000000000000000019 /* TextTools.swift */,
+				A1000000000000000000001A /* Tool.swift */,
+				A1000000000000000000001B /* ToolRegistry.swift */,
+			);
+			path = Tools;
+			sourceTree = "<group>";
+		};
 		EE8C68442FB7847A002CA5C3 = {
 			isa = PBXGroup;
 			children = (
@@ -50,6 +128,29 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		EE8C684F2FB7847A002CA5C3 /* paste */ = {
+			isa = PBXGroup;
+			children = (
+				A1000000000000000000001C /* Assets.xcassets */,
+				C10000000000000000000001 /* Detection */,
+				C10000000000000000000002 /* Tools */,
+				A10000000000000000000001 /* AuthManager.swift */,
+				A10000000000000000000002 /* ClipboardManager.swift */,
+				A10000000000000000000003 /* Color+Hex.swift */,
+				A10000000000000000000004 /* ContentView.swift */,
+				A10000000000000000000005 /* FileSnapshotStore.swift */,
+				A10000000000000000000006 /* ItemPreviewPanel.swift */,
+				A10000000000000000000007 /* Keychain.swift */,
+				A10000000000000000000008 /* MainWindowView.swift */,
+				A10000000000000000000009 /* MenuBarView.swift */,
+				A1000000000000000000000A /* pasteApp.swift */,
+				A1000000000000000000000B /* PreviewOverlayWindow.swift */,
+				A1000000000000000000000C /* TransformPanel.swift */,
+				A1000000000000000000001D /* paste.entitlements */,
+			);
+			path = paste;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -64,9 +165,6 @@
 			buildRules = (
 			);
 			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				EE8C684F2FB7847A002CA5C3 /* paste */,
 			);
 			name = paste;
 			packageProductDependencies = (
@@ -118,6 +216,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B1000000000000000000001C /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -128,6 +227,33 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B10000000000000000000001 /* AuthManager.swift in Sources */,
+				B10000000000000000000002 /* ClipboardManager.swift in Sources */,
+				B10000000000000000000003 /* Color+Hex.swift in Sources */,
+				B10000000000000000000004 /* ContentView.swift in Sources */,
+				B10000000000000000000005 /* FileSnapshotStore.swift in Sources */,
+				B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */,
+				B10000000000000000000007 /* Keychain.swift in Sources */,
+				B10000000000000000000008 /* MainWindowView.swift in Sources */,
+				B10000000000000000000009 /* MenuBarView.swift in Sources */,
+				B1000000000000000000000A /* pasteApp.swift in Sources */,
+				B1000000000000000000000B /* PreviewOverlayWindow.swift in Sources */,
+				B1000000000000000000000C /* TransformPanel.swift in Sources */,
+				B1000000000000000000000D /* ClipboardCategory.swift in Sources */,
+				B1000000000000000000000E /* ClipboardContentType.swift in Sources */,
+				B1000000000000000000000F /* CodeLanguageDetector.swift in Sources */,
+				B10000000000000000000010 /* ContentDetector.swift in Sources */,
+				B10000000000000000000011 /* DetectionTypes.swift in Sources */,
+				B10000000000000000000012 /* FileKindDetector.swift in Sources */,
+				B10000000000000000000013 /* TextSemanticDetector.swift in Sources */,
+				B10000000000000000000014 /* TextTraditionalDetectors.swift in Sources */,
+				B10000000000000000000015 /* FileTools.swift in Sources */,
+				B10000000000000000000016 /* ImageTools.swift in Sources */,
+				B10000000000000000000017 /* MediaTools.swift in Sources */,
+				B10000000000000000000018 /* PDFTools.swift in Sources */,
+				B10000000000000000000019 /* TextTools.swift in Sources */,
+				B1000000000000000000001A /* Tool.swift in Sources */,
+				B1000000000000000000001B /* ToolRegistry.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

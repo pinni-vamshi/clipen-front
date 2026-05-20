@@ -400,14 +400,47 @@ struct ItemRow: View {
         case .richText(_, plain: let plain):
             Text(plain).font(.system(size: 12)).lineLimit(3)
 
+        case .html(_, plain: let plain):
+            Text(plain).font(.system(size: 12)).lineLimit(3)
+
         case .file(let url):
             HStack(spacing: 6) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 16, height: 16)
+                fileThumbnail(url, size: 34)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(url.lastPathComponent).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                    Text(url.deletingLastPathComponent().path).font(.system(size: 10)).lineLimit(1).foregroundColor(.secondary)
+                    Text(item.metadataSummary ?? url.deletingLastPathComponent().path)
+                        .font(.system(size: 10)).lineLimit(1).foregroundColor(.secondary)
                 }
             }
+
+        case .files(let urls):
+            HStack(spacing: 6) {
+                if let firstImageURL = urls.first(where: FileKindDetector.isImageFile) {
+                    fileThumbnail(firstImageURL, size: 34)
+                } else {
+                    Image(systemName: "doc.on.doc").frame(width: 16, height: 16)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(urls.count) files").font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    Text(item.metadataSummary ?? urls.map(\.lastPathComponent).joined(separator: ", "))
+                        .font(.system(size: 10)).lineLimit(1).foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fileThumbnail(_ url: URL, size: CGFloat) -> some View {
+        if FileKindDetector.isImageFile(url), let image = NSImage(contentsOf: url) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+        } else {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable()
+                .frame(width: 16, height: 16)
         }
     }
 }
@@ -417,18 +450,8 @@ struct ItemRow: View {
 struct InlineTransformExpansion: View {
     let item: ClipboardItem
 
-    private var textForTransform: String? {
-        switch item.content {
-        case .text(let s):               return s
-        case .richText(_, plain: let s): return s
-        case .file(let u):               return u.path
-        case .image:                     return nil
-        }
-    }
-
-    private var applicableTransforms: [TextTransform] {
-        guard let t = textForTransform else { return [] }
-        return TextTransform.all.filter { $0.apply(t) != nil }
+    private var applicableTransforms: [ClipboardTool] {
+        ToolRegistry.tools(for: item).filter { !$0.isAsync }
     }
 
     var body: some View {
@@ -465,13 +488,34 @@ struct InlineTransformExpansion: View {
                     }
                     .frame(maxHeight: 110)
 
+                case .html(_, plain: let plain):
+                    ScrollView {
+                        Text(plain)
+                            .font(.system(size: 11))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    }
+                    .frame(maxHeight: 110)
+
                 case .file(let url):
                     HStack(spacing: 8) {
                         Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                             .resizable().frame(width: 28, height: 28)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(url.lastPathComponent).font(.system(size: 12, weight: .medium))
-                            Text(url.path).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                            Text(item.metadataSummary ?? url.path).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                        }
+                    }
+                    .padding(10)
+
+                case .files(let urls):
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 24))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(urls.count) files").font(.system(size: 12, weight: .medium))
+                            Text(item.metadataSummary ?? urls.map(\.lastPathComponent).joined(separator: ", "))
+                                .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(2)
                         }
                     }
                     .padding(10)
@@ -495,11 +539,9 @@ struct InlineTransformExpansion: View {
                     .padding(.vertical, 5)
 
                     ForEach(Array(applicableTransforms.prefix(8).enumerated()), id: \.element.id) { i, transform in
-                        if let text = textForTransform {
-                            InlineTransformRow(text: text, transform: transform)
-                            if i < min(applicableTransforms.count, 8) - 1 {
-                                Divider().padding(.leading, 34)
-                            }
+                        InlineTransformRow(item: item, transform: transform)
+                        if i < min(applicableTransforms.count, 8) - 1 {
+                            Divider().padding(.leading, 34)
                         }
                     }
 
@@ -518,16 +560,26 @@ struct InlineTransformExpansion: View {
 }
 
 struct InlineTransformRow: View {
-    let text:      String
-    let transform: TextTransform
+    let item:      ClipboardItem
+    let transform: ClipboardTool
     @State private var isHovered = false
 
-    private var result: String? { transform.apply(text) }
+    private var preview: String? { transform.preview(item) }
 
     var body: some View {
         Button {
-            guard let out = result else { return }
-            ClipboardManager.shared.pasteTransformed(out)
+            guard let result = transform.runSync?(item) else { return }
+            switch result {
+            case .text(let text) where !text.isEmpty:
+                ClipboardManager.shared.pasteTransformed(text)
+            case .revealFiles(let urls, let message):
+                NSWorkspace.shared.activateFileViewerSelecting(urls)
+                ClipboardManager.shared.flashStatus(message)
+            case .status(let message):
+                ClipboardManager.shared.flashStatus(message)
+            default:
+                ClipboardManager.shared.flashStatus("Transform returned nothing.")
+            }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: transform.icon)
@@ -539,7 +591,7 @@ struct InlineTransformRow: View {
                     Text(transform.label)
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(isHovered ? .accentColor : .primary)
-                    if let preview = result {
+                    if let preview {
                         Text(preview.trimmingCharacters(in: .whitespacesAndNewlines))
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.secondary)

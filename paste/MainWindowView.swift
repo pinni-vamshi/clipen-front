@@ -39,8 +39,9 @@ struct MainWindowView: View {
 
         // Fallback: substring match
         return manager.displayItems.filter {
-            if case .text(let s) = $0.content { return s.localizedCaseInsensitiveContains(searchText) }
-            return false
+            $0.textForEmbedding?.localizedCaseInsensitiveContains(searchText) == true
+                || $0.previewText.localizedCaseInsensitiveContains(searchText)
+                || $0.metadataSummary?.localizedCaseInsensitiveContains(searchText) == true
         }
     }
 
@@ -278,6 +279,11 @@ struct MainWindowView: View {
                             cardDivider()
                             cardRow(icon: "paintpalette", label: "Color swatches") {
                                 Toggle("", isOn: $manager.showColorSwatches)
+                                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                            }
+                            cardDivider()
+                            cardRow(icon: "lock.shield", label: "Ignore passwords & secrets") {
+                                Toggle("", isOn: $manager.autoIgnoreSecrets)
                                     .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                             }
                         }
@@ -926,14 +932,56 @@ struct DarkItemRow: View {
         case .richText(_, plain: let plain):
             Text(plain).font(.system(size: 13)).lineLimit(2)
                 .foregroundColor(isSelected ? .white : Color(hex: "#CCCCCC"))
+        case .html(_, plain: let plain):
+            Text(plain).font(.system(size: 13)).lineLimit(2)
+                .foregroundColor(isSelected ? .white : Color(hex: "#CCCCCC"))
         case .file(let url):
             HStack(spacing: 8) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 18, height: 18)
-                Text(url.deletingLastPathComponent().path).font(.system(size: 10)).lineLimit(1)
-                    .foregroundColor(Color(hex: "#555555"))
+                fileThumbnail(url, size: 32)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(url.lastPathComponent).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                        .foregroundColor(isSelected ? .white : Color(hex: "#CCCCCC"))
+                    Text(item.metadataSummary ?? url.deletingLastPathComponent().path).font(.system(size: 10)).lineLimit(1)
+                        .foregroundColor(Color(hex: "#555555"))
+                }
+            }
+        case .files(let urls):
+            HStack(spacing: 8) {
+                if let firstImageURL = urls.first(where: FileKindDetector.isImageFile) {
+                    fileThumbnail(firstImageURL, size: 32)
+                } else {
+                    Image(systemName: "doc.on.doc").frame(width: 18, height: 18)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(urls.count) files").font(.system(size: 12, weight: .medium)).lineLimit(1)
+                        .foregroundColor(isSelected ? .white : Color(hex: "#CCCCCC"))
+                    Text(item.metadataSummary ?? urls.map(\.lastPathComponent).joined(separator: ", "))
+                        .font(.system(size: 10)).lineLimit(1)
+                        .foregroundColor(Color(hex: "#555555"))
+                }
             }
         case .image(let img, _, _):
-            Image(nsImage: img).resizable().scaledToFit().frame(height: 36).cornerRadius(4)
+            VStack(alignment: .leading, spacing: 3) {
+                Image(nsImage: img).resizable().scaledToFit().frame(height: 36).cornerRadius(4)
+                if let summary = item.metadataSummary {
+                    Text(summary).font(.system(size: 10)).lineLimit(1).foregroundColor(Color(hex: "#555555"))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func fileThumbnail(_ url: URL, size: CGFloat) -> some View {
+        if FileKindDetector.isImageFile(url), let image = NSImage(contentsOf: url) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+        } else {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable()
+                .frame(width: 18, height: 18)
         }
     }
 
@@ -1092,6 +1140,7 @@ struct TutorialSheet: View {
             switch item.content {
             case .text(let s):                return s.trimmingCharacters(in: .whitespacesAndNewlines)
             case .richText(_, plain: let p):  return p.trimmingCharacters(in: .whitespacesAndNewlines)
+            case .html(_, plain: let p):      return p.trimmingCharacters(in: .whitespacesAndNewlines)
             default:                          return nil
             }
         })

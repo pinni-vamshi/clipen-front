@@ -531,16 +531,43 @@ struct PopoverRow: View {
                     Text(plain).font(.system(size: 12)).lineLimit(2)
                         .foregroundColor(.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                case .html(_, plain: let plain):
+                    Text(plain).font(.system(size: 12)).lineLimit(2)
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 case .file(let url):
                     HStack(spacing: 6) {
-                        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 14, height: 14)
-                        Text(url.deletingLastPathComponent().path).font(.system(size: 10)).lineLimit(1)
-                            .foregroundColor(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                        fileThumbnail(url, size: 28)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(url.lastPathComponent).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                            Text(item.metadataSummary ?? url.deletingLastPathComponent().path).font(.system(size: 9)).lineLimit(1)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                case .files(let urls):
+                    HStack(spacing: 6) {
+                        if let firstImageURL = urls.first(where: FileKindDetector.isImageFile) {
+                            fileThumbnail(firstImageURL, size: 28)
+                        } else {
+                            Image(systemName: "doc.on.doc").frame(width: 14, height: 14)
+                        }
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(urls.count) files").font(.system(size: 11, weight: .medium)).lineLimit(1)
+                            Text(item.metadataSummary ?? urls.map(\.lastPathComponent).joined(separator: ", "))
+                                .font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 case .image(let img, _, _):
-                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 280, maxHeight: 62)
-                        .cornerRadius(5).clipped()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 280, maxHeight: 62)
+                            .cornerRadius(5).clipped()
+                        if let summary = item.metadataSummary {
+                            Text(summary).font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
             .padding(.leading, 30)
@@ -548,5 +575,20 @@ struct PopoverRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(isSelected ? Color.accentColor.opacity(0.22) : Color.clear, in: Rectangle())
+    }
+
+    @ViewBuilder
+    private func fileThumbnail(_ url: URL, size: CGFloat) -> some View {
+        if FileKindDetector.isImageFile(url), let image = NSImage(contentsOf: url) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+        } else {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable()
+                .frame(width: 14, height: 14)
+        }
     }
 }

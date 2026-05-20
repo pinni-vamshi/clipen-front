@@ -1,11 +1,14 @@
 import Accelerate
 import AppKit
+import AVFoundation
 import Combine
 import CoreServices
 import CryptoKit
 import NaturalLanguage
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
+@preconcurrency import PDFKit
 
 /// AES-GCM encryption for the on-disk clipboard history.
 ///
@@ -46,6 +49,39 @@ private enum HistoryCrypto {
 final class DismissTicker: ObservableObject {
     @Published var progress: Double = 1.0
     @Published var frozen:   Bool   = false
+}
+
+private enum SecretDetector {
+    static func isLikelySecret(_ value: String) -> Bool {
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 8 else { return false }
+
+        if text.contains("-----BEGIN ") && text.contains("PRIVATE KEY-----") { return true }
+
+        let patterns = [
+            #"(?i)(api[_-]?key|secret|password|passwd|token|bearer|client_secret)\s*[:=]\s*["']?[^"'\s]{8,}"#,
+            #"AKIA[0-9A-Z]{16}"#,
+            #"gh[pousr]_[A-Za-z0-9_]{30,}"#,
+            #"xox[baprs]-[A-Za-z0-9-]{20,}"#,
+            #"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"#
+        ]
+        if patterns.contains(where: { matches($0, in: text) }) { return true }
+
+        let singleLine = !text.contains("\n") && !text.contains(" ")
+        guard singleLine, text.count >= 32, text.count <= 256 else { return false }
+        let scalars = text.unicodeScalars
+        let hasLower = scalars.contains { CharacterSet.lowercaseLetters.contains($0) }
+        let hasUpper = scalars.contains { CharacterSet.uppercaseLetters.contains($0) }
+        let hasDigit = scalars.contains { CharacterSet.decimalDigits.contains($0) }
+        let hasSymbol = scalars.contains { CharacterSet(charactersIn: "_-+/=.").contains($0) }
+        return [hasLower, hasUpper, hasDigit, hasSymbol].filter { $0 }.count >= 3
+    }
+
+    private static func matches(_ pattern: String, in text: String) -> Bool {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.firstMatch(in: text, range: range) != nil
+    }
 }
 
 class ClipboardManager: ObservableObject {
@@ -127,7 +163,7 @@ class ClipboardManager: ObservableObject {
         didSet { UserDefaults.standard.set(captureRichText, forKey: "captureRichText") }
     }
 
-    @Published var captureFiles: Bool = UserDefaults.standard.object(forKey: "captureFiles") as? Bool ?? false {
+    @Published var captureFiles: Bool = UserDefaults.standard.object(forKey: "captureFiles") as? Bool ?? true {
         didSet { UserDefaults.standard.set(captureFiles, forKey: "captureFiles") }
     }
 
@@ -137,6 +173,10 @@ class ClipboardManager: ObservableObject {
 
     @Published var showColorSwatches: Bool = UserDefaults.standard.object(forKey: "showColorSwatches") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showColorSwatches, forKey: "showColorSwatches") }
+    }
+
+    @Published var autoIgnoreSecrets: Bool = UserDefaults.standard.object(forKey: "autoIgnoreSecrets") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(autoIgnoreSecrets, forKey: "autoIgnoreSecrets") }
     }
 
     /// User-controllable clipboard-capture pause. Lives only in memory —
@@ -200,6 +240,7 @@ class ClipboardManager: ObservableObject {
 
     let previewWindow  = PreviewOverlayWindow()
     let transformPanel = TransformPanel()
+    let itemPreviewPanel = ItemPreviewPanel()
     /// Mirrors `AXIsProcessTrusted()`. Initialized synchronously so the
     /// onboarding screen doesn't flash on launch for users who already
     /// granted permission in a previous run. Refreshed by a 1Hz timer in
@@ -311,8 +352,10 @@ class ClipboardManager: ObservableObject {
     private init() {
         // maxItems is now plan-driven only — remove any stale UserDefaults value
         UserDefaults.standard.removeObject(forKey: "maxItems")
-        UserDefaults.standard.set(false, forKey: "captureFiles")
-        captureFiles = false
+        // Migrate older builds that forced file capture off. Copying actual
+        // file data is now core behavior for documents/media/images.
+        UserDefaults.standard.set(true, forKey: "captureFiles")
+        captureFiles = true
         saveCancellable = $items
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.saveHistory() }
@@ -382,25 +425,44 @@ class ClipboardManager: ObservableObject {
         lastChangeCount = pb.changeCount
 
         // 1. File URLs
-        if captureFiles,
-           let urls = pb.readObjects(forClasses: [NSURL.self],
-                                     options: [.urlReadingFileURLsOnly: true]) as? [URL],
-           let url = urls.first {
-            addItem(ClipboardItem(content: .file(url)))
+        if captureFiles {
+            let urls = fileURLs(from: pb)
+            if !urls.isEmpty {
+            let snapshots = FileSnapshotStore.snapshot(urls)
+            addItem(ClipboardItem(content: snapshots.count == 1 ? .file(snapshots[0]) : .files(snapshots)))
             return
+            }
         }
 
-        // 2. RTF (before plain text — RTF also exposes .string)
+        // 2. HTML (before RTF/plain text so web formatting survives)
+        let htmlTypes: [NSPasteboard.PasteboardType] = [
+            .init("public.html"),
+            .init("Apple HTML pasteboard type")
+        ]
+        for type in htmlTypes {
+            if let htmlData = pb.data(forType: type),
+               let html = String(data: htmlData, encoding: .utf8),
+               let plain = Self.plainText(fromHTML: htmlData),
+               !plain.isEmpty {
+                guard !shouldIgnoreSensitiveText(plain) else { return }
+                addItem(ClipboardItem(content: .html(html, plain: plain)))
+                return
+            }
+        }
+
+        // 3. RTF (before plain text — RTF also exposes .string)
         if captureRichText,
            let rtfData = pb.data(forType: .rtf),
            let attrStr = NSAttributedString(rtf: rtfData, documentAttributes: nil),
            !attrStr.string.isEmpty {
+            guard !shouldIgnoreSensitiveText(attrStr.string) else { return }
             addItem(ClipboardItem(content: .richText(attrStr, plain: attrStr.string)))
             return
         }
 
-        // 3. Plain text
+        // 4. Plain text
         if let str = pb.string(forType: .string), !str.isEmpty {
+            guard !shouldIgnoreSensitiveText(str) else { return }
             let item = ClipboardItem(content: .text(str))
             addItem(item)
             if fetchURLTitles {
@@ -413,10 +475,11 @@ class ClipboardManager: ObservableObject {
             return
         }
 
-        // 4. Images
+        // 5. Images
         let imageTypes: [NSPasteboard.PasteboardType] = [
             .init("public.png"), .tiff,
-            .init("com.adobe.pdf"), .init("public.jpeg"), .init("public.heic")
+            .init("com.adobe.pdf"), .init("public.jpeg"), .init("public.heic"),
+            .init("com.compuserve.gif"), .init("public.gif")
         ]
         for type in imageTypes {
             if let data = pb.data(forType: type), let img = NSImage(data: data) {
@@ -430,9 +493,101 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    private func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
+        var urls: [URL] = []
+
+        if let objects = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] {
+            urls.append(contentsOf: objects)
+        }
+
+        let filenameType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        if let paths = pasteboard.propertyList(forType: filenameType) as? [String] {
+            urls.append(contentsOf: paths.map { URL(fileURLWithPath: $0) })
+        }
+
+        let fileURLTypes: [NSPasteboard.PasteboardType] = [
+            .init("public.file-url"),
+            .init("NSURLPboardType"),
+            .init("Apple URL pasteboard type"),
+            .init("com.apple.pasteboard.promised-file-url")
+        ]
+
+        for item in pasteboard.pasteboardItems ?? [] {
+            for type in fileURLTypes {
+                if let string = item.string(forType: type),
+                   let url = parseFileURL(string) {
+                    urls.append(url)
+                } else if let data = item.data(forType: type),
+                          let string = String(data: data, encoding: .utf8),
+                          let url = parseFileURL(string) {
+                    urls.append(url)
+                }
+            }
+
+            if let paths = item.propertyList(forType: filenameType) as? [String] {
+                urls.append(contentsOf: paths.map { URL(fileURLWithPath: $0) })
+            }
+        }
+
+        if let string = pasteboard.string(forType: .string),
+           let url = parseFileURL(string) {
+            urls.append(url)
+        }
+
+        var seen = Set<String>()
+        return urls.filter { url in
+            guard url.isFileURL,
+                  FileManager.default.fileExists(atPath: url.path),
+                  !seen.contains(url.path) else { return false }
+            seen.insert(url.path)
+            return true
+        }
+    }
+
+    private func parseFileURL(_ raw: String) -> URL? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !text.contains("\n") else { return nil }
+
+        if text.hasPrefix("file://"),
+           let url = URL(string: text.removingPercentEncoding ?? text),
+           url.isFileURL {
+            return url
+        }
+
+        if text.hasPrefix("/") || text.hasPrefix("~") {
+            return URL(fileURLWithPath: (text as NSString).expandingTildeInPath)
+        }
+
+        return nil
+    }
+
+    private static func plainText(fromHTML data: Data) -> String? {
+        guard let attr = NSAttributedString(
+            html: data,
+            options: [.documentType: NSAttributedString.DocumentType.html],
+            documentAttributes: nil
+        ) else { return nil }
+        return attr.string.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func shouldIgnoreSensitiveText(_ text: String) -> Bool {
+        guard autoIgnoreSecrets, SecretDetector.isLikelySecret(text) else { return false }
+        flashStatus("Secret ignored. Toggle this in Settings if you want to save it.")
+        return true
+    }
+
     private func addItem(_ item: ClipboardItem) {
         if let first = items.first(where: { !$0.isPinned }),
            item.isDuplicate(of: first) { return }
+
+        var item = item
+        if item.sourceAppName == nil, let app = NSWorkspace.shared.frontmostApplication {
+            item.sourceAppName = app.localizedName
+            item.sourceBundleID = app.bundleIdentifier
+        }
 
         // Compute diff badge before inserting (existing items are current ring)
         if case .text(let newText) = item.content {
@@ -587,6 +742,8 @@ class ClipboardManager: ObservableObject {
                 //    dismiss, nothing pasted
                 if pendingFirstOpen {
                     DispatchQueue.main.async { [weak self] in self?.fastPasteFront() }
+                } else if itemPreviewPanel.isVisible {
+                    DispatchQueue.main.async { [weak self] in self?.dismissPreview() }
                 } else if previewWindow.isVisible {
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
@@ -610,6 +767,14 @@ class ClipboardManager: ObservableObject {
         // Escape — cancel popup without pasting
         if key == 53 && previewWindow.isVisible {
             DispatchQueue.main.async { [weak self] in self?.dismissPreview() }
+            return nil
+        }
+
+        // Space — Quick Look-style temporary preview for the highlighted item.
+        // The popup is command-driven, so accept Space while the popup is open
+        // regardless of whether Command is currently held.
+        if key == 49 && previewWindow.isVisible {
+            DispatchQueue.main.async { [weak self] in self?.toggleSelectedItemPreview() }
             return nil
         }
 
@@ -715,7 +880,7 @@ class ClipboardManager: ObservableObject {
 
         // Unified cycling for ALL content types (text, richText, image, PDF, file)
         let item     = displayItems[selectedIndex]
-        let displays = TransformResolver.displays(for: item)
+        let displays = ToolRegistry.displays(for: item)
         guard !displays.isEmpty else { return }
         transformIndex = (transformIndex + 1) % displays.count
         updateTransformPanel()
@@ -736,6 +901,7 @@ class ClipboardManager: ObservableObject {
         transformStageActive = false
         stageRevertTimer?.invalidate(); stageRevertTimer = nil
         transformPanel.hide()
+        itemPreviewPanel.hide()
         // Unfreeze and restart dismiss countdown
         scheduleDismissTimer()
     }
@@ -757,23 +923,31 @@ class ClipboardManager: ObservableObject {
                             isProcessing: processing)
     }
 
-    /// Synchronous sibling of `TransformResolver.apply` for the cases that
-    /// don't need async (text / richText / non-PDF file). The async resolver
-    /// would also work but commitPaste avoids spawning a Task for sync paths.
-    private func await_apply_sync(item: ClipboardItem, index: Int) -> String? {
-        switch item.content {
-        case .text(let s):
-            let applicable = TextTransform.all.filter { $0.apply(s) != nil }
-            return applicable[safe: index].flatMap { $0.apply(s) }
-        case .richText(_, plain: let s):
-            let applicable = TextTransform.all.filter { $0.apply(s) != nil }
-            return applicable[safe: index].flatMap { $0.apply(s) }
-        case .file(let url):
-            let applicable = TextTransform.all.filter { $0.apply(url.path) != nil }
-            return applicable[safe: index].flatMap { $0.apply(url.path) }
-        case .image:
-            return nil   // async only — should never reach here via this path
+    private func toggleSelectedItemPreview() {
+        guard previewWindow.isVisible,
+              !displayItems.isEmpty,
+              selectedIndex < displayItems.count else { return }
+        if itemPreviewPanel.isVisible {
+            itemPreviewPanel.hide()
+            scheduleDismissTimer()
+        } else {
+            showSelectedItemPreview()
         }
+    }
+
+    private func showSelectedItemPreview() {
+        guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        itemPreviewPanel.show(for: displayItems[selectedIndex], near: previewWindow.frame)
+        dismissTimer?.invalidate(); dismissTimer = nil
+        progressTimer?.invalidate(); progressTimer = nil
+        timerFrozen = true
+    }
+
+    /// Synchronous sibling of `ToolRegistry.run` for tools that can finish
+    /// immediately. Async tools still go through the Task path so the panel can
+    /// show processing state.
+    private func applySyncTransform(item: ClipboardItem, index: Int) -> TransformOutput? {
+        ToolRegistry.runSync(item: item, index: index)
     }
 
     func pasteTransformed(_ text: String) {
@@ -784,9 +958,102 @@ class ClipboardManager: ObservableObject {
 
         previewWindow.hide()
         transformPanel.hide()
+        itemPreviewPanel.hide()
         dismissTimer?.invalidate(); dismissTimer = nil
         progressTimer?.invalidate(); progressTimer = nil
         selectionArmed = true
+
+        isSimulatingPaste = true
+        let src  = CGEventSource(stateID: .combinedSessionState)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+        let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+        down?.flags = .maskCommand; up?.flags = .maskCommand
+        down?.post(tap: .cgAnnotatedSessionEventTap)
+        up?.post(tap: .cgAnnotatedSessionEventTap)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.isSimulatingPaste = false
+            self?.selectedIndex = 0
+            self?.selectionArmed = true
+        }
+    }
+
+    private func handleTransformResult(_ result: TransformOutput?) {
+        guard let result else {
+            flashStatus("Transform returned nothing.")
+            return
+        }
+
+        switch result {
+        case .text(let text) where !text.isEmpty:
+            pasteTransformed(text)
+        case .item(let item, let message):
+            pasteGeneratedItem(item, message: message)
+        case .files(let urls, let message):
+            pasteGeneratedFiles(urls, message: message)
+        case .revealFiles(let urls, let message):
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
+            flashStatus(message)
+        case .status(let message):
+            flashStatus(message)
+        default:
+            flashStatus("Transform returned nothing.")
+        }
+    }
+
+    func pasteGeneratedItem(_ item: ClipboardItem, message: String) {
+        addItem(item)
+
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        write(item, to: pb)
+        lastChangeCount = pb.changeCount
+
+        previewWindow.hide()
+        transformPanel.hide()
+        itemPreviewPanel.hide()
+        dismissTimer?.invalidate(); dismissTimer = nil
+        progressTimer?.invalidate(); progressTimer = nil
+        selectionArmed = true
+        flashStatus(message)
+
+        isSimulatingPaste = true
+        let src  = CGEventSource(stateID: .combinedSessionState)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+        let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+        down?.flags = .maskCommand; up?.flags = .maskCommand
+        down?.post(tap: .cgAnnotatedSessionEventTap)
+        up?.post(tap: .cgAnnotatedSessionEventTap)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.isSimulatingPaste = false
+            self?.selectedIndex = 0
+            self?.selectionArmed = true
+        }
+    }
+
+    func pasteGeneratedFiles(_ urls: [URL], message: String) {
+        guard !urls.isEmpty else {
+            flashStatus("No files were generated.")
+            return
+        }
+
+        // addItem inserts at the front. Iterate in reverse so page-001 ends
+        // up as the newest/top item in the ring after exporting a PDF.
+        for url in urls.reversed() {
+            addItem(ClipboardItem(content: .file(url)))
+        }
+
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        writeFileURLs(urls, to: pb)
+        lastChangeCount = pb.changeCount
+
+        previewWindow.hide()
+        transformPanel.hide()
+        itemPreviewPanel.hide()
+        dismissTimer?.invalidate(); dismissTimer = nil
+        progressTimer?.invalidate(); progressTimer = nil
+        selectionArmed = true
+        flashStatus(message)
 
         isSimulatingPaste = true
         let src  = CGEventSource(stateID: .combinedSessionState)
@@ -864,6 +1131,10 @@ class ClipboardManager: ObservableObject {
             }
         }
 
+        if itemPreviewPanel.isVisible {
+            showSelectedItemPreview()
+        }
+
         scheduleDismissTimer()
     }
 
@@ -899,6 +1170,9 @@ class ClipboardManager: ObservableObject {
         if wasFirstOpen { openPopupNow() } else { selectionArmed = true }
         previewVisible = true
         cycleCount += 1
+        if itemPreviewPanel.isVisible {
+            showSelectedItemPreview()
+        }
         scheduleDismissTimer()
     }
 
@@ -924,6 +1198,9 @@ class ClipboardManager: ObservableObject {
 
         previewVisible = true
         cycleCount += 1
+        if itemPreviewPanel.isVisible {
+            showSelectedItemPreview()
+        }
         scheduleDismissTimer()
     }
 
@@ -949,6 +1226,9 @@ class ClipboardManager: ObservableObject {
 
         previewVisible = true
         cycleCount += 1
+        if itemPreviewPanel.isVisible {
+            showSelectedItemPreview()
+        }
         scheduleDismissTimer()
     }
 
@@ -1002,12 +1282,21 @@ class ClipboardManager: ObservableObject {
         items.remove(at: realIndex)
         if items.isEmpty { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
+        if itemPreviewPanel.isVisible {
+            showSelectedItemPreview()
+        }
         // @ObservedObject re-render handles the popup refresh. No AX query,
         // no setFrame, no view-tree rebuild — just bump the @Published vars.
         scheduleDismissTimer()
     }
 
     private func scheduleDismissTimer() {
+        if itemPreviewPanel.isVisible {
+            timerFrozen = true
+            dismissTimer?.invalidate();  dismissTimer  = nil
+            progressTimer?.invalidate(); progressTimer = nil
+            return
+        }
         timerFrozen    = false
         dismissProgress = 1.0
         guard dismissTimeout > 0 else {
@@ -1068,6 +1357,7 @@ class ClipboardManager: ObservableObject {
     private func dismissPreview() {
         previewWindow.hide()
         transformPanel.hide()
+        itemPreviewPanel.hide()
         dismissTimer?.invalidate();  dismissTimer = nil
         progressTimer?.invalidate(); progressTimer = nil
         stageRevertTimer?.invalidate(); stageRevertTimer = nil
@@ -1175,7 +1465,12 @@ class ClipboardManager: ObservableObject {
     // MARK: - Paste
 
     func commitPaste() {
-        guard !items.isEmpty else { previewWindow.hide(); return }
+        guard !items.isEmpty else {
+            previewWindow.hide()
+            transformPanel.hide()
+            itemPreviewPanel.hide()
+            return
+        }
 
         stageRevertTimer?.invalidate(); stageRevertTimer = nil
 
@@ -1183,7 +1478,7 @@ class ClipboardManager: ObservableObject {
         if inTransformStage {
             let item     = displayItems[selectedIndex]
             let idx      = transformIndex
-            let isAsync  = TransformResolver.isAsync(item: item, index: idx)
+            let isAsync  = ToolRegistry.isAsync(item: item, index: idx)
 
             if isAsync {
                 // Async path (OCR / PDF text extraction) — show "Processing…"
@@ -1191,34 +1486,33 @@ class ClipboardManager: ObservableObject {
                 updateTransformPanelProcessing(true)
                 Task { [weak self] in
                     guard let self else { return }
-                    let result = await TransformResolver.apply(item: item, index: idx)
+                    let result = await ToolRegistry.run(item: item, index: idx)
                     await MainActor.run {
                         self.updateTransformPanelProcessing(false)
                         self.inTransformStage = false
                         self.transformIndex   = 0
                         self.transformPanel.hide()
+                        self.itemPreviewPanel.hide()
                         self.previewWindow.hide()
                         self.dismissTimer?.invalidate(); self.dismissTimer = nil
                         self.progressTimer?.invalidate(); self.progressTimer = nil
                         self.selectionArmed = true
-                        if let r = result, !r.isEmpty {
-                            self.pasteTransformed(r)
-                        } else {
-                            // Async transform returned nothing — tell the user
-                            // why they don't see a paste happen.
-                            self.flashStatus("No text found — nothing to paste.")
-                        }
+                        self.handleTransformResult(result)
                     }
                 }
                 return
             } else {
                 // Sync path — apply immediately
-                let result = await_apply_sync(item: item, index: idx)
-                if let r = result, !r.isEmpty {
-                    inTransformStage = false; transformIndex = 0
-                    pasteTransformed(r)
-                    return
-                }
+                let result = applySyncTransform(item: item, index: idx)
+                inTransformStage = false; transformIndex = 0
+                transformPanel.hide()
+                itemPreviewPanel.hide()
+                previewWindow.hide()
+                dismissTimer?.invalidate(); dismissTimer = nil
+                progressTimer?.invalidate(); progressTimer = nil
+                selectionArmed = true
+                handleTransformResult(result)
+                return
             }
         }
 
@@ -1227,27 +1521,11 @@ class ClipboardManager: ObservableObject {
         let item = displayItems[selectedIndex]
         dismissTimer?.invalidate(); dismissTimer = nil
         progressTimer?.invalidate(); progressTimer = nil
-        previewWindow.hide(); transformPanel.hide()
+        previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
 
         let pb = NSPasteboard.general
         pb.clearContents()
-        switch item.content {
-        case .text(let str):
-            pb.setString(str, forType: .string)
-        case .image(let img, let rawData, let dataType):
-            pb.setData(rawData, forType: dataType)
-            if let png = img.pngData() { pb.setData(png, forType: .init("public.png")) }
-            if let tiff = img.tiffRepresentation { pb.setData(tiff, forType: .tiff) }
-        case .richText(let attrStr, let plain):
-            let range = NSRange(location: 0, length: attrStr.length)
-            if let rtfData = try? attrStr.data(from: range,
-                                               documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) {
-                pb.setData(rtfData, forType: .rtf)
-            }
-            pb.setString(plain, forType: .string)
-        case .file(let url):
-            pb.writeObjects([url as NSURL])
-        }
+        write(item, to: pb)
         lastChangeCount = pb.changeCount
 
         isSimulatingPaste = true
@@ -1266,6 +1544,92 @@ class ClipboardManager: ObservableObject {
             self?.cachedCaretPosition = nil   // session over → next ⌘V re-queries
         }
         AuthManager.shared.registerCommandVAction()
+    }
+
+    private func write(_ item: ClipboardItem, to pb: NSPasteboard) {
+        switch item.content {
+        case .text(let str):
+            pb.setString(str, forType: .string)
+        case .image(let img, let rawData, let dataType):
+            pb.setData(rawData, forType: dataType)
+            if let png = img.pngData() { pb.setData(png, forType: .init("public.png")) }
+            if let tiff = img.tiffRepresentation { pb.setData(tiff, forType: .tiff) }
+        case .richText(let attrStr, let plain):
+            let range = NSRange(location: 0, length: attrStr.length)
+            if let rtfData = try? attrStr.data(from: range,
+                                               documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) {
+                pb.setData(rtfData, forType: .rtf)
+            }
+            pb.setString(plain, forType: .string)
+        case .html(let html, let plain):
+            pb.setData(Data(html.utf8), forType: .init("public.html"))
+            pb.setString(plain, forType: .string)
+        case .file(let url):
+            writeFileURLs([url], to: pb)
+        case .files(let urls):
+            writeFileURLs(urls, to: pb)
+        }
+    }
+
+    private func writeFileURLs(_ urls: [URL], to pb: NSPasteboard) {
+        let existingURLs = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !existingURLs.isEmpty else { return }
+
+        let paths = existingURLs.map(\.path)
+        pb.setPropertyList(paths, forType: .init("NSFilenamesPboardType"))
+        pb.writeObjects(existingURLs.map { $0 as NSURL })
+
+        if existingURLs.count == 1, let url = existingURLs.first {
+            pb.setString(url.absoluteString, forType: .init("public.file-url"))
+            pb.setString(url.absoluteString, forType: .init("NSURLPboardType"))
+            pb.setString(url.absoluteString, forType: .init("Apple URL pasteboard type"))
+            writeSingleFilePayload(url, to: pb)
+        }
+    }
+
+    private func writeSingleFilePayload(_ url: URL, to pb: NSPasteboard) {
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentTypeKey, .fileSizeKey]),
+              values.isDirectory != true else { return }
+
+        // Avoid loading very large files into the pasteboard. Those still paste
+        // as files through the file-url/Finder representations above.
+        let maxInlineBytes = 50 * 1024 * 1024
+        if let fileSize = values.fileSize, fileSize > maxInlineBytes { return }
+
+        guard let data = try? Data(contentsOf: url) else { return }
+
+        var types: [NSPasteboard.PasteboardType] = []
+        if let contentType = values.contentType {
+            types.append(.init(contentType.identifier))
+        } else if let inferredType = UTType(filenameExtension: url.pathExtension) {
+            types.append(.init(inferredType.identifier))
+        }
+
+        switch url.pathExtension.lowercased() {
+        case "png":
+            types.append(.init("public.png"))
+        case "jpg", "jpeg":
+            types.append(.init("public.jpeg"))
+        case "gif":
+            types.append(.init("public.gif"))
+        case "tif", "tiff":
+            types.append(.tiff)
+        case "pdf":
+            types.append(.init("com.adobe.pdf"))
+            types.append(.init("public.pdf"))
+        default:
+            break
+        }
+        types.append(.init("public.data"))
+
+        var seenTypes = Set<String>()
+        for type in types where seenTypes.insert(type.rawValue).inserted {
+            pb.setData(data, forType: type)
+        }
+
+        if let text = FileKindDetector.readableText(from: url, maxBytes: maxInlineBytes) {
+            pb.setString(text, forType: .string)
+        }
     }
 
     func pasteItem(at itemsIndex: Int) {
@@ -1352,16 +1716,21 @@ class ClipboardManager: ObservableObject {
     private static let FREE_RING_LIMIT = 10
 
     func applyPlanLimits(ringLimit: Int) {
+        let target: Int
         if ringLimit <= Self.FREE_RING_LIMIT {
             // Free plan — exact server cap, no user preference applied.
-            maxItems = ringLimit
-            return
+            target = ringLimit
+        } else {
+            // Pro plan — user picks within the server cap; default to a sane
+            // mid-range so first-time Pro users don't see a tiny ring.
+            let preferred = UserDefaults.standard.object(forKey: "preferredRingSize") as? Int
+            target = max(1, preferred.map { min($0, ringLimit) } ?? 20)
         }
-        // Pro plan — user picks within the server cap; default to a sane
-        // mid-range so first-time Pro users don't see a tiny ring.
-        let preferred = UserDefaults.standard.object(forKey: "preferredRingSize") as? Int
-        let target    = preferred.map { min($0, ringLimit) } ?? 20
-        maxItems = max(1, target)
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.maxItems != target else { return }
+            self.maxItems = target
+        }
     }
 
     // (No cloud sync in this build — it's a local-only clipboard manager.
@@ -1451,6 +1820,10 @@ class ClipboardManager: ObservableObject {
         let rtfData:   Data?
         let plainText: String?
         let filePath:  String?
+        let filePaths: [String]?
+        let html:      String?
+        let sourceAppName: String?
+        let sourceBundleID: String?
     }
 
     private var historyDir: URL {
@@ -1480,24 +1853,43 @@ class ClipboardManager: ObservableObject {
             case .text(let str):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: item.urlTitle, type: "text", text: str,
-                                     imageData: nil, imageType: nil, rtfData: nil, plainText: nil, filePath: nil)
+                                     imageData: nil, imageType: nil, rtfData: nil, plainText: nil, filePath: nil,
+                                     filePaths: nil, html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
             case .image(_, let rawData, let dataType):
                 guard rawData.count < 8_000_000 else { return nil }
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "image", text: nil,
-                                     imageData: rawData, imageType: dataType.rawValue,
-                                     rtfData: nil, plainText: nil, filePath: nil)
+                                     imageData: rawData, imageType: dataType.rawValue, rtfData: nil,
+                                     plainText: nil, filePath: nil, filePaths: nil, html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
             case .richText(let attrStr, let plain):
                 let range = NSRange(location: 0, length: attrStr.length)
                 let rtf = try? attrStr.data(from: range,
                                             documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: item.urlTitle, type: "richText", text: nil,
-                                     imageData: nil, imageType: nil, rtfData: rtf, plainText: plain, filePath: nil)
+                                     imageData: nil, imageType: nil, rtfData: rtf, plainText: plain, filePath: nil,
+                                     filePaths: nil, html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
+            case .html(let html, let plain):
+                return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
+                                     urlTitle: item.urlTitle, type: "html", text: nil,
+                                     imageData: nil, imageType: nil, rtfData: nil, plainText: plain, filePath: nil,
+                                     filePaths: nil, html: html,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
             case .file(let url):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "file", text: nil,
-                                     imageData: nil, imageType: nil, rtfData: nil, plainText: nil, filePath: url.path)
+                                     imageData: nil, imageType: nil, rtfData: nil, plainText: nil, filePath: url.path,
+                                     filePaths: nil, html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
+            case .files(let urls):
+                return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
+                                     urlTitle: nil, type: "files", text: nil,
+                                     imageData: nil, imageType: nil, rtfData: nil, plainText: nil, filePath: nil,
+                                     filePaths: urls.map(\.path), html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
             }
         }
         guard let plain = try? enc.encode(persisted),
@@ -1543,15 +1935,23 @@ class ClipboardManager: ObservableObject {
                 guard let rtf = p.rtfData,
                       let attrStr = NSAttributedString(rtf: rtf, documentAttributes: nil) else { return nil }
                 content = .richText(attrStr, plain: p.plainText ?? attrStr.string)
+            case "html":
+                guard let html = p.html else { return nil }
+                content = .html(html, plain: p.plainText ?? "")
             case "file":
                 guard let path = p.filePath else { return nil }
                 content = .file(URL(fileURLWithPath: path))
+            case "files":
+                guard let paths = p.filePaths, !paths.isEmpty else { return nil }
+                content = .files(paths.map { URL(fileURLWithPath: $0) })
             default:
                 return nil
             }
             var item = ClipboardItem(content: content, id: p.id, timestamp: p.timestamp)
             item.isPinned = p.isPinned
             item.urlTitle = p.urlTitle
+            item.sourceAppName = p.sourceAppName
+            item.sourceBundleID = p.sourceBundleID
             return item
         }
         // Respect plan limit: keep all pinned + up to maxItems unpinned
@@ -1561,143 +1961,30 @@ class ClipboardManager: ObservableObject {
     }
 }
 
-// MARK: - Content type detection
-
-/// Top-level category bucket each clipboard item falls into. Drives the
-/// horizontal chip strip in the popover so the user can narrow the ring
-/// down by kind of content. Distinct from `ClipboardContentType` (which
-/// is per-item detection metadata used for badges/icons inside a row).
-enum ClipboardCategory: String, CaseIterable, Hashable {
-    case code, color, file, image, json, latex, richText, text, url
-
-    var label: String {
-        switch self {
-        case .code:     return "Code"
-        case .color:    return "Color"
-        case .file:     return "Files"
-        case .image:    return "Images"
-        case .json:     return "JSON"
-        case .latex:    return "LaTeX"
-        case .richText: return "Rich text"
-        case .text:     return "Text"
-        case .url:      return "URLs"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .code:     return "chevron.left.forwardslash.chevron.right"
-        case .color:    return "paintpalette"
-        case .file:     return "doc"
-        case .image:    return "photo"
-        case .json:     return "curlybraces"
-        case .latex:    return "function"
-        case .richText: return "doc.richtext"
-        case .text:     return "doc.text"
-        case .url:      return "link"
-        }
-    }
-}
-
-enum ClipboardContentType {
-    case plain
-    case url
-    case json
-    case latex
-    case code(String)
-    case hexColor(NSColor)
-
-    var badgeLabel: String? {
-        switch self {
-        case .plain, .hexColor: return nil
-        case .url:              return "URL"
-        case .json:             return "JSON"
-        case .latex:            return "LaTeX"
-        case .code(let lang):   return lang
-        }
-    }
-
-    var sfIcon: String {
-        switch self {
-        case .plain:    return "doc.text"
-        case .url:      return "link"
-        case .json:     return "curlybraces"
-        case .latex:    return "function"
-        case .code:     return "chevron.left.forwardslash.chevron.right"
-        case .hexColor: return "paintpalette"
-        }
-    }
-
-    var badgeColor: Color {
-        switch self {
-        case .json:             return .green
-        case .latex:            return .purple
-        case .code:             return .blue
-        case .url:              return .cyan
-        default:                return .gray
-        }
-    }
-}
-
-private func detectCodeLanguage(_ s: String) -> String? {
-    let checks: [(String, [String])] = [
-        ("Swift",      ["func ", "var ", "let ", "guard ", "struct ", "import SwiftUI", "@State", ".self"]),
-        ("Python",     ["def ", "import ", "print(", "if __name__", "elif ", "self.", "None", "True"]),
-        ("JavaScript", ["function ", "const ", "=>", "console.log", "require(", "async ", "await "]),
-        ("TypeScript", ["interface ", ": string", ": number", "export ", "import { ", ": void"]),
-        ("Rust",       ["fn ", "let mut", "impl ", "pub fn", "println!", "match ", "::"]),
-        ("Go",         ["func ", "package ", ":=", "fmt.Println", "go func", "chan "]),
-        ("Kotlin",     ["fun ", "val ", "data class", "companion ", "override fun"]),
-        ("Java",       ["public class", "public static void", "System.out.println", "@Override"]),
-        ("C/C++",      ["#include", "int main", "printf(", "std::", "nullptr", "cout <<"]),
-        ("HTML",       ["<html", "<div", "<body", "<!DOCTYPE", "<script", "<style"]),
-        ("CSS",        ["font-size:", "color:", "margin:", "padding:", "display:", "flex;"]),
-        ("SQL",        ["SELECT ", "FROM ", "WHERE ", "INSERT INTO", "CREATE TABLE", "JOIN "]),
-        ("Shell",      ["#!/bin/", "echo ", "grep ", "chmod ", "export ", "alias "]),
-        ("Ruby",       ["def ", "end\n", "puts ", "attr_", ".each", "do |"]),
-        ("LaTeX",      ["\\begin{", "\\end{", "\\frac{", "\\sum", "\\int", "\\alpha"]),
-    ]
-    // Short-circuit: stop counting at 2 matches per language, and skip
-    // remaining languages once we find one. Cuts worst-case substring
-    // scans from ~105 to as few as 2 for the lucky first language.
-    for (lang, keywords) in checks {
-        var hits = 0
-        for kw in keywords {
-            if s.contains(kw) {
-                hits += 1
-                if hits >= 2 { return lang }
-            }
-        }
-    }
-    return nil
-}
-
 // MARK: - Models
 
 struct ClipboardItem: Identifiable {
     let id:        UUID
     let timestamp: Date
     let content:   ClipboardContent
-    /// Pre-computed at init so each PopoverRow render doesn't redo
-    /// `detectCodeLanguage` (15 langs × 7 keywords = up to 105 substring
-    /// scans) plus a JSON-parse attempt. Cached once per item; content is
-    /// immutable so this can never go stale.
+    /// Pre-computed at init so row renders don't redo traditional + semantic
+    /// detectors. Content is immutable, so this can never go stale.
     let detectedType: ClipboardContentType
-    /// Same idea — hex-color check is cheap, but pre-computing means
-    /// `detectedType` doesn't have to call it during render either.
+    /// Same idea for color swatches.
     let detectedColor: NSColor?
     var isPinned:  Bool     = false
     var embedding: [Float]? = nil
     var urlTitle:  String?  = nil
     var diffBadge: String?  = nil
+    var sourceAppName: String? = nil
+    var sourceBundleID: String? = nil
 
     init(content: ClipboardContent, id: UUID = UUID(), timestamp: Date = Date()) {
         self.id        = id
         self.timestamp = timestamp
         self.content   = content
-        self.detectedColor = Self.computeDetectedColor(content: content)
-        self.detectedType  = Self.computeDetectedType(content: content,
-                                                       color: self.detectedColor)
+        self.detectedColor = ContentDetector.detectedColor(for: content)
+        self.detectedType  = ContentDetector.detectedType(for: content, color: self.detectedColor)
     }
 
     var previewText: String {
@@ -1705,7 +1992,9 @@ struct ClipboardItem: Identifiable {
         case .text(let s):               return String(s.prefix(200))
         case .image:                     return "[Image]"
         case .richText(_, plain: let s): return String(s.prefix(200))
+        case .html(_, plain: let s):     return String(s.prefix(200))
         case .file(let url):             return url.lastPathComponent
+        case .files(let urls):           return "\(urls.count) files"
         }
     }
 
@@ -1714,18 +2003,26 @@ struct ClipboardItem: Identifiable {
         case .text:     return "doc.text"
         case .image:    return "photo"
         case .richText: return "doc.richtext"
+        case .html:     return "globe"
         case .file:     return "doc"
+        case .files:    return "doc.on.doc"
         }
     }
 
     var typeLabel: String {
         switch content {
         case .text:             return detectedType.badgeLabel ?? "Text"
-        case .image:            return "Image"
+        case .image(_, _, let dataType):
+            if dataType.rawValue.contains("gif") { return "GIF" }
+            if dataType.rawValue.contains("pdf") { return "PDF" }
+            return "Image"
         case .richText:         return "Rich Text"
+        case .html:             return "HTML"
         case .file(let url):
             let ext = url.pathExtension.uppercased()
             return ext.isEmpty ? "File" : ext
+        case .files(let urls):
+            return "\(urls.count) Files"
         }
     }
 
@@ -1734,22 +2031,97 @@ struct ClipboardItem: Identifiable {
         case .text:             return detectedType.sfIcon
         case .image:            return "photo"
         case .richText:         return "doc.richtext"
+        case .html:             return "globe"
         case .file(let url):
-            switch url.pathExtension.lowercased() {
-            case "pdf":                              return "doc.richtext"
-            case "png","jpg","jpeg","heic","gif":    return "photo"
-            case "mp4","mov","avi","mkv":            return "film"
-            case "mp3","aac","wav","m4a":            return "music.note"
-            case "zip","tar","gz","rar":             return "archivebox"
-            case "swift":                            return "swift"
-            case "py":                               return "terminal"
-            case "js","ts","jsx","tsx":              return "chevron.left.forwardslash.chevron.right"
-            case "html","htm":                       return "globe"
-            case "md":                               return "doc.text"
-            default:                                 return "doc"
-            }
+            return Self.iconName(for: url)
+        case .files:            return "doc.on.doc"
         }
     }
+
+    var metadataSummary: String? {
+        switch content {
+        case .image(let img, let data, let dataType):
+            let dims = "\(Int(img.size.width))×\(Int(img.size.height))"
+            let size = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+            return "\(dims) · \(size) · \(dataType.rawValue)"
+        case .file(let url):
+            return Self.fileMetadataSummary(for: url)
+        case .files(let urls):
+            let total = urls.compactMap { Self.fileSize($0) }.reduce(0, +)
+            let size = total > 0 ? " · " + ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file) : ""
+            return "\(urls.count) files\(size)"
+        default:
+            return nil
+        }
+    }
+
+    private static func iconName(for url: URL) -> String {
+        if FileKindDetector.isVideoFile(url) { return "film" }
+        if FileKindDetector.isAudioFile(url) { return "music.note" }
+        if FileKindDetector.isArchiveFile(url) { return "archivebox" }
+        if FileKindDetector.isFontFile(url) { return "textformat" }
+        if FileKindDetector.isDesignFile(url) { return "paintbrush" }
+        if FileKindDetector.is3DFile(url) { return "cube" }
+        if FileKindDetector.isDataFile(url) { return "externaldrive" }
+        if FileKindDetector.isInstallerFile(url) { return "shippingbox" }
+        switch url.pathExtension.lowercased() {
+        case "pdf":                              return "doc.richtext"
+        case "ppt", "pptx", "pps", "ppsx":       return "chart.bar.doc.horizontal"
+        case "xls", "xlsx", "xlsm", "numbers":   return "tablecells"
+        case "doc", "docx", "pages":             return "doc.text"
+        case "key":                              return "play.rectangle"
+        case "png","jpg","jpeg","heic","gif",
+             "raw","cr2","cr3","nef","arw",
+             "dng":                              return "photo"
+        case "swift":                            return "swift"
+        case "py":                               return "terminal"
+        case "js","ts","jsx","tsx":              return "chevron.left.forwardslash.chevron.right"
+        case "html","htm","webarchive":          return "globe"
+        case "md","markdown":                    return "doc.plaintext"
+        case "csv","tsv":                        return "tablecells"
+        case "epub","mobi","azw3":               return "book"
+        case "ics":                              return "calendar"
+        case "vcf":                              return "person.crop.square"
+        case "srt","vtt":                        return "captions.bubble"
+        default:                                 return "doc"
+        }
+    }
+
+    private static func fileSize(_ url: URL) -> UInt64? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value
+    }
+
+    private static func fileMetadataSummary(for url: URL) -> String? {
+        var parts: [String] = []
+        if let type = UTType(filenameExtension: url.pathExtension)?.localizedDescription {
+            parts.append(type)
+        }
+        if let size = fileSize(url) {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+        }
+        if let modified = try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date {
+            parts.append(Self.relativeDateFormatter.localizedString(for: modified, relativeTo: Date()))
+        }
+
+        let ext = url.pathExtension.lowercased()
+        if ["png", "jpg", "jpeg", "heic", "gif", "tiff"].contains(ext),
+           let img = NSImage(contentsOf: url) {
+            parts.insert("\(Int(img.size.width))×\(Int(img.size.height))", at: 0)
+        } else if ext == "pdf", let pdf = PDFDocument(url: url) {
+            let pages = pdf.pageCount == 1 ? "1 page" : "\(pdf.pageCount) pages"
+            parts.insert(pages, at: 0)
+            if let title = pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String, !title.isEmpty {
+                parts.insert(title, at: 0)
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static let relativeDateFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 
     var image: NSImage? {
         if case .image(let img, _, _) = content { return img }
@@ -1760,76 +2132,22 @@ struct ClipboardItem: Identifiable {
         switch content {
         case .text(let s):               return s
         case .richText(_, plain: let s): return s
+        case .html(_, plain: let s):     return s
         default:                         return nil
         }
     }
 
-    /// Top-level bucket this item belongs to — drives the popover's
-    /// category chip strip. Stable for the life of the item (content is
-    /// immutable, `detectedType` is pre-computed at init).
     var category: ClipboardCategory {
-        switch content {
-        case .image:    return .image
-        case .richText: return .richText
-        case .file:     return .file
-        case .text:
-            switch detectedType {
-            case .url:      return .url
-            case .json:     return .json
-            case .latex:    return .latex
-            case .code:     return .code
-            case .hexColor: return .color
-            case .plain:    return .text
-            }
-        }
-    }
-
-    private static func computeDetectedColor(content: ClipboardContent) -> NSColor? {
-        guard case .text(let s) = content else { return nil }
-        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard t.hasPrefix("#"), t.count == 7 || t.count == 4 else { return nil }
-        let hex = String(t.dropFirst())
-        guard hex.allSatisfy({ $0.isHexDigit }) else { return nil }
-        return NSColor(hexString: t)
-    }
-
-    private static func computeDetectedType(content: ClipboardContent,
-                                            color: NSColor?) -> ClipboardContentType {
-        guard case .text(let s) = content else { return .plain }
-        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Hex color
-        if let c = color { return .hexColor(c) }
-
-        // URL
-        if (t.hasPrefix("http://") || t.hasPrefix("https://")),
-           let url = URL(string: t), url.host != nil { return .url }
-
-        // JSON
-        if t.hasPrefix("{") || t.hasPrefix("[") {
-            if (try? JSONSerialization.jsonObject(with: Data(t.utf8))) != nil { return .json }
-        }
-
-        // LaTeX — keyword-based detection
-        let latexKW = ["\\begin{", "\\end{", "\\frac{", "\\sum", "\\int",
-                       "\\alpha", "\\beta", "\\gamma", "\\delta", "\\theta",
-                       "\\lambda", "\\pi", "\\sigma", "\\sqrt{", "\\infty",
-                       "\\text{", "\\mathbf{", "\\cdot", "\\times"]
-        let inlineMath  = t.hasPrefix("$") && t.hasSuffix("$") && t.count > 2
-        let displayMath = t.hasPrefix("\\[") && t.hasSuffix("\\]")
-        if latexKW.contains(where: { t.contains($0) }) || inlineMath || displayMath { return .latex }
-
-        // Code
-        if let lang = detectCodeLanguage(t) { return .code(lang) }
-
-        return .plain
+        ContentDetector.category(for: self)
     }
 
     func isDuplicate(of other: ClipboardItem) -> Bool {
         switch (content, other.content) {
         case (.text(let a),                     .text(let b)):                     return a == b
         case (.richText(_, plain: let a),       .richText(_, plain: let b)):       return a == b
+        case (.html(let a, _),                  .html(let b, _)):                  return a == b
         case (.file(let a),                     .file(let b)):                     return a == b
+        case (.files(let a),                    .files(let b)):                    return a == b
         default:                                                                   return false
         }
     }
@@ -1839,7 +2157,9 @@ enum ClipboardContent {
     case text(String)
     case image(NSImage, rawData: Data, dataType: NSPasteboard.PasteboardType)
     case richText(NSAttributedString, plain: String)
+    case html(String, plain: String)
     case file(URL)
+    case files([URL])
 }
 
 // MARK: - Extensions
