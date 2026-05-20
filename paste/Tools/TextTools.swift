@@ -31,7 +31,7 @@ enum TextTools {
         },
         make("text.url-encode", icon: "link", label: "URL Encode", group: "ENCODE") {
             guard isURL($0) else { return nil }
-            return $0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+            return encodeURLComponents($0)
         },
         make("text.url-decode", icon: "link.badge.plus", label: "URL Decode", group: "ENCODE") {
             guard $0.contains("%") else { return nil }
@@ -109,6 +109,17 @@ enum TextTools {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         guard t.hasPrefix("#"), t.count == 7 || t.count == 4 else { return false }
         return t.dropFirst().allSatisfy { $0.isHexDigit }
+    }
+
+    private static func encodeURLComponents(_ urlString: String) -> String? {
+        guard var components = URLComponents(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        let encodedPath = components.path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+        let encodedQuery = components.query?.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        components.path = encodedPath ?? components.path
+        components.query = encodedQuery
+        return components.url?.absoluteString
     }
 
     private static func isURL(_ s: String) -> Bool {

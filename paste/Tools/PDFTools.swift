@@ -47,7 +47,15 @@ enum PDFTools {
             },
             runAsync: { item in
                 guard let input = pdfInput(for: item) else { return nil }
-                return await apply(input.pdf, input.data)
+                guard let result = await apply(input.pdf, input.data) else {
+                    switch id {
+                    case "pdf.extract-all-text", "pdf.first-page-text":
+                        return .status("No text found in PDF.")
+                    default:
+                        return nil
+                    }
+                }
+                return result
             }
         )
     }

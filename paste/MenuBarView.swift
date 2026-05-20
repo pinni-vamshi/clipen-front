@@ -451,7 +451,7 @@ struct InlineTransformExpansion: View {
     let item: ClipboardItem
 
     private var applicableTransforms: [ClipboardTool] {
-        ToolRegistry.tools(for: item).filter { !$0.isAsync }
+        ToolRegistry.tools(for: item)
     }
 
     var body: some View {
@@ -568,17 +568,15 @@ struct InlineTransformRow: View {
 
     var body: some View {
         Button {
-            guard let result = transform.runSync?(item) else { return }
-            switch result {
-            case .text(let text) where !text.isEmpty:
-                ClipboardManager.shared.pasteTransformed(text, restoring: item)
-            case .revealFiles(let urls, let message):
-                NSWorkspace.shared.activateFileViewerSelecting(urls)
-                ClipboardManager.shared.flashStatus(message)
-            case .status(let message):
-                ClipboardManager.shared.flashStatus(message)
-            default:
-                ClipboardManager.shared.flashStatus("Transform returned nothing.")
+            if transform.isAsync {
+                Task {
+                    let result = await transform.runAsync(item)
+                    await MainActor.run {
+                        ClipboardManager.shared.applyTransformResult(result, restoring: item)
+                    }
+                }
+            } else if let result = transform.runSync?(item) {
+                ClipboardManager.shared.applyTransformResult(result, restoring: item)
             }
         } label: {
             HStack(spacing: 8) {

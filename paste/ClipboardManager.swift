@@ -974,7 +974,17 @@ class ClipboardManager: ObservableObject {
         finishTransformPaste(message: nil, restoring: source)
     }
 
-    private func handleTransformResult(_ result: TransformOutput?, restoring source: ClipboardItem) {
+    /// Public entry for menu-bar / settings UI (same path as ⌘X transform paste).
+    func pasteGeneratedTransformItem(_ item: ClipboardItem, message: String, restoring source: ClipboardItem) {
+        pasteGeneratedItem(item, message: message, restoring: source)
+    }
+
+    func pasteGeneratedTransformFiles(_ urls: [URL], message: String, restoring source: ClipboardItem) {
+        pasteGeneratedFiles(urls, message: message, restoring: source)
+    }
+
+    /// Single entry for applying any transform result (⌘X popup, menu bar, etc.).
+    func applyTransformResult(_ result: TransformOutput?, restoring source: ClipboardItem) {
         guard let result else {
             flashStatus("Transform returned nothing.")
             return
@@ -984,9 +994,9 @@ class ClipboardManager: ObservableObject {
         case .text(let text) where !text.isEmpty:
             pasteTransformed(text, restoring: source)
         case .item(let item, let message):
-            pasteGeneratedItem(item, message: message, restoring: source)
+            pasteGeneratedTransformItem(item, message: message, restoring: source)
         case .files(let urls, let message):
-            pasteGeneratedFiles(urls, message: message, restoring: source)
+            pasteGeneratedTransformFiles(urls, message: message, restoring: source)
         case .revealFiles(let urls, let message):
             NSWorkspace.shared.activateFileViewerSelecting(urls)
             flashStatus(message)
@@ -997,12 +1007,38 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    private func handleTransformResult(_ result: TransformOutput?, restoring source: ClipboardItem) {
+        applyTransformResult(result, restoring: source)
+    }
+
     private func pasteGeneratedItem(_ item: ClipboardItem, message: String, restoring source: ClipboardItem) {
         let pb = NSPasteboard.general
         pb.clearContents()
+
+        if ImageService.shouldWriteExportFile(transformed: item, source: source),
+           case .image(_, let rawData, let dataType) = item.content,
+           let fileName = ImageService.persistExportFile(
+               data: rawData,
+               dataType: dataType,
+               baseName: exportBaseName(for: source)
+           ) {
+            writeFileURLs([ImageService.exportFileURL(fileName: fileName)], to: pb)
+        }
+
         write(item, to: pb)
         lastChangeCount = pb.changeCount
         finishTransformPaste(message: message, restoring: source)
+    }
+
+    private func exportBaseName(for item: ClipboardItem) -> String? {
+        switch item.content {
+        case .file(let url):
+            return url.deletingPathExtension().lastPathComponent
+        case .files(let urls):
+            return urls.first?.deletingPathExtension().lastPathComponent
+        default:
+            return nil
+        }
     }
 
     private func pasteGeneratedFiles(_ urls: [URL], message: String, restoring source: ClipboardItem) {
@@ -1039,13 +1075,15 @@ class ClipboardManager: ObservableObject {
         up?.post(tap: .cgAnnotatedSessionEventTap)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self else { return }
-            self.isSimulatingPaste = false
+            // Restore the original item BEFORE clearing isSimulatingPaste so
+            // pollClipboard() cannot capture the transformed payload into the ring.
             if let source {
                 let pb = NSPasteboard.general
                 pb.clearContents()
                 self.write(source, to: pb)
                 self.lastChangeCount = pb.changeCount
             }
+            self.isSimulatingPaste = false
             self.selectedIndex = 0
             self.selectionArmed = true
         }
@@ -1591,9 +1629,21 @@ class ClipboardManager: ObservableObject {
         case .text(let str):
             pb.setString(str, forType: .string)
         case .image(let img, let rawData, let dataType):
+            let types = ImageService.pasteboardTypes(for: item)
+            if !types.isEmpty {
+                pb.declareTypes(types, owner: nil)
+            }
             pb.setData(rawData, forType: dataType)
-            if let png = img.pngData() { pb.setData(png, forType: .init("public.png")) }
-            if let tiff = img.tiffRepresentation { pb.setData(tiff, forType: .tiff) }
+            if let compat = ImageService.compatibilityPasteboardPayload(
+                image: img, rawData: rawData, dataType: dataType
+            ) {
+                pb.setData(compat.data, forType: compat.type)
+            }
+            pb.writeObjects([img])
+            if ImageService.shouldAttachTiffFallback(for: dataType),
+               let tiff = img.tiffRepresentation {
+                pb.setData(tiff, forType: .tiff)
+            }
         case .richText(let attrStr, let plain):
             let range = NSRange(location: 0, length: attrStr.length)
             if let rtfData = try? attrStr.data(from: range,
