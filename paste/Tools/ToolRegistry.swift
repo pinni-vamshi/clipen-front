@@ -53,13 +53,29 @@ enum ToolRegistry {
         return await tools[index].runAsync(item)
     }
 
+    static func toolID(item: ClipboardItem, index: Int) -> String? {
+        let tools = tools(for: item)
+        guard tools.indices.contains(index) else { return nil }
+        return tools[index].id
+    }
+
     private static func applicable(_ tools: [ClipboardTool], to item: ClipboardItem) -> [ClipboardTool] {
-        tools.filter { tool in
+        let filtered = tools.filter { tool in
             if tool.preview(item) != nil { return true }
             if let runSync = tool.runSync {
                 if case .status = runSync(item) { return false }
             }
             return false
+        }
+        return filtered.sorted { lhs, rhs in
+            let lc = AuthManager.shared.toolUsageCount(for: lhs.id)
+            let rc = AuthManager.shared.toolUsageCount(for: rhs.id)
+            if lc == rc {
+                // Keep original declaration order stable for ties.
+                return (tools.firstIndex(where: { $0.id == lhs.id }) ?? .max)
+                    < (tools.firstIndex(where: { $0.id == rhs.id }) ?? .max)
+            }
+            return lc > rc
         }
     }
 }

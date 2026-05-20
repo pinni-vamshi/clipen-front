@@ -1472,6 +1472,9 @@ class ClipboardManager: ObservableObject {
             let item     = displayItems[selectedIndex]
             let idx      = transformIndex
             let isAsync  = ToolRegistry.isAsync(item: item, index: idx)
+            if let toolID = ToolRegistry.toolID(item: item, index: idx) {
+                AuthManager.shared.registerToolUsage(toolID: toolID)
+            }
 
             if isAsync {
                 // Async path (OCR / PDF text extraction) — show "Processing…"

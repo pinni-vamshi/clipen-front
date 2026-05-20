@@ -53,6 +53,8 @@ final class AuthManager: ObservableObject {
     private let lastUpdateCheckClickKey = "backendFeatureFlagsLastUpdateCheckClick"
     private let deviceIDKey = "backendFeatureFlagsDeviceID"
     private let backendURLKey = "backendFeatureFlagsURL"
+    private let toolUsageCountsKey = "backendToolUsageCounts"
+    private let toolUsageTotalsKey = "backendToolUsageTotals"
 
     private var refreshInFlight = false
 
@@ -84,6 +86,25 @@ final class AuthManager: ObservableObject {
         }
     }
 
+    /// Track per-tool usage deltas locally; flushed on the next backend
+    /// refresh call so we can attribute usage to a stable `device_id`.
+    func registerToolUsage(toolID: String, count: Int = 1) {
+        guard !toolID.isEmpty, count > 0 else { return }
+        var counters = pendingToolUsageCounts()
+        counters[toolID, default: 0] += count
+        UserDefaults.standard.set(counters, forKey: toolUsageCountsKey)
+
+        var totals = toolUsageTotals()
+        totals[toolID, default: 0] += count
+        UserDefaults.standard.set(totals, forKey: toolUsageTotalsKey)
+    }
+
+    /// Local ranking signal used by the transform/tool panels to keep the
+    /// user's most-used tool near the top for each content type.
+    func toolUsageCount(for toolID: String) -> Int {
+        toolUsageTotals()[toolID, default: 0]
+    }
+
     func refreshFeatureFlags(force: Bool = false, clickCount: Int? = nil) {
         guard !refreshInFlight else { return }
         let currentClickCount = clickCount ?? UserDefaults.standard.integer(forKey: clickCountKey)
@@ -98,7 +119,10 @@ final class AuthManager: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONEncoder().encode(RefreshFlagsRequest(
             deviceID: deviceID,
-            clickCount: currentClickCount
+            clickCount: currentClickCount,
+            appVersion: appVersion,
+            osVersion: osVersion,
+            toolUsageCounts: pendingToolUsageCounts()
         ))
 
         URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
@@ -114,6 +138,7 @@ final class AuthManager: ObservableObject {
 
                 self.apply(response)
                 UserDefaults.standard.set(currentClickCount, forKey: self.lastRefreshClickKey)
+                self.clearPendingToolUsageCounts()
                 if let encoded = try? JSONEncoder().encode(response) {
                     UserDefaults.standard.set(encoded, forKey: self.cacheKey)
                 }
@@ -134,6 +159,52 @@ final class AuthManager: ObservableObject {
         let fresh = UUID().uuidString
         UserDefaults.standard.set(fresh, forKey: deviceIDKey)
         return fresh
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+    }
+
+    private var osVersion: String {
+        ProcessInfo.processInfo.operatingSystemVersionString
+    }
+
+    private func pendingToolUsageCounts() -> [String: Int] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: toolUsageCountsKey) else { return [:] }
+        var counts: [String: Int] = [:]
+        for (k, v) in raw {
+            let value: Int
+            if let n = v as? Int {
+                value = n
+            } else if let n = v as? NSNumber {
+                value = n.intValue
+            } else {
+                continue
+            }
+            if value > 0 { counts[k] = value }
+        }
+        return counts
+    }
+
+    private func clearPendingToolUsageCounts() {
+        UserDefaults.standard.removeObject(forKey: toolUsageCountsKey)
+    }
+
+    private func toolUsageTotals() -> [String: Int] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: toolUsageTotalsKey) else { return [:] }
+        var counts: [String: Int] = [:]
+        for (k, v) in raw {
+            let value: Int
+            if let n = v as? Int {
+                value = n
+            } else if let n = v as? NSNumber {
+                value = n.intValue
+            } else {
+                continue
+            }
+            if value > 0 { counts[k] = value }
+        }
+        return counts
     }
 
     private func loadCachedFeatureFlags() {
@@ -188,10 +259,16 @@ final class AuthManager: ObservableObject {
 private struct RefreshFlagsRequest: Encodable {
     let deviceID: String
     let clickCount: Int
+    let appVersion: String
+    let osVersion: String
+    let toolUsageCounts: [String: Int]
 
     enum CodingKeys: String, CodingKey {
         case deviceID = "device_id"
         case clickCount = "click_count"
+        case appVersion = "app_version"
+        case osVersion = "os_version"
+        case toolUsageCounts = "tool_usage_counts"
     }
 }
 
