@@ -126,6 +126,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set { updaterController?.updater.automaticallyChecksForUpdates = newValue }
     }
 
+    var automaticallyDownloadsUpdates: Bool {
+        get { updaterController?.updater.automaticallyDownloadsUpdates ?? false }
+        set { updaterController?.updater.automaticallyDownloadsUpdates = newValue }
+    }
+
     func checkForUpdatesInBackgroundIfAllowed() {
         guard automaticallyChecksForUpdates,
               let updater = updaterController?.updater,

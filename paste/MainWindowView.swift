@@ -201,10 +201,18 @@ struct MainWindowView: View {
                                 .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                             }
                             cardDivider()
-                            cardRow(icon: "arrow.triangle.2.circlepath", label: "Auto updates") {
+                            cardRow(icon: "arrow.triangle.2.circlepath", label: "Auto-check updates") {
                                 Toggle("", isOn: Binding(
                                     get: { AppDelegate.shared?.automaticallyChecksForUpdates ?? true },
                                     set: { AppDelegate.shared?.automaticallyChecksForUpdates = $0 }
+                                ))
+                                .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                            }
+                            cardDivider()
+                            cardRow(icon: "arrow.down.circle", label: "Auto-download updates") {
+                                Toggle("", isOn: Binding(
+                                    get: { AppDelegate.shared?.automaticallyDownloadsUpdates ?? false },
+                                    set: { AppDelegate.shared?.automaticallyDownloadsUpdates = $0 }
                                 ))
                                 .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                             }
