@@ -262,7 +262,7 @@ struct MenuBarView: View {
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundColor(manager.firstOpenDelay > 0 ? .accentColor : .secondary)
             }
-            Slider(value: delayMS, in: 0...500, step: 5)
+            Slider(value: delayMS, in: 0...1000, step: 5)
                 .tint(manager.firstOpenDelay > 0 ? .accentColor : .secondary)
             Text("Tap ⌘V and release inside this window to paste the front item without the popup.")
                 .font(.system(size: 9))

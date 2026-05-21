@@ -23,6 +23,7 @@ class TransformPanel: NSPanel {
 
     func show(for item: ClipboardItem,
               near popupFrame: NSRect,
+              anchorPoint: NSPoint? = nil,
               selectedTransformIndex: Int = 0,
               isProcessing: Bool = false,
               displaysOverride: [TransformDisplay]? = nil) {
@@ -40,31 +41,56 @@ class TransformPanel: NSPanel {
 
         let displays = displaysOverride ?? ToolRegistry.displays(for: item)
 
-        let view = AnyView(TransformView(
+        let content = TransformView(
             previewText:            previewText,
             item:                   item,
             displays:               displays,
             selectedTransformIndex: selectedTransformIndex,
             isProcessing:           isProcessing,
             onDismiss:              { [weak self] in self?.hide() }
+        )
+
+        let bubbleW: CGFloat = 290
+        let arrowW: CGFloat = 10
+        let w: CGFloat = bubbleW + arrowW
+        let screen = NSScreen.main?.visibleFrame ?? .zero
+
+        let preferredRightX = popupFrame.maxX + 8
+        let rightFits = preferredRightX + w <= screen.maxX
+        let leftX = popupFrame.minX - w - 8
+        let leftFits = leftX >= screen.minX + 8
+        let placeRight = rightFits || !leftFits
+
+        let measuringView = AnyView(TransformCalloutView(
+            content: content,
+            arrowOnLeadingSide: placeRight,
+            arrowCenterYFromTop: 120
         ))
 
         if let hv = hostingView {
-            hv.rootView = view
+            hv.rootView = measuringView
         } else {
-            let hv = NSHostingView(rootView: view)
+            let hv = NSHostingView(rootView: measuringView)
             contentView = hv
             hostingView = hv
         }
 
-        let w: CGFloat = 290
         let h = min(hostingView?.fittingSize.height ?? 560, 620)
-        let screen = NSScreen.main?.visibleFrame ?? .zero
 
-        var x = popupFrame.maxX + 8
-        if x + w > screen.maxX { x = popupFrame.minX - w - 8 }
+        var x = placeRight ? preferredRightX : leftX
         x = max(screen.minX + 8, x)
-        let y = max(screen.minY + 8, min(popupFrame.minY, screen.maxY - h - 8))
+
+        let targetY = anchorPoint?.y ?? popupFrame.midY
+        var y = targetY - h / 2
+        y = max(screen.minY + 8, min(y, screen.maxY - h - 8))
+        let arrowCenterYFromTop = (y + h) - targetY
+
+        let finalView = AnyView(TransformCalloutView(
+            content: content,
+            arrowOnLeadingSide: placeRight,
+            arrowCenterYFromTop: arrowCenterYFromTop
+        ))
+        hostingView?.rootView = finalView
 
         setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
         if !isVisible { orderFront(nil) }
@@ -82,6 +108,66 @@ class TransformPanel: NSPanel {
         setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
         if !isVisible { orderFront(nil) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.hide() }
+    }
+}
+
+private struct TransformCalloutView: View {
+    let content: TransformView
+    let arrowOnLeadingSide: Bool
+    let arrowCenterYFromTop: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if arrowOnLeadingSide {
+                // Panel is on the right of the preview, so arrow must point left
+                // back toward the selected row.
+                sideArrow(pointingRight: false)
+                content
+            } else {
+                content
+                // Panel is on the left of the preview, so arrow must point right
+                // back toward the selected row.
+                sideArrow(pointingRight: true)
+            }
+        }
+    }
+
+    private func sideArrow(pointingRight: Bool) -> some View {
+        GeometryReader { geo in
+            let topOffset = max(12, min(arrowCenterYFromTop - 10, geo.size.height - 32))
+            ZStack(alignment: .top) {
+                Color.clear
+                SideArrow(pointingRight: pointingRight)
+                    .fill(.regularMaterial)
+                    .overlay(
+                        SideArrow(pointingRight: pointingRight)
+                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                    )
+                    .frame(width: 10, height: 20)
+                    .shadow(color: .black.opacity(0.16), radius: 2, x: pointingRight ? 1 : -1, y: 1)
+                    .offset(y: topOffset)
+            }
+        }
+        .frame(width: 10)
+    }
+}
+
+private struct SideArrow: Shape {
+    let pointingRight: Bool
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        if pointingRight {
+            p.move(to: CGPoint(x: rect.maxX, y: rect.midY))
+            p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        } else {
+            p.move(to: CGPoint(x: rect.minX, y: rect.midY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        }
+        p.closeSubpath()
+        return p
     }
 }
 

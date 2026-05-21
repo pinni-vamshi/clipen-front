@@ -2,37 +2,27 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// What used to be the full user-account system (Sign in with Apple,
-/// Firestore-backed plan, click-counter refresh, install tracking).
-/// All of that has been removed — Clipen is now a local-only app with
-/// zero backend coupling for accounts.
+/// Runtime feature-flag model for Clipen.
 ///
-/// This class stays as an ObservableObject because hundreds of existing
-/// @ObservedObject / @StateObject bindings in views read `auth.ringLimit`,
-/// `auth.transformsEnabled`, etc. Rather than rewire every view, we keep
-/// the shape and serve hardcoded "everyone unlocked" defaults.
-///
-/// To re-introduce accounts later (e.g. when shipping iCloud sync or a
-/// real Pro tier): restore the full implementation from git history at
-/// commit ~`932a1a8…` and switch the relevant @Published vars to be
-/// server-driven again.
+/// Values are bootstrapped from the last known backend state (cached in
+/// UserDefaults), then refreshed from `/clipen/refresh-flags`. This avoids
+/// shipping opinionated hardcoded feature defaults in the client.
 final class AuthManager: ObservableObject {
     static let shared = AuthManager()
 
-    // ── Feature flags — every capability on for everyone ─────────────────
-    @Published var ringLimit:           Int  = 200   // max selectable in Settings stepper
-    @Published var transformsEnabled:   Bool = true
-    @Published var pinEnabled:          Bool = true
-    @Published var semanticSearch:      Bool = true
-    @Published var urlTitles:           Bool = true
-    @Published var richTextCapture:     Bool = true
-    @Published var fileCapture:         Bool = true
-    @Published var timeScrub:           Bool = true
-    @Published var ocrEnabled:          Bool = true
-    @Published var pdfTextExtract:      Bool = true
-    @Published var refreshEveryClicks:  Int  = 100
-    @Published var updateCheckEveryClicks: Int = 100
-    @Published var sparkleAutomaticChecks: Bool = true
+    @Published var ringLimit:           Int  = AuthManager.intState(for: "featureState.ringLimit")
+    @Published var transformsEnabled:   Bool = AuthManager.boolState(for: "featureState.transformsEnabled")
+    @Published var pinEnabled:          Bool = AuthManager.boolState(for: "featureState.pinEnabled")
+    @Published var semanticSearch:      Bool = AuthManager.boolState(for: "featureState.semanticSearch")
+    @Published var urlTitles:           Bool = AuthManager.boolState(for: "featureState.urlTitles")
+    @Published var richTextCapture:     Bool = AuthManager.boolState(for: "featureState.richTextCapture")
+    @Published var fileCapture:         Bool = AuthManager.boolState(for: "featureState.fileCapture")
+    @Published var timeScrub:           Bool = AuthManager.boolState(for: "featureState.timeScrub")
+    @Published var ocrEnabled:          Bool = AuthManager.boolState(for: "featureState.ocr")
+    @Published var pdfTextExtract:      Bool = AuthManager.boolState(for: "featureState.pdfTextExtract")
+    @Published var refreshEveryClicks:  Int  = AuthManager.intState(for: "featureState.refreshEveryClicks")
+    @Published var updateCheckEveryClicks: Int = AuthManager.intState(for: "featureState.updateCheckEveryClicks")
+    @Published var sparkleAutomaticChecks: Bool = AuthManager.boolState(for: "featureState.sparkleAutomaticChecks")
 
     // ── Compatibility shims for the few views that still ask "is the user X?"
     // Everyone has every feature; nobody has a backend account. Returning
@@ -62,13 +52,13 @@ final class AuthManager: ObservableObject {
     private var refreshInFlight = false
 
     private init() {
+        let hasBootstrappedFlags = hasPersistedFeatureState() || UserDefaults.standard.data(forKey: cacheKey) != nil
         loadCachedFeatureFlags()
-        // Make sure ClipboardManager's maxItems trim kicks in on launch.
-        // Deferring to next runloop tick avoids "modifying @Published state
-        // during view init" undefined-behaviour warnings.
         DispatchQueue.main.async {
-            ClipboardManager.shared.applyPlanLimits(ringLimit: self.ringLimit)
-            self.applyFeatureFlagsToRuntime()
+            if hasBootstrappedFlags {
+                ClipboardManager.shared.applyPlanLimits(ringLimit: self.ringLimit)
+                self.applyFeatureFlagsToRuntime()
+            }
             self.refreshFeatureFlags(force: true)
         }
     }
@@ -340,12 +330,14 @@ final class AuthManager: ObservableObject {
         refreshEveryClicks = max(flags.refreshEveryClicks, 1)
         updateCheckEveryClicks = max(flags.updateCheckEveryClicks, 1)
         sparkleAutomaticChecks = flags.sparkleAutomaticChecks
+        persistFeatureState()
         applyFeatureFlagsToRuntime()
     }
 
     private func applyFeatureFlagsToRuntime() {
         let ringLimit = ringLimit
         let richTextCapture = richTextCapture
+        let fileCapture = fileCapture
         let urlTitles = urlTitles
         let sparkleAutomaticChecks = sparkleAutomaticChecks
 
@@ -358,13 +350,40 @@ final class AuthManager: ObservableObject {
             if manager.fetchURLTitles != urlTitles {
                 manager.fetchURLTitles = urlTitles
             }
-            // File capture is core clipboard behavior now: files are snapshotted
-            // into Clipen storage, not treated as plain path text.
-            if !manager.captureFiles {
-                manager.captureFiles = true
+            if manager.captureFiles != fileCapture {
+                manager.captureFiles = fileCapture
             }
             AppDelegate.shared?.automaticallyChecksForUpdates = sparkleAutomaticChecks
         }
+    }
+
+    private func hasPersistedFeatureState() -> Bool {
+        UserDefaults.standard.object(forKey: "featureState.ringLimit") != nil
+    }
+
+    private func persistFeatureState() {
+        let defaults = UserDefaults.standard
+        defaults.set(ringLimit, forKey: "featureState.ringLimit")
+        defaults.set(transformsEnabled, forKey: "featureState.transformsEnabled")
+        defaults.set(pinEnabled, forKey: "featureState.pinEnabled")
+        defaults.set(semanticSearch, forKey: "featureState.semanticSearch")
+        defaults.set(urlTitles, forKey: "featureState.urlTitles")
+        defaults.set(richTextCapture, forKey: "featureState.richTextCapture")
+        defaults.set(fileCapture, forKey: "featureState.fileCapture")
+        defaults.set(timeScrub, forKey: "featureState.timeScrub")
+        defaults.set(ocrEnabled, forKey: "featureState.ocr")
+        defaults.set(pdfTextExtract, forKey: "featureState.pdfTextExtract")
+        defaults.set(refreshEveryClicks, forKey: "featureState.refreshEveryClicks")
+        defaults.set(updateCheckEveryClicks, forKey: "featureState.updateCheckEveryClicks")
+        defaults.set(sparkleAutomaticChecks, forKey: "featureState.sparkleAutomaticChecks")
+    }
+
+    private static func intState(for key: String) -> Int {
+        UserDefaults.standard.object(forKey: key) as? Int ?? 0
+    }
+
+    private static func boolState(for key: String) -> Bool {
+        UserDefaults.standard.object(forKey: key) as? Bool ?? false
     }
 }
 

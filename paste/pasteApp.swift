@@ -67,6 +67,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         applyMenuBarVisibility()
         ClipboardManager.shared.startMonitoring()
+        // Kick one background check shortly after launch so update availability
+        // is known even before the user starts cycling with ⌘V.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.checkForUpdatesInBackgroundIfAllowed()
+        }
 
         // Open the main window on first launch for onboarding.
         if !UserDefaults.standard.bool(forKey: "hasLaunchedBefore") {
@@ -119,14 +124,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
 
         guard let updaterController else {
+            openLatestReleaseDownload()
             return
         }
 
         guard updaterController.updater.canCheckForUpdates else {
+            openLatestReleaseDownload()
             return
         }
 
         updaterController.checkForUpdates(nil)
+    }
+
+    /// Fallback path when Sparkle cannot start a check (e.g. transient
+    /// session state). This still gets the user to the newest DMG.
+    private func openLatestReleaseDownload() {
+        guard let url = URL(string: "https://github.com/pinni-vamshi/clipen-releases/releases/latest/download/Clipen.dmg") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     /// Bring the main settings window to front, creating it if needed.

@@ -311,8 +311,18 @@ class ClipboardManager: ObservableObject {
     /// Default 0.12 s (120 ms) — short enough that intentional cyclers don't
     /// notice the delay, long enough to absorb a relaxed "quick tap" of
     /// ~50–100 ms. User-tunable via the slider in the menu bar widget.
-    @Published var firstOpenDelay: Double = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.12 {
-        didSet { UserDefaults.standard.set(firstOpenDelay, forKey: "firstOpenDelay") }
+    @Published var firstOpenDelay: Double = {
+        let stored = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.12
+        return min(max(stored, 0.0), 1.0)
+    }() {
+        didSet {
+            let clamped = min(max(firstOpenDelay, 0.0), 1.0)
+            if firstOpenDelay != clamped {
+                firstOpenDelay = clamped
+                return
+            }
+            UserDefaults.standard.set(clamped, forKey: "firstOpenDelay")
+        }
     }
     /// When false (default), popup mode can start only while a text input is
     /// focused. This prevents accidental activation in non-typing contexts.
@@ -949,8 +959,13 @@ class ClipboardManager: ObservableObject {
 
     private func updateTransformPanel() {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        let anchor = previewWindow.selectedRowAnchorPoint(
+            selectedIndex: selectedIndex,
+            totalItems: displayItems.count
+        )
         transformPanel.show(for: displayItems[selectedIndex],
                             near: previewWindow.frame,
+                            anchorPoint: anchor,
                             selectedTransformIndex: transformIndex,
                             displaysOverride: inTransformStage ? transformDisplaysCache : nil)
     }
@@ -959,8 +974,13 @@ class ClipboardManager: ObservableObject {
     /// the row for the selected transform shows a spinner while async work runs.
     private func updateTransformPanelProcessing(_ processing: Bool) {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        let anchor = previewWindow.selectedRowAnchorPoint(
+            selectedIndex: selectedIndex,
+            totalItems: displayItems.count
+        )
         transformPanel.show(for: displayItems[selectedIndex],
                             near: previewWindow.frame,
+                            anchorPoint: anchor,
                             selectedTransformIndex: transformIndex,
                             isProcessing: processing,
                             displaysOverride: inTransformStage ? transformDisplaysCache : nil)
@@ -1889,7 +1909,12 @@ class ClipboardManager: ObservableObject {
 
     // Show transform panel for any item (e.g. from menu bar tap)
     func showTransformPanelForItem(_ item: ClipboardItem) {
-        transformPanel.show(for: item, near: previewWindow.frame, selectedTransformIndex: 0)
+        transformPanel.show(
+            for: item,
+            near: previewWindow.frame,
+            anchorPoint: NSPoint(x: previewWindow.frame.maxX, y: previewWindow.frame.midY),
+            selectedTransformIndex: 0
+        )
     }
 
     // MARK: - Diff badge

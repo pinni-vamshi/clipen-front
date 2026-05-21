@@ -3,6 +3,8 @@ import SwiftUI
 
 class PreviewOverlayWindow: NSPanel {
     private var hostingView: NSHostingView<PopoverPreviewView>?
+    private var visibleRowCount: Int = 5
+    private var isArrowAtBottom: Bool = true
 
     init() {
         super.init(
@@ -25,7 +27,6 @@ class PreviewOverlayWindow: NSPanel {
     }
 
     func show(at caretPos: NSPoint) {
-        let items = ClipboardManager.shared.displayItems
         let rowH: CGFloat    = 72
         // Header = title row with inline V/X/Paste hints (~44) + category
         // strip (~36). The standalone shortcut chip row is gone.
@@ -66,6 +67,8 @@ class PreviewOverlayWindow: NSPanel {
         // being typed). If there isn't enough room up there, fall to below.
         let fitsAbove     = totalH <= spaceAbove
         let arrowAtBottom = fitsAbove   // popup above ↦ arrow at popup's bottom pointing down
+        visibleRowCount = slotCount
+        isArrowAtBottom = arrowAtBottom
 
         var x = caretPos.x - w / 2
         var y: CGFloat
@@ -104,6 +107,31 @@ class PreviewOverlayWindow: NSPanel {
     }
 
     func hide() { orderOut(nil) }
+
+    /// Anchor point at the center of the currently selected visible row.
+    /// Used by sibling panels (e.g. transform callout) so their arrows can
+    /// point at the same row the user is focused on.
+    func selectedRowAnchorPoint(selectedIndex: Int, totalItems: Int) -> NSPoint {
+        guard totalItems > 0 else {
+            return NSPoint(x: frame.maxX, y: frame.midY)
+        }
+
+        let win = min(max(1, visibleRowCount), totalItems)
+        let start = selectedIndex < win ? 0 : selectedIndex - (win - 1)
+        let clampedStart = max(0, min(start, totalItems - win))
+        let rowInWindow = max(0, min(selectedIndex - clampedStart, win - 1))
+
+        let rowH: CGFloat = 72
+        let footerH: CGFloat = 26
+        let arrowH: CGFloat = 10
+
+        // Bubble sits above the bottom arrow when the popup is above caret.
+        let bubbleMinY = isArrowAtBottom ? (frame.minY + arrowH) : frame.minY
+        let rowsBottomY = bubbleMinY + footerH
+        let rowCenterY = rowsBottomY + (CGFloat(win - rowInWindow) - 0.5) * rowH
+
+        return NSPoint(x: frame.maxX, y: rowCenterY)
+    }
 }
 
 // MARK: - Popover-style container

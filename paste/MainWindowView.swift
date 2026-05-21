@@ -193,18 +193,15 @@ struct MainWindowView: View {
                                 .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                             }
                             cardDivider()
-                            cardRow(icon: "arrow.triangle.2.circlepath", label: "Auto-check updates") {
+                            cardRow(icon: "arrow.triangle.2.circlepath", label: "Auto updates") {
                                 Toggle("", isOn: Binding(
                                     get: { AppDelegate.shared?.automaticallyChecksForUpdates ?? true },
-                                    set: { AppDelegate.shared?.automaticallyChecksForUpdates = $0 }
-                                ))
-                                .toggleStyle(.switch).controlSize(.mini).tint(.accent)
-                            }
-                            cardDivider()
-                            cardRow(icon: "arrow.down.circle", label: "Auto-download updates") {
-                                Toggle("", isOn: Binding(
-                                    get: { AppDelegate.shared?.automaticallyDownloadsUpdates ?? false },
-                                    set: { AppDelegate.shared?.automaticallyDownloadsUpdates = $0 }
+                                    set: { value in
+                                        AppDelegate.shared?.automaticallyChecksForUpdates = value
+                                        if !value {
+                                            AppDelegate.shared?.automaticallyDownloadsUpdates = false
+                                        }
+                                    }
                                 ))
                                 .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                             }
@@ -250,7 +247,7 @@ struct MainWindowView: View {
                                         get: { manager.firstOpenDelay * 1000 },
                                         set: { manager.firstOpenDelay = $0 / 1000 }
                                     ),
-                                    in: 0...500, step: 5
+                                    in: 0...1000, step: 5
                                 )
                                 .tint(.accent)
                             }

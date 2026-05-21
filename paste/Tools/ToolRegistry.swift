@@ -9,13 +9,30 @@ enum ToolRegistry {
     /// One primary pool per item so image/PDF/file tools sort among themselves
     /// (usage scores), not buried under unrelated text tools.
     private static func toolPool(for item: ClipboardItem) -> [ClipboardTool] {
-        let tags = Set(item.tags)
-        if tags.contains(.image) { return ImageTools.all }
-        if tags.contains(.pdf) { return PDFTools.all }
-        if tags.contains(.video) || tags.contains(.audio) { return MediaTools.all }
-        if tags.contains(.files) { return FileTools.all }
-        if tags.contains(.file) { return FileTools.all }
-        return mergedPools(for: item.tags)
+        switch item.content {
+        case .image:
+            return ImageTools.all
+
+        case .file(let url):
+            if FileKindDetector.isVideoFile(url) || FileKindDetector.isAudioFile(url) {
+                return MediaTools.all
+            }
+            if url.pathExtension.lowercased() == "pdf" {
+                return PDFTools.all
+            }
+            return FileTools.all
+
+        case .files(let urls):
+            if let first = urls.first,
+               urls.count == 1,
+               (FileKindDetector.isVideoFile(first) || FileKindDetector.isAudioFile(first)) {
+                return MediaTools.all
+            }
+            return FileTools.all
+
+        case .text, .richText, .html:
+            return TextTools.all + FileTools.all
+        }
     }
 
     static func displays(for item: ClipboardItem) -> [TransformDisplay] {
@@ -68,36 +85,6 @@ enum ToolRegistry {
         let tools = tools(for: item)
         guard tools.indices.contains(index) else { return nil }
         return tools[index].id
-    }
-
-    /// Union tool lists for every tag on the item (deduped by tool id).
-    private static func mergedPools(for tags: [ClipboardTag]) -> [ClipboardTool] {
-        var seen = Set<String>()
-        var merged: [ClipboardTool] = []
-        merged.reserveCapacity(48)
-
-        for tag in tags.sorted(by: { $0.priority < $1.priority }) {
-            for tool in pool(for: tag) where seen.insert(tool.id).inserted {
-                merged.append(tool)
-            }
-        }
-        return merged
-    }
-
-    private static func pool(for tag: ClipboardTag) -> [ClipboardTool] {
-        switch tag {
-        case .image:
-            return ImageTools.all
-        case .pdf:
-            return PDFTools.all
-        case .file, .files:
-            return FileTools.all
-        case .video, .audio:
-            return MediaTools.all
-        case .html, .richText, .url, .json, .markdown, .latex, .table,
-             .email, .phone, .address, .code, .color, .text:
-            return TextTools.all + FileTools.all
-        }
     }
 
     private static func applicable(_ tools: [ClipboardTool], to item: ClipboardItem) -> [ClipboardTool] {
