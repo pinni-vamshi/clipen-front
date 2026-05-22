@@ -104,11 +104,6 @@ struct MainWindowView: View {
                 }
             }
         }
-        .onChange(of: auth.timeScrub) { _, enabled in
-            guard !enabled else { return }
-            timeScrubPos = 1.0
-            manager.timeScrubDate = nil
-        }
     }
 
     // MARK: - Sidebar
@@ -118,15 +113,22 @@ struct MainWindowView: View {
 
             // ── Fixed header ─────────────────────────────
             HStack(alignment: .center, spacing: 0) {
-                HStack(spacing: 8) {
-                    Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
-                        .resizable()
-                        .frame(width: 28, height: 28)
-                        .cornerRadius(6)
-                    Text("Clipen")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.textPri)
+                Button {
+                    if let url = URL(string: "https://clipen.lovable.app") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
+                            .resizable()
+                            .frame(width: 28, height: 28)
+                            .cornerRadius(6)
+                        Text("Clipen")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.textPri)
+                    }
                 }
+                .buttonStyle(.plain)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -231,7 +233,13 @@ struct MainWindowView: View {
                                 active: manager.dismissTimeout != 0,
                                 caption: "Clears the highlight after idle; popup stays until you release ⌘ or press Esc."
                             ) {
-                                Slider(value: $manager.dismissTimeout, in: 0...15, step: 1)
+                                Slider(
+                                    value: Binding(
+                                        get: { manager.dismissTimeout },
+                                        set: { manager.dismissTimeout = $0.rounded() }
+                                    ),
+                                    in: 0...15
+                                )
                                     .tint(.accent)
                             }
                             cardDivider()
@@ -251,16 +259,28 @@ struct MainWindowView: View {
                                 Slider(
                                     value: Binding(
                                         get: { manager.firstOpenDelay * 1000 },
-                                        set: { manager.firstOpenDelay = $0 / 1000 }
+                                        set: { manager.firstOpenDelay = ($0 / 5).rounded() * 5 / 1000 }
                                     ),
-                                    in: 0...1000, step: 5
+                                    in: 0...1000
                                 )
                                 .tint(.accent)
                             }
                             cardDivider()
-                            cardRow(icon: "text.cursor", label: "Popup everywhere") {
-                                Toggle("", isOn: $manager.showPopupOutsideTextInputs)
-                                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                            VStack(alignment: .leading, spacing: 8) {
+                                cardRow(icon: "text.cursor", label: "Popup only when writing") {
+                                    Toggle("", isOn: Binding(
+                                        get: { !manager.showPopupOutsideTextInputs },
+                                        set: { manager.showPopupOutsideTextInputs = !$0 }
+                                    ))
+                                        .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                                }
+
+                                Text("On: show popup only in text fields. Off: show popup anywhere on ⌘V.")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.textDim)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.horizontal, 12)
+                                    .padding(.bottom, 10)
                             }
                         }
                     }
@@ -269,50 +289,101 @@ struct MainWindowView: View {
 
                     Divider().background(Color.border)
 
-                    // CAPTURE
                     VStack(alignment: .leading, spacing: 0) {
-                        sectionLabel("CAPTURE")
+                        sectionLabel("ABOUT")
                             .padding(.bottom, 10)
 
                         settingsCard {
-                            cardRow(icon: "doc.richtext", label: "Rich text") {
-                                Toggle("", isOn: $manager.captureRichText)
-                                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Clipen")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.textPri)
+                                Text(Self.appVersionString)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.textDim)
                             }
-                            cardDivider()
-                            cardRow(icon: "link", label: "URL titles") {
-                                Toggle("", isOn: $manager.fetchURLTitles)
-                                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
-                            }
-                            cardDivider()
-                            cardRow(icon: "paintpalette", label: "Color swatches") {
-                                Toggle("", isOn: $manager.showColorSwatches)
-                                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
-                            }
-                            cardDivider()
-                            cardRow(icon: "lock.shield", label: "Ignore passwords & secrets") {
-                                Toggle("", isOn: $manager.autoIgnoreSecrets)
-                                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 16)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
 
-                    Divider().background(Color.border)
+                            cardDivider()
 
-                    // SHORTCUTS
-                    VStack(alignment: .leading, spacing: 0) {
-                        sectionLabel("SHORTCUTS")
-                            .padding(.bottom, 10)
-                        VStack(spacing: 6) {
-                            shortcutRow("⌘C",      "Copy (auto-captured)")
-                            shortcutRow("⌘V",      "Next item")
-                            shortcutRow("⌘⌥V",     "Jump 5 items forward")
-                            shortcutRow("Tab / ⇧Tab", "Next / previous category (popup open)")
-                            shortcutRow("⌘V → ⌘X", "Pick with V, then transform with X")
-                            shortcutRow("⌘V → ⌘⌫","Pick with V, then delete highlighted")
-                            shortcutRow("release ⌘", "Paste selection")
+                            HStack(spacing: 10) {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(.accent)
+                                Text("Built by Vamshi Krishna Pinni")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.textSec)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+
+                            cardDivider()
+
+                            HStack(spacing: 12) {
+                                Button("Website") {
+                                    if let url = URL(string: "https://clipen.lovable.app") {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.accent)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+                                )
+                                Button("Privacy") {
+                                    if let url = URL(string: "https://clipen.lovable.app/privacy.html") {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.accent)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+                                )
+                                Button("Support") {
+                                    if let url = URL(string: "https://clipen.lovable.app/support.html") {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.accent)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+                                )
+                                Button("Check updates") {
+                                    AppDelegate.shared?.checkForUpdates()
+                                }
+                                .buttonStyle(.plain)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.accent)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+                                )
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
                         }
                     }
                     .padding(.horizontal, 14)
@@ -338,21 +409,6 @@ struct MainWindowView: View {
                     .buttonStyle(.plain)
                 }
                 Spacer()
-                Text(Self.appVersionString)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.textDim)
-                Button {
-                    if let url = URL(string: "https://clipen.app/privacy") {
-                        NSWorkspace.shared.open(url)
-                    }
-                } label: {
-                    Text("Privacy").font(.system(size: 11)).foregroundColor(.textDim)
-                }.buttonStyle(.plain)
-                Button {
-                    AppDelegate.shared?.checkForUpdates()
-                } label: {
-                    Text("Check for updates").font(.system(size: 11)).foregroundColor(.textDim)
-                }.buttonStyle(.plain)
                 Button("Quit") { NSApp.terminate(nil) }
                     .buttonStyle(.plain)
                     .font(.system(size: 11))
@@ -460,6 +516,7 @@ struct MainWindowView: View {
 
     // MARK: - Main area
 
+    @ViewBuilder
     private var mainArea: some View {
         Group {
             if !manager.hasAccessibilityPermission && !hasSkippedAccessibility {
