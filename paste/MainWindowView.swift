@@ -23,7 +23,6 @@ struct MainWindowView: View {
     @State private var searchText    = ""
     @State private var hoveredID: UUID? = nil
     @State private var showTutorial     = false
-    @State private var isSemanticSearch = false
     @State private var timeScrubPos: Double = 1.0   // 1.0 = now, 0.0 = oldest
     @AppStorage("hasSkippedAccessibility")   private var hasSkippedAccessibility   = false
     @AppStorage("hasSeenTutorial")           private var hasSeenTutorial           = false
@@ -32,9 +31,11 @@ struct MainWindowView: View {
         guard !searchText.isEmpty else { return manager.displayItems }
 
         // Try semantic search first (needs 2+ chars and embeddings)
-        let semantic = manager.semanticSearch(query: searchText)
-        if !semantic.isEmpty {
-            return semantic
+        if auth.semanticSearch {
+            let semantic = manager.semanticSearch(query: searchText)
+            if !semantic.isEmpty {
+                return semantic
+            }
         }
 
         // Fallback: substring match
@@ -102,6 +103,11 @@ struct MainWindowView: View {
                     TutorialSheet(isPresented: $showTutorial)
                 }
             }
+        }
+        .onChange(of: auth.timeScrub) { _, enabled in
+            guard !enabled else { return }
+            timeScrubPos = 1.0
+            manager.timeScrubDate = nil
         }
     }
 
@@ -300,9 +306,10 @@ struct MainWindowView: View {
                         sectionLabel("SHORTCUTS")
                             .padding(.bottom, 10)
                         VStack(spacing: 6) {
-                            shortcutRow("⌘C",      "Capture to ring")
+                            shortcutRow("⌘C",      "Copy (auto-captured)")
                             shortcutRow("⌘V",      "Next item")
                             shortcutRow("⌘⌥V",     "Jump 5 items forward")
+                            shortcutRow("Tab / ⇧Tab", "Next / previous category (popup open)")
                             shortcutRow("⌘V → ⌘X", "Pick with V, then transform with X")
                             shortcutRow("⌘V → ⌘⌫","Pick with V, then delete highlighted")
                             shortcutRow("release ⌘", "Paste selection")
@@ -512,7 +519,7 @@ struct MainWindowView: View {
             // How it works steps
             VStack(alignment: .leading, spacing: 10) {
                 accessibilityStep("1", "Hold ⌘ and tap V",  "Opens your clipboard ring near the cursor")
-                accessibilityStep("2", "Tap V · ⌥V",        "Next item · ⌥V jumps 5 forward")
+                accessibilityStep("2", "Tap V · ⌘⌥V",       "Next item · ⌘⌥V jumps 5 forward")
                 accessibilityStep("3", "Tap V, then X",     "Pick an item with V, then transform it with X")
                 accessibilityStep("4", "Tap V, then ⌫",     "Pick an item with V, then delete it from the ring")
                 accessibilityStep("5", "Release ⌘",         "Pastes the highlighted (or transformed) item")
@@ -597,7 +604,7 @@ struct MainWindowView: View {
                     .font(.system(size: 14))
                     .foregroundColor(.textPri)
                 if !searchText.isEmpty {
-                    if !manager.semanticSearch(query: searchText).isEmpty {
+                    if auth.semanticSearch && !manager.semanticSearch(query: searchText).isEmpty {
                         Text("Semantic")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(.accent)
@@ -620,7 +627,7 @@ struct MainWindowView: View {
             Divider().background(Color.border)
 
             // Time machine scrubber (only when there are items to scrub through)
-            if manager.items.count > 1 {
+            if auth.timeScrub && manager.items.count > 1 {
                 timeMachineScrubber
                 Divider().background(Color.border)
             }
@@ -986,7 +993,7 @@ struct OnboardingView: View {
 
     private let steps: [(icon: String, key: String, title: String, sub: String)] = [
         ("doc.on.clipboard.fill", "⌘C",        "Copy anything",        "Copy text, images, files or URLs anywhere on your Mac"),
-        ("arrow.clockwise",       "Hold ⌘ · V", "Cycle your ring",        "Tap V for the next item · ⌥V jumps 5 forward while ⌘ is held"),
+        ("arrow.clockwise",       "Hold ⌘ · V", "Cycle your ring",        "Tap V for the next item · ⌘⌥V jumps 5 forward while ⌘ is held"),
         ("arrow.down.doc.fill",   "Release ⌘",  "Paste your pick",          "Let go of ⌘ to paste whichever item is highlighted"),
         ("wand.and.stars",        "V → X",      "Pick, then transform",     "Hold ⌘, tap V to land on an item, then tap X — tap X again to cycle transforms"),
         ("trash",                 "V → ⌫",      "Pick, then delete",        "Hold ⌘, tap V to highlight what to remove, then tap ⌫ to drop it from the ring"),
@@ -1331,7 +1338,7 @@ struct TutorialSheet: View {
     private var cyclePage: some View {
         animatedPage(
             title:       "Hold ⌘ and tap V to cycle",
-            detail:      "Hold ⌘ to open your clipboard ring near the cursor. Each tap of V moves to the next item; tap ⌥V to leap 5 forward. Release ⌘ to paste whichever item is highlighted.",
+            detail:      "Hold ⌘ to open your clipboard ring near the cursor. Each tap of V moves to the next item; tap ⌘⌥V to leap 5 forward. Release ⌘ to paste whichever item is highlighted.",
             practiceHint:"Click below, then hold ⌘ · tap V to cycle · release ⌘ to paste one of the lines you just copied."
         ) { cycleAnimation(active: tick % 5) }
     }
@@ -1347,7 +1354,7 @@ struct TutorialSheet: View {
     private var deletePage: some View {
         animatedPage(
             title:       "Pick with V, then delete with ⌫",
-            detail:      "First hold ⌘ and tap V to land on the item you want to remove. Then tap ⌫ while the popup is still open — only that highlighted item is deleted. You can also click × on any row in the popup.",
+            detail:      "First hold ⌘ and tap V to land on the item you want to remove. Then tap ⌫ while the popup is still open — only that highlighted item is deleted.",
             practiceHint:"Click below, hold ⌘, tap V until the item you want is highlighted, then tap ⌫ to remove it from the ring."
         ) { deleteAnimation(active: tick % 6) }
     }

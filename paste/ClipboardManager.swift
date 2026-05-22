@@ -369,10 +369,6 @@ class ClipboardManager: ObservableObject {
     private init() {
         // maxItems is now plan-driven only — remove any stale UserDefaults value
         UserDefaults.standard.removeObject(forKey: "maxItems")
-        // Migrate older builds that forced file capture off. Copying actual
-        // file data is now core behavior for documents/media/images.
-        UserDefaults.standard.set(true, forKey: "captureFiles")
-        captureFiles = true
         saveCancellable = $items
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in self?.saveHistory() }
@@ -795,13 +791,25 @@ class ClipboardManager: ObservableObject {
             return nil
         }
 
-        // Plain ⌘ allowed; ⌃ never. Shift is allowed only for the V key
-        // (⌘⇧V → next category) — handled below before we tighten the
-        // guard further down.
+        // Tab / Shift-Tab while popup is visible: cycle category forward /
+        // backward without requiring Command.
+        if key == 48 && previewWindow.isVisible {
+            DispatchQueue.main.async { [weak self] in
+                if self?.inTransformStage == true { self?.exitTransformStage() }
+                if shift { self?.cycleCategoryBackward() }
+                else { self?.cycleCategoryForward() }
+            }
+            return nil
+        }
+
+        // Plain ⌘ allowed; ⌃ never.
         guard cmd && !ctrl else { return Unmanaged.passUnretained(event) }
 
-        if key == 9 { // V — ⌘V cycle, ⌘⌥V jump+5, ⌘⇧V next category
+        if key == 9 { // V — ⌘V cycle, ⌘⌥V jump+5
             if isSimulatingPaste { return Unmanaged.passUnretained(event) }
+            // Do not hijack Cmd+Shift+V; many apps reserve it for
+            // "paste and match style".
+            guard !shift else { return Unmanaged.passUnretained(event) }
             // Optional strict mode: only activate popup flows while user is
             // actively focused in a text-editable element.
             if !previewWindow.isVisible,
@@ -810,16 +818,8 @@ class ClipboardManager: ObservableObject {
                focusedTextInputPosition() == nil {
                 return Unmanaged.passUnretained(event)
             }
-            if displayItems.isEmpty && !previewWindow.isVisible && !shift {
+            if displayItems.isEmpty && !previewWindow.isVisible {
                 return Unmanaged.passUnretained(event)
-            }
-
-            if shift && !opt {
-                DispatchQueue.main.async { [weak self] in
-                    if self?.inTransformStage == true { self?.exitTransformStage() }
-                    self?.cycleCategoryForward()
-                }
-                return nil
             }
 
             if opt {
@@ -1256,9 +1256,8 @@ class ClipboardManager: ObservableObject {
     }
 
     /// Cycle forward through the category filter: Recents → first category
-    /// (alphabetical) → … → last → Recents. Bound to ⌘⇧V so the user can
-    /// flip categories without taking their hand off the keyboard. Opens the
-    /// popup if it isn't already visible.
+    /// (alphabetical) → … → last → Recents. Bound to Tab while the popup is
+    /// visible.
     private func cycleCategoryForward() {
         let tags: [ClipboardTag?] = [nil] + availableTags
         guard tags.count > 1 else { return }
@@ -1272,6 +1271,30 @@ class ClipboardManager: ObservableObject {
         let currentIdx = tags.firstIndex(of: tagFilter) ?? 0
         let nextIdx    = (currentIdx + 1) % tags.count
         tagFilter = tags[nextIdx]
+
+        previewVisible = true
+        cycleCount += 1
+        if itemPreviewPanel.isVisible {
+            showSelectedItemPreview()
+        }
+        scheduleDismissTimer()
+    }
+
+    /// Cycle backward through the category filter. Bound to Shift-Tab while
+    /// the popup is visible.
+    private func cycleCategoryBackward() {
+        let tags: [ClipboardTag?] = [nil] + availableTags
+        guard tags.count > 1 else { return }
+
+        let isFirstOpen = !previewWindow.isVisible
+        if isFirstOpen {
+            cancelPendingFirstOpen()
+            openPopupNow()
+        }
+
+        let currentIdx = tags.firstIndex(of: tagFilter) ?? 0
+        let prevIdx    = (currentIdx - 1 + tags.count) % tags.count
+        tagFilter = tags[prevIdx]
 
         previewVisible = true
         cycleCount += 1
@@ -1791,6 +1814,13 @@ class ClipboardManager: ObservableObject {
     private var lastSemanticItemsRev: Int = -1   // changes with every items mutation
 
     func semanticSearch(query: String) -> [ClipboardItem] {
+        guard AuthManager.shared.semanticSearch else {
+            lastSemanticQuery = query
+            lastSemanticResult = []
+            lastSemanticItemsRev = items.count
+            return []
+        }
+
         // Hit the cache if the query AND the underlying items haven't changed.
         if query == lastSemanticQuery && items.count == lastSemanticItemsRev {
             return lastSemanticResult
@@ -1838,6 +1868,10 @@ class ClipboardManager: ObservableObject {
     }
 
     func togglePin(id: UUID) {
+        guard AuthManager.shared.pinEnabled else {
+            flashStatus("Pinning is disabled for this build.")
+            return
+        }
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].isPinned.toggle()
     }

@@ -205,7 +205,7 @@ struct PopoverPreviewView: View {
                     Spacer()
 
                     FlatHint(key: "V", label: "Next")
-                    FlatHint(key: "⇧V", label: "Category")
+                    FlatHint(key: "Tab", label: "Category")
                     FlatHint(key: "X", label: "Transform",
                              enabled: auth.transformsEnabled)
                     SpaceKeyFlatHint(label: "Preview")
