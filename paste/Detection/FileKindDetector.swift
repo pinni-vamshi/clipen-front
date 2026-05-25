@@ -1,4 +1,5 @@
 import Foundation
+import PDFKit
 
 enum FileKindDetector {
     nonisolated static func isImageFile(_ url: URL) -> Bool {
@@ -134,6 +135,37 @@ enum FileKindDetector {
         return String(data: data, encoding: .utf8)
             ?? String(data: data, encoding: .utf16)
             ?? String(data: data, encoding: .isoLatin1)
+    }
+
+    /// Extract readable text from document files (PDF, DOCX, RTF, Pages, etc.).
+    /// Returns nil for unsupported formats or if no readable text is found.
+    /// - Parameter maxChars: Maximum characters to return (default 5 000 — enough for preview + paste context)
+    nonisolated static func readableDocumentText(from url: URL, maxChars: Int = 5_000) -> String? {
+        let ext = url.pathExtension.lowercased()
+        switch ext {
+        case "pdf":
+            guard let pdf = PDFDocument(url: url) else { return nil }
+            var text = ""
+            for i in 0..<min(pdf.pageCount, 3) {
+                if let pageText = pdf.page(at: i)?.string {
+                    text += pageText + "\n"
+                }
+                if text.count > maxChars { break }
+            }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : String(trimmed.prefix(maxChars))
+
+        case "doc", "docx", "rtf", "rtfd", "odt", "pages":
+            let maxBytes = 10 * 1024 * 1024
+            if let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue,
+               size > maxBytes { return nil }
+            guard let attr = try? NSAttributedString(url: url, options: [:], documentAttributes: nil) else { return nil }
+            let trimmed = attr.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : String(trimmed.prefix(maxChars))
+
+        default:
+            return nil
+        }
     }
 
     private nonisolated static func fileExtension(_ url: URL) -> String {

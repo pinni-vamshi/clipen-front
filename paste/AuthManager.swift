@@ -189,12 +189,17 @@ final class AuthManager: ObservableObject {
     }
 
     private var deviceID: String {
-        if let existing = UserDefaults.standard.string(forKey: deviceIDKey) {
+        // Keychain is the primary store — survives UserDefaults clears and
+        // re-installs, so the same device always maps to the same Firestore doc.
+        let keychainKey = "installID"
+        if let existing = Keychain.get(keychainKey) {
             return existing
         }
-        let fresh = UUID().uuidString
-        UserDefaults.standard.set(fresh, forKey: deviceIDKey)
-        return fresh
+        // Migrate from UserDefaults (installs before Keychain storage) or
+        // generate a fresh UUID for brand-new installs.
+        let id = UserDefaults.standard.string(forKey: deviceIDKey) ?? UUID().uuidString
+        Keychain.set(id, forKey: keychainKey)
+        return id
     }
 
     private var appVersion: String {

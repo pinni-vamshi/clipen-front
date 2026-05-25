@@ -164,12 +164,18 @@ enum FileTools {
     }
 
     private static func readableFileText(for item: ClipboardItem) -> String? {
-        let urls = fileURLs(for: item).filter(FileKindDetector.isTextFile)
-        guard !urls.isEmpty else { return nil }
-        let parts = urls.compactMap { url -> String? in
-            guard let text = FileKindDetector.readableText(from: url) else { return nil }
-            if urls.count == 1 { return text }
-            return "===== \(url.lastPathComponent) =====\n\(text)"
+        let allURLs = fileURLs(for: item)
+        guard !allURLs.isEmpty else { return nil }
+        let parts = allURLs.compactMap { url -> String? in
+            let text: String?
+            if FileKindDetector.isTextFile(url) {
+                text = FileKindDetector.readableText(from: url)
+            } else {
+                text = FileKindDetector.readableDocumentText(from: url)
+            }
+            guard let t = text else { return nil }
+            if allURLs.count == 1 { return t }
+            return "===== \(url.lastPathComponent) =====\n\(t)"
         }
         return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
     }

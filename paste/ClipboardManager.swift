@@ -1886,6 +1886,10 @@ class ClipboardManager: ObservableObject {
 
         if let text = FileKindDetector.readableText(from: url, maxBytes: maxInlineBytes) {
             pb.setString(text, forType: .string)
+        } else if let docText = FileKindDetector.readableDocumentText(from: url) {
+            // PDF, DOCX, RTF, Pages, etc. — put extracted text on the pasteboard so
+            // text-accepting apps (Notes, Mail, etc.) receive readable content.
+            pb.setString(docText, forType: .string)
         }
     }
 
