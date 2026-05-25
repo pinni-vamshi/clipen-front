@@ -267,6 +267,22 @@ struct MainWindowView: View {
                             }
                             cardDivider()
                             VStack(alignment: .leading, spacing: 8) {
+                                cardRow(icon: "eye", label: "Always show preview") {
+                                    Toggle("", isOn: $manager.alwaysShowItemPreview)
+                                        .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                                }
+
+                                Text(manager.alwaysShowItemPreview
+                                     ? "Preview follows the highlighted item while cycling."
+                                     : "Press Space while cycling to open preview.")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.textDim)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.horizontal, 12)
+                                    .padding(.bottom, 6)
+                            }
+                            cardDivider()
+                            VStack(alignment: .leading, spacing: 8) {
                                 cardRow(icon: "text.cursor", label: "Popup only when writing") {
                                     Toggle("", isOn: Binding(
                                         get: { !manager.showPopupOutsideTextInputs },

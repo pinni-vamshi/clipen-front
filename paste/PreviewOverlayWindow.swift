@@ -204,15 +204,20 @@ struct PopoverPreviewView: View {
 
                     Spacer()
 
-                    FlatHint(key: "V", label: "Next")
-                    FlatHint(key: "Tab", label: "Category")
+                    FlatHint(key: "V", label: "Next",
+                             isActive: manager.popupHintV)
+                    FlatHint(key: "⇧V", label: "Category",
+                             isActive: manager.popupHintShiftV)
                     FlatHint(key: "X", label: "Transform",
-                             enabled: auth.transformsEnabled)
-                    SpaceKeyFlatHint(label: "Preview")
+                             enabled: auth.transformsEnabled,
+                             isActive: manager.popupHintX)
+                    SpaceKeyFlatHint(label: "Preview",
+                                     isActive: manager.popupHintSpace)
                     FlatHint(key: "⌘",
                              label: manager.selectionArmed ? "Paste" : "Dismiss",
-                             keyColor: manager.selectionArmed ? .green : .secondary,
-                             labelColor: manager.selectionArmed ? .green : .secondary)
+                             isActive: manager.popupHintCmd,
+                             idleKeyColor: manager.selectionArmed ? .green : .secondary,
+                             idleLabelColor: manager.selectionArmed ? .green : .secondary)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -377,52 +382,60 @@ struct ShortcutChip: View {
 // MARK: - Flat hint (no chip boxes — just bold key + muted label)
 
 struct FlatHint: View {
+    private static let activeColor = Color(hex: "#4F8EF7")
+
     let key: String
     let label: String
     var enabled: Bool = true
-    var keyColor:   Color = .primary
-    var labelColor: Color = .secondary
+    var isActive: Bool = false
+    var idleKeyColor: Color = .primary
+    var idleLabelColor: Color = .secondary
 
     var body: some View {
         HStack(spacing: 4) {
             Text(key)
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundColor(keyColor)
+                .foregroundColor(isActive ? Self.activeColor : idleKeyColor)
                 .lineLimit(1)
                 .fixedSize()
             Text(label)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(labelColor)
+                .foregroundColor(isActive ? Self.activeColor : idleLabelColor)
                 .lineLimit(1)
                 .fixedSize()
         }
         .fixedSize()
         .opacity(enabled ? 1.0 : 0.35)
+        .animation(.easeOut(duration: 0.1), value: isActive)
     }
 }
 
 struct SpaceKeyFlatHint: View {
+    private static let activeColor = Color(hex: "#4F8EF7")
+
     let label: String
     var enabled: Bool = true
+    var isActive: Bool = false
 
     var body: some View {
         HStack(spacing: 4) {
             ZStack {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .stroke(Color.primary.opacity(0.45), lineWidth: 1)
+                    .stroke(isActive ? Self.activeColor : Color.primary.opacity(0.45), lineWidth: 1)
                     .frame(width: 18, height: 10)
                 RoundedRectangle(cornerRadius: 1, style: .continuous)
-                    .fill(Color.primary.opacity(0.7))
+                    .fill(isActive ? Self.activeColor : Color.primary.opacity(0.7))
                     .frame(width: 10, height: 1.5)
             }
             Text(label)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(isActive ? Self.activeColor : .secondary)
                 .lineLimit(1)
                 .fixedSize()
         }
         .fixedSize()
         .opacity(enabled ? 1.0 : 0.35)
+        .animation(.easeOut(duration: 0.1), value: isActive)
     }
 }
 

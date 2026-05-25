@@ -97,6 +97,13 @@ class ClipboardManager: ObservableObject {
     /// dismisses without pasting.
     @Published var selectionArmed: Bool = true
 
+    /// Popup header legend — blue while the matching key/modifier is held.
+    @Published private(set) var popupHintV = false
+    @Published private(set) var popupHintShiftV = false
+    @Published private(set) var popupHintX = false
+    @Published private(set) var popupHintSpace = false
+    @Published private(set) var popupHintCmd = false
+
     /// Optional tag filter. `nil` = Recents (everything). When set,
     /// `displayItems` is filtered to items that include that tag. Cleared
     /// on `dismissPreview` so each new ⌘V session starts at Recents.
@@ -109,6 +116,7 @@ class ClipboardManager: ObservableObject {
             selectionArmed = true
             if previewWindow.isVisible {
                 scheduleDismissTimer()
+                syncItemPreviewWithSelection()
             }
         }
     }
@@ -269,6 +277,11 @@ class ClipboardManager: ObservableObject {
     private var previewVisible: Bool = false
     private var cycleCount: Int = 0
     private var transformCycleCount: Int = 0
+    private var hintKeyVDown = false
+    private var hintKeyXDown = false
+    private var hintKeySpaceDown = false
+    private var hintCmdHeld = false
+    private var hintShiftHeld = false
 
     /// Fires once on the user's first ⌘V cycle — preview overlay shows ⌘X transform tip.
     @Published var showFirstCycleHint: Bool = false
@@ -308,11 +321,11 @@ class ClipboardManager: ObservableObject {
     /// system paste. Hold ⌘ for longer than this and the popup opens, and
     /// the user enters cycling mode.
     ///
-    /// Default 0.12 s (120 ms) — short enough that intentional cyclers don't
+    /// Default 0.15 s (150 ms) — short enough that intentional cyclers don't
     /// notice the delay, long enough to absorb a relaxed "quick tap" of
     /// ~50–100 ms. User-tunable via the slider in the menu bar widget.
     @Published var firstOpenDelay: Double = {
-        let stored = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.12
+        let stored = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.15
         return min(max(stored, 0.0), 1.0)
     }() {
         didSet {
@@ -324,11 +337,18 @@ class ClipboardManager: ObservableObject {
             UserDefaults.standard.set(clamped, forKey: "firstOpenDelay")
         }
     }
-    /// When false (default), popup mode can start only while a text input is
-    /// focused. This prevents accidental activation in non-typing contexts.
-    /// When true, popup can start anywhere (legacy behavior).
-    @Published var showPopupOutsideTextInputs: Bool = UserDefaults.standard.object(forKey: "showPopupOutsideTextInputs") as? Bool ?? false {
+    /// When false, popup mode can start only while a text input is focused.
+    /// When true (default), popup can start anywhere.
+    @Published var showPopupOutsideTextInputs: Bool = UserDefaults.standard.object(forKey: "showPopupOutsideTextInputs") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showPopupOutsideTextInputs, forKey: "showPopupOutsideTextInputs") }
+    }
+    /// When true, the Space-style item preview panel follows the highlighted
+    /// row while cycling. When false, Space toggles preview on/off (default).
+    @Published var alwaysShowItemPreview: Bool = UserDefaults.standard.object(forKey: "alwaysShowItemPreview") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(alwaysShowItemPreview, forKey: "alwaysShowItemPreview")
+            applyAlwaysShowItemPreviewPolicy()
+        }
     }
 
     private var pollTimer: Timer?
@@ -703,7 +723,9 @@ class ClipboardManager: ObservableObject {
         // Defensive: if we somehow have a leftover tap, kill it first.
         teardownEventTap()
 
-        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue)
+        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
+            | (1 << CGEventType.flagsChanged.rawValue)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -747,6 +769,7 @@ class ClipboardManager: ObservableObject {
 
         if type == .flagsChanged {
             let hasCmd = event.flags.contains(.maskCommand)
+            notePopupHintModifiers(cmd: hasCmd, shift: event.flags.contains(.maskShift))
             if !hasCmd {
                 // Release-while-pending cases:
                 //  • pendingFirstOpen → fast-paste front item, no popup
@@ -768,10 +791,21 @@ class ClipboardManager: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
 
+        if type == .keyUp {
+            let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
+            notePopupHintModifiers(cmd: event.flags.contains(.maskCommand),
+                                   shift: event.flags.contains(.maskShift))
+            notePopupHintKeyUp(keycode: key)
+            return Unmanaged.passUnretained(event)
+        }
+
         guard type == .keyDown else { return Unmanaged.passUnretained(event) }
 
         let key   = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
+        notePopupHintModifiers(cmd: flags.contains(.maskCommand),
+                               shift: flags.contains(.maskShift))
+        notePopupHintKeyDown(keycode: Int(key), cmd: flags.contains(.maskCommand))
         let cmd   = flags.contains(.maskCommand)
         let shift = flags.contains(.maskShift)
         let opt   = flags.contains(.maskAlternate)
@@ -791,25 +825,13 @@ class ClipboardManager: ObservableObject {
             return nil
         }
 
-        // Tab / Shift-Tab while popup is visible: cycle category forward /
-        // backward without requiring Command.
-        if key == 48 && previewWindow.isVisible {
-            DispatchQueue.main.async { [weak self] in
-                if self?.inTransformStage == true { self?.exitTransformStage() }
-                if shift { self?.cycleCategoryBackward() }
-                else { self?.cycleCategoryForward() }
-            }
-            return nil
-        }
-
-        // Plain ⌘ allowed; ⌃ never.
+        // Plain ⌘ allowed; ⌃ never. Shift is allowed only for the V key
+        // (⌘⇧V → next category) — handled below before we tighten the
+        // guard further down.
         guard cmd && !ctrl else { return Unmanaged.passUnretained(event) }
 
-        if key == 9 { // V — ⌘V cycle, ⌘⌥V jump+5
+        if key == 9 { // V — ⌘V cycle, ⌘⌥V jump+5, ⌘⇧V next category
             if isSimulatingPaste { return Unmanaged.passUnretained(event) }
-            // Do not hijack Cmd+Shift+V; many apps reserve it for
-            // "paste and match style".
-            guard !shift else { return Unmanaged.passUnretained(event) }
             // Optional strict mode: only activate popup flows while user is
             // actively focused in a text-editable element.
             if !previewWindow.isVisible,
@@ -818,8 +840,16 @@ class ClipboardManager: ObservableObject {
                focusedTextInputPosition() == nil {
                 return Unmanaged.passUnretained(event)
             }
-            if displayItems.isEmpty && !previewWindow.isVisible {
+            if displayItems.isEmpty && !previewWindow.isVisible && !shift {
                 return Unmanaged.passUnretained(event)
+            }
+
+            if shift && !opt {
+                DispatchQueue.main.async { [weak self] in
+                    if self?.inTransformStage == true { self?.exitTransformStage() }
+                    self?.cycleCategoryForward()
+                }
+                return nil
             }
 
             if opt {
@@ -881,6 +911,68 @@ class ClipboardManager: ObservableObject {
         }
 
         return Unmanaged.passUnretained(event)
+    }
+
+    // MARK: - Popup header hint press feedback
+
+    private var popupHintSessionActive: Bool {
+        previewWindow.isVisible || pendingFirstOpen
+    }
+
+    private func clearPopupHintHighlights() {
+        hintKeyVDown = false
+        hintKeyXDown = false
+        hintKeySpaceDown = false
+        hintCmdHeld = false
+        hintShiftHeld = false
+        popupHintV = false
+        popupHintShiftV = false
+        popupHintX = false
+        popupHintSpace = false
+        popupHintCmd = false
+    }
+
+    private func notePopupHintModifiers(cmd: Bool, shift: Bool) {
+        hintCmdHeld = cmd
+        hintShiftHeld = shift
+        DispatchQueue.main.async { [weak self] in self?.syncPopupHintHighlights() }
+    }
+
+    private func notePopupHintKeyDown(keycode: Int, cmd: Bool) {
+        switch keycode {
+        case 9 where cmd:  hintKeyVDown = true
+        case 7 where cmd:  hintKeyXDown = true
+        case 49:          hintKeySpaceDown = true
+        default: break
+        }
+        DispatchQueue.main.async { [weak self] in self?.syncPopupHintHighlights() }
+    }
+
+    private func notePopupHintKeyUp(keycode: Int) {
+        switch keycode {
+        case 9:  hintKeyVDown = false
+        case 7:  hintKeyXDown = false
+        case 49: hintKeySpaceDown = false
+        default: break
+        }
+        DispatchQueue.main.async { [weak self] in self?.syncPopupHintHighlights() }
+    }
+
+    private func syncPopupHintHighlights() {
+        guard popupHintSessionActive else {
+            clearPopupHintHighlights()
+            return
+        }
+        popupHintCmd = hintCmdHeld
+        if hintKeyVDown && hintCmdHeld {
+            popupHintV = !hintShiftHeld
+            popupHintShiftV = hintShiftHeld
+        } else {
+            popupHintV = false
+            popupHintShiftV = false
+        }
+        popupHintX = hintKeyXDown && hintCmdHeld && previewWindow.isVisible
+        popupHintSpace = hintKeySpaceDown && previewWindow.isVisible
     }
 
     // MARK: - Two-stage transform
@@ -1004,6 +1096,36 @@ class ClipboardManager: ObservableObject {
         dismissTimer?.invalidate(); dismissTimer = nil
         progressTimer?.invalidate(); progressTimer = nil
         timerFrozen = true
+    }
+
+    private func applyAlwaysShowItemPreviewPolicy() {
+        guard previewWindow.isVisible else {
+            if !alwaysShowItemPreview { itemPreviewPanel.hide() }
+            return
+        }
+        syncItemPreviewWithSelection()
+    }
+
+    /// Keeps the item preview panel in sync with the current selection when
+    /// `alwaysShowItemPreview` is on, or refreshes it when the user already
+    /// opened preview via Space.
+    private func syncItemPreviewWithSelection() {
+        guard previewWindow.isVisible else { return }
+        if alwaysShowItemPreview {
+            guard selectionArmed,
+                  !displayItems.isEmpty,
+                  selectedIndex < displayItems.count else {
+                if itemPreviewPanel.isVisible {
+                    itemPreviewPanel.hide()
+                    timerFrozen = false
+                    scheduleDismissTimer()
+                }
+                return
+            }
+            showSelectedItemPreview()
+        } else if itemPreviewPanel.isVisible {
+            showSelectedItemPreview()
+        }
     }
 
     /// Synchronous sibling of `ToolRegistry.run` for tools that can finish
@@ -1210,10 +1332,7 @@ class ClipboardManager: ObservableObject {
             }
         }
 
-        if itemPreviewPanel.isVisible {
-            showSelectedItemPreview()
-        }
-
+        syncItemPreviewWithSelection()
         scheduleDismissTimer()
     }
 
@@ -1249,15 +1368,14 @@ class ClipboardManager: ObservableObject {
         if wasFirstOpen { openPopupNow() } else { selectionArmed = true }
         previewVisible = true
         cycleCount += 1
-        if itemPreviewPanel.isVisible {
-            showSelectedItemPreview()
-        }
+        syncItemPreviewWithSelection()
         scheduleDismissTimer()
     }
 
     /// Cycle forward through the category filter: Recents → first category
-    /// (alphabetical) → … → last → Recents. Bound to Tab while the popup is
-    /// visible.
+    /// (alphabetical) → … → last → Recents. Bound to ⌘⇧V so the user can
+    /// flip categories without taking their hand off the keyboard. Opens the
+    /// popup if it isn't already visible.
     private func cycleCategoryForward() {
         let tags: [ClipboardTag?] = [nil] + availableTags
         guard tags.count > 1 else { return }
@@ -1274,33 +1392,7 @@ class ClipboardManager: ObservableObject {
 
         previewVisible = true
         cycleCount += 1
-        if itemPreviewPanel.isVisible {
-            showSelectedItemPreview()
-        }
-        scheduleDismissTimer()
-    }
-
-    /// Cycle backward through the category filter. Bound to Shift-Tab while
-    /// the popup is visible.
-    private func cycleCategoryBackward() {
-        let tags: [ClipboardTag?] = [nil] + availableTags
-        guard tags.count > 1 else { return }
-
-        let isFirstOpen = !previewWindow.isVisible
-        if isFirstOpen {
-            cancelPendingFirstOpen()
-            openPopupNow()
-        }
-
-        let currentIdx = tags.firstIndex(of: tagFilter) ?? 0
-        let prevIdx    = (currentIdx - 1 + tags.count) % tags.count
-        tagFilter = tags[prevIdx]
-
-        previewVisible = true
-        cycleCount += 1
-        if itemPreviewPanel.isVisible {
-            showSelectedItemPreview()
-        }
+        syncItemPreviewWithSelection()
         scheduleDismissTimer()
     }
 
@@ -1326,9 +1418,7 @@ class ClipboardManager: ObservableObject {
 
         previewVisible = true
         cycleCount += 1
-        if itemPreviewPanel.isVisible {
-            showSelectedItemPreview()
-        }
+        syncItemPreviewWithSelection()
         scheduleDismissTimer()
     }
 
@@ -1355,6 +1445,7 @@ class ClipboardManager: ObservableObject {
         let position = focusedTextInputPosition() ?? caretPosition()
         cachedCaretPosition = position
         previewWindow.show(at: position)
+        syncItemPreviewWithSelection()
     }
 
     /// Returns caret/input position only when the current AX focused element
@@ -1437,6 +1528,7 @@ class ClipboardManager: ObservableObject {
     /// Visually identical to a system ⌘V for users who weren't trying to
     /// cycle — they just see the paste happen.
     private func fastPasteFront() {
+        clearPopupHintHighlights()
         cancelPendingFirstOpen()
         guard !displayItems.isEmpty else { return }
         selectedIndex = 0
@@ -1446,17 +1538,16 @@ class ClipboardManager: ObservableObject {
     }
 
     private func deleteSelected() {
-        guard selectionArmed, !items.isEmpty else { return }
-        let realIndex = isReversed ? (items.count - 1 - selectedIndex) : selectedIndex
-        guard items.indices.contains(realIndex) else { return }
+        guard selectionArmed, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        // Resolve by ID so filters (tagFilter, isReversed, pinnedAtBottom) never
+        // cause the wrong item to be deleted.
+        let target = displayItems[selectedIndex]
+        guard let realIndex = items.firstIndex(where: { $0.id == target.id }) else { return }
         items.remove(at: realIndex)
-        if items.isEmpty { dismissPreview(); return }
+        // displayItems is synchronously rebuilt by the items.didSet above.
+        if displayItems.isEmpty { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
-        if itemPreviewPanel.isVisible {
-            showSelectedItemPreview()
-        }
-        // @ObservedObject re-render handles the popup refresh. No AX query,
-        // no setFrame, no view-tree rebuild — just bump the @Published vars.
+        syncItemPreviewWithSelection()
         scheduleDismissTimer()
     }
 
@@ -1522,9 +1613,11 @@ class ClipboardManager: ObservableObject {
         progressTimer = nil
         dismissStartTime = nil
         dismissProgress = 0
+        syncItemPreviewWithSelection()
     }
 
     private func dismissPreview() {
+        clearPopupHintHighlights()
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()

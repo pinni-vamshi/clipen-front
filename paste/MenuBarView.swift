@@ -29,6 +29,8 @@ struct MenuBarView: View {
             Divider()
             firstOpenDelaySlider
             Divider()
+            alwaysShowPreviewToggle
+            Divider()
             footer
         }
         .frame(minWidth: 300, maxWidth: 520)
@@ -265,6 +267,35 @@ struct MenuBarView: View {
             Slider(value: delayMS, in: 0...1000, step: 5)
                 .tint(manager.firstOpenDelay > 0 ? .accentColor : .secondary)
             Text("Tap ⌘V and release inside this window to paste the front item without the popup.")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary.opacity(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Always-show preview toggle
+
+    private var alwaysShowPreviewToggle: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Image(systemName: "eye")
+                    .font(.system(size: 10))
+                    .foregroundColor(manager.alwaysShowItemPreview ? .accentColor : .secondary)
+                Text("Always show preview")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Toggle("", isOn: $manager.alwaysShowItemPreview)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .labelsHidden()
+            }
+            Text(manager.alwaysShowItemPreview
+                 ? "Preview follows the highlighted item while cycling."
+                 : "Press Space while cycling to open preview.")
                 .font(.system(size: 9))
                 .foregroundColor(.secondary.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)

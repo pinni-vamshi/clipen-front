@@ -60,12 +60,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             userDriverDelegate: self
         )
 
-        // Menu-bar panel is disabled for now; run as a standard app window.
-        NSApp.setActivationPolicy(.regular)
+        // Run as an accessory (no persistent dock icon — like Rectangle).
+        // openMainWindow() switches to .regular while the window is visible
+        // and the window-close observer below switches back.
+        NSApp.setActivationPolicy(.accessory)
         statusItem = nil
         menuPanel = nil
 
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            DispatchQueue.main.async {
+                let hasVisibleMainWindow = NSApp.windows.contains {
+                    !($0 is NSPanel) && $0.isVisible && $0.identifier?.rawValue == "main"
+                }
+                if !hasVisibleMainWindow {
+                    NSApp.setActivationPolicy(.accessory)
+                }
+            }
+        }
+
         applyMenuBarVisibility()
+
+        // Default to silently pre-downloading updates so users see "Ready to
+        // install" instead of a blocking download progress bar. Only set on
+        // first run so users who explicitly turned this off keep their choice.
+        if UserDefaults.standard.object(forKey: "SUAutomaticallyUpdate") == nil {
+            updaterController?.updater.automaticallyDownloadsUpdates = true
+        }
+
         ClipboardManager.shared.startMonitoring()
         // Kick one background check shortly after launch so update availability
         // is known even before the user starts cycling with ⌘V.
@@ -147,6 +172,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Bring the main settings window to front, creating it if needed.
     func openMainWindow() {
+        // Restore dock icon and Cmd-Tab presence while the window is open.
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
             existing.makeKeyAndOrderFront(nil)
@@ -318,14 +345,14 @@ extension AppDelegate: SPUStandardUserDriverDelegate {
 extension AppDelegate: SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        // Bring app forward so the update dialog is visible — update found is
+        // the one case where interrupting the user is warranted.
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
-        NSApp.activate(ignoringOtherApps: true)
-    }
+    // didNotFindUpdate and didAbortWithError must NOT activate — they fire on
+    // every silent background check (launch + 24h scheduler). Activating here
+    // yanks Clipen to the foreground even when nothing interesting happened.
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) { }
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) { }
 }

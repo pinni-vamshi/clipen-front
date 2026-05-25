@@ -90,6 +90,10 @@ enum ToolRegistry {
     private static func applicable(_ tools: [ClipboardTool], to item: ClipboardItem) -> [ClipboardTool] {
         let filtered = tools.filter { tool in
             if tool.id == "image.ocr", !AuthManager.shared.ocrEnabled { return false }
+            if (tool.id == "pdf.extract-all-text" || tool.id == "pdf.first-page-text"),
+               !AuthManager.shared.pdfTextExtract {
+                return false
+            }
             if tool.preview(item) != nil { return true }
             if let runSync = tool.runSync {
                 if case .status = runSync(item) { return false }

@@ -16,7 +16,7 @@ class TransformPanel: NSPanel {
         level           = .floating
         isOpaque        = false
         backgroundColor = .clear
-        hasShadow       = true
+        hasShadow       = false   // shadow drawn in SwiftUI — avoids double halo with NSPanel
         ignoresMouseEvents = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
@@ -117,7 +117,7 @@ private struct TransformCalloutView: View {
     let arrowCenterYFromTop: CGFloat
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: -1) {
             if arrowOnLeadingSide {
                 // Panel is on the right of the preview, so arrow must point left
                 // back toward the selected row.
@@ -130,6 +130,8 @@ private struct TransformCalloutView: View {
                 sideArrow(pointingRight: true)
             }
         }
+        // One shadow for arrow + bubble (panel hasShadow is off).
+        .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
     }
 
     private func sideArrow(pointingRight: Bool) -> some View {
@@ -139,12 +141,7 @@ private struct TransformCalloutView: View {
                 Color.clear
                 SideArrow(pointingRight: pointingRight)
                     .fill(.regularMaterial)
-                    .overlay(
-                        SideArrow(pointingRight: pointingRight)
-                            .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-                    )
                     .frame(width: 10, height: 20)
-                    .shadow(color: .black.opacity(0.16), radius: 2, x: pointingRight ? 1 : -1, y: 1)
                     .offset(y: topOffset)
             }
         }
@@ -258,7 +255,7 @@ struct TransformView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(Array(displays.enumerated()), id: \.offset) { idx, display in
+                            ForEach(Array(displays.enumerated()), id: \.element.id) { idx, display in
                                 TransformRow(
                                     display:    display,
                                     isSelected: idx == selectedTransformIndex,
@@ -295,11 +292,11 @@ struct TransformView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
         }
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(Color.primary.opacity(0.1), lineWidth: 1))
-        .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
     }
 }
 
