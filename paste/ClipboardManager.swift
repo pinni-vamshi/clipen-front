@@ -1796,21 +1796,18 @@ class ClipboardManager: ObservableObject {
         case .text(let str):
             pb.setString(str, forType: .string)
         case .image(let img, let rawData, let dataType):
-            let types = ImageService.pasteboardTypes(for: item)
-            if !types.isEmpty {
-                pb.declareTypes(types, owner: nil)
-            }
-            pb.setData(rawData, forType: dataType)
+            let pitem = NSPasteboardItem()
+            pitem.setData(rawData, forType: dataType)
             if let compat = ImageService.compatibilityPasteboardPayload(
                 image: img, rawData: rawData, dataType: dataType
-            ) {
-                pb.setData(compat.data, forType: compat.type)
+            ), compat.type != dataType {
+                pitem.setData(compat.data, forType: compat.type)
             }
-            pb.writeObjects([img])
             if ImageService.shouldAttachTiffFallback(for: dataType),
                let tiff = img.tiffRepresentation {
-                pb.setData(tiff, forType: .tiff)
+                pitem.setData(tiff, forType: .tiff)
             }
+            pb.writeObjects([pitem])
         case .richText(let attrStr, let plain):
             let range = NSRange(location: 0, length: attrStr.length)
             if let rtfData = try? attrStr.data(from: range,
