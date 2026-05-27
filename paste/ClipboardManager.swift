@@ -1203,10 +1203,12 @@ class ClipboardManager: ObservableObject {
                dataType: dataType,
                baseName: exportBaseName(for: source)
            ) {
-            writeFileURLs([ImageService.exportFileURL(fileName: fileName)], to: pb)
+            // Write a single item that carries both the file URL and inline image data
+            pb.writeObjects([makeFilePasteboardItem(for: ImageService.exportFileURL(fileName: fileName))])
+        } else {
+            write(item, to: pb)
         }
 
-        write(item, to: pb)
         lastChangeCount = pb.changeCount
         finishTransformPaste(message: message, restoring: source)
     }
@@ -1230,7 +1232,7 @@ class ClipboardManager: ObservableObject {
 
         let pb = NSPasteboard.general
         pb.clearContents()
-        writeFileURLs(urls, to: pb)
+        pb.writeObjects(urls.filter { FileManager.default.fileExists(atPath: $0.path) }.map { makeFilePasteboardItem(for: $0) })
         lastChangeCount = pb.changeCount
         finishTransformPaste(message: message, restoring: source)
     }
@@ -1791,10 +1793,22 @@ class ClipboardManager: ObservableObject {
         AuthManager.shared.registerCommandVAction()
     }
 
+    // MARK: - Pasteboard write
+    //
+    // Every content type produces exactly ONE NSPasteboardItem with all
+    // representations on that single item.  Mixing the old-style API
+    // (setData/setString/setPropertyList after clearContents without
+    // declareTypes) with writeObjects creates multiple implicit items on the
+    // pasteboard; apps that iterate all items then paste each one, which is
+    // why everything except plain text was pasting twice.
+
     private func write(_ item: ClipboardItem, to pb: NSPasteboard) {
         switch item.content {
         case .text(let str):
-            pb.setString(str, forType: .string)
+            let pitem = NSPasteboardItem()
+            pitem.setString(str, forType: .string)
+            pb.writeObjects([pitem])
+
         case .image(let img, let rawData, let dataType):
             let pitem = NSPasteboardItem()
             pitem.setData(rawData, forType: dataType)
@@ -1808,86 +1822,82 @@ class ClipboardManager: ObservableObject {
                 pitem.setData(tiff, forType: .tiff)
             }
             pb.writeObjects([pitem])
+
         case .richText(let attrStr, let plain):
+            let pitem = NSPasteboardItem()
             let range = NSRange(location: 0, length: attrStr.length)
             if let rtfData = try? attrStr.data(from: range,
                                                documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) {
-                pb.setData(rtfData, forType: .rtf)
+                pitem.setData(rtfData, forType: .rtf)
             }
-            pb.setString(plain, forType: .string)
+            pitem.setString(plain, forType: .string)
+            pb.writeObjects([pitem])
+
         case .html(let html, let plain):
-            pb.setData(Data(html.utf8), forType: .init("public.html"))
-            pb.setString(plain, forType: .string)
+            let pitem = NSPasteboardItem()
+            pitem.setData(Data(html.utf8), forType: .init("public.html"))
+            pitem.setString(plain, forType: .string)
+            pb.writeObjects([pitem])
+
         case .file(let url):
-            writeFileURLs([url], to: pb)
+            pb.writeObjects([makeFilePasteboardItem(for: url)])
+
         case .files(let urls):
-            writeFileURLs(urls, to: pb)
+            let existing = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
+            guard !existing.isEmpty else { return }
+            pb.writeObjects(existing.map { makeFilePasteboardItem(for: $0) })
         }
     }
 
-    private func writeFileURLs(_ urls: [URL], to pb: NSPasteboard) {
-        let existingURLs = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
-        guard !existingURLs.isEmpty else { return }
+    /// Build a single NSPasteboardItem for a file URL with every representation
+    /// on that one item — Finder-standard file URL, legacy path list, typed raw
+    /// data (so PDF viewers, image editors etc. get native format), and extracted
+    /// plain text (so text editors receive readable content for text/document files).
+    private func makeFilePasteboardItem(for url: URL) -> NSPasteboardItem {
+        let item = NSPasteboardItem()
 
-        let paths = existingURLs.map(\.path)
-        pb.setPropertyList(paths, forType: .init("NSFilenamesPboardType"))
-        pb.writeObjects(existingURLs.map { $0 as NSURL })
+        // Standard file-URL type — how Finder, Mail, Dock etc. reference files.
+        item.setData(url.dataRepresentation, forType: .fileURL)
+        // Legacy path list for older apps.
+        item.setPropertyList([url.path], forType: .init("NSFilenamesPboardType"))
 
-        if existingURLs.count == 1, let url = existingURLs.first {
-            pb.setString(url.absoluteString, forType: .init("public.file-url"))
-            pb.setString(url.absoluteString, forType: .init("NSURLPboardType"))
-            pb.setString(url.absoluteString, forType: .init("Apple URL pasteboard type"))
-            writeSingleFilePayload(url, to: pb)
-        }
-    }
-
-    private func writeSingleFilePayload(_ url: URL, to pb: NSPasteboard) {
-        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentTypeKey, .fileSizeKey]),
-              values.isDirectory != true else { return }
-
-        // Avoid loading very large files into the pasteboard. Those still paste
-        // as files through the file-url/Finder representations above.
         let maxInlineBytes = 50 * 1024 * 1024
-        if let fileSize = values.fileSize, fileSize > maxInlineBytes { return }
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentTypeKey, .fileSizeKey]),
+              values.isDirectory != true,
+              let fileSize = values.fileSize, fileSize <= maxInlineBytes,
+              let data = try? Data(contentsOf: url) else { return item }
 
-        guard let data = try? Data(contentsOf: url) else { return }
-
-        var types: [NSPasteboard.PasteboardType] = []
-        if let contentType = values.contentType {
-            types.append(.init(contentType.identifier))
-        } else if let inferredType = UTType(filenameExtension: url.pathExtension) {
-            types.append(.init(inferredType.identifier))
-        }
-
-        switch url.pathExtension.lowercased() {
-        case "png":
-            types.append(.init("public.png"))
-        case "jpg", "jpeg":
-            types.append(.init("public.jpeg"))
-        case "gif":
-            types.append(.init("public.gif"))
-        case "tif", "tiff":
-            types.append(.tiff)
+        // Typed raw data so specialised apps (Preview, image editors, etc.) get
+        // their native format instead of just a file reference.
+        let ext = url.pathExtension.lowercased()
+        switch ext {
         case "pdf":
-            types.append(.init("com.adobe.pdf"))
-            types.append(.init("public.pdf"))
+            item.setData(data, forType: .init("com.adobe.pdf"))
+            item.setData(data, forType: .init("public.pdf"))
+        case "png":
+            item.setData(data, forType: .init("public.png"))
+        case "jpg", "jpeg":
+            item.setData(data, forType: .init("public.jpeg"))
+        case "gif":
+            item.setData(data, forType: .init("public.gif"))
+        case "tif", "tiff":
+            item.setData(data, forType: .tiff)
+        case "heic":
+            item.setData(data, forType: .init("public.heic"))
         default:
-            break
-        }
-        types.append(.init("public.data"))
-
-        var seenTypes = Set<String>()
-        for type in types where seenTypes.insert(type.rawValue).inserted {
-            pb.setData(data, forType: type)
+            if let contentType = values.contentType {
+                item.setData(data, forType: .init(contentType.identifier))
+            }
         }
 
+        // Plain-text representation for apps that accept text (editors, terminals).
         if let text = FileKindDetector.readableText(from: url, maxBytes: maxInlineBytes) {
-            pb.setString(text, forType: .string)
+            item.setString(text, forType: .string)
         } else if let docText = FileKindDetector.readableDocumentText(from: url) {
-            // PDF, DOCX, RTF, Pages, etc. — put extracted text on the pasteboard so
-            // text-accepting apps (Notes, Mail, etc.) receive readable content.
-            pb.setString(docText, forType: .string)
+            item.setString(docText, forType: .string)
         }
+
+        return item
     }
 
     func pasteItem(at itemsIndex: Int) {
