@@ -1041,9 +1041,13 @@ class ClipboardManager: ObservableObject {
             }
 
             if shift && !opt {
+                // ⌘⇧V — step BACK one item in the current category.  Was:
+                // cycle category forward; categories are now reachable via
+                // ⌘1 … ⌘9 (chip-numbered).  V/⇧V is now a symmetric pair:
+                // forward / backward within the active ring filter.
                 DispatchQueue.main.async { [weak self] in
                     if self?.inTransformStage == true { self?.exitTransformStage() }
-                    self?.cycleCategoryForward()
+                    self?.cyclePrevious()
                 }
                 return nil
             }
@@ -1069,15 +1073,15 @@ class ClipboardManager: ObservableObject {
         // Other shortcuts require plain ⌘ — no shift, no opt.
         guard !shift && !opt else { return Unmanaged.passUnretained(event) }
 
-        // ⌘1 … ⌘9 — jump straight to that row (1-indexed). Available
-        // whenever the popup is visible OR a delayed-open is pending; in
-        // the pending case we open the popup at the picked index without
-        // waiting for the rest of the delay.
+        // ⌘1 … ⌘9 — switch the CATEGORY filter (was: jump to row N).
+        // ⌘1 = Recents (no filter), ⌘2 = first available category, ⌘3 =
+        // second, …  Numbers are advertised by the "1.", "2." prefixes on
+        // the category chip strip itself, so the binding is discoverable.
         if let target = Self.numberRowKeycodeToIndex[key],
            previewWindow.isVisible || pendingFirstOpen {
             DispatchQueue.main.async { [weak self] in
                 if self?.inTransformStage == true { self?.exitTransformStage() }
-                self?.selectByNumber(target)
+                self?.selectCategoryByIndex(target)
             }
             return nil
         }
@@ -1558,12 +1562,43 @@ class ClipboardManager: ObservableObject {
         scheduleDismissTimer()
     }
 
+    /// ⌘⇧V — step one item BACKWARD in the current category.  Mirrors
+    /// cycleNext / cycleNext's wrap behavior (last → first becomes
+    /// first → last) so the user can nudge in either direction without
+    /// taking their hand off the ⌘ key.  No popup-open-on-first-press
+    /// dance: ⇧V before the popup is open opens it on the LAST item.
+    private func cyclePrevious() {
+        let display = displayItems
+        guard !display.isEmpty else { return }
+
+        if !previewWindow.isVisible {
+            cancelPendingFirstOpen()
+            selectedIndex = display.count - 1
+            openPopupNow()
+        } else {
+            if !selectionArmed {
+                clampSelectedIndexToDisplay()
+                selectionArmed = true
+            } else {
+                // Wrap negative: -1 % n is implementation-defined in Swift,
+                // so compute explicitly.
+                selectedIndex = (selectedIndex - 1 + display.count) % display.count
+            }
+        }
+
+        previewVisible = true
+        cycleCount += 1
+        syncItemPreviewWithSelection()
+        scheduleDismissTimer()
+    }
+
     /// Top-row number keycodes (kVK_ANSI_1 … kVK_ANSI_9) mapped to the
-    /// zero-based ring index they should select. ⌘0 is intentionally NOT
-    /// in the map — most users read "0" as "tenth" which would silently
-    /// off-by-one, and ⌘0 is already a system-reserved shortcut in many
-    /// apps (zoom-to-fit etc.). For 10+ items the user falls back to ⌘V
-    /// or ⌘⌥V to walk past row 9.
+    /// zero-based CATEGORY index they should select.  ⌘1 → Recents (no
+    /// filter), ⌘2 → first available category, ⌘3 → second, etc.  Numbers
+    /// past 9 (rare — most rings have ≤6 active categories) have no
+    /// keybinding and the chip just renders with no prefix.
+    /// ⌘0 is intentionally NOT in the map — it's a system-reserved
+    /// shortcut in many apps (zoom-to-fit etc.).
     private static let numberRowKeycodeToIndex: [Int64: Int] = [
         18: 0, // 1
         19: 1, // 2
@@ -1576,42 +1611,23 @@ class ClipboardManager: ObservableObject {
         25: 8, // 9
     ]
 
-    /// Pick the row at `idx` directly (⌘1 → row 0, ⌘2 → row 1, …). If the
-    /// popup is in the pre-open delay window, cancel the delay and open at
-    /// the picked index. If the index is past the end of the ring, bail
-    /// silently — pressing ⌘7 with only 3 items shouldn't surprise-jump.
-    private func selectByNumber(_ idx: Int) {
-        let display = displayItems
-        guard !display.isEmpty, idx < display.count else { return }
+    /// Switch the active category filter by 1-based chip index.
+    ///   idx == 0 → Recents (no filter)
+    ///   idx == 1 → first item in `availableTags`
+    ///   idx == 2 → second … etc.
+    /// Out-of-range indices (e.g. ⌘5 with only 3 categories) are ignored.
+    /// Opens the popup if it isn't already visible.
+    private func selectCategoryByIndex(_ idx: Int) {
+        let tags: [ClipboardTag?] = [nil] + availableTags
+        guard idx >= 0, idx < tags.count else { return }
 
         let wasFirstOpen = !previewWindow.isVisible
-        cancelPendingFirstOpen()
-        selectedIndex = idx
-        if wasFirstOpen { openPopupNow() } else { selectionArmed = true }
-        previewVisible = true
-        cycleCount += 1
-        syncItemPreviewWithSelection()
-        scheduleDismissTimer()
-    }
-
-    /// Cycle forward through the category filter: Recents → first category
-    /// (alphabetical) → … → last → Recents. Bound to ⌘⇧V so the user can
-    /// flip categories without taking their hand off the keyboard. Opens the
-    /// popup if it isn't already visible.
-    private func cycleCategoryForward() {
-        let tags: [ClipboardTag?] = [nil] + availableTags
-        guard tags.count > 1 else { return }
-
-        let isFirstOpen = !previewWindow.isVisible
-        if isFirstOpen {
+        if wasFirstOpen {
             cancelPendingFirstOpen()
             openPopupNow()
         }
-
-        let currentIdx = tags.firstIndex(of: tagFilter) ?? 0
-        let nextIdx    = (currentIdx + 1) % tags.count
-        tagFilter = tags[nextIdx]
-
+        tagFilter = tags[idx]
+        selectionArmed = true
         previewVisible = true
         cycleCount += 1
         syncItemPreviewWithSelection()

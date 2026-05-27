@@ -247,7 +247,7 @@ struct PopoverPreviewView: View {
 
                     FlatHint(key: "V", label: "Next",
                              isActive: manager.popupHintV)
-                    FlatHint(key: "⇧V", label: "Category",
+                    FlatHint(key: "⇧V", label: "Prev",
                              isActive: manager.popupHintShiftV)
                     FlatHint(key: "X", label: "Transform",
                              enabled: auth.transformsEnabled,
@@ -599,14 +599,25 @@ struct TagFilterStrip: View {
     @ObservedObject private var manager = ClipboardManager.shared
 
     var body: some View {
+        // 1. Recents (default), 2. <first category>, 3. <second>, …
+        // Numbers ≤ 9 are key-bindable: ⌘1 → Recents, ⌘2 → first category, etc.
+        // Beyond 9 the prefix is dropped (no shortcut) — mouse-click only.
         let tags = manager.availableTags
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                TagFilterChip(tag: nil, selected: manager.tagFilter == nil) {
+                TagFilterChip(
+                    tag: nil,
+                    selected: manager.tagFilter == nil,
+                    shortcutNumber: 1
+                ) {
                     manager.tagFilter = nil
                 }
-                ForEach(tags, id: \.self) { tag in
-                    TagFilterChip(tag: tag, selected: manager.tagFilter == tag) {
+                ForEach(Array(tags.enumerated()), id: \.element) { idx, tag in
+                    TagFilterChip(
+                        tag: tag,
+                        selected: manager.tagFilter == tag,
+                        shortcutNumber: idx + 2 <= 9 ? idx + 2 : nil
+                    ) {
                         manager.tagFilter = (manager.tagFilter == tag) ? nil : tag
                     }
                 }
@@ -622,11 +633,17 @@ struct TagFilterStrip: View {
 struct TagFilterChip: View {
     let tag: ClipboardTag?
     let selected: Bool
+    var shortcutNumber: Int? = nil      // 1…9, used as ⌘N keybinding
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
+                if let n = shortcutNumber {
+                    Text("\(n).")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(selected ? .white.opacity(0.85) : .secondary.opacity(0.75))
+                }
                 Image(systemName: tag?.icon ?? "clock")
                     .font(.system(size: 9, weight: .semibold))
                 Text(tag?.label ?? "Recents")
@@ -677,20 +694,12 @@ struct PopoverRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
 
-            // ── Header: badge · type  ·  badge · ↵ ──────
+            // ── Header: type tags · diff badge · ↵ ──────
+            // The per-row number badge was removed: numbers now live on the
+            // category chips above (⌘1 → Recents, ⌘2 → first category, …)
+            // since ⌘1–9 now switches CATEGORY, not row.  V / ⇧V step through
+            // items in the current category instead.
             HStack(spacing: 8) {
-                // Plain row number. The ⌘1–9 binding is advertised by the
-                // "1–9 Pick" chip in the header strip; printing ⌘ on every
-                // badge was visual noise on top of that.
-                ZStack {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.12))
-                        .frame(width: 22, height: 18)
-                    Text("\(index + 1)")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(isSelected ? .white : .secondary)
-                }
-
                 ItemTagStrip(tags: item.tags, maxVisible: 4, style: .plainComma)
 
                 if let badge = item.diffBadge {
