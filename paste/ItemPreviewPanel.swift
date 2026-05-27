@@ -47,7 +47,12 @@ final class ItemPreviewPanel: NSPanel {
         if !isVisible { orderFront(nil) }
     }
 
-    func hide() { orderOut(nil) }
+    func hide() {
+        // Reset the SwiftUI tree first so AVPlayer / QLPreviewView get dismantled
+        // (and stop playing) before the panel disappears.
+        hostingView?.rootView = AnyView(EmptyView())
+        orderOut(nil)
+    }
 }
 
 private struct ItemPreviewView: View {
@@ -210,12 +215,22 @@ private struct AVMediaPreview: NSViewRepresentable {
         let view = AVPlayerView()
         view.controlsStyle = .floating
         view.videoGravity = .resizeAspect
+        // Create the player but do NOT call play() — user presses play manually.
         view.player = AVPlayer(url: url)
         return view
     }
 
     func updateNSView(_ view: AVPlayerView, context: Context) {
+        // Only swap the player when the URL actually changes to avoid restarting.
+        guard (view.player?.currentItem?.asset as? AVURLAsset)?.url != url else { return }
+        view.player?.pause()
         view.player = AVPlayer(url: url)
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        // Called when the panel is hidden — stop playback immediately.
+        view.player?.pause()
+        view.player = nil
     }
 }
 
@@ -224,13 +239,18 @@ private struct QuickLookFilePreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> QLPreviewView {
         let view = QLPreviewView(frame: .zero, style: .normal)!
-        view.autostarts = true
+        view.autostarts = false   // Do NOT auto-play audio/video inside QL previews.
         view.previewItem = url as NSURL
         return view
     }
 
     func updateNSView(_ view: QLPreviewView, context: Context) {
         view.previewItem = url as NSURL
+    }
+
+    static func dismantleNSView(_ view: QLPreviewView, coordinator: ()) {
+        // Clear the preview item when the panel is hidden so QL stops any playback.
+        view.previewItem = nil
     }
 }
 
