@@ -14,6 +14,12 @@ enum PDFTools {
         make("pdf.page-count", icon: "number.circle", label: "Page Count", group: "INFO") { pdf, _ in
             .text("\(pdf.pageCount) pages")
         },
+        // Interactive — `runAsync` here is a no-op placeholder; the real
+        // behaviour is intercepted in ClipboardManager.commitPaste, which
+        // opens the PageRangePanel instead of running this closure.
+        make("pdf.paste-pages", icon: "doc.text.below.ecg", label: "Paste Specific Pages", group: "TEXT") { pdf, _ in
+            .status("Pick pages in the panel.")
+        },
         make("pdf.pages-as-png", icon: "photo.stack", label: "Pages as PNG Images", group: "EXPORT") { pdf, data in
             await PDFService.exportPagesAsImages(from: pdf, originalData: data)
         },
@@ -42,6 +48,7 @@ enum PDFTools {
                 case "pdf.page-count": return "Show total page count"
                 case "pdf.pages-as-png": return "Export each page as a PNG image"
                 case "pdf.reduce-size": return "Create a smaller PDF copy"
+                case "pdf.paste-pages": return "Pick a page range, then paste"
                 default: return ""
                 }
             },

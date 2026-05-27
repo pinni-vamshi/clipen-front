@@ -247,6 +247,10 @@ class ClipboardManager: ObservableObject {
     let previewWindow  = PreviewOverlayWindow()
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
+    /// Activating sub-panel for the "Paste Specific Pages" PDF transform.
+    /// Opens with a real TextField + clickable page grid when the user picks
+    /// that tool during the X-transform cycle.
+    let pageRangePanel = PageRangePanel()
     /// Mirrors `AXIsProcessTrusted()`. Initialized synchronously so the
     /// onboarding screen doesn't flash on launch for users who already
     /// granted permission in a previous run. Refreshed by a 1Hz timer in
@@ -1665,6 +1669,32 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    /// Tell the polling capture loop that the *next* changeCount bump is our
+    /// own write (so it doesn't re-capture our paste as a new clipboard item).
+    /// Used by sub-panels (PageRangePanel, etc.) that write directly to
+    /// NSPasteboard from outside the regular paste flow.
+    func markPasteboardWriteAsOwn() {
+        lastChangeCount = NSPasteboard.general.changeCount
+    }
+
+    /// Post a synthetic ⌘V to the frontmost app.  Mirrors the handshake used
+    /// by commitSearchPaste / commitPopupSearchPaste so external panels share
+    /// one paste-simulation path.  Caller is responsible for restoring focus
+    /// to the original app BEFORE calling this.
+    func simulateCommandV() {
+        isSimulatingPaste = true
+        let src  = CGEventSource(stateID: .combinedSessionState)
+        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+        let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+        down?.flags = .maskCommand; up?.flags = .maskCommand
+        down?.post(tap: .cgAnnotatedSessionEventTap)
+        up?.post(tap: .cgAnnotatedSessionEventTap)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.isSimulatingPaste = false
+        }
+        AuthManager.shared.registerCommandVAction()
+    }
+
     /// Paste the selected inline-popup-search result.
     /// The popup is a non-activating panel so focus never left the target app;
     /// we just write to NSPasteboard and fire a simulated ⌘V.
@@ -1964,6 +1994,22 @@ class ClipboardManager: ObservableObject {
                 flashStatus("Selected tool is unavailable.")
                 return
             }
+
+            // Interactive transform: "Paste Specific Pages" needs a UI for the
+            // user to pick which pages.  Instead of running the tool's
+            // runAsync (which just returns a status placeholder), we open the
+            // PageRangePanel and let it do the paste handshake itself.
+            if selectedToolID == "pdf.paste-pages",
+               let input = PDFTools.pdfInput(for: item) {
+                let returnApp = NSWorkspace.shared.frontmostApplication
+                previewWindow.hide()
+                transformPanel.hide()
+                itemPreviewPanel.hide()
+                inTransformStage = false
+                pageRangePanel.show(pdf: input.pdf, sourceApp: returnApp)
+                return
+            }
+
             let isAsync  = ToolRegistry.isAsync(item: item, toolID: selectedToolID)
 
             if isAsync {
