@@ -273,7 +273,7 @@ struct TransformView: View {
             Spacer()
             Text(manager.inPageRangeMode
                  ? "↵ paste · ␣ preview · ⎋ cancel"
-                 : "⌘X cycle · release ⌘ apply")
+                 : "⌘X next · ⌘⇧X prev · release ⌘ apply")
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
         }

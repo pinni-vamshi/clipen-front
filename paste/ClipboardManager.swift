@@ -1085,6 +1085,31 @@ class ClipboardManager: ObservableObject {
             return nil
         }
 
+        // X — enter transform stage on first press, then cycle through
+        // tools.  Symmetric pair with V/⇧V:
+        //   ⌘X       → next transform tool (forward)
+        //   ⌘⇧X      → previous transform tool (backward) — only meaningful
+        //              once you're already in the transform stage; before
+        //              that, both X and ⇧X enter the stage on the first
+        //              tool, matching what users expect from the V pair.
+        if key == 7 && previewWindow.isVisible {
+            // Ignore key-repeat while holding X — one step per physical press.
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
+                return nil
+            }
+            let goBack = shift && !opt
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.selectionArmed else { return }
+                if self.inTransformStage {
+                    if goBack { self.cycleTransformBackward() }
+                    else      { self.cycleTransform() }
+                } else {
+                    self.enterTransformStage()
+                }
+            }
+            return nil
+        }
+
         // Other shortcuts require plain ⌘ — no shift, no opt.
         guard !shift && !opt else { return Unmanaged.passUnretained(event) }
 
@@ -1097,22 +1122,6 @@ class ClipboardManager: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 if self?.inTransformStage == true { self?.exitTransformStage() }
                 self?.selectCategoryByIndex(target)
-            }
-            return nil
-        }
-
-        if key == 7 && previewWindow.isVisible { // X — enter transform, then cycle
-            // Ignore key-repeat while holding X — one step per physical press.
-            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
-                return nil
-            }
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.selectionArmed else { return }
-                if self.inTransformStage {
-                    self.cycleTransform()
-                } else {
-                    self.enterTransformStage()
-                }
             }
             return nil
         }
@@ -1246,6 +1255,22 @@ class ClipboardManager: ObservableObject {
         // Unified cycling for ALL content types (text, richText, image, PDF, file)
         guard !transformDisplaysCache.isEmpty else { return }
         transformIndex = (transformIndex + 1) % transformDisplaysCache.count
+        updateTransformPanel()
+    }
+
+    /// ⌘⇧X — step one transform BACKWARD in the cached display list.
+    /// Mirrors cycleTransform's wrap (first ← last) so the user can nudge
+    /// in either direction without leaving the transform stage.  Same
+    /// guard set, same cache, same panel-refresh path.
+    private func cycleTransformBackward() {
+        guard inTransformStage, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        stageRevertTimer?.invalidate(); stageRevertTimer = nil
+        transformCycleCount += 1
+
+        guard !transformDisplaysCache.isEmpty else { return }
+        let n = transformDisplaysCache.count
+        // -1 % n is implementation-defined in Swift — compute explicitly.
+        transformIndex = (transformIndex - 1 + n) % n
         updateTransformPanel()
     }
 
