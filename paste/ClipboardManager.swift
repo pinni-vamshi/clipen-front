@@ -356,6 +356,9 @@ class ClipboardManager: ObservableObject {
     private var progressTimer: Timer?
     private var dismissStartTime: Date?
     private var permissionRetryTimer: Timer?
+    /// Exponential backoff for the permission-retry loop: 1s → 2s → … → 30s.
+    /// Reset to 1s on every fresh `attemptEventTap()`.
+    private var permissionRetryBackoff: TimeInterval = 1.0
     private var stageRevertTimer: Timer?
     /// Timer that fires `firstOpenDelay` seconds after the user's first ⌘V
     /// tap. If the user releases ⌘ before it fires we cancel and do a fast
@@ -716,22 +719,39 @@ class ClipboardManager: ObservableObject {
         // would each try to createEventTap and then leak.
         permissionRetryTimer?.invalidate()
         permissionRetryTimer = nil
+        // Reset backoff so a fresh attempt cycle starts at 1s, not 30s.
+        permissionRetryBackoff = 1.0
 
         if AXIsProcessTrusted() {
             createEventTap()
         } else {
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
             AXIsProcessTrustedWithOptions(opts as CFDictionary)
-            permissionRetryTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-                guard let self else { return }
-                if AXIsProcessTrusted() {
-                    self.permissionRetryTimer?.invalidate()
-                    self.permissionRetryTimer = nil
-                    self.createEventTap()
-                }
-            }
-            RunLoop.main.add(permissionRetryTimer!, forMode: .common)
+            scheduleNextPermissionRetry()
         }
+    }
+
+    /// Schedules a single retry of `AXIsProcessTrusted` with growing intervals.
+    /// 1s → 2s → 4s → 8s → 16s → 30s (capped).  When permission lands the
+    /// timer is invalidated immediately and the tap is created.  Keeping it
+    /// non-repeating means we can grow the interval each time without ever
+    /// having two timers racing.
+    private func scheduleNextPermissionRetry() {
+        let interval = min(permissionRetryBackoff, 30.0)
+        permissionRetryTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            if AXIsProcessTrusted() {
+                self.permissionRetryTimer?.invalidate()
+                self.permissionRetryTimer = nil
+                self.permissionRetryBackoff = 1.0
+                self.createEventTap()
+            } else {
+                // Still no permission — double the wait, up to 30s.
+                self.permissionRetryBackoff = min(self.permissionRetryBackoff * 2, 30.0)
+                self.scheduleNextPermissionRetry()
+            }
+        }
+        if let t = permissionRetryTimer { RunLoop.main.add(t, forMode: .common) }
     }
 
     /// Remove the existing tap from the run loop and disable it. Called

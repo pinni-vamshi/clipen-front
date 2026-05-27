@@ -526,6 +526,49 @@ struct MainWindowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // MARK: - Cycling-unavailable banner (Accessibility revoked / skipped)
+
+    private var cyclingUnavailableBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("⌘V cycling is unavailable")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.textPri)
+                Text("Clipen needs Accessibility permission to show the paste popup. History and double-click-to-paste still work.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.textSec)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Button {
+                NSWorkspace.shared.open(
+                    URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                )
+            } label: {
+                Text("Open Settings")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.orange, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10))
+        .overlay(
+            Rectangle()
+                .fill(Color.orange.opacity(0.35))
+                .frame(height: 1),
+            alignment: .bottom
+        )
+    }
+
     // MARK: - Main area
 
     @ViewBuilder
@@ -534,14 +577,29 @@ struct MainWindowView: View {
             if !manager.hasAccessibilityPermission && !hasSkippedAccessibility {
                 accessibilityContentView
             } else {
-                clipboardArea
-                    .onAppear {
-                        guard !hasSeenTutorial else { return }
-                        hasSeenTutorial = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                            showTutorial = true
-                        }
+                VStack(spacing: 0) {
+                    // Persistent banner: surfaces whenever ⌘V cycling can't work.
+                    // Triggers in two real cases:
+                    //   1. The user clicked "Skip" during onboarding.  The app
+                    //      still runs (history, search, double-click paste) but
+                    //      the popup gesture is dead.  Without this banner they
+                    //      would have no idea why ⌘V "doesn't work in Clipen."
+                    //   2. The user granted permission earlier, then revoked it
+                    //      (System Settings or a macOS update).  The 1-second
+                    //      AX poll already flips hasAccessibilityPermission to
+                    //      false; this banner makes that state visible.
+                    if !manager.hasAccessibilityPermission {
+                        cyclingUnavailableBanner
                     }
+                    clipboardArea
+                }
+                .onAppear {
+                    guard !hasSeenTutorial else { return }
+                    hasSeenTutorial = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        showTutorial = true
+                    }
+                }
             }
         }
         // When accessibility is granted while on that screen, auto-advance
