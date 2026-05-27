@@ -245,68 +245,81 @@ struct PopoverPreviewView: View {
 
                     Spacer()
 
-                    if manager.isPopupSearchActive {
-                        // When search is active, show a compact reminder only
-                        FlatHint(key: "F", label: "Close search",
-                                 isActive: false)
-                    } else {
-                        FlatHint(key: "V", label: "Next",
-                                 isActive: manager.popupHintV)
-                        FlatHint(key: "⇧V", label: "Category",
-                                 isActive: manager.popupHintShiftV)
-                        FlatHint(key: "X", label: "Transform",
-                                 enabled: auth.transformsEnabled,
-                                 isActive: manager.popupHintX)
-                        FlatHint(key: "F", label: "Search",
-                                 isActive: false)
-                        SpaceKeyFlatHint(label: "Preview",
-                                         isActive: manager.popupHintSpace)
-                        FlatHint(key: "⌘",
-                                 label: manager.selectionArmed ? "Paste" : "Dismiss",
-                                 isActive: manager.popupHintCmd,
-                                 idleKeyColor: manager.selectionArmed ? .green : .secondary,
-                                 idleLabelColor: manager.selectionArmed ? .green : .secondary)
-                    }
+                    FlatHint(key: "V", label: "Next",
+                             isActive: manager.popupHintV)
+                    FlatHint(key: "⇧V", label: "Category",
+                             isActive: manager.popupHintShiftV)
+                    FlatHint(key: "X", label: "Transform",
+                             enabled: auth.transformsEnabled,
+                             isActive: manager.popupHintX)
+                    SpaceKeyFlatHint(label: "Preview",
+                                     isActive: manager.popupHintSpace)
+                    FlatHint(key: "⌘",
+                             label: manager.selectionArmed ? "Paste" : "Dismiss",
+                             isActive: manager.popupHintCmd,
+                             idleKeyColor: manager.selectionArmed ? .green : .secondary,
+                             idleLabelColor: manager.selectionArmed ? .green : .secondary)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
 
-                // ── Inline search text box (between header and category strip) ──
-                // Toggled by ⌘F. Thin, compact — sits between Clipen heading row
-                // and the category chips. Typed characters route through the
-                // event tap so the popup never needs to steal focus.
-                if manager.isPopupSearchActive {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.accentColor)
-                        Group {
+                // ── Inline search text box (always visible) ──
+                // Sits between the Clipen heading row and the category strip.
+                // Idle state: shows "⌘F · Search your copied items" as
+                // placeholder text — no border highlight.
+                // Active state (⌘F pressed): accent-colored border + caret;
+                // typed characters route through the event tap so the popup
+                // never has to steal focus. Popup dismiss timer is frozen
+                // while typing so the user can take their time.
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(manager.isPopupSearchActive
+                                         ? .accentColor
+                                         : .secondary.opacity(0.55))
+                    Group {
+                        if manager.isPopupSearchActive {
                             if manager.popupSearchQuery.isEmpty {
-                                Text("Type to search clipboard…")
-                                    .foregroundColor(.secondary.opacity(0.5))
+                                Text("Type to search… ⎋ to cancel")
+                                    .foregroundColor(.secondary.opacity(0.55))
                             } else {
                                 Text(manager.popupSearchQuery + "▌")
                                     .foregroundColor(.primary)
                             }
+                        } else {
+                            HStack(spacing: 4) {
+                                Text("Press")
+                                Text("⌘F")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.primary.opacity(0.08),
+                                                in: RoundedRectangle(cornerRadius: 3))
+                                Text("to search your copied items")
+                            }
+                            .foregroundColor(.secondary.opacity(0.55))
                         }
-                        .font(.system(size: 12))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .lineLimit(1)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.primary.opacity(0.06))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(Color.accentColor.opacity(0.45), lineWidth: 1)
-                    )
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 6)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .font(.system(size: 12))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(1)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.primary.opacity(manager.isPopupSearchActive ? 0.06 : 0.03))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(manager.isPopupSearchActive
+                                ? Color.accentColor.opacity(0.45)
+                                : Color.primary.opacity(0.08),
+                                lineWidth: 1)
+                )
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
+                .animation(.easeInOut(duration: 0.15), value: manager.isPopupSearchActive)
 
                 // Category strip — horizontal scrolling list of category
                 // pills the user can click to filter the ring. "Recents"

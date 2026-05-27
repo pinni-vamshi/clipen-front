@@ -816,6 +816,12 @@ class ClipboardManager: ObservableObject {
             let hasCmd = event.flags.contains(.maskCommand)
             notePopupHintModifiers(cmd: hasCmd, shift: event.flags.contains(.maskShift))
             if !hasCmd {
+                // If search mode is active, the user is typing — ⌘ release must
+                // NOT close the popup or trigger a paste. Search ends only via
+                // ⎋ or ↵ (commit). Pass the event through and stay open.
+                if isPopupSearchActive && previewWindow.isVisible {
+                    return Unmanaged.passUnretained(event)
+                }
                 // Release-while-pending cases:
                 //  • pendingFirstOpen → fast-paste front item, no popup
                 //  • popup visible + armed → commit paste
@@ -868,6 +874,8 @@ class ClipboardManager: ObservableObject {
                     guard let self else { return }
                     if self.popupSearchQuery.isEmpty {
                         self.isPopupSearchActive = false
+                        self.timerFrozen = false
+                        self.scheduleDismissTimer()
                     } else {
                         self.popupSearchQuery = ""
                         self.popupSearchSelectedIndex = 0
@@ -1026,9 +1034,16 @@ class ClipboardManager: ObservableObject {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.isPopupSearchActive.toggle()
-                    if !self.isPopupSearchActive {
+                    if self.isPopupSearchActive {
+                        // Freeze dismiss timer while the user is typing.
+                        self.dismissTimer?.invalidate(); self.dismissTimer = nil
+                        self.timerFrozen = true
+                    } else {
+                        // Search cancelled — clear query and resume normal timer.
                         self.popupSearchQuery = ""
                         self.popupSearchSelectedIndex = 0
+                        self.timerFrozen = false
+                        self.scheduleDismissTimer()
                     }
                 }
                 return nil
