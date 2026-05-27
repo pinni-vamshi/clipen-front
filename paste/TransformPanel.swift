@@ -75,19 +75,16 @@ class TransformPanel: NSPanel {
             hostingView = hv
         }
 
-        // Force a layout pass BEFORE asking for fittingSize, otherwise
-        // SwiftUI returns stale numbers when the rootView was just swapped
-        // (e.g. transform-list → page-range picker) and the new content has
-        // a very different intrinsic height.  Without this the panel keeps
-        // the OLD list's height and the picker's footer (Enter/Space hints)
-        // ends up clipped below the visible frame.
+        // Force a layout pass BEFORE asking for fittingSize so the new
+        // rootView's intrinsic height is what we actually use (otherwise
+        // we'd see the pre-swap height when entering page-range mode).
+        // The picker is now rendered INLINE inside the scrollable tool
+        // list — overflow scrolls within the panel, no need to grow the
+        // panel itself.  Keeps the panel feeling like a stable Transforms
+        // panel that just has one tool currently expanded.
         hostingView?.layoutSubtreeIfNeeded()
         let measured = hostingView?.fittingSize.height ?? 0
-        // In page-range mode guarantee enough room for header + query input
-        // + a useful grid + footer; otherwise rely on the SwiftUI fittingSize
-        // with the historical 560 fallback / 620 cap.
-        let minHeight: CGFloat = ClipboardManager.shared.inPageRangeMode ? 440 : 0
-        let h = min(max(measured > 0 ? measured : 560, minHeight), 620)
+        let h = min(max(measured > 0 ? measured : 560, 360), 620)
 
         var x = placeRight ? preferredRightX : leftX
         x = max(screen.minX + 8, x)
@@ -229,15 +226,16 @@ struct TransformView: View {
                 detectedBadge(label: label)
                 Divider()
             }
-            // ── Middle: swaps between tool list and picker ──
-            if manager.inPageRangeMode {
-                InlinePagePicker()
-            } else {
-                middleToolList
-            }
+            // ── Middle: the tool list is ALWAYS shown.  When the user has
+            // activated "Paste Specific Pages", the picker UI expands
+            // INLINE under that row — every other tool option stays visible
+            // and the user keeps the full transform context.  Same pattern
+            // would apply to any future interactive transform.
+            middleToolList
             Divider()
-            // Footer line updates to match mode.
-            Text(manager.inPageRangeMode ? "Pick pages — ↵ paste · ␣ preview · ⎋ cancel" : stats)
+            // Footer always shows the item's stats — the picker's keybindings
+            // are advertised in the header (top-right) so we don't duplicate.
+            Text(stats)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -254,15 +252,17 @@ struct TransformView: View {
     // MARK: - Outer chrome (always-on)
 
     private var outerHeader: some View {
+        // Always renders the Transforms label — the picker now lives INLINE
+        // under its tool row, so the header doesn't need to change context.
         HStack(spacing: 6) {
-            Image(systemName: manager.inPageRangeMode ? "doc.text.below.ecg" : "wand.and.stars")
+            Image(systemName: "wand.and.stars")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(manager.inPageRangeMode ? .accentColor : .secondary)
-            Text(manager.inPageRangeMode ? "Paste Specific Pages" : "Transforms")
+                .foregroundColor(.secondary)
+            Text("Transforms")
                 .font(.system(size: 12, weight: .semibold))
             Spacer()
             Text(manager.inPageRangeMode
-                 ? "\(manager.pageRangePageCount) page\(manager.pageRangePageCount == 1 ? "" : "s") in PDF"
+                 ? "↵ paste · ␣ preview · ⎋ cancel"
                  : "⌘X cycle · release ⌘ apply")
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
@@ -318,6 +318,31 @@ struct TransformView: View {
                                 isProcessing: idx == selectedTransformIndex && isProcessing
                             )
                             .id(idx)
+
+                            // INLINE picker — nested directly under its tool row.
+                            // Only renders for the "pdf.paste-pages" row, and
+                            // only while the user has activated that picker
+                            // (manager.inPageRangeMode == true).  Every other
+                            // tool above and below stays visible — the user
+                            // doesn't lose the transform context.
+                            if display.id == "pdf.paste-pages" && manager.inPageRangeMode {
+                                InlinePagePicker()
+                                    .padding(.leading, 36) // align under the tool row's label
+                                    .padding(.trailing, 8)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.accentColor.opacity(0.05))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
+                                    )
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 4)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+
                             if idx < displays.count - 1 {
                                 Divider().padding(.leading, 36)
                             }
@@ -325,6 +350,7 @@ struct TransformView: View {
                     }
                     .padding(.vertical, 6)
                     .padding(.horizontal, 8)
+                    .animation(.easeInOut(duration: 0.15), value: manager.inPageRangeMode)
                 }
                 .onChange(of: selectedTransformIndex) { _, newIdx in
                     guard displays.indices.contains(newIdx) else { return }
