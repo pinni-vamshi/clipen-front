@@ -177,6 +177,11 @@ struct TransformView: View {
     let selectedTransformIndex: Int
     let isProcessing:           Bool
     let onDismiss:              () -> Void
+    /// Observed so we can swap the body to the inline page-picker when the
+    /// user activates the "Paste Specific Pages" transform — the panel's
+    /// hosting view is set up once per show(), but the content reacts to
+    /// manager state changes here.
+    @ObservedObject private var manager = ClipboardManager.shared
 
     private var stats: String {
         guard let text = previewText else {
@@ -200,6 +205,22 @@ struct TransformView: View {
     }
 
     var body: some View {
+        if manager.inPageRangeMode {
+            // Picker takes over the whole panel — header included — because
+            // the user is now in a different mode entirely.  Its own header
+            // explains the context ("Pick pages to paste").
+            InlinePagePicker()
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                )
+        } else {
+            transformListBody
+        }
+    }
+
+    private var transformListBody: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "wand.and.stars")

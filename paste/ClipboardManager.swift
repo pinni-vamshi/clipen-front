@@ -247,10 +247,6 @@ class ClipboardManager: ObservableObject {
     let previewWindow  = PreviewOverlayWindow()
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
-    /// Activating sub-panel for the "Paste Specific Pages" PDF transform.
-    /// Opens with a real TextField + clickable page grid when the user picks
-    /// that tool during the X-transform cycle.
-    let pageRangePanel = PageRangePanel()
     /// Mirrors `AXIsProcessTrusted()`. Initialized synchronously so the
     /// onboarding screen doesn't flash on launch for users who already
     /// granted permission in a previous run. Refreshed by a 1Hz timer in
@@ -406,6 +402,31 @@ class ClipboardManager: ObservableObject {
     @Published var popupSearchQuery: String = ""
     /// Highlighted row index within popupSearchResults.
     @Published var popupSearchSelectedIndex: Int = 0
+
+    // MARK: - Inline page-range picker state ("Paste Specific Pages")
+    /// True while the page-picker has replaced the tool list in TransformPanel.
+    /// Keystrokes (digits / dash / comma / backspace / arrows / space / return / esc)
+    /// are routed through the CGEventTap to update the state below.  Mouse clicks
+    /// on the page grid go directly through SwiftUI buttons.
+    @Published var inPageRangeMode: Bool = false
+    /// Live range query, e.g. "1-3, 5, 7-9".  Built character-by-character via the
+    /// event tap; the SwiftUI view treats it as read-only display text.
+    @Published var pageRangeQuery: String = ""
+    /// Pages clicked individually in the grid (0-indexed).  Final selection is the
+    /// union of `pageRangeQuery`'s parsed range and this set.
+    @Published var pageRangeManualPages: Set<Int> = []
+    /// Total page count of the active PDF — published so the view doesn't have to
+    /// keep a reference to the PDFDocument itself.
+    @Published var pageRangePageCount: Int = 0
+    /// PDF being picked from.  Strong-held while in page-range mode.
+    private var pageRangePDF: PDFDocument?
+
+    /// Union of typed-range pages and manually-clicked pages.  This is what the
+    /// grid uses for highlight state and what `commitPageRangePaste` extracts.
+    var pageRangeEffectiveSelection: Set<Int> {
+        PageRangeParser.parse(pageRangeQuery, maxPage: pageRangePageCount)
+            .union(pageRangeManualPages)
+    }
 
     /// Search overlay (main window + standalone overlay) — capped at 8.
     /// Hybrid scorer handles lexical + semantic + recency in one pass.
@@ -823,10 +844,10 @@ class ClipboardManager: ObservableObject {
             let hasCmd = event.flags.contains(.maskCommand)
             notePopupHintModifiers(cmd: hasCmd, shift: event.flags.contains(.maskShift))
             if !hasCmd {
-                // If search mode is active, the user is typing — ⌘ release must
-                // NOT close the popup or trigger a paste. Search ends only via
-                // ⎋ or ↵ (commit). Pass the event through and stay open.
-                if isPopupSearchActive && previewWindow.isVisible {
+                // If search OR page-range picker is active, the user is typing
+                // / picking — ⌘ release must NOT close the popup or trigger a
+                // paste.  Both modes end only via ⎋ or ↵.
+                if (isPopupSearchActive || inPageRangeMode) && previewWindow.isVisible {
                     return Unmanaged.passUnretained(event)
                 }
                 // Release-while-pending cases:
@@ -868,6 +889,59 @@ class ClipboardManager: ObservableObject {
         let shift = flags.contains(.maskShift)
         let opt   = flags.contains(.maskAlternate)
         let ctrl  = flags.contains(.maskControl)
+
+        // ── Inline page-range picker routing ───────────────────────────────
+        // When the "Paste Specific Pages" picker is active we intercept ALL
+        // non-⌘ keystrokes and route them to pageRangeQuery (typed digits,
+        // dashes, commas) or to actions (return, escape, space-preview).
+        // Mouse clicks on page-grid buttons are handled by SwiftUI directly.
+        if inPageRangeMode && !cmd {
+            switch key {
+            case 53: // Esc — clear query first; second Esc exits page-range mode
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if !self.pageRangeQuery.isEmpty || !self.pageRangeManualPages.isEmpty {
+                        self.pageRangeQuery = ""
+                        self.pageRangeManualPages = []
+                    } else {
+                        self.exitPageRangeMode()
+                    }
+                }
+                return nil
+            case 51: // ⌫ Backspace
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if !self.pageRangeQuery.isEmpty { self.pageRangeQuery.removeLast() }
+                }
+                return nil
+            case 36, 76: // Return / Enter — commit paste
+                DispatchQueue.main.async { [weak self] in self?.commitPageRangePaste() }
+                return nil
+            case 49:     // Space — toggle inline preview of would-be-pasted text
+                DispatchQueue.main.async { [weak self] in self?.showPageRangePreview() }
+                return nil
+            default:
+                // Accept digits, dash, and comma only — silently drop everything else.
+                var length: Int = 0
+                var chars = [UniChar](repeating: 0, count: 4)
+                event.keyboardGetUnicodeString(maxStringLength: 4,
+                                               actualStringLength: &length,
+                                               unicodeString: &chars)
+                guard length > 0 else { return nil }
+                let typed = String(utf16CodeUnits: Array(chars.prefix(length)), count: length)
+                let filtered = typed.filter { c in
+                    c.isNumber || c == "-" || c == "," || c == " "
+                }
+                if !filtered.isEmpty {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.pageRangeQuery += filtered
+                    }
+                }
+                // Swallow everything in page-range mode so stray keystrokes
+                // never reach the target app.
+                return nil
+            }
+        }
 
         // ── Inline popup search routing ────────────────────────────────────
         // When the search bar inside the popup is active we intercept ALL
@@ -1669,6 +1743,122 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    // MARK: - Inline page-range picker control
+
+    /// Switch the TransformPanel from its tool list into the page-picker view.
+    /// Keeps the popup + transform panel visible so the user has continuous
+    /// context; freezes the dismiss timer because typing the range takes
+    /// time and a silent dismiss mid-edit would feel broken.
+    func enterPageRangeMode(pdf: PDFDocument, item: ClipboardItem) {
+        pageRangePDF        = pdf
+        pageRangePageCount  = pdf.pageCount
+        pageRangeQuery      = ""
+        pageRangeManualPages = []
+        inPageRangeMode     = true
+
+        // Freeze auto-dismiss — same trick as popup-search.
+        dismissTimer?.invalidate(); dismissTimer = nil
+        timerFrozen = true
+
+        // Re-render the transform panel in picker mode.  It's still anchored
+        // to the same item / selected-row, so we just call show() again with
+        // the cached displays — the inline view inside will switch its body
+        // because it observes manager.inPageRangeMode.
+        let displays = transformDisplaysCache.isEmpty
+            ? ToolRegistry.displays(for: item)
+            : transformDisplaysCache
+        let anchor   = previewWindow.selectedRowAnchorPoint(
+            selectedIndex: selectedIndex,
+            totalItems:    displayItems.count
+        )
+        transformPanel.show(for: item,
+                            near: previewWindow.frame,
+                            anchorPoint: anchor,
+                            selectedTransformIndex: transformIndex,
+                            isProcessing: false,
+                            displaysOverride: displays)
+    }
+
+    func exitPageRangeMode() {
+        inPageRangeMode      = false
+        pageRangeQuery       = ""
+        pageRangeManualPages = []
+        pageRangePageCount   = 0
+        pageRangePDF         = nil
+        itemPreviewPanel.hide()
+        // Resume the dismiss countdown.
+        timerFrozen = false
+        scheduleDismissTimer()
+    }
+
+    func togglePageRangeManualPage(_ index: Int) {
+        if pageRangeManualPages.contains(index) {
+            pageRangeManualPages.remove(index)
+        } else {
+            pageRangeManualPages.insert(index)
+        }
+    }
+
+    /// Extract text from the union-selection pages, write to pasteboard,
+    /// close everything, fire ⌘V.  Target app focus was never lost (popup is
+    /// non-activating) so we don't need to re-activate it explicitly.
+    func commitPageRangePaste() {
+        let pages = pageRangeEffectiveSelection.sorted()
+        guard !pages.isEmpty, let pdf = pageRangePDF else { return }
+        let combined = Self.extractPageText(pdf: pdf, pages: pages)
+        guard !combined.isEmpty else { exitPageRangeMode(); return }
+
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(combined, forType: .string)
+        markPasteboardWriteAsOwn()
+
+        exitPageRangeMode()
+        previewWindow.hide()
+        transformPanel.hide()
+        itemPreviewPanel.hide()
+        inTransformStage = false
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.simulateCommandV()
+        }
+    }
+
+    /// Build a transient ClipboardItem of the would-be-pasted text and show
+    /// it in the existing ItemPreviewPanel, anchored next to the transform
+    /// panel.  Same Quick-Look-style preview the user already gets via Space
+    /// on regular popup rows.
+    func showPageRangePreview() {
+        let pages = pageRangeEffectiveSelection.sorted()
+        guard !pages.isEmpty, let pdf = pageRangePDF else {
+            itemPreviewPanel.hide()
+            return
+        }
+        let combined = Self.extractPageText(pdf: pdf, pages: pages)
+        guard !combined.isEmpty else {
+            itemPreviewPanel.hide()
+            return
+        }
+        // Toggle: second space dismisses, like the regular row preview.
+        if itemPreviewPanel.isVisible {
+            itemPreviewPanel.hide()
+            return
+        }
+        let previewItem = ClipboardItem(content: .text(combined))
+        itemPreviewPanel.show(for: previewItem, near: transformPanel.frame)
+    }
+
+    /// Extract and join text from the given 0-indexed PDF pages.
+    private static func extractPageText(pdf: PDFDocument, pages: [Int]) -> String {
+        let chunks: [String] = pages.compactMap { idx in
+            guard idx >= 0, idx < pdf.pageCount,
+                  let str = pdf.page(at: idx)?.string else { return nil }
+            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return chunks.joined(separator: "\n\n")
+    }
+
     /// Tell the polling capture loop that the *next* changeCount bump is our
     /// own write (so it doesn't re-capture our paste as a new clipboard item).
     /// Used by sub-panels (PageRangePanel, etc.) that write directly to
@@ -1951,6 +2141,13 @@ class ClipboardManager: ObservableObject {
         isPopupSearchActive = false
         popupSearchQuery = ""
         popupSearchSelectedIndex = 0
+        // Reset page-range state too — no half-typed picker should outlive
+        // a dismiss.
+        inPageRangeMode = false
+        pageRangeQuery = ""
+        pageRangeManualPages = []
+        pageRangePageCount = 0
+        pageRangePDF = nil
     }
 
     /// Returns the BOTTOM-LEFT of the AX element's frame in AppKit coords.
@@ -1995,18 +2192,16 @@ class ClipboardManager: ObservableObject {
                 return
             }
 
-            // Interactive transform: "Paste Specific Pages" needs a UI for the
-            // user to pick which pages.  Instead of running the tool's
-            // runAsync (which just returns a status placeholder), we open the
-            // PageRangePanel and let it do the paste handshake itself.
+            // Interactive transform: "Paste Specific Pages" needs a picker UI
+            // inside the existing TransformPanel.  Instead of running the
+            // tool's runAsync, swap the transform panel into page-range mode
+            // and leave the popup open.  All input (digits, dash, comma,
+            // return, escape, space-preview) flows through the CGEventTap
+            // just like the popup search bar does — the non-activating panel
+            // never has to steal focus from the target app.
             if selectedToolID == "pdf.paste-pages",
                let input = PDFTools.pdfInput(for: item) {
-                let returnApp = NSWorkspace.shared.frontmostApplication
-                previewWindow.hide()
-                transformPanel.hide()
-                itemPreviewPanel.hide()
-                inTransformStage = false
-                pageRangePanel.show(pdf: input.pdf, sourceApp: returnApp)
+                enterPageRangeMode(pdf: input.pdf, item: item)
                 return
             }
 
