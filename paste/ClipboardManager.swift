@@ -912,10 +912,20 @@ class ClipboardManager: ObservableObject {
                 }
                 return nil
             case 36, 76: // Return / Enter — commit paste
-                DispatchQueue.main.async { [weak self] in self?.commitPageRangePaste() }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    let n = self.pageRangeEffectiveSelection.count
+                    NSLog("[Clipen] page-picker Enter pressed; selection=\(n) pages")
+                    self.commitPageRangePaste()
+                }
                 return nil
             case 49:     // Space — toggle inline preview of would-be-pasted text
-                DispatchQueue.main.async { [weak self] in self?.showPageRangePreview() }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    let n = self.pageRangeEffectiveSelection.count
+                    NSLog("[Clipen] page-picker Space pressed; selection=\(n) pages; previewVisible=\(self.itemPreviewPanel.isVisible)")
+                    self.showPageRangePreview()
+                }
                 return nil
             default:
                 // Accept digits, dash, and comma only — silently drop everything else.
@@ -1773,6 +1783,8 @@ class ClipboardManager: ObservableObject {
         dismissTimer?.invalidate(); dismissTimer = nil
         timerFrozen = true
 
+        flashStatus("Pick pages — type or click, ↵ to paste")
+
         // Force the transform panel to re-render with the picker view AND
         // re-measure its height.  The picker is taller than a typical
         // transform list, so without this the footer (Enter/Space/Esc hints)
@@ -2236,10 +2248,16 @@ class ClipboardManager: ObservableObject {
             // return, escape, space-preview) flows through the CGEventTap
             // just like the popup search bar does — the non-activating panel
             // never has to steal focus from the target app.
-            if selectedToolID == "pdf.paste-pages",
-               let input = PDFTools.pdfInput(for: item) {
-                enterPageRangeMode(pdf: input.pdf, item: item)
-                return
+            if selectedToolID == "pdf.paste-pages" {
+                if let input = PDFTools.pdfInput(for: item) {
+                    NSLog("[Clipen] commitPaste intercept → enterPageRangeMode (pages=\(input.pdf.pageCount))")
+                    enterPageRangeMode(pdf: input.pdf, item: item)
+                    return
+                } else {
+                    NSLog("[Clipen] commitPaste intercept FAILED: pdfInput returned nil for item content=\(item.content)")
+                    flashStatus("Couldn't open PDF for page picker.")
+                    return
+                }
             }
 
             let isAsync  = ToolRegistry.isAsync(item: item, toolID: selectedToolID)
