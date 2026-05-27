@@ -400,34 +400,15 @@ class ClipboardManager: ObservableObject {
     /// Highlighted row index within popupSearchResults.
     @Published var popupSearchSelectedIndex: Int = 0
 
-    /// Semantic-then-substring search results, capped at 8 for the overlay.
+    /// Search overlay (main window + standalone overlay) — capped at 8.
+    /// Hybrid scorer handles lexical + semantic + recency in one pass.
     var searchResults: [ClipboardItem] {
-        let q = searchQuery.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return [] }
-        if AuthManager.shared.semanticSearch {
-            let sem = semanticSearch(query: q)
-            if !sem.isEmpty { return Array(sem.prefix(8)) }
-        }
-        return items.filter {
-            $0.textForEmbedding?.localizedCaseInsensitiveContains(q) == true
-                || $0.previewText.localizedCaseInsensitiveContains(q)
-                || $0.metadataSummary?.localizedCaseInsensitiveContains(q) == true
-        }.prefix(8).map { $0 }
+        Array(hybridSearch(query: searchQuery).prefix(8))
     }
 
-    /// Inline popup search results — same semantic engine, capped at 5 (fits popup height).
+    /// Inline popup search results — capped at 5 (fits popup height).
     var popupSearchResults: [ClipboardItem] {
-        let q = popupSearchQuery.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return [] }
-        if AuthManager.shared.semanticSearch {
-            let sem = semanticSearch(query: q)
-            if !sem.isEmpty { return Array(sem.prefix(5)) }
-        }
-        return items.filter {
-            $0.textForEmbedding?.localizedCaseInsensitiveContains(q) == true
-                || $0.previewText.localizedCaseInsensitiveContains(q)
-                || $0.metadataSummary?.localizedCaseInsensitiveContains(q) == true
-        }.prefix(5).map { $0 }
+        Array(hybridSearch(query: popupSearchQuery).prefix(5))
     }
 
     private init() {
@@ -2140,47 +2121,160 @@ class ClipboardManager: ObservableObject {
         commitPaste()
     }
 
-    // MARK: - Semantic search
+    // MARK: - Hybrid search (lexical + semantic + recency)
 
-    /// Cached last query → result so SwiftUI views that call this twice per
-    /// render (e.g. once for `filtered` and once for the "Semantic" badge
-    /// in the search bar) don't pay for the embedding + similarity scan
-    /// twice. The embedding step alone is a 5–15ms ANE round-trip.
-    private var lastSemanticQuery: String?
-    private var lastSemanticResult: [ClipboardItem] = []
-    private var lastSemanticItemsRev: Int = -1   // changes with every items mutation
+    // Cache key combines query, item count, AND embedded-item count so that
+    // results refresh once background-embedding finishes filling in vectors.
+    private var lastSearchQuery: String?
+    private var lastSearchResult: [ClipboardItem] = []
+    private var lastSearchItemsRev: Int = -1
+    private var lastSearchEmbedRev: Int = -1
 
-    func semanticSearch(query: String) -> [ClipboardItem] {
-        guard AuthManager.shared.semanticSearch else {
-            lastSemanticQuery = query
-            lastSemanticResult = []
-            lastSemanticItemsRev = items.count
-            return []
+    /// Production search: blends LEXICAL (exact-phrase + per-token), SEMANTIC
+    /// (sentence-embedding cosine), and RECENCY into a single combined score.
+    ///
+    /// Why this design (vs. plain semantic):
+    ///   • A user typing "pdf" expects a PDF file to rank above an
+    ///     abstractly-related text item. Pure semantic search fails this
+    ///     because short-query embeddings are noisy.
+    ///   • Per-field weighting puts what the user actually SEES first
+    ///     (previewText) above hidden metadata.
+    ///   • Recency is a tiny tiebreaker — among equally relevant items,
+    ///     the one copied an hour ago beats one copied 2 weeks ago.
+    ///
+    /// Weights (chosen so lex wins on literal matches but sem dominates
+    /// when only meaning matches):
+    ///   combined = 0.55·lex + 0.40·sem + recency (max 0.08)
+    func hybridSearch(query: String) -> [ClipboardItem] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty, q.count >= 2 else { return [] }
+
+        let embeddedCount = items.reduce(0) { $1.embedding == nil ? $0 : $0 + 1 }
+        if q == lastSearchQuery
+            && items.count == lastSearchItemsRev
+            && embeddedCount == lastSearchEmbedRev {
+            return lastSearchResult
         }
 
-        // Hit the cache if the query AND the underlying items haven't changed.
-        if query == lastSemanticQuery && items.count == lastSemanticItemsRev {
-            return lastSemanticResult
+        // Normalise once (strip diacritics + lowercase) so "café" matches "cafe".
+        let qNorm = Self.normalize(q)
+        let qTokens: [String] = Set(
+            qNorm.components(separatedBy: CharacterSet.alphanumerics.inverted)
+                 .filter { $0.count >= 2 }
+        ).sorted()  // deterministic order doesn't matter functionally; helps debugging
+
+        // Query embedding — only computed once per query, not once per item.
+        var queryVec: [Float]? = nil
+        if AuthManager.shared.semanticSearch,
+           let emb = nlEmbedding,
+           let v = emb.vector(for: qNorm) {
+            queryVec = v.map { Float($0) }
         }
 
-        guard query.count >= 2,
-              let emb = nlEmbedding,
-              let queryVec = emb.vector(for: query)?.map({ Float($0) }) else {
-            lastSemanticQuery = query
-            lastSemanticResult = []
-            lastSemanticItemsRev = items.count
-            return []
+        let now = Date()
+        var scored: [(ClipboardItem, Float)] = []
+        scored.reserveCapacity(items.count)
+
+        for item in items {
+            let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, item: item)
+            let sem = Self.semanticComponent(queryVec: queryVec, item: item, cosine: cosineSimilarity)
+            let rec = Self.recencyBoost(item: item, now: now)
+
+            // Combined score — bounded roughly to [0, 1.08].
+            let combined = 0.55 * lex + 0.40 * sem + rec
+
+            // Threshold: needs either a partial lexical hit (~0.27 lex alone)
+            // or a strong semantic match (~0.38 sem alone) to clear the bar.
+            // Tuned for "few false positives" — better to miss a marginal item
+            // than to surface garbage above real matches.
+            if combined >= 0.15 {
+                scored.append((item, combined))
+            }
         }
-        let scored: [(ClipboardItem, Float)] = items.compactMap { item in
-            guard let vec = item.embedding else { return nil }
-            let score = cosineSimilarity(queryVec, vec)
-            return score > 0.25 ? (item, score) : nil
-        }
+
         let sorted = scored.sorted { $0.1 > $1.1 }.map { $0.0 }
-        lastSemanticQuery = query
-        lastSemanticResult = sorted
-        lastSemanticItemsRev = items.count
+        lastSearchQuery = q
+        lastSearchResult = sorted
+        lastSearchItemsRev = items.count
+        lastSearchEmbedRev = embeddedCount
         return sorted
+    }
+
+    /// Back-compat alias for older call sites — same return semantics.
+    func semanticSearch(query: String) -> [ClipboardItem] { hybridSearch(query: query) }
+
+    // MARK: Scoring helpers (pure functions — easy to reason about)
+
+    /// Lowercase + strip diacritics so accent-insensitive matching works.
+    private static func normalize(_ s: String) -> String {
+        s.lowercased().applyingTransform(.stripDiacritics, reverse: false) ?? s.lowercased()
+    }
+
+    /// LEXICAL score in [0, 1]. Considers exact-phrase and per-token matches
+    /// across THREE haystacks, each with its own weight reflecting how visible
+    /// it is to the user:
+    ///   • previewText      — what shows in the row (weight 1.00)
+    ///   • textForEmbedding — full text + metadata sentence (weight 0.70)
+    ///   • metadataSummary  — type/size/dims string (weight 0.55)
+    ///
+    /// Within each haystack:
+    ///   • full query as a substring → +1.0 (capped at the haystack weight)
+    ///   • else fraction of query tokens present
+    ///   • +0.15 bonus if the FIRST token starts a word (prefix match)
+    ///
+    /// We take the MAX across haystacks rather than summing because the same
+    /// match shouldn't be triple-counted just because it shows up in the
+    /// preview AND the embedding text AND the metadata.
+    private static func lexicalScore(query: String, tokens: [String], item: ClipboardItem) -> Float {
+        let haystacks: [(String, Float)] = [
+            (normalize(item.previewText),                  1.00),
+            (normalize(item.textForEmbedding ?? ""),       0.70),
+            (normalize(item.metadataSummary ?? ""),        0.55),
+        ]
+
+        var best: Float = 0
+        for (text, weight) in haystacks {
+            guard !text.isEmpty else { continue }
+            var score: Float = 0
+
+            // Tier 1: exact phrase
+            if !query.isEmpty && text.contains(query) {
+                score = 1.0
+            } else if !tokens.isEmpty {
+                // Tier 2: fraction of tokens that appear
+                var hits = 0
+                for t in tokens where text.contains(t) { hits += 1 }
+                score = Float(hits) / Float(tokens.count)
+
+                // Tier 2b: word-boundary bonus for the first token
+                if let first = tokens.first,
+                   score > 0,
+                   text.hasPrefix(first) || text.contains(" " + first) {
+                    score = min(1.0, score + 0.15)
+                }
+            }
+            best = max(best, score * weight)
+        }
+        return best
+    }
+
+    /// SEMANTIC score in [0, 1]. Cosine similarity normalised so 0.3 → 0
+    /// and 0.8 → 1.0 (below 0.3 is noise; above 0.8 is essentially identical
+    /// meaning). Returns 0 when either side has no embedding.
+    private static func semanticComponent(queryVec: [Float]?,
+                                          item: ClipboardItem,
+                                          cosine: ([Float], [Float]) -> Float) -> Float {
+        guard let qv = queryVec, let iv = item.embedding else { return 0 }
+        let cos = cosine(qv, iv)
+        return max(0, min(1, (cos - 0.3) / 0.5))
+    }
+
+    /// RECENCY boost in [0, 0.08]. Linear decay over 14 days. Small enough
+    /// that it only tiebreaks — never elevates an irrelevant item to the top.
+    private static func recencyBoost(item: ClipboardItem, now: Date) -> Float {
+        let ageHours = Float(now.timeIntervalSince(item.timestamp) / 3600)
+        let twoWeeks: Float = 24 * 14
+        return max(0, 0.08 * (1 - min(ageHours / twoWeeks, 1)))
     }
 
     private func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {

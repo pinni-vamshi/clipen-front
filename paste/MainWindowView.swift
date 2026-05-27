@@ -29,21 +29,12 @@ struct MainWindowView: View {
 
     var filtered: [ClipboardItem] {
         guard !searchText.isEmpty else { return manager.displayItems }
-
-        // Try semantic search first (needs 2+ chars and embeddings)
-        if auth.semanticSearch {
-            let semantic = manager.semanticSearch(query: searchText)
-            if !semantic.isEmpty {
-                return semantic
-            }
-        }
-
-        // Fallback: substring match
-        return manager.displayItems.filter {
-            $0.textForEmbedding?.localizedCaseInsensitiveContains(searchText) == true
-                || $0.previewText.localizedCaseInsensitiveContains(searchText)
-                || $0.metadataSummary?.localizedCaseInsensitiveContains(searchText) == true
-        }
+        // Hybrid scorer (lexical + semantic + recency) — one call, properly ranked.
+        // We further intersect with displayItems so the active category filter is
+        // respected: if the user is viewing "PDF", searching only shows PDF hits.
+        let hits = manager.hybridSearch(query: searchText)
+        let visibleIDs = Set(manager.displayItems.map { $0.id })
+        return hits.filter { visibleIDs.contains($0.id) }
     }
 
     var body: some View {
@@ -677,8 +668,8 @@ struct MainWindowView: View {
                     .font(.system(size: 14))
                     .foregroundColor(.textPri)
                 if !searchText.isEmpty {
-                    if auth.semanticSearch && !manager.semanticSearch(query: searchText).isEmpty {
-                        Text("Semantic")
+                    if auth.semanticSearch && !manager.hybridSearch(query: searchText).isEmpty {
+                        Text("Smart")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(.accent)
                             .padding(.horizontal, 5)
