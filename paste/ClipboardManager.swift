@@ -1853,6 +1853,7 @@ class ClipboardManager: ObservableObject {
         }
 
         let pb = NSPasteboard.general
+        let toolID: String
         switch pageRangeOutputMode {
         case .combinedPDF:
             guard let url = Self.buildCombinedPDF(from: originalPDF, pages: pages) else {
@@ -1862,6 +1863,7 @@ class ClipboardManager: ObservableObject {
             }
             pb.clearContents()
             pb.writeObjects([makeFilePasteboardItem(for: url)])
+            toolID = "pdf.paste-pages"
 
         case .perPageImages:
             let urls = Self.renderPagesAsImages(from: originalPDF, pages: pages)
@@ -1872,8 +1874,13 @@ class ClipboardManager: ObservableObject {
             }
             pb.clearContents()
             pb.writeObjects(urls.map { makeFilePasteboardItem(for: $0) })
+            toolID = "pdf.paste-pages-as-images"
         }
         markPasteboardWriteAsOwn()
+        // Page-picker tools bypass applyTransformResult (we write to the
+        // pasteboard directly), so usage tracking has to be done here too —
+        // otherwise these tools never rise in the ToolRegistry ranking.
+        AuthManager.shared.registerToolUsage(toolID: toolID)
 
         cleanupAfterPagePicker()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
