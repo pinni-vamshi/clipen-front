@@ -279,12 +279,27 @@ struct PopoverPreviewView: View {
                                          : .secondary.opacity(0.55))
                     Group {
                         if manager.isPopupSearchActive {
+                            // BlinkingCursor sits at the caret position
+                            // (start when empty, end of query when typing) so
+                            // the user can see this is an active input even
+                            // though the non-activating panel can't host a
+                            // real TextField.
                             if manager.popupSearchQuery.isEmpty {
-                                Text("Type to search… ⎋ to cancel")
-                                    .foregroundColor(.secondary.opacity(0.55))
+                                HStack(spacing: 0) {
+                                    BlinkingCursor()
+                                        .foregroundColor(.accentColor)
+                                    Text("Type to search… ⎋ to cancel")
+                                        .foregroundColor(.secondary.opacity(0.55))
+                                    Spacer(minLength: 0)
+                                }
                             } else {
-                                Text(manager.popupSearchQuery + "▌")
-                                    .foregroundColor(.primary)
+                                HStack(spacing: 0) {
+                                    Text(manager.popupSearchQuery)
+                                        .foregroundColor(.primary)
+                                    BlinkingCursor()
+                                        .foregroundColor(.accentColor)
+                                    Spacer(minLength: 0)
+                                }
                             }
                         } else {
                             HStack(spacing: 4) {

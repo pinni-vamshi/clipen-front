@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 @preconcurrency import PDFKit
 
@@ -33,14 +34,19 @@ struct InlinePagePicker: View {
             Image(systemName: "textformat.123")
                 .font(.system(size: 11))
                 .foregroundColor(.accentColor)
-            Group {
+            HStack(spacing: 0) {
                 if manager.pageRangeQuery.isEmpty {
+                    BlinkingCursor()
+                        .foregroundColor(.accentColor)
                     Text("Type e.g. 1-3, 5, 7-9")
                         .foregroundColor(.secondary.opacity(0.55))
                 } else {
-                    Text(manager.pageRangeQuery + "▌")
+                    Text(manager.pageRangeQuery)
                         .foregroundColor(.primary)
+                    BlinkingCursor()
+                        .foregroundColor(.accentColor)
                 }
+                Spacer(minLength: 0)
             }
             .font(.system(size: 12, design: .monospaced))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -108,6 +114,37 @@ struct InlinePagePicker: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Blinking cursor (shared by all non-activating-panel inputs)
+
+/// Fake caret for places where a real `TextField` can't be used — the popup
+/// search bar and the page-picker query input both live inside non-activating
+/// `NSPanel`s that can't receive keyboard focus, so the system-provided
+/// blinking cursor is unavailable.  This view renders a `▌` glyph that
+/// toggles visibility on a 500ms cycle (matches macOS's default cursor
+/// blink rate), so the user can tell at a glance "this is an active input."
+struct BlinkingCursor: View {
+    /// Cycle period in seconds — each tick toggles visibility, so the full
+    /// on→off→on cycle is 2× this value.  0.5s gives a 1s round trip,
+    /// matching NSTextField's default.
+    var period: Double = 0.5
+
+    @State private var visible: Bool = true
+
+    var body: some View {
+        Text("▌")
+            .opacity(visible ? 1 : 0)
+            // .common run-loop mode so the timer keeps firing during
+            // scroll/tracking; otherwise the cursor freezes whenever the
+            // user is interacting with another part of the panel.
+            .onReceive(Timer.publish(every: period, on: .main, in: .common).autoconnect()) { _ in
+                visible.toggle()
+            }
+            // Render the cursor at the same width whether visible or not
+            // so adjacent text doesn't shift sideways every blink.
+            .frame(minWidth: 6, alignment: .leading)
     }
 }
 
