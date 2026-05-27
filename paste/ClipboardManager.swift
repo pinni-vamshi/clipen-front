@@ -897,15 +897,12 @@ class ClipboardManager: ObservableObject {
         // Mouse clicks on page-grid buttons are handled by SwiftUI directly.
         if inPageRangeMode && !cmd {
             switch key {
-            case 53: // Esc — clear query first; second Esc exits page-range mode
+            case 53: // Esc — exit picker mode AND close the popup.  Single
+                     // press is unambiguous: nothing pastes, everything closes.
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    if !self.pageRangeQuery.isEmpty || !self.pageRangeManualPages.isEmpty {
-                        self.pageRangeQuery = ""
-                        self.pageRangeManualPages = []
-                    } else {
-                        self.exitPageRangeMode()
-                    }
+                    self.exitPageRangeMode()
+                    self.dismissPreview()
                 }
                 return nil
             case 51: // ⌫ Backspace
@@ -1760,10 +1757,12 @@ class ClipboardManager: ObservableObject {
         dismissTimer?.invalidate(); dismissTimer = nil
         timerFrozen = true
 
-        // Re-render the transform panel in picker mode.  It's still anchored
-        // to the same item / selected-row, so we just call show() again with
-        // the cached displays — the inline view inside will switch its body
-        // because it observes manager.inPageRangeMode.
+        // Force the transform panel to re-render with the picker view AND
+        // re-measure its height.  The picker is taller than a typical
+        // transform list, so without this the footer (Enter/Space/Esc hints)
+        // would be clipped below the panel's existing frame.  The flag
+        // tells show() to use a guaranteed minimum height suitable for the
+        // grid + header + query + footer.
         let displays = transformDisplaysCache.isEmpty
             ? ToolRegistry.displays(for: item)
             : transformDisplaysCache
@@ -1802,11 +1801,31 @@ class ClipboardManager: ObservableObject {
     /// Extract text from the union-selection pages, write to pasteboard,
     /// close everything, fire ⌘V.  Target app focus was never lost (popup is
     /// non-activating) so we don't need to re-activate it explicitly.
+    ///
+    /// Fail-soft cases (user pressed Enter without selecting / on an image-
+    /// only PDF) flash a clear status and exit the picker — never leave the
+    /// user "stuck" with no visible feedback.
     func commitPageRangePaste() {
         let pages = pageRangeEffectiveSelection.sorted()
-        guard !pages.isEmpty, let pdf = pageRangePDF else { return }
+        guard !pages.isEmpty else {
+            flashStatus("Select at least one page first.")
+            return
+        }
+        guard let pdf = pageRangePDF else {
+            flashStatus("PDF unavailable.")
+            exitPageRangeMode()
+            return
+        }
         let combined = Self.extractPageText(pdf: pdf, pages: pages)
-        guard !combined.isEmpty else { exitPageRangeMode(); return }
+        guard !combined.isEmpty else {
+            flashStatus("No extractable text on the selected pages.")
+            exitPageRangeMode()
+            previewWindow.hide()
+            transformPanel.hide()
+            itemPreviewPanel.hide()
+            inTransformStage = false
+            return
+        }
 
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -1827,21 +1846,23 @@ class ClipboardManager: ObservableObject {
     /// Build a transient ClipboardItem of the would-be-pasted text and show
     /// it in the existing ItemPreviewPanel, anchored next to the transform
     /// panel.  Same Quick-Look-style preview the user already gets via Space
-    /// on regular popup rows.
+    /// on regular popup rows.  Second Space toggles it off.
     func showPageRangePreview() {
-        let pages = pageRangeEffectiveSelection.sorted()
-        guard !pages.isEmpty, let pdf = pageRangePDF else {
-            itemPreviewPanel.hide()
-            return
-        }
-        let combined = Self.extractPageText(pdf: pdf, pages: pages)
-        guard !combined.isEmpty else {
-            itemPreviewPanel.hide()
-            return
-        }
-        // Toggle: second space dismisses, like the regular row preview.
+        // Toggle off cleanly first — second Space should dismiss regardless
+        // of the current selection state.
         if itemPreviewPanel.isVisible {
             itemPreviewPanel.hide()
+            return
+        }
+        let pages = pageRangeEffectiveSelection.sorted()
+        guard !pages.isEmpty else {
+            flashStatus("Select at least one page first.")
+            return
+        }
+        guard let pdf = pageRangePDF else { return }
+        let combined = Self.extractPageText(pdf: pdf, pages: pages)
+        guard !combined.isEmpty else {
+            flashStatus("No extractable text on the selected pages.")
             return
         }
         let previewItem = ClipboardItem(content: .text(combined))

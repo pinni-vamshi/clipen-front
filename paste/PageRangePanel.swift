@@ -78,6 +78,9 @@ struct InlinePagePicker: View {
     }
 
     // MARK: Page grid — clickable buttons (mouse works in non-activating panel)
+    // Fills available space (no fixed maxHeight) so header / query / footer
+    // never get clipped when the panel is shorter than the picker's natural
+    // content height.  The grid itself scrolls if there are many pages.
     private var grid: some View {
         let pageCount = manager.pageRangePageCount
         let effective = manager.pageRangeEffectiveSelection
@@ -106,7 +109,7 @@ struct InlinePagePicker: View {
             }
             .padding(10)
         }
-        .frame(maxHeight: 240)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: Footer

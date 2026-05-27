@@ -75,7 +75,19 @@ class TransformPanel: NSPanel {
             hostingView = hv
         }
 
-        let h = min(hostingView?.fittingSize.height ?? 560, 620)
+        // Force a layout pass BEFORE asking for fittingSize, otherwise
+        // SwiftUI returns stale numbers when the rootView was just swapped
+        // (e.g. transform-list → page-range picker) and the new content has
+        // a very different intrinsic height.  Without this the panel keeps
+        // the OLD list's height and the picker's footer (Enter/Space hints)
+        // ends up clipped below the visible frame.
+        hostingView?.layoutSubtreeIfNeeded()
+        let measured = hostingView?.fittingSize.height ?? 0
+        // In page-range mode guarantee enough room for header + query input
+        // + a useful grid + footer; otherwise rely on the SwiftUI fittingSize
+        // with the historical 560 fallback / 620 cap.
+        let minHeight: CGFloat = ClipboardManager.shared.inPageRangeMode ? 440 : 0
+        let h = min(max(measured > 0 ? measured : 560, minHeight), 620)
 
         var x = placeRight ? preferredRightX : leftX
         x = max(screen.minX + 8, x)
