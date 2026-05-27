@@ -381,7 +381,7 @@ class ClipboardManager: ObservableObject {
 
     private var saveCancellable: AnyCancellable?
 
-    // MARK: - Search overlay state
+    // MARK: - Search overlay state (standalone ⌘F window — kept for future use)
     let searchOverlayWindow = SearchOverlayWindow()
     /// Live search query — updated as the user types in the search overlay.
     @Published var searchQuery: String = ""
@@ -391,6 +391,14 @@ class ClipboardManager: ObservableObject {
     @Published var isSearchMode: Bool = false
     /// The app that was frontmost when search opened; restored on paste/close.
     private var searchReturnApp: NSRunningApplication?
+
+    // MARK: - Inline popup search state (⌘F while popup is open)
+    /// True while the search bar inside the popup is active.
+    @Published var isPopupSearchActive: Bool = false
+    /// Query text built character-by-character via the event tap (no key window needed).
+    @Published var popupSearchQuery: String = ""
+    /// Highlighted row index within popupSearchResults.
+    @Published var popupSearchSelectedIndex: Int = 0
 
     /// Semantic-then-substring search results, capped at 8 for the overlay.
     var searchResults: [ClipboardItem] {
@@ -405,6 +413,21 @@ class ClipboardManager: ObservableObject {
                 || $0.previewText.localizedCaseInsensitiveContains(q)
                 || $0.metadataSummary?.localizedCaseInsensitiveContains(q) == true
         }.prefix(8).map { $0 }
+    }
+
+    /// Inline popup search results — same semantic engine, capped at 5 (fits popup height).
+    var popupSearchResults: [ClipboardItem] {
+        let q = popupSearchQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        if AuthManager.shared.semanticSearch {
+            let sem = semanticSearch(query: q)
+            if !sem.isEmpty { return Array(sem.prefix(5)) }
+        }
+        return items.filter {
+            $0.textForEmbedding?.localizedCaseInsensitiveContains(q) == true
+                || $0.previewText.localizedCaseInsensitiveContains(q)
+                || $0.metadataSummary?.localizedCaseInsensitiveContains(q) == true
+        }.prefix(5).map { $0 }
     }
 
     private init() {
@@ -833,6 +856,71 @@ class ClipboardManager: ObservableObject {
         let opt   = flags.contains(.maskAlternate)
         let ctrl  = flags.contains(.maskControl)
 
+        // ── Inline popup search routing ────────────────────────────────────
+        // When the search bar inside the popup is active we intercept ALL
+        // keystrokes here (before the ⌘-guard below) and route them to the
+        // popupSearchQuery string.  No window-focus change is needed because
+        // every key already flows through this tap.
+        if isPopupSearchActive && previewWindow.isVisible && !cmd {
+            switch key {
+            case 53: // Esc — clear query first; second Esc exits search
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if self.popupSearchQuery.isEmpty {
+                        self.isPopupSearchActive = false
+                    } else {
+                        self.popupSearchQuery = ""
+                        self.popupSearchSelectedIndex = 0
+                    }
+                }
+                return nil
+            case 51: // ⌫ Backspace
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    if !self.popupSearchQuery.isEmpty {
+                        self.popupSearchQuery.removeLast()
+                        self.popupSearchSelectedIndex = 0
+                    }
+                }
+                return nil
+            case 36, 76: // Return / Enter
+                DispatchQueue.main.async { [weak self] in self?.commitPopupSearchPaste() }
+                return nil
+            case 125: // ↓
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    let max = max(0, self.popupSearchResults.count - 1)
+                    self.popupSearchSelectedIndex = min(self.popupSearchSelectedIndex + 1, max)
+                }
+                return nil
+            case 126: // ↑
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.popupSearchSelectedIndex = max(0, self.popupSearchSelectedIndex - 1)
+                }
+                return nil
+            default:
+                // Printable character — extract from CGEvent and append
+                var length: Int = 0
+                var chars = [UniChar](repeating: 0, count: 8)
+                event.keyboardGetUnicodeString(maxStringLength: 8,
+                                               actualStringLength: &length,
+                                               unicodeString: &chars)
+                if length > 0 {
+                    let s = String(utf16CodeUnits: Array(chars.prefix(length)), count: length)
+                        .filter { !$0.isNewline && $0.unicodeScalars.allSatisfy { $0.value >= 32 } }
+                    if !s.isEmpty {
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self else { return }
+                            self.popupSearchQuery += s
+                            self.popupSearchSelectedIndex = 0
+                        }
+                        return nil
+                    }
+                }
+            }
+        }
+
         // Escape — cancel popup without pasting
         if key == 53 && previewWindow.isVisible {
             DispatchQueue.main.async { [weak self] in self?.dismissPreview() }
@@ -932,13 +1020,21 @@ class ClipboardManager: ObservableObject {
             return nil
         }
 
-        if key == 3 { // ⌘F — toggle semantic search overlay
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if self.isSearchMode { self.closeSearch() }
-                else                 { self.openSearch() }
+        if key == 3 { // ⌘F
+            if previewWindow.isVisible {
+                // Popup is open → toggle inline search bar inside the popup
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.isPopupSearchActive.toggle()
+                    if !self.isPopupSearchActive {
+                        self.popupSearchQuery = ""
+                        self.popupSearchSelectedIndex = 0
+                    }
+                }
+                return nil
             }
-            return nil
+            // Popup is NOT open → pass through so other apps (Finder, browser) get ⌘F
+            return Unmanaged.passUnretained(event)
         }
 
         return Unmanaged.passUnretained(event)
@@ -1551,6 +1647,46 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    /// Paste the selected inline-popup-search result.
+    /// The popup is a non-activating panel so focus never left the target app;
+    /// we just write to NSPasteboard and fire a simulated ⌘V.
+    func commitPopupSearchPaste() {
+        let results = popupSearchResults
+        guard !results.isEmpty else {
+            isPopupSearchActive = false
+            popupSearchQuery = ""
+            return
+        }
+        let item = results[min(popupSearchSelectedIndex, results.count - 1)]
+
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        write(item, to: pb)
+        lastChangeCount = pb.changeCount
+
+        isPopupSearchActive = false
+        popupSearchQuery = ""
+        popupSearchSelectedIndex = 0
+        previewWindow.hide()
+        transformPanel.hide()
+        itemPreviewPanel.hide()
+
+        // Target app already has focus (non-activating popup never stole it).
+        // Fire ⌘V immediately so the app pastes the freshly written content.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self else { return }
+            self.isSimulatingPaste = true
+            let src  = CGEventSource(stateID: .combinedSessionState)
+            let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+            let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+            down?.flags = .maskCommand; up?.flags = .maskCommand
+            down?.post(tap: .cgAnnotatedSessionEventTap)
+            up?.post(tap: .cgAnnotatedSessionEventTap)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.isSimulatingPaste = false }
+            AuthManager.shared.registerCommandVAction()
+        }
+    }
+
     // MARK: - Embedding recomputation
 
     /// After loading history from disk, embeddings are nil (not persisted).
@@ -1761,6 +1897,10 @@ class ClipboardManager: ObservableObject {
         timerFrozen      = false
         previewVisible   = false
         cycleCount       = 0
+        // Always reset inline search state when popup closes
+        isPopupSearchActive = false
+        popupSearchQuery = ""
+        popupSearchSelectedIndex = 0
     }
 
     /// Returns the BOTTOM-LEFT of the AX element's frame in AppKit coords.

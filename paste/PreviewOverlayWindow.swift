@@ -245,20 +245,28 @@ struct PopoverPreviewView: View {
 
                     Spacer()
 
-                    FlatHint(key: "V", label: "Next",
-                             isActive: manager.popupHintV)
-                    FlatHint(key: "⇧V", label: "Category",
-                             isActive: manager.popupHintShiftV)
-                    FlatHint(key: "X", label: "Transform",
-                             enabled: auth.transformsEnabled,
-                             isActive: manager.popupHintX)
-                    SpaceKeyFlatHint(label: "Preview",
-                                     isActive: manager.popupHintSpace)
-                    FlatHint(key: "⌘",
-                             label: manager.selectionArmed ? "Paste" : "Dismiss",
-                             isActive: manager.popupHintCmd,
-                             idleKeyColor: manager.selectionArmed ? .green : .secondary,
-                             idleLabelColor: manager.selectionArmed ? .green : .secondary)
+                    if manager.isPopupSearchActive {
+                        // When search is active, show a compact reminder only
+                        FlatHint(key: "F", label: "Close search",
+                                 isActive: false)
+                    } else {
+                        FlatHint(key: "V", label: "Next",
+                                 isActive: manager.popupHintV)
+                        FlatHint(key: "⇧V", label: "Category",
+                                 isActive: manager.popupHintShiftV)
+                        FlatHint(key: "X", label: "Transform",
+                                 enabled: auth.transformsEnabled,
+                                 isActive: manager.popupHintX)
+                        FlatHint(key: "F", label: "Search",
+                                 isActive: false)
+                        SpaceKeyFlatHint(label: "Preview",
+                                         isActive: manager.popupHintSpace)
+                        FlatHint(key: "⌘",
+                                 label: manager.selectionArmed ? "Paste" : "Dismiss",
+                                 isActive: manager.popupHintCmd,
+                                 idleKeyColor: manager.selectionArmed ? .green : .secondary,
+                                 idleLabelColor: manager.selectionArmed ? .green : .secondary)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -302,35 +310,118 @@ struct PopoverPreviewView: View {
 
                 Divider()
 
-                // Fixed-height row area — category changes swap content only.
-                VStack(spacing: 0) {
-                    if items.isEmpty {
-                        Text("No items with this tag")
+                // ── Inline search bar (shown when ⌘F activates search mode) ──
+                if manager.isPopupSearchActive {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.accentColor)
+                        Group {
+                            if manager.popupSearchQuery.isEmpty {
+                                Text("Type to search…")
+                                    .foregroundColor(.secondary.opacity(0.45))
+                            } else {
+                                // Simulate a cursor with a block character
+                                Text(manager.popupSearchQuery + "▌")
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                        .font(.system(size: 13))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        if !manager.popupSearchQuery.isEmpty {
+                            Text("↵ paste  ↑↓ navigate  ⎋ clear")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.secondary.opacity(0.45))
+                        } else {
+                            Text("⌘F to close")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.secondary.opacity(0.45))
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.accentColor.opacity(0.06))
+                    Divider()
+                }
+
+                // Fixed-height row area — shows search results or normal items.
+                VStack(spacing: 0) {
+                    if manager.isPopupSearchActive {
+                        // ── Search results ──
+                        let results = manager.popupSearchResults
+                        if manager.popupSearchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                            VStack(spacing: 6) {
+                                Image(systemName: "sparkle.magnifyingglass")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(.secondary.opacity(0.35))
+                                Text("Semantic search — type anything")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if results.isEmpty {
+                            VStack(spacing: 6) {
+                                Image(systemName: "magnifyingglass")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(.secondary.opacity(0.3))
+                                Text("No results for \"\(manager.popupSearchQuery)\"")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            ForEach(Array(results.prefix(visibleCount).enumerated()), id: \.element.id) { idx, item in
+                                PopoverRow(item: item,
+                                           index: idx,
+                                           isSelected: idx == manager.popupSearchSelectedIndex)
+                                    .onTapGesture { manager.commitPopupSearchPaste() }
+                                if idx < min(results.count, visibleCount) - 1 {
+                                    Divider().padding(.leading, 38)
+                                }
+                            }
+                        }
                     } else {
-                        ForEach(Array(items[visibleRange].enumerated()), id: \.element.id) { pair in
-                            let absoluteIndex = visibleRange.lowerBound + pair.offset
-                            PopoverRow(item: pair.element,
-                                       index: absoluteIndex,
-                                       isSelected: manager.selectionArmed && absoluteIndex == selectedIndex)
-                            if absoluteIndex < visibleRange.upperBound - 1 {
-                                Divider().padding(.leading, 38)
+                        // ── Normal clipboard ring ──
+                        if items.isEmpty {
+                            Text("No items with this tag")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else {
+                            ForEach(Array(items[visibleRange].enumerated()), id: \.element.id) { pair in
+                                let absoluteIndex = visibleRange.lowerBound + pair.offset
+                                PopoverRow(item: pair.element,
+                                           index: absoluteIndex,
+                                           isSelected: manager.selectionArmed && absoluteIndex == selectedIndex)
+                                if absoluteIndex < visibleRange.upperBound - 1 {
+                                    Divider().padding(.leading, 38)
+                                }
                             }
                         }
                     }
                 }
                 .frame(height: Self.rowHeight * CGFloat(visibleCount), alignment: .top)
+                .animation(.easeInOut(duration: 0.15), value: manager.isPopupSearchActive)
+                .animation(.easeInOut(duration: 0.1), value: manager.popupSearchQuery)
 
                 Divider()
-                Text(items.isEmpty
-                     ? "0 of 0"
-                     : "\(min(selectedIndex + 1, items.count)) of \(items.count)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+                // Footer — search mode shows result count; normal mode shows position
+                if manager.isPopupSearchActive && !manager.popupSearchQuery.isEmpty {
+                    let count = manager.popupSearchResults.count
+                    Text(count == 0 ? "No results" : "\(count) result\(count == 1 ? "" : "s")")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                } else {
+                    Text(items.isEmpty
+                         ? "0 of 0"
+                         : "\(min(selectedIndex + 1, items.count)) of \(items.count)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
