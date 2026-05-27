@@ -106,6 +106,46 @@ class PreviewOverlayWindow: NSPanel {
         if !isVisible { orderFront(nil) }
     }
 
+    /// Show the popup centred on the main screen — used when there is no
+    /// focused text input to anchor to. No caret arrow is drawn.
+    func showCentered() {
+        let rowH: CGFloat     = 72
+        let headerH: CGFloat  = 80
+        let footerH: CGFloat  = 26
+        let w: CGFloat        = 420
+        let margin: CGFloat   = 12
+        let maxVisible: Int   = 5
+
+        let screen = NSScreen.main?.visibleFrame
+                  ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+
+        let availableH = screen.height - margin * 2 - headerH - footerH
+        let slotCount  = min(maxVisible, max(1, Int(availableH / rowH)))
+        let bodyH      = headerH + CGFloat(slotCount) * rowH + footerH
+
+        visibleRowCount = slotCount
+        isArrowAtBottom = false
+
+        let x = screen.midX - w / 2
+        let y = screen.midY - bodyH / 2
+
+        let view = PopoverPreviewView(
+            visibleCount: slotCount,
+            arrowAtBottom: false,
+            arrowOffsetX: 0,
+            showArrow: false
+        )
+        if let hv = hostingView {
+            hv.rootView = view
+        } else {
+            let hv = NSHostingView(rootView: view)
+            contentView = hv
+            hostingView = hv
+        }
+        setFrame(NSRect(x: x, y: y, width: w, height: bodyH), display: true)
+        if !isVisible { orderFront(nil) }
+    }
+
     func hide() { orderOut(nil) }
 
     /// Anchor point at the center of the currently selected visible row.
@@ -141,6 +181,7 @@ struct PopoverPreviewView: View {
     let visibleCount: Int        // how many rows actually fit on screen
     let arrowAtBottom: Bool
     let arrowOffsetX: CGFloat
+    var showArrow: Bool = true   // false when popup is centered (no caret to point at)
 
     // Reactive state — read live from the manager so cycling only flips
     // selectedIndex and SwiftUI re-renders via @ObservedObject without
@@ -180,7 +221,7 @@ struct PopoverPreviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !arrowAtBottom {
+            if showArrow && !arrowAtBottom {
                 arrowShape.padding(.leading, arrowOffsetX - 10)
             }
 
@@ -299,7 +340,7 @@ struct PopoverPreviewView: View {
             )
             .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
 
-            if arrowAtBottom {
+            if showArrow && arrowAtBottom {
                 arrowShape.padding(.leading, arrowOffsetX - 10)
             }
         }

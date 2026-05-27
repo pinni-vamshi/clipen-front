@@ -372,11 +372,6 @@ class ClipboardManager: ObservableObject {
     /// Caret position cached from the most recent popup open. AX queries in
     /// Safari/Chrome can take 100–300ms because their accessibility trees are
     /// huge; running them on every V tap turns each cycle into a stutter.
-    /// The user types in one spot per session, so we query AX once on first
-    /// open and reuse the result for every subsequent cycle. Cleared on
-    /// dismiss so the next session starts fresh.
-    private var cachedCaretPosition: NSPoint?
-
     // Two-stage cycling: Stage 1 = items, Stage 2 = transforms for selected item
     private var inTransformStage = false
     private var transformIndex   = 0
@@ -1438,15 +1433,16 @@ class ClipboardManager: ObservableObject {
         scheduleDismissTimer()
     }
 
-    /// Centralised "open the panel near the caret" — used by cycleNext (no
-    /// delay path), jumpForward, and openPopoverAfterDelay. Keeps the fresh
-    /// AX query + cache write in one place so all three paths stay in sync.
+    /// Centralised "open the panel" — two states only:
+    ///   1. Near the active text input (caret anchor).
+    ///   2. Centre of the screen — fallback when no text field is focused.
     private func openPopupNow() {
         selectionArmed = true
-        // Prefer true text-focus caret anchoring when available.
-        let position = focusedTextInputPosition() ?? caretPosition()
-        cachedCaretPosition = position
-        previewWindow.show(at: position)
+        if let textPos = focusedTextInputPosition() {
+            previewWindow.show(at: textPos)
+        } else {
+            previewWindow.showCentered()
+        }
         syncItemPreviewWithSelection()
     }
 
@@ -1636,52 +1632,6 @@ class ClipboardManager: ObservableObject {
         timerFrozen      = false
         previewVisible   = false
         cycleCount       = 0
-        // Clear caret cache — session is over, next ⌘V must re-query the
-        // user's current caret position (they may have moved cursor).
-        cachedCaretPosition = nil
-    }
-
-    /// Find the AppKit point where the user is currently typing, so the popup
-    /// arrow can point at it. Tries (best → worst):
-    /// 1. AX text-range bounds (real caret rect) — works in TextEdit, Mail, Notes, Safari, Chrome, Cursor, …
-    /// 2. AX focused-element frame — works for any focused input
-    /// 3. AX focused-window center — guaranteed app-window position
-    /// 4. Current mouse location — last resort
-    ///
-    /// Coordinate notes: AX uses top-left origin (y-down) across ALL screens.
-    /// AppKit uses bottom-left origin of the PRIMARY screen (y-up). To convert
-    /// we use the primary screen's height, NOT NSScreen.main (which can be
-    /// the screen with the active window — different on multi-monitor setups).
-    private func caretPosition() -> NSPoint {
-        // Primary screen height — same y-flip reference AX uses globally
-        let primaryH = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
-                    ?? NSScreen.main?.frame.height
-                    ?? 0
-
-        // Focused app
-        guard let appEl = focusedApplicationAXElement() else {
-            return NSEvent.mouseLocation
-        }
-
-        // Focused UI element (text field, web view, etc.)
-        let axEl = focusedUIElement(in: appEl) ?? appEl
-
-        // 1) Best path — real text caret bounds via parameterized attribute
-        if let caret = textCaretPoint(for: axEl, primaryH: primaryH) { return caret }
-
-        // 2) Focused element frame — center bottom edge
-        if let p = elementPoint(axEl, primaryH: primaryH) { return p }
-
-        // 3) Focused window center — much better than mouse position
-        var winRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
-           let winVal = winRef,
-           let p = elementPoint(winVal as! AXUIElement, primaryH: primaryH) {
-            return p
-        }
-
-        // 4) Last resort
-        return NSEvent.mouseLocation
     }
 
     /// Returns the BOTTOM-LEFT of the AX element's frame in AppKit coords.
@@ -1788,7 +1738,6 @@ class ClipboardManager: ObservableObject {
             self?.selectionArmed   = true
             self?.previewVisible   = false
             self?.cycleCount       = 0
-            self?.cachedCaretPosition = nil   // session over → next ⌘V re-queries
         }
         AuthManager.shared.registerCommandVAction()
     }

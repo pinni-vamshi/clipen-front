@@ -41,7 +41,7 @@ final class AuthManager: ObservableObject {
     private let clickCountKey = "backendFeatureFlagsClickCount"
     private let lastRefreshClickKey = "backendFeatureFlagsLastRefreshClick"
     private let lastUpdateCheckClickKey = "backendFeatureFlagsLastUpdateCheckClick"
-    private let deviceIDKey = "backendFeatureFlagsDeviceID"
+    private let installKeyDefaultsKey = "backendFeatureFlagsInstallKey"
     private let backendURLKey = "backendFeatureFlagsURL"
     private let toolUsageCountsKey = "backendToolUsageCounts"
     private let toolUsageTotalsKey = "backendToolUsageTotals"
@@ -80,7 +80,7 @@ final class AuthManager: ObservableObject {
     }
 
     /// Track per-tool usage deltas locally; flushed on the next backend
-    /// refresh call so we can attribute usage to a stable `device_id`.
+    /// refresh call so we can attribute usage to a stable `install_key`.
     func registerToolUsage(toolID: String, count: Int = 1) {
         guard !toolID.isEmpty, count > 0 else { return }
         let now = Date()
@@ -154,7 +154,7 @@ final class AuthManager: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONEncoder().encode(RefreshFlagsRequest(
-            deviceID: deviceID,
+            installKey: installKey,
             clickCount: currentClickCount,
             appVersion: appVersion,
             osVersion: osVersion,
@@ -188,18 +188,23 @@ final class AuthManager: ObservableObject {
         return base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/clipen/refresh-flags"
     }
 
-    private var deviceID: String {
-        // Keychain is the primary store — survives UserDefaults clears and
-        // re-installs, so the same device always maps to the same Firestore doc.
-        let keychainKey = "installID"
+    /// A randomly-generated private UUID that identifies this install.
+    /// It is NOT a hardware or system device identifier — it is generated
+    /// once at first launch and stored in Keychain so it survives UserDefaults
+    /// clears and reinstalls, giving the backend a stable key to associate
+    /// feature flags and usage data with this installation.
+    private var installKey: String {
+        let keychainKey = "installKey"
         if let existing = Keychain.get(keychainKey) {
             return existing
         }
-        // Migrate from UserDefaults (installs before Keychain storage) or
-        // generate a fresh UUID for brand-new installs.
-        let id = UserDefaults.standard.string(forKey: deviceIDKey) ?? UUID().uuidString
-        Keychain.set(id, forKey: keychainKey)
-        return id
+        // Migrate from previous Keychain key ("installID") or UserDefaults fallback,
+        // then generate a fresh UUID for brand-new installs.
+        let legacyKeychain = Keychain.get("installID")
+        let legacyDefaults = UserDefaults.standard.string(forKey: installKeyDefaultsKey)
+        let key = legacyKeychain ?? legacyDefaults ?? UUID().uuidString
+        Keychain.set(key, forKey: keychainKey)
+        return key
     }
 
     private var appVersion: String {
@@ -393,14 +398,14 @@ final class AuthManager: ObservableObject {
 }
 
 private struct RefreshFlagsRequest: Encodable {
-    let deviceID: String
+    let installKey: String
     let clickCount: Int
     let appVersion: String
     let osVersion: String
     let toolUsageCounts: [String: Int]
 
     enum CodingKeys: String, CodingKey {
-        case deviceID = "device_id"
+        case installKey = "install_key"
         case clickCount = "click_count"
         case appVersion = "app_version"
         case osVersion = "os_version"
