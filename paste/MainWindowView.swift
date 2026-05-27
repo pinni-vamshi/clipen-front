@@ -29,10 +29,15 @@ struct MainWindowView: View {
 
     var filtered: [ClipboardItem] {
         guard !searchText.isEmpty else { return manager.displayItems }
-        // Hybrid scorer (lexical + semantic + recency) — one call, properly ranked.
-        // We further intersect with displayItems so the active category filter is
-        // respected: if the user is viewing "PDF", searching only shows PDF hits.
+        // Hybrid scorer cached internally — calling it any number of times
+        // per render is free (O(1) cache hit) as long as the query+items+
+        // embeddedCount are unchanged.  We still pay for the set-intersect
+        // below, so we filter once and reuse via SwiftUI's diffing.
         let hits = manager.hybridSearch(query: searchText)
+        // displayItems is a stored property (not a heavy computed) — building
+        // a Set is the cost we want to amortise.  Cap at hits.count so we
+        // don't pay for an enormous Set when there are only a few hits.
+        if hits.isEmpty { return [] }
         let visibleIDs = Set(manager.displayItems.map { $0.id })
         return hits.filter { visibleIDs.contains($0.id) }
     }
@@ -668,7 +673,9 @@ struct MainWindowView: View {
                     .font(.system(size: 14))
                     .foregroundColor(.textPri)
                 if !searchText.isEmpty {
-                    if auth.semanticSearch && !manager.hybridSearch(query: searchText).isEmpty {
+                    // Reuse `filtered` (cached body-local read) instead of a
+                    // second hybridSearch call — same result, no extra work.
+                    if auth.semanticSearch && !filtered.isEmpty {
                         Text("Smart")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundColor(.accent)

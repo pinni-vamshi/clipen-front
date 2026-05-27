@@ -670,8 +670,10 @@ class ClipboardManager: ObservableObject {
                       let vector = emb.vector(for: str) else { return }
                 let floats = vector.map { Float($0) }
                 DispatchQueue.main.async {
-                    if let idx = self.items.firstIndex(where: { $0.id == itemID }) {
+                    if let idx = self.items.firstIndex(where: { $0.id == itemID }),
+                       self.items[idx].embedding == nil {
                         self.items[idx].embedding = floats
+                        self.embeddedItemCount += 1
                     }
                 }
             }
@@ -1699,8 +1701,10 @@ class ClipboardManager: ObservableObject {
                 let floats = vector.map { Float($0) }
                 let itemID = item.id
                 DispatchQueue.main.async {
-                    if let idx = self.items.firstIndex(where: { $0.id == itemID }) {
+                    if let idx = self.items.firstIndex(where: { $0.id == itemID }),
+                       self.items[idx].embedding == nil {
                         self.items[idx].embedding = floats
+                        self.embeddedItemCount += 1
                     }
                 }
             }
@@ -2123,47 +2127,43 @@ class ClipboardManager: ObservableObject {
 
     // MARK: - Hybrid search (lexical + semantic + recency)
 
-    // Cache key combines query, item count, AND embedded-item count so that
-    // results refresh once background-embedding finishes filling in vectors.
+    // Cache key uses (query, items.count, embeddedItemCount).  The embedded
+    // count is maintained as a tracked counter — incremented when an embedding
+    // is written, reset on full re-load — so the cache check is O(1) instead
+    // of an O(N) walk over items on every keystroke.
     private var lastSearchQuery: String?
     private var lastSearchResult: [ClipboardItem] = []
     private var lastSearchItemsRev: Int = -1
     private var lastSearchEmbedRev: Int = -1
+    private var embeddedItemCount: Int = 0
 
     /// Production search: blends LEXICAL (exact-phrase + per-token), SEMANTIC
     /// (sentence-embedding cosine), and RECENCY into a single combined score.
-    ///
-    /// Why this design (vs. plain semantic):
-    ///   • A user typing "pdf" expects a PDF file to rank above an
-    ///     abstractly-related text item. Pure semantic search fails this
-    ///     because short-query embeddings are noisy.
-    ///   • Per-field weighting puts what the user actually SEES first
-    ///     (previewText) above hidden metadata.
-    ///   • Recency is a tiny tiebreaker — among equally relevant items,
-    ///     the one copied an hour ago beats one copied 2 weeks ago.
-    ///
-    /// Weights (chosen so lex wins on literal matches but sem dominates
-    /// when only meaning matches):
-    ///   combined = 0.55·lex + 0.40·sem + recency (max 0.08)
+    /// Per-keystroke cost is O(N · |tokens|) of string `.contains` checks on
+    /// PRE-NORMALISED haystacks already stored on each ClipboardItem — no
+    /// filesystem I/O, no per-item allocation.
     func hybridSearch(query: String) -> [ClipboardItem] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, q.count >= 2 else { return [] }
 
-        let embeddedCount = items.reduce(0) { $1.embedding == nil ? $0 : $0 + 1 }
+        // O(1) cache check — no item walk before the cache hit.
         if q == lastSearchQuery
             && items.count == lastSearchItemsRev
-            && embeddedCount == lastSearchEmbedRev {
+            && embeddedItemCount == lastSearchEmbedRev {
             return lastSearchResult
         }
 
-        // Normalise once (strip diacritics + lowercase) so "café" matches "cafe".
-        let qNorm = Self.normalize(q)
-        let qTokens: [String] = Set(
+        let qNorm = ClipboardItem.normalize(q)
+        // Token extraction: split on non-alphanumerics, drop tokens < 2 chars,
+        // dedupe via Set.  Cheap: O(|q|).
+        let qTokenSet = Set(
             qNorm.components(separatedBy: CharacterSet.alphanumerics.inverted)
                  .filter { $0.count >= 2 }
-        ).sorted()  // deterministic order doesn't matter functionally; helps debugging
+        )
+        let qTokens = Array(qTokenSet)
+        let firstToken = qTokens.first  // any element is fine for the word-boundary bonus
 
-        // Query embedding — only computed once per query, not once per item.
+        // Query embedding — one ANE round-trip per query, NOT per item.
         var queryVec: [Float]? = nil
         if AuthManager.shared.semanticSearch,
            let emb = nlEmbedding,
@@ -2176,17 +2176,11 @@ class ClipboardManager: ObservableObject {
         scored.reserveCapacity(items.count)
 
         for item in items {
-            let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, item: item)
+            let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, firstToken: firstToken, item: item)
             let sem = Self.semanticComponent(queryVec: queryVec, item: item, cosine: cosineSimilarity)
             let rec = Self.recencyBoost(item: item, now: now)
 
-            // Combined score — bounded roughly to [0, 1.08].
             let combined = 0.55 * lex + 0.40 * sem + rec
-
-            // Threshold: needs either a partial lexical hit (~0.27 lex alone)
-            // or a strong semantic match (~0.38 sem alone) to clear the bar.
-            // Tuned for "few false positives" — better to miss a marginal item
-            // than to surface garbage above real matches.
             if combined >= 0.15 {
                 scored.append((item, combined))
             }
@@ -2196,66 +2190,49 @@ class ClipboardManager: ObservableObject {
         lastSearchQuery = q
         lastSearchResult = sorted
         lastSearchItemsRev = items.count
-        lastSearchEmbedRev = embeddedCount
+        lastSearchEmbedRev = embeddedItemCount
         return sorted
     }
 
     /// Back-compat alias for older call sites — same return semantics.
     func semanticSearch(query: String) -> [ClipboardItem] { hybridSearch(query: query) }
 
-    // MARK: Scoring helpers (pure functions — easy to reason about)
+    // MARK: Scoring helpers (pure functions — read pre-cached haystacks)
 
-    /// Lowercase + strip diacritics so accent-insensitive matching works.
-    private static func normalize(_ s: String) -> String {
-        s.lowercased().applyingTransform(.stripDiacritics, reverse: false) ?? s.lowercased()
+    /// LEXICAL score in [0, 1]. Reads PRE-NORMALISED haystacks off the item
+    /// (no allocation, no I/O).  Three weighted fields:
+    ///   • searchPreviewNorm  — what the row shows (weight 1.00)
+    ///   • searchEmbedNorm    — full searchable text (weight 0.70)
+    ///   • searchMetaNorm     — type / size / dims (weight 0.55)
+    /// We take MAX across fields (not sum) so a match isn't triple-counted.
+    private static func lexicalScore(query: String,
+                                     tokens: [String],
+                                     firstToken: String?,
+                                     item: ClipboardItem) -> Float {
+        // Inline tuple iteration to avoid Array allocation per call.
+        var best: Float = 0
+        best = max(best, score(text: item.searchPreviewNorm, query: query, tokens: tokens, firstToken: firstToken) * 1.00)
+        best = max(best, score(text: item.searchEmbedNorm,   query: query, tokens: tokens, firstToken: firstToken) * 0.70)
+        best = max(best, score(text: item.searchMetaNorm,    query: query, tokens: tokens, firstToken: firstToken) * 0.55)
+        return best
     }
 
-    /// LEXICAL score in [0, 1]. Considers exact-phrase and per-token matches
-    /// across THREE haystacks, each with its own weight reflecting how visible
-    /// it is to the user:
-    ///   • previewText      — what shows in the row (weight 1.00)
-    ///   • textForEmbedding — full text + metadata sentence (weight 0.70)
-    ///   • metadataSummary  — type/size/dims string (weight 0.55)
-    ///
-    /// Within each haystack:
-    ///   • full query as a substring → +1.0 (capped at the haystack weight)
-    ///   • else fraction of query tokens present
-    ///   • +0.15 bonus if the FIRST token starts a word (prefix match)
-    ///
-    /// We take the MAX across haystacks rather than summing because the same
-    /// match shouldn't be triple-counted just because it shows up in the
-    /// preview AND the embedding text AND the metadata.
-    private static func lexicalScore(query: String, tokens: [String], item: ClipboardItem) -> Float {
-        let haystacks: [(String, Float)] = [
-            (normalize(item.previewText),                  1.00),
-            (normalize(item.textForEmbedding ?? ""),       0.70),
-            (normalize(item.metadataSummary ?? ""),        0.55),
-        ]
-
-        var best: Float = 0
-        for (text, weight) in haystacks {
-            guard !text.isEmpty else { continue }
-            var score: Float = 0
-
-            // Tier 1: exact phrase
-            if !query.isEmpty && text.contains(query) {
-                score = 1.0
-            } else if !tokens.isEmpty {
-                // Tier 2: fraction of tokens that appear
-                var hits = 0
-                for t in tokens where text.contains(t) { hits += 1 }
-                score = Float(hits) / Float(tokens.count)
-
-                // Tier 2b: word-boundary bonus for the first token
-                if let first = tokens.first,
-                   score > 0,
-                   text.hasPrefix(first) || text.contains(" " + first) {
-                    score = min(1.0, score + 0.15)
-                }
-            }
-            best = max(best, score * weight)
+    @inline(__always)
+    private static func score(text: String, query: String, tokens: [String], firstToken: String?) -> Float {
+        guard !text.isEmpty else { return 0 }
+        // Tier 1: exact phrase
+        if !query.isEmpty && text.contains(query) { return 1.0 }
+        guard !tokens.isEmpty else { return 0 }
+        // Tier 2: token-coverage fraction
+        var hits = 0
+        for t in tokens where text.contains(t) { hits += 1 }
+        var s = Float(hits) / Float(tokens.count)
+        // Tier 2b: word-boundary bonus
+        if s > 0, let first = firstToken,
+           text.hasPrefix(first) || text.contains(" " + first) {
+            s = min(1.0, s + 0.15)
         }
-        return best
+        return s
     }
 
     /// SEMANTIC score in [0, 1]. Cosine similarity normalised so 0.3 → 0
@@ -2437,12 +2414,14 @@ class ClipboardManager: ObservableObject {
         let sourceBundleID: String?
     }
 
-    private var historyDir: URL {
+    /// `Application Support/Clipen`.  `lazy` so the directory-create call runs
+    /// exactly once per process — every other access is a stored-URL read.
+    private lazy var historyDir: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Clipen")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-    }
+    }()
 
     /// Encrypted-at-rest history. `.clip` extension instead of `.json` so
     /// nobody mistakes the contents for a readable file.
@@ -2569,6 +2548,10 @@ class ClipboardManager: ObservableObject {
         let pinned   = allLoaded.filter { $0.isPinned }
         let unpinned = Array(allLoaded.filter { !$0.isPinned }.prefix(maxItems))
         items = pinned + unpinned
+        // Loaded items have no embeddings yet (recomputeEmbeddingsInBackground
+        // re-fills them); reset the counter so the search cache invalidates
+        // correctly as those fills land.
+        embeddedItemCount = items.reduce(0) { $1.embedding == nil ? $0 : $0 + 1 }
     }
 }
 
@@ -2589,10 +2572,23 @@ struct ClipboardItem: Identifiable {
     let detectedColor: NSColor?
     var isPinned:  Bool     = false
     var embedding: [Float]? = nil
-    var urlTitle:  String?  = nil
+    var urlTitle:  String?  = nil { didSet { rebuildSearchHaystacks() } }
     var diffBadge: String?  = nil
-    var sourceAppName: String? = nil
+    var sourceAppName: String? = nil { didSet { rebuildSearchHaystacks() } }
     var sourceBundleID: String? = nil
+
+    // Pre-normalised search haystacks — built ONCE at init so the per-keystroke
+    // hot path (hybridSearch → lexicalScore) doesn't do disk I/O or string
+    // allocation per item.  Previously each search call did:
+    //   • FileManager.attributesOfItem (size + mtime) — kernel syscall, ×N items
+    //   • PDF/NSImage open for image and pdf metadata
+    //   • full lowercase + Unicode diacritic-strip transform per item per key
+    // Now all that happens once when the item enters the ring.  Re-built only
+    // when urlTitle / sourceAppName arrive late (image titles come from a
+    // background URL fetch; source-app from frontmost-app sniff).
+    private(set) var searchPreviewNorm: String = ""
+    private(set) var searchEmbedNorm:   String = ""
+    private(set) var searchMetaNorm:    String = ""
 
     init(content: ClipboardContent, id: UUID = UUID(), timestamp: Date = Date()) {
         self.id        = id
@@ -2602,6 +2598,26 @@ struct ClipboardItem: Identifiable {
         self.detectedType  = ContentDetector.detectedType(for: content, color: self.detectedColor)
         self.tags         = TagDetector.tags(for: content, color: self.detectedColor)
         self.primaryTag   = TagDetector.primaryTag(from: self.tags)
+        rebuildSearchHaystacks()
+    }
+
+    /// Rebuilds ALL derived caches: metadataSummary, textForEmbedding, and the
+    /// three normalised search-haystack strings.  Called once at init, and
+    /// again only when urlTitle / sourceAppName arrive late (image titles
+    /// from a background URL fetch; source-app from frontmost-app sniff).
+    /// File-system I/O happens exactly here — never on a read path.
+    mutating func rebuildSearchHaystacks() {
+        metadataSummary  = Self.computeMetadataSummary(for: content)
+        textForEmbedding = Self.computeTextForEmbedding(content: content,
+                                                       urlTitle: urlTitle,
+                                                       sourceAppName: sourceAppName)
+        searchPreviewNorm = Self.normalize(previewText)
+        searchEmbedNorm   = Self.normalize(textForEmbedding ?? "")
+        searchMetaNorm    = Self.normalize(metadataSummary ?? "")
+    }
+
+    static func normalize(_ s: String) -> String {
+        s.lowercased().applyingTransform(.stripDiacritics, reverse: false) ?? s.lowercased()
     }
 
     var previewText: String {
@@ -2655,16 +2671,20 @@ struct ClipboardItem: Identifiable {
         }
     }
 
-    var metadataSummary: String? {
+    /// Cached at init / rebuildSearchHaystacks.  Used by every row render.
+    /// For file items this previously did ~3 FileManager syscalls per access.
+    private(set) var metadataSummary: String?
+
+    private static func computeMetadataSummary(for content: ClipboardContent) -> String? {
         switch content {
         case .image(let img, let data, let dataType):
             let dims = "\(Int(img.size.width))×\(Int(img.size.height))"
             let size = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
             return "\(dims) · \(size) · \(dataType.rawValue)"
         case .file(let url):
-            return Self.fileMetadataSummary(for: url)
+            return fileMetadataSummary(for: url)
         case .files(let urls):
-            let total = urls.compactMap { Self.fileSize($0) }.reduce(0, +)
+            let total = urls.compactMap { fileSize($0) }.reduce(0, +)
             let size = total > 0 ? " · " + ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file) : ""
             return "\(urls.count) files\(size)"
         default:
@@ -2749,11 +2769,14 @@ struct ClipboardItem: Identifiable {
         return nil
     }
 
-    /// Text fed to NLEmbedding for semantic search.
-    /// For text items this is the full text; for binary/file items it is a
-    /// rich metadata sentence so users can find items by saying things like
-    /// "that PDF from Xcode yesterday" or "the MP4 video I got from Safari".
-    var textForEmbedding: String? {
+    /// Cached at init / rebuildSearchHaystacks.  Embedding generation + every
+    /// hybrid-search call previously triggered this — for file items it meant
+    /// FileManager syscalls per item per keystroke.  Now built once.
+    private(set) var textForEmbedding: String?
+
+    private static func computeTextForEmbedding(content: ClipboardContent,
+                                                urlTitle: String?,
+                                                sourceAppName: String?) -> String? {
         switch content {
         case .text(let s):               return s.isEmpty ? nil : s
         case .richText(_, plain: let s): return s.isEmpty ? nil : s
@@ -2767,24 +2790,27 @@ struct ClipboardItem: Identifiable {
             else if raw.contains("pdf")  { parts.append("PDF document") }
             else if raw.contains("webp") { parts.append("WebP") }
             else                         { parts.append("JPEG photo") }
-            let dims = "\(Int(img.size.width))×\(Int(img.size.height)) pixels"
-            parts.append(dims)
+            parts.append("\(Int(img.size.width))×\(Int(img.size.height)) pixels")
             let kb = data.count / 1_024
             parts.append(kb > 1_024 ? "\(kb / 1_024) MB" : "\(kb) KB")
             if let title = urlTitle     { parts.append(title) }
             if let app   = sourceAppName { parts.append("from \(app)") }
             return parts.joined(separator: " ")
         case .file(let url):
-            return fileMetadataEmbeddingText(for: url)
+            var s = fileMetadataEmbeddingText(for: url)
+            if let app = sourceAppName { s += " from \(app)" }
+            return s
         case .files(let urls):
-            let parts = urls.prefix(5).compactMap { fileMetadataEmbeddingText(for: $0) }
+            let parts = urls.prefix(5).map { fileMetadataEmbeddingText(for: $0) }
             if parts.isEmpty { return nil }
             let prefix = urls.count > 1 ? "\(urls.count) files " : ""
-            return prefix + parts.joined(separator: " | ")
+            var s = prefix + parts.joined(separator: " | ")
+            if let app = sourceAppName { s += " from \(app)" }
+            return s
         }
     }
 
-    private func fileMetadataEmbeddingText(for url: URL) -> String {
+    private static func fileMetadataEmbeddingText(for url: URL) -> String {
         var parts: [String] = []
         let filename = url.lastPathComponent
         let baseName = url.deletingPathExtension().lastPathComponent
@@ -2806,13 +2832,12 @@ struct ClipboardItem: Identifiable {
         else if FileKindDetector.isArchiveFile(url)    { parts.append("archive zip compressed \(ext)") }
         else if FileKindDetector.isDesignFile(url)     { parts.append("design file \(ext)") }
         else if !ext.isEmpty                           { parts.append(ext) }
-        // File size
+        // File size — one FileManager.attributesOfItem call, only at init.
         if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
            let bytes = (attrs[.size] as? NSNumber)?.intValue {
             let kb = bytes / 1_024
             parts.append(kb > 1_024 ? "\(kb / 1_024) MB" : "\(kb) KB")
         }
-        if let app = sourceAppName { parts.append("from \(app)") }
         return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 

@@ -360,11 +360,17 @@ struct PopoverPreviewView: View {
 
                 Divider()
 
+                // Bind once: popupSearchResults is a computed property that
+                // allocates a fresh Array<ClipboardItem>(prefix(5)) per call.
+                // Reading it once per body render (used in rows AND footer)
+                // is fine; reading it 3× would triple the alloc.
+                let popupResults = manager.isPopupSearchActive ? manager.popupSearchResults : []
+
                 // Fixed-height row area — shows search results or normal items.
                 VStack(spacing: 0) {
                     if manager.isPopupSearchActive {
                         // ── Search results ──
-                        let results = manager.popupSearchResults
+                        let results = popupResults
                         if manager.popupSearchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
                             VStack(spacing: 6) {
                                 Image(systemName: "sparkle.magnifyingglass")
@@ -423,7 +429,7 @@ struct PopoverPreviewView: View {
                 Divider()
                 // Footer — search mode shows result count; normal mode shows position
                 if manager.isPopupSearchActive && !manager.popupSearchQuery.isEmpty {
-                    let count = manager.popupSearchResults.count
+                    let count = popupResults.count   // reuse the body-local bind
                     Text(count == 0 ? "No results" : "\(count) result\(count == 1 ? "" : "s")")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundColor(.secondary)
