@@ -381,6 +381,32 @@ class ClipboardManager: ObservableObject {
 
     private var saveCancellable: AnyCancellable?
 
+    // MARK: - Search overlay state
+    let searchOverlayWindow = SearchOverlayWindow()
+    /// Live search query — updated as the user types in the search overlay.
+    @Published var searchQuery: String = ""
+    /// Which result row is highlighted in the search overlay.
+    @Published var searchSelectedIndex: Int = 0
+    /// True while the search overlay is visible — freezes the paste-popup dismiss timer.
+    @Published var isSearchMode: Bool = false
+    /// The app that was frontmost when search opened; restored on paste/close.
+    private var searchReturnApp: NSRunningApplication?
+
+    /// Semantic-then-substring search results, capped at 8 for the overlay.
+    var searchResults: [ClipboardItem] {
+        let q = searchQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        if AuthManager.shared.semanticSearch {
+            let sem = semanticSearch(query: q)
+            if !sem.isEmpty { return Array(sem.prefix(8)) }
+        }
+        return items.filter {
+            $0.textForEmbedding?.localizedCaseInsensitiveContains(q) == true
+                || $0.previewText.localizedCaseInsensitiveContains(q)
+                || $0.metadataSummary?.localizedCaseInsensitiveContains(q) == true
+        }.prefix(8).map { $0 }
+    }
+
     private init() {
         // maxItems is now plan-driven only — remove any stale UserDefaults value
         UserDefaults.standard.removeObject(forKey: "maxItems")
@@ -393,6 +419,7 @@ class ClipboardManager: ObservableObject {
 
     func startMonitoring() {
         loadHistory()
+        recomputeEmbeddingsInBackground()
         startPolling()
         startAccessibilityWatcher()
         attemptEventTap()
@@ -901,6 +928,15 @@ class ClipboardManager: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.selectionArmed else { return }
                 self.deleteSelected()
+            }
+            return nil
+        }
+
+        if key == 3 { // ⌘F — toggle semantic search overlay
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.isSearchMode { self.closeSearch() }
+                else                 { self.openSearch() }
             }
             return nil
         }
@@ -1444,6 +1480,99 @@ class ClipboardManager: ObservableObject {
             previewWindow.showCentered()
         }
         syncItemPreviewWithSelection()
+    }
+
+    // MARK: - Search overlay
+
+    func openSearch() {
+        searchReturnApp = NSWorkspace.shared.frontmostApplication
+        searchQuery = ""
+        searchSelectedIndex = 0
+        isSearchMode = true
+        timerFrozen  = true   // keep paste popup alive while user searches
+        searchOverlayWindow.show()
+    }
+
+    func closeSearch() {
+        isSearchMode = false
+        searchQuery  = ""
+        searchSelectedIndex = 0
+        timerFrozen  = false
+        searchOverlayWindow.hide()
+        let app = searchReturnApp
+        searchReturnApp = nil
+        app?.activate(options: .activateIgnoringOtherApps)
+    }
+
+    func searchSelectNext() {
+        let cap = min(8, searchResults.count)
+        searchSelectedIndex = min(searchSelectedIndex + 1, max(0, cap - 1))
+    }
+
+    func searchSelectPrev() {
+        searchSelectedIndex = max(searchSelectedIndex - 1, 0)
+    }
+
+    /// Paste the currently-selected search result into the original app.
+    func commitSearchPaste() {
+        let results = searchResults
+        guard !results.isEmpty else { closeSearch(); return }
+        let item = results[min(searchSelectedIndex, results.count - 1)]
+
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        write(item, to: pb)
+        lastChangeCount = pb.changeCount
+
+        isSearchMode = false
+        searchQuery  = ""
+        searchSelectedIndex = 0
+        searchOverlayWindow.hide()
+        previewWindow.hide()
+        transformPanel.hide()
+        itemPreviewPanel.hide()
+
+        let returnApp = searchReturnApp
+        searchReturnApp = nil
+
+        // Restore focus to the original app, then fire ⌘V so it receives the paste.
+        returnApp?.activate(options: .activateIgnoringOtherApps)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else { return }
+            self.isSimulatingPaste = true
+            let src  = CGEventSource(stateID: .combinedSessionState)
+            let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+            let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+            down?.flags = .maskCommand; up?.flags = .maskCommand
+            down?.post(tap: .cgAnnotatedSessionEventTap)
+            up?.post(tap: .cgAnnotatedSessionEventTap)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.isSimulatingPaste = false }
+            AuthManager.shared.registerCommandVAction()
+        }
+    }
+
+    // MARK: - Embedding recomputation
+
+    /// After loading history from disk, embeddings are nil (not persisted).
+    /// Recompute them in the background so semantic search works immediately.
+    private func recomputeEmbeddingsInBackground() {
+        guard let emb = nlEmbedding else { return }
+        let snapshot = items.filter { $0.embedding == nil }
+        guard !snapshot.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            for item in snapshot {
+                guard let self else { return }
+                guard let str = item.textForEmbedding,
+                      let vector = emb.vector(for: str) else { continue }
+                let floats = vector.map { Float($0) }
+                let itemID = item.id
+                DispatchQueue.main.async {
+                    if let idx = self.items.firstIndex(where: { $0.id == itemID }) {
+                        self.items[idx].embedding = floats
+                    }
+                }
+            }
+        }
     }
 
     /// Returns caret/input position only when the current AX focused element
@@ -2362,18 +2491,80 @@ struct ClipboardItem: Identifiable {
         return formatter
     }()
 
+    var relativeTimestamp: String {
+        Self.relativeDateFormatter.localizedString(for: timestamp, relativeTo: Date())
+    }
+
     var image: NSImage? {
         if case .image(let img, _, _) = content { return img }
         return nil
     }
 
+    /// Text fed to NLEmbedding for semantic search.
+    /// For text items this is the full text; for binary/file items it is a
+    /// rich metadata sentence so users can find items by saying things like
+    /// "that PDF from Xcode yesterday" or "the MP4 video I got from Safari".
     var textForEmbedding: String? {
         switch content {
-        case .text(let s):               return s
-        case .richText(_, plain: let s): return s
-        case .html(_, plain: let s):     return s
-        default:                         return nil
+        case .text(let s):               return s.isEmpty ? nil : s
+        case .richText(_, plain: let s): return s.isEmpty ? nil : s
+        case .html(_, plain: let s):     return s.isEmpty ? nil : s
+        case .image(let img, let data, let dataType):
+            var parts: [String] = ["image"]
+            let raw = dataType.rawValue.lowercased()
+            if raw.contains("png")       { parts.append("PNG") }
+            else if raw.contains("gif")  { parts.append("GIF animation") }
+            else if raw.contains("heic") { parts.append("HEIC photo") }
+            else if raw.contains("pdf")  { parts.append("PDF document") }
+            else if raw.contains("webp") { parts.append("WebP") }
+            else                         { parts.append("JPEG photo") }
+            let dims = "\(Int(img.size.width))×\(Int(img.size.height)) pixels"
+            parts.append(dims)
+            let kb = data.count / 1_024
+            parts.append(kb > 1_024 ? "\(kb / 1_024) MB" : "\(kb) KB")
+            if let title = urlTitle     { parts.append(title) }
+            if let app   = sourceAppName { parts.append("from \(app)") }
+            return parts.joined(separator: " ")
+        case .file(let url):
+            return fileMetadataEmbeddingText(for: url)
+        case .files(let urls):
+            let parts = urls.prefix(5).compactMap { fileMetadataEmbeddingText(for: $0) }
+            if parts.isEmpty { return nil }
+            let prefix = urls.count > 1 ? "\(urls.count) files " : ""
+            return prefix + parts.joined(separator: " | ")
         }
+    }
+
+    private func fileMetadataEmbeddingText(for url: URL) -> String {
+        var parts: [String] = []
+        let filename = url.lastPathComponent
+        let baseName = url.deletingPathExtension().lastPathComponent
+        let ext      = url.pathExtension.lowercased()
+        // Human-readable name — replace _ and - with spaces so NLEmbedding
+        // tokenises words correctly (e.g. "my_report_2026" → "my report 2026")
+        let readableName = baseName
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        parts.append(filename)
+        if readableName != baseName { parts.append(readableName) }
+        // File-kind keywords
+        if FileKindDetector.isImageFile(url)           { parts.append("image photo picture \(ext)") }
+        else if FileKindDetector.isVideoFile(url)      { parts.append("video movie clip \(ext)") }
+        else if FileKindDetector.isAudioFile(url)      { parts.append("audio music sound recording \(ext)") }
+        else if ext == "pdf"                           { parts.append("PDF document") }
+        else if FileKindDetector.isTextFile(url)       { parts.append("text code \(ext) document") }
+        else if FileKindDetector.isDocumentFile(url)   { parts.append("document file \(ext)") }
+        else if FileKindDetector.isArchiveFile(url)    { parts.append("archive zip compressed \(ext)") }
+        else if FileKindDetector.isDesignFile(url)     { parts.append("design file \(ext)") }
+        else if !ext.isEmpty                           { parts.append(ext) }
+        // File size
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let bytes = (attrs[.size] as? NSNumber)?.intValue {
+            let kb = bytes / 1_024
+            parts.append(kb > 1_024 ? "\(kb / 1_024) MB" : "\(kb) KB")
+        }
+        if let app = sourceAppName { parts.append("from \(app)") }
+        return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     var category: ClipboardCategory {
