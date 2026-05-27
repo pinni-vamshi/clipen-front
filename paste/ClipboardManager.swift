@@ -1826,27 +1826,25 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    /// Extract text from the union-selection pages, write to pasteboard,
-    /// close everything, fire ⌘V.  Target app focus was never lost (popup is
-    /// non-activating) so we don't need to re-activate it explicitly.
-    ///
-    /// Fail-soft cases (user pressed Enter without selecting / on an image-
-    /// only PDF) flash a clear status and exit the picker — never leave the
-    /// user "stuck" with no visible feedback.
+    /// Build a NEW PDF containing only the user's selected pages (in original
+    /// order, preserving each page exactly as-is — no text extraction, no
+    /// rasterising), write it to a temp file in Application Support, put a
+    /// file-URL on the pasteboard, fire ⌘V.  The target app receives a PDF
+    /// file paste — same as if the user had dragged a PDF in.
     func commitPageRangePaste() {
         let pages = pageRangeEffectiveSelection.sorted()
         guard !pages.isEmpty else {
             flashStatus("Select at least one page first.")
             return
         }
-        guard let pdf = pageRangePDF else {
+        guard let originalPDF = pageRangePDF else {
             flashStatus("PDF unavailable.")
             exitPageRangeMode()
             return
         }
-        let combined = Self.extractPageText(pdf: pdf, pages: pages)
-        guard !combined.isEmpty else {
-            flashStatus("No extractable text on the selected pages.")
+
+        guard let url = Self.buildCombinedPDF(from: originalPDF, pages: pages) else {
+            flashStatus("Couldn't build PDF from selected pages.")
             exitPageRangeMode()
             previewWindow.hide()
             transformPanel.hide()
@@ -1857,7 +1855,7 @@ class ClipboardManager: ObservableObject {
 
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString(combined, forType: .string)
+        pb.writeObjects([makeFilePasteboardItem(for: url)])
         markPasteboardWriteAsOwn()
 
         exitPageRangeMode()
@@ -1871,13 +1869,10 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    /// Build a transient ClipboardItem of the would-be-pasted text and show
-    /// it in the existing ItemPreviewPanel, anchored next to the transform
-    /// panel.  Same Quick-Look-style preview the user already gets via Space
-    /// on regular popup rows.  Second Space toggles it off.
+    /// Build the combined PDF for the current selection and show it in the
+    /// existing ItemPreviewPanel as a real PDF preview.  Second Space toggles
+    /// it off.
     func showPageRangePreview() {
-        // Toggle off cleanly first — second Space should dismiss regardless
-        // of the current selection state.
         if itemPreviewPanel.isVisible {
             itemPreviewPanel.hide()
             return
@@ -1887,25 +1882,52 @@ class ClipboardManager: ObservableObject {
             flashStatus("Select at least one page first.")
             return
         }
-        guard let pdf = pageRangePDF else { return }
-        let combined = Self.extractPageText(pdf: pdf, pages: pages)
-        guard !combined.isEmpty else {
-            flashStatus("No extractable text on the selected pages.")
+        guard let originalPDF = pageRangePDF else { return }
+        guard let url = Self.buildCombinedPDF(from: originalPDF, pages: pages) else {
+            flashStatus("Couldn't build PDF preview.")
             return
         }
-        let previewItem = ClipboardItem(content: .text(combined))
+        let previewItem = ClipboardItem(content: .file(url))
         itemPreviewPanel.show(for: previewItem, near: transformPanel.frame)
     }
 
-    /// Extract and join text from the given 0-indexed PDF pages.
-    private static func extractPageText(pdf: PDFDocument, pages: [Int]) -> String {
-        let chunks: [String] = pages.compactMap { idx in
-            guard idx >= 0, idx < pdf.pageCount,
-                  let str = pdf.page(at: idx)?.string else { return nil }
-            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+    /// Construct a new PDFDocument from the user's selected page indices
+    /// (0-based, ascending), write it to a unique file in Application
+    /// Support/Clipen/Optimized/, and return the URL.  Pages are inserted
+    /// IN ORDER — never re-rendered, never re-encoded.  The resulting PDF
+    /// is bit-for-bit a subset of the original (just the chosen pages).
+    private static func buildCombinedPDF(from original: PDFDocument, pages: [Int]) -> URL? {
+        guard !pages.isEmpty else { return nil }
+
+        let newPDF = PDFDocument()
+        var insertIdx = 0
+        for srcIdx in pages {
+            guard srcIdx >= 0, srcIdx < original.pageCount,
+                  let page = original.page(at: srcIdx)?.copy() as? PDFPage else { continue }
+            newPDF.insert(page, at: insertIdx)
+            insertIdx += 1
         }
-        return chunks.joined(separator: "\n\n")
+        guard newPDF.pageCount > 0 else { return nil }
+
+        // Output filename includes the picked page numbers when reasonable
+        // (≤4 pages); otherwise just "N pages".  Falls back to a UUID-based
+        // path so two concurrent picks can't collide.
+        let label: String
+        if pages.count <= 4 {
+            label = pages.map { String($0 + 1) }.joined(separator: "-")
+        } else {
+            label = "\(pages.count)-pages"
+        }
+        let fileName = "Clipen-Pages-\(label)-\(UUID().uuidString.prefix(8)).pdf"
+
+        let dir = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Clipen/Optimized", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent(fileName)
+
+        guard newPDF.write(to: url) else { return nil }
+        return url
     }
 
     /// Tell the polling capture loop that the *next* changeCount bump is our
