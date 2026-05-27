@@ -78,6 +78,9 @@ struct MainWindowView: View {
         .background(Color.bg)
         .preferredColorScheme(.dark)
         .onAppear { }   // onboarding flow is driven by mainArea step conditions above
+        .sheet(isPresented: $showTutorial) {
+            TutorialSheet(isPresented: $showTutorial)
+        }
         // Global error alert — any backend / auth failure surfaces here
         .alert("Heads up",
                isPresented: Binding(
@@ -99,9 +102,6 @@ struct MainWindowView: View {
                     }
                 }
                 .help("How to use")
-                .sheet(isPresented: $showTutorial) {
-                    TutorialSheet(isPresented: $showTutorial)
-                }
             }
         }
     }
