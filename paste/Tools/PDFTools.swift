@@ -16,8 +16,15 @@ enum PDFTools {
         },
         // Interactive — `runAsync` here is a no-op placeholder; the real
         // behaviour is intercepted in ClipboardManager.commitPaste, which
-        // opens the PageRangePanel instead of running this closure.
+        // swaps the transform panel into the inline page-picker instead of
+        // running this closure.  Two flavours: one combines selected pages
+        // into a single PDF; the other renders each selected page as its
+        // own PNG image file.  Both share the picker UI; mode is set on
+        // entry based on which tool ID was active when ⌘ was released.
         make("pdf.paste-pages", icon: "doc.text.below.ecg", label: "Paste Specific Pages", group: "TEXT") { pdf, _ in
+            .status("Pick pages in the panel.")
+        },
+        make("pdf.paste-pages-as-images", icon: "photo.stack", label: "Paste Specific Pages as Images", group: "EXPORT") { pdf, _ in
             .status("Pick pages in the panel.")
         },
         make("pdf.pages-as-png", icon: "photo.stack", label: "Pages as PNG Images", group: "EXPORT") { pdf, data in
@@ -48,7 +55,8 @@ enum PDFTools {
                 case "pdf.page-count": return "Show total page count"
                 case "pdf.pages-as-png": return "Export each page as a PNG image"
                 case "pdf.reduce-size": return "Create a smaller PDF copy"
-                case "pdf.paste-pages": return "Pick a page range, then paste"
+                case "pdf.paste-pages": return "Pick pages → paste as one combined PDF"
+                case "pdf.paste-pages-as-images": return "Pick pages → paste each as a PNG image"
                 default: return ""
                 }
             },

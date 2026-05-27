@@ -420,6 +420,11 @@ class ClipboardManager: ObservableObject {
     @Published var pageRangePageCount: Int = 0
     /// PDF being picked from.  Strong-held while in page-range mode.
     private var pageRangePDF: PDFDocument?
+    /// What to produce when the user commits the picker:
+    ///   .combinedPDF — stitch selected pages into one new PDF, paste as file
+    ///   .perPageImages — render each selected page to its own PNG, paste files
+    enum PageRangeOutputMode { case combinedPDF; case perPageImages }
+    @Published var pageRangeOutputMode: PageRangeOutputMode = .combinedPDF
 
     /// Union of typed-range pages and manually-clicked pages.  This is what the
     /// grid uses for highlight state and what `commitPageRangePaste` extracts.
@@ -1772,18 +1777,20 @@ class ClipboardManager: ObservableObject {
     /// Keeps the popup + transform panel visible so the user has continuous
     /// context; freezes the dismiss timer because typing the range takes
     /// time and a silent dismiss mid-edit would feel broken.
-    func enterPageRangeMode(pdf: PDFDocument, item: ClipboardItem) {
+    func enterPageRangeMode(pdf: PDFDocument, item: ClipboardItem, outputMode: PageRangeOutputMode = .combinedPDF) {
         pageRangePDF        = pdf
         pageRangePageCount  = pdf.pageCount
         pageRangeQuery      = ""
         pageRangeManualPages = []
-        inPageRangeMode     = true
+        pageRangeOutputMode  = outputMode
+        inPageRangeMode      = true
 
         // Freeze auto-dismiss — same trick as popup-search.
         dismissTimer?.invalidate(); dismissTimer = nil
         timerFrozen = true
 
-        flashStatus("Pick pages — type or click, ↵ to paste")
+        let modeLabel = (outputMode == .perPageImages) ? "images" : "PDF"
+        flashStatus("Pick pages → \(modeLabel) · ↵ paste · ␣ preview")
 
         // Force the transform panel to re-render with the picker view AND
         // re-measure its height.  The picker is taller than a typical
@@ -1812,6 +1819,7 @@ class ClipboardManager: ObservableObject {
         pageRangeManualPages = []
         pageRangePageCount   = 0
         pageRangePDF         = nil
+        pageRangeOutputMode  = .combinedPDF
         itemPreviewPanel.hide()
         // Resume the dismiss countdown.
         timerFrozen = false
@@ -1826,11 +1834,12 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    /// Build a NEW PDF containing only the user's selected pages (in original
-    /// order, preserving each page exactly as-is — no text extraction, no
-    /// rasterising), write it to a temp file in Application Support, put a
-    /// file-URL on the pasteboard, fire ⌘V.  The target app receives a PDF
-    /// file paste — same as if the user had dragged a PDF in.
+    /// Commit the page picker.  Output depends on pageRangeOutputMode:
+    ///   .combinedPDF — stitch selected pages into ONE new PDF (.copy()-d
+    ///                  page-by-page; no text extraction, no rasterising)
+    ///                  and paste as a single PDF file.
+    ///   .perPageImages — render EACH selected page to its own PNG file
+    ///                    at 2× scale and paste the collection as files.
     func commitPageRangePaste() {
         let pages = pageRangeEffectiveSelection.sorted()
         guard !pages.isEmpty else {
@@ -1843,35 +1852,50 @@ class ClipboardManager: ObservableObject {
             return
         }
 
-        guard let url = Self.buildCombinedPDF(from: originalPDF, pages: pages) else {
-            flashStatus("Couldn't build PDF from selected pages.")
-            exitPageRangeMode()
-            previewWindow.hide()
-            transformPanel.hide()
-            itemPreviewPanel.hide()
-            inTransformStage = false
-            return
-        }
-
         let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects([makeFilePasteboardItem(for: url)])
+        switch pageRangeOutputMode {
+        case .combinedPDF:
+            guard let url = Self.buildCombinedPDF(from: originalPDF, pages: pages) else {
+                flashStatus("Couldn't build PDF from selected pages.")
+                cleanupAfterPagePicker()
+                return
+            }
+            pb.clearContents()
+            pb.writeObjects([makeFilePasteboardItem(for: url)])
+
+        case .perPageImages:
+            let urls = Self.renderPagesAsImages(from: originalPDF, pages: pages)
+            guard !urls.isEmpty else {
+                flashStatus("Couldn't render pages as images.")
+                cleanupAfterPagePicker()
+                return
+            }
+            pb.clearContents()
+            pb.writeObjects(urls.map { makeFilePasteboardItem(for: $0) })
+        }
         markPasteboardWriteAsOwn()
 
-        exitPageRangeMode()
-        previewWindow.hide()
-        transformPanel.hide()
-        itemPreviewPanel.hide()
-        inTransformStage = false
-
+        cleanupAfterPagePicker()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.simulateCommandV()
         }
     }
 
-    /// Build the combined PDF for the current selection and show it in the
-    /// existing ItemPreviewPanel as a real PDF preview.  Second Space toggles
-    /// it off.
+    /// Common teardown after a page-picker commit / fatal-error exit.
+    private func cleanupAfterPagePicker() {
+        exitPageRangeMode()
+        previewWindow.hide()
+        transformPanel.hide()
+        itemPreviewPanel.hide()
+        inTransformStage = false
+    }
+
+    /// Preview what would be pasted on Enter.  Shows the actual artefacts:
+    ///   .combinedPDF mode  → builds the would-be PDF, previews it
+    ///   .perPageImages mode → renders the would-be PNGs, previews them
+    ///                         (as a .files collection — first image shown,
+    ///                         count indicated by the panel chrome).
+    /// Second Space toggles off.
     func showPageRangePreview() {
         if itemPreviewPanel.isVisible {
             itemPreviewPanel.hide()
@@ -1883,12 +1907,27 @@ class ClipboardManager: ObservableObject {
             return
         }
         guard let originalPDF = pageRangePDF else { return }
-        guard let url = Self.buildCombinedPDF(from: originalPDF, pages: pages) else {
-            flashStatus("Couldn't build PDF preview.")
-            return
+
+        switch pageRangeOutputMode {
+        case .combinedPDF:
+            guard let url = Self.buildCombinedPDF(from: originalPDF, pages: pages) else {
+                flashStatus("Couldn't build PDF preview.")
+                return
+            }
+            let previewItem = ClipboardItem(content: .file(url))
+            itemPreviewPanel.show(for: previewItem, near: transformPanel.frame)
+
+        case .perPageImages:
+            let urls = Self.renderPagesAsImages(from: originalPDF, pages: pages)
+            guard !urls.isEmpty else {
+                flashStatus("Couldn't render image preview.")
+                return
+            }
+            // Single page → preview as file; multiple → as files collection.
+            let content: ClipboardContent = (urls.count == 1) ? .file(urls[0]) : .files(urls)
+            let previewItem = ClipboardItem(content: content)
+            itemPreviewPanel.show(for: previewItem, near: transformPanel.frame)
         }
-        let previewItem = ClipboardItem(content: .file(url))
-        itemPreviewPanel.show(for: previewItem, near: transformPanel.frame)
     }
 
     /// Construct a new PDFDocument from the user's selected page indices
@@ -1928,6 +1967,69 @@ class ClipboardManager: ObservableObject {
 
         guard newPDF.write(to: url) else { return nil }
         return url
+    }
+
+    /// Render each selected page to its own PNG file at 2× scale.  Returns
+    /// the list of file URLs in ascending page order.  Files land in a
+    /// dedicated subfolder per call so multiple invocations don't pollute
+    /// each other's output.  No text extraction — pure raster of whatever
+    /// is on the page (works for scanned PDFs, vector PDFs, anything).
+    private static func renderPagesAsImages(from original: PDFDocument, pages: [Int]) -> [URL] {
+        guard !pages.isEmpty else { return [] }
+
+        let base = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Clipen/Optimized", isDirectory: true)
+        let dir = base.appendingPathComponent("PDF-Pages-\(UUID().uuidString.prefix(8))",
+                                              isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        var urls: [URL] = []
+        urls.reserveCapacity(pages.count)
+        for srcIdx in pages {
+            guard srcIdx >= 0, srcIdx < original.pageCount,
+                  let page = original.page(at: srcIdx),
+                  let pngData = renderPDFPageToPNG(page: page, scale: 2.0) else { continue }
+            let filename = String(format: "page-%03d.png", srcIdx + 1)
+            let url = dir.appendingPathComponent(filename)
+            do {
+                try pngData.write(to: url, options: .atomic)
+                urls.append(url)
+            } catch {
+                continue
+            }
+        }
+        return urls
+    }
+
+    /// Rasterise a single PDFPage to PNG data at the given scale.
+    /// Same approach PDFService.exportPagesAsImages uses — kept local here
+    /// so the page-picker doesn't have to reach across into the Tools layer.
+    private static func renderPDFPageToPNG(page: PDFPage, scale: CGFloat) -> Data? {
+        let bounds = page.bounds(for: .mediaBox)
+        let width  = max(1, Int(bounds.width  * scale))
+        let height = max(1, Int(bounds.height * scale))
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+
+        context.setFillColor(NSColor.white.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.saveGState()
+        context.scaleBy(x: scale, y: scale)
+        context.translateBy(x: -bounds.origin.x, y: -bounds.origin.y)
+        page.draw(with: .mediaBox, to: context)
+        context.restoreGState()
+
+        guard let cgImage = context.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
     }
 
     /// Tell the polling capture loop that the *next* changeCount bump is our
@@ -2270,10 +2372,12 @@ class ClipboardManager: ObservableObject {
             // return, escape, space-preview) flows through the CGEventTap
             // just like the popup search bar does — the non-activating panel
             // never has to steal focus from the target app.
-            if selectedToolID == "pdf.paste-pages" {
+            if selectedToolID == "pdf.paste-pages" || selectedToolID == "pdf.paste-pages-as-images" {
                 if let input = PDFTools.pdfInput(for: item) {
-                    NSLog("[Clipen] commitPaste intercept → enterPageRangeMode (pages=\(input.pdf.pageCount))")
-                    enterPageRangeMode(pdf: input.pdf, item: item)
+                    let mode: PageRangeOutputMode =
+                        (selectedToolID == "pdf.paste-pages-as-images") ? .perPageImages : .combinedPDF
+                    NSLog("[Clipen] commitPaste intercept → enterPageRangeMode mode=\(mode) pages=\(input.pdf.pageCount)")
+                    enterPageRangeMode(pdf: input.pdf, item: item, outputMode: mode)
                     return
                 } else {
                     NSLog("[Clipen] commitPaste intercept FAILED: pdfInput returned nil for item content=\(item.content)")

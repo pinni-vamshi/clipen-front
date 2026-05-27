@@ -192,6 +192,16 @@ struct TransformView: View {
     /// manager state changes here.
     @ObservedObject private var manager = ClipboardManager.shared
 
+    /// Which of the two PDF page-picker tool IDs the picker should currently
+    /// expand under.  Derived from the manager's output-mode so the inline
+    /// expansion always nests beneath the SAME tool the user activated.
+    private var activePagePickerToolID: String {
+        switch manager.pageRangeOutputMode {
+        case .perPageImages: return "pdf.paste-pages-as-images"
+        case .combinedPDF:   return "pdf.paste-pages"
+        }
+    }
+
     private var stats: String {
         guard let text = previewText else {
             switch item.content {
@@ -319,13 +329,16 @@ struct TransformView: View {
                             )
                             .id(idx)
 
-                            // INLINE picker — nested directly under its tool row.
-                            // Only renders for the "pdf.paste-pages" row, and
-                            // only while the user has activated that picker
-                            // (manager.inPageRangeMode == true).  Every other
-                            // tool above and below stays visible — the user
-                            // doesn't lose the transform context.
-                            if display.id == "pdf.paste-pages" && manager.inPageRangeMode {
+                            // INLINE picker — nested directly under whichever
+                            // PDF-page tool the user activated.  Two tools
+                            // share the same picker UI; mode is set in
+                            // ClipboardManager.pageRangeOutputMode and drives
+                            // commit/preview behaviour (combined PDF vs.
+                            // individual PNGs).  Other tool rows stay
+                            // visible — no transform context is lost.
+                            if (display.id == "pdf.paste-pages" || display.id == "pdf.paste-pages-as-images")
+                               && manager.inPageRangeMode
+                               && display.id == activePagePickerToolID {
                                 InlinePagePicker()
                                     .padding(.leading, 36) // align under the tool row's label
                                     .padding(.trailing, 8)
