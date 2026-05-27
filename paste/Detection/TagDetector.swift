@@ -12,8 +12,8 @@ enum TagDetector {
         appendStructuralTags(for: content, into: &found)
         if let plain = plainText(from: content), !plain.isEmpty {
             appendTextTags(plain: plain, color: color, into: &found)
-            if hasLocalFilePath(in: plain) {
-                found.insert(.file)
+            if let fileURL = resolvedLocalFileURL(from: plain) {
+                appendFileTypeTag(for: fileURL, into: &found)
             }
         }
         if found.isEmpty {
@@ -50,8 +50,15 @@ enum TagDetector {
             }
         case .files(let urls):
             found.insert(.files)
-            if !urls.isEmpty, urls.allSatisfy(FileKindDetector.isImageFile) {
+            guard !urls.isEmpty else { break }
+            if urls.allSatisfy(FileKindDetector.isImageFile) {
                 found.insert(.image)
+            } else if urls.allSatisfy(FileKindDetector.isVideoFile) {
+                found.insert(.video)
+            } else if urls.allSatisfy(FileKindDetector.isAudioFile) {
+                found.insert(.audio)
+            } else if urls.allSatisfy({ $0.pathExtension.lowercased() == "pdf" }) {
+                found.insert(.pdf)
             }
         case .html:
             found.insert(.html)
@@ -96,17 +103,34 @@ enum TagDetector {
         }
     }
 
-    private static func hasLocalFilePath(in string: String) -> Bool {
+    /// Returns a URL if `string` is a single local file path that exists on disk.
+    private static func resolvedLocalFileURL(from string: String) -> URL? {
         let raw = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty, !raw.contains("\n") else { return false }
+        guard !raw.isEmpty, !raw.contains("\n") else { return nil }
         let url: URL
         if raw.hasPrefix("file://"), let parsed = URL(string: raw), parsed.isFileURL {
             url = parsed
         } else if raw.hasPrefix("/") || raw.hasPrefix("~") {
             url = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
         } else {
-            return false
+            return nil
         }
-        return FileManager.default.fileExists(atPath: url.path)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Inserts the most specific file-type tag for `url` (image/video/audio/pdf/file).
+    private static func appendFileTypeTag(for url: URL, into found: inout Set<ClipboardTag>) {
+        let ext = url.pathExtension.lowercased()
+        if ext == "pdf" {
+            found.insert(.pdf)
+        } else if FileKindDetector.isImageFile(url) {
+            found.insert(.image)
+        } else if FileKindDetector.isVideoFile(url) {
+            found.insert(.video)
+        } else if FileKindDetector.isAudioFile(url) {
+            found.insert(.audio)
+        } else {
+            found.insert(.file)
+        }
     }
 }

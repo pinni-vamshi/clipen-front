@@ -100,10 +100,32 @@ enum TextTraditionalDetectors {
 
     private static func isPhoneNumber(_ text: String) -> Bool {
         guard !text.contains("\n") else { return false }
+        let t = text.trimmingCharacters(in: .whitespaces)
+
+        // Reject IPv4 addresses (192.168.1.1, 10.0.0.1, etc.)
+        if DetectionRegex.matches(#"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"#, in: t) { return false }
+
+        // Reject date formats: 2026-05-27, 05/27/2026, 27.05.2026
+        if DetectionRegex.matches(#"^\d{1,4}[.\-/]\d{1,2}[.\-/]\d{2,4}$"#, in: t) { return false }
+
+        // Reject version strings: 1.0.10, 2.5.1.3
+        if DetectionRegex.matches(#"^\d+\.\d+(\.\d+)+$"#, in: t) { return false }
+
         let allowed = CharacterSet(charactersIn: "+0123456789()-. ")
-        guard text.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
-        let digits = text.filter(\.isNumber).count
-        return digits >= 7 && digits <= 15
+        guard t.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return false }
+
+        let digits = t.filter(\.isNumber).count
+        guard digits >= 7 && digits <= 15 else { return false }
+
+        // Pure-digit strings (no formatting) must be exactly 10 or 11 digits to
+        // qualify — this avoids flagging unix timestamps, numeric IDs, and other
+        // long integer sequences as phone numbers.
+        let hasSeparators = t.contains(where: { "+()-. ".contains($0) })
+        if !hasSeparators {
+            return digits == 10 || digits == 11
+        }
+
+        return true
     }
 
     private static func isPostalAddress(_ text: String) -> Bool {
