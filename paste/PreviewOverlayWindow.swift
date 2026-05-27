@@ -271,6 +271,43 @@ struct PopoverPreviewView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
 
+                // ── Inline search text box (between header and category strip) ──
+                // Toggled by ⌘F. Thin, compact — sits between Clipen heading row
+                // and the category chips. Typed characters route through the
+                // event tap so the popup never needs to steal focus.
+                if manager.isPopupSearchActive {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.accentColor)
+                        Group {
+                            if manager.popupSearchQuery.isEmpty {
+                                Text("Type to search clipboard…")
+                                    .foregroundColor(.secondary.opacity(0.5))
+                            } else {
+                                Text(manager.popupSearchQuery + "▌")
+                                    .foregroundColor(.primary)
+                            }
+                        }
+                        .font(.system(size: 12))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(1)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.primary.opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(Color.accentColor.opacity(0.45), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 6)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
                 // Category strip — horizontal scrolling list of category
                 // pills the user can click to filter the ring. "Recents"
                 // (nil filter) is pinned first, then categories present in
@@ -309,40 +346,6 @@ struct PopoverPreviewView: View {
                 }
 
                 Divider()
-
-                // ── Inline search bar (shown when ⌘F activates search mode) ──
-                if manager.isPopupSearchActive {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.accentColor)
-                        Group {
-                            if manager.popupSearchQuery.isEmpty {
-                                Text("Type to search…")
-                                    .foregroundColor(.secondary.opacity(0.45))
-                            } else {
-                                // Simulate a cursor with a block character
-                                Text(manager.popupSearchQuery + "▌")
-                                    .foregroundColor(.primary)
-                            }
-                        }
-                        .font(.system(size: 13))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        if !manager.popupSearchQuery.isEmpty {
-                            Text("↵ paste  ↑↓ navigate  ⎋ clear")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.secondary.opacity(0.45))
-                        } else {
-                            Text("⌘F to close")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.secondary.opacity(0.45))
-                        }
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.accentColor.opacity(0.06))
-                    Divider()
-                }
 
                 // Fixed-height row area — shows search results or normal items.
                 VStack(spacing: 0) {
