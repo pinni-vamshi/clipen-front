@@ -217,108 +217,27 @@ struct TransformView: View {
     }
 
     var body: some View {
-        if manager.inPageRangeMode {
-            // Picker takes over the whole panel — header included — because
-            // the user is now in a different mode entirely.  Its own header
-            // explains the context ("Pick pages to paste").
-            InlinePagePicker()
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-                )
-        } else {
-            transformListBody
-        }
-    }
-
-    private var transformListBody: some View {
+        // Same outer chrome (header, detected-type badge, background, stroke)
+        // regardless of mode — the panel must always look like the Transforms
+        // panel.  Only the middle section swaps between the tool list and the
+        // inline page picker so the user can see it's the SAME panel, with
+        // one tool just expanded into an interactive form.
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "wand.and.stars")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary)
-                Text("Transforms")
-                    .font(.system(size: 12, weight: .semibold))
-                Spacer()
-                Text("⌘X cycle · release ⌘ apply")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-
+            outerHeader
             Divider()
-
             if let label = item.detectedType.badgeLabel {
-                HStack(spacing: 6) {
-                    Image(systemName: item.detectedType.sfIcon)
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(label)
-                        .font(.system(size: 10, weight: .semibold))
-                    Spacer()
-                    Text("detected")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                }
-                .foregroundColor(item.detectedType.badgeColor)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(item.detectedType.badgeColor.opacity(0.12))
-
+                detectedBadge(label: label)
                 Divider()
             }
-
-            if displays.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "wand.and.stars.inverse")
-                        .font(.system(size: 24, weight: .thin))
-                        .foregroundColor(.secondary.opacity(0.4))
-                    Text("No transforms available")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.secondary.opacity(0.6))
-                    Text("This content type can't be transformed")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary.opacity(0.4))
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 28)
+            // ── Middle: swaps between tool list and picker ──
+            if manager.inPageRangeMode {
+                InlinePagePicker()
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(Array(displays.enumerated()), id: \.element.id) { idx, display in
-                                TransformRow(
-                                    display:    display,
-                                    isSelected: idx == selectedTransformIndex,
-                                    isProcessing: idx == selectedTransformIndex && isProcessing
-                                )
-                                .id(idx)
-                                if idx < displays.count - 1 {
-                                    Divider().padding(.leading, 36)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
-                    }
-                    .onChange(of: selectedTransformIndex) { _, newIdx in
-                        guard displays.indices.contains(newIdx) else { return }
-                        withAnimation(.easeOut(duration: 0.15)) {
-                            proxy.scrollTo(newIdx, anchor: .center)
-                        }
-                    }
-                    .onAppear {
-                        guard displays.indices.contains(selectedTransformIndex) else { return }
-                        proxy.scrollTo(selectedTransformIndex, anchor: .center)
-                    }
-                }
+                middleToolList
             }
-
             Divider()
-
-            Text(stats)
+            // Footer line updates to match mode.
+            Text(manager.inPageRangeMode ? "Pick pages — ↵ paste · ␣ preview · ⎋ cancel" : stats)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -330,6 +249,95 @@ struct TransformView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.primary.opacity(0.1), lineWidth: 1)
         )
+    }
+
+    // MARK: - Outer chrome (always-on)
+
+    private var outerHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: manager.inPageRangeMode ? "doc.text.below.ecg" : "wand.and.stars")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(manager.inPageRangeMode ? .accentColor : .secondary)
+            Text(manager.inPageRangeMode ? "Paste Specific Pages" : "Transforms")
+                .font(.system(size: 12, weight: .semibold))
+            Spacer()
+            Text(manager.inPageRangeMode
+                 ? "\(manager.pageRangePageCount) page\(manager.pageRangePageCount == 1 ? "" : "s") in PDF"
+                 : "⌘X cycle · release ⌘ apply")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+    }
+
+    private func detectedBadge(label: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: item.detectedType.sfIcon)
+                .font(.system(size: 10, weight: .semibold))
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+            Spacer()
+            Text("detected")
+                .font(.system(size: 9))
+                .foregroundColor(.secondary)
+        }
+        .foregroundColor(item.detectedType.badgeColor)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(item.detectedType.badgeColor.opacity(0.12))
+    }
+
+    // MARK: - Middle: tool list (used when not in page-range mode)
+
+    @ViewBuilder
+    private var middleToolList: some View {
+        if displays.isEmpty {
+            VStack(spacing: 8) {
+                Image(systemName: "wand.and.stars.inverse")
+                    .font(.system(size: 24, weight: .thin))
+                    .foregroundColor(.secondary.opacity(0.4))
+                Text("No transforms available")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.6))
+                Text("This content type can't be transformed")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.4))
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(displays.enumerated()), id: \.element.id) { idx, display in
+                            TransformRow(
+                                display:    display,
+                                isSelected: idx == selectedTransformIndex,
+                                isProcessing: idx == selectedTransformIndex && isProcessing
+                            )
+                            .id(idx)
+                            if idx < displays.count - 1 {
+                                Divider().padding(.leading, 36)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                }
+                .onChange(of: selectedTransformIndex) { _, newIdx in
+                    guard displays.indices.contains(newIdx) else { return }
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo(newIdx, anchor: .center)
+                    }
+                }
+                .onAppear {
+                    guard displays.indices.contains(selectedTransformIndex) else { return }
+                    proxy.scrollTo(selectedTransformIndex, anchor: .center)
+                }
+            }
+        }
     }
 }
 

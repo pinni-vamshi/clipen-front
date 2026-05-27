@@ -13,35 +13,18 @@ import SwiftUI
 struct InlinePagePicker: View {
     @ObservedObject private var manager = ClipboardManager.shared
 
+    // No header here — the outer TransformView header already announces
+    // "Paste Specific Pages" with the page count.  Keeping a duplicate
+    // header would make the picker look like a separate panel.  This view
+    // is purely the picker's CONTENT: query row, page grid, selection count.
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
             queryRow
             Divider()
             grid
             Divider()
-            footer
+            selectionCountRow
         }
-    }
-
-    // MARK: Header
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "doc.text.below.ecg")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.accentColor)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Pick pages to paste")
-                    .font(.system(size: 12, weight: .semibold))
-                Text("\(manager.pageRangePageCount) page\(manager.pageRangePageCount == 1 ? "" : "s") total")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
     }
 
     // MARK: Range input (visual only — keystrokes routed via CGEventTap)
@@ -112,37 +95,19 @@ struct InlinePagePicker: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: Footer
-    private var footer: some View {
+    // MARK: Selection count row (compact — TransformView's outer footer shows the keybinding hints)
+    private var selectionCountRow: some View {
         let count = manager.pageRangeEffectiveSelection.count
-        return VStack(alignment: .leading, spacing: 4) {
+        return HStack {
             Text(count == 0 ? "No pages selected"
                             : (count == 1 ? "1 page selected" : "\(count) pages selected"))
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(count == 0 ? .secondary : .accentColor)
-            HStack(spacing: 10) {
-                hintChip(key: "↵", label: "Paste", enabled: count > 0)
-                hintChip(key: "␣", label: "Preview", enabled: count > 0)
-                hintChip(key: "⎋", label: "Cancel", enabled: true)
-            }
+            Spacer()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    private func hintChip(key: String, label: String, enabled: Bool) -> some View {
-        HStack(spacing: 3) {
-            Text(key)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(Color.primary.opacity(enabled ? 0.10 : 0.05),
-                            in: RoundedRectangle(cornerRadius: 3))
-            Text(label)
-                .font(.system(size: 9, weight: .medium))
-        }
-        .foregroundColor(enabled ? .secondary : .secondary.opacity(0.4))
+        .padding(.vertical, 6)
     }
 }
 
