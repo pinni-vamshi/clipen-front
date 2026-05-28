@@ -245,6 +245,10 @@ struct PopoverPreviewView: View {
 
                     Spacer()
 
+                    // The "⌘ Paste" affordance moved out of the header — it's
+                    // now shown inline on the currently-highlighted row as
+                    // "Release ⌘ to paste", which puts the action right next
+                    // to its target.  Header stays focused on cycle hints.
                     FlatHint(key: "V", label: "Next",
                              isActive: manager.popupHintV)
                     FlatHint(key: "⇧V", label: "Prev",
@@ -254,11 +258,6 @@ struct PopoverPreviewView: View {
                              isActive: manager.popupHintX)
                     SpaceKeyFlatHint(label: "Preview",
                                      isActive: manager.popupHintSpace)
-                    FlatHint(key: "⌘",
-                             label: manager.selectionArmed ? "Paste" : "Dismiss",
-                             isActive: manager.popupHintCmd,
-                             idleKeyColor: manager.selectionArmed ? .green : .secondary,
-                             idleLabelColor: manager.selectionArmed ? .green : .secondary)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -696,9 +695,27 @@ struct PopoverRow: View {
                 Spacer()
 
                 if isSelected {
-                    Image(systemName: "return")
-                        .font(.system(size: 10))
-                        .foregroundColor(.accentColor)
+                    // Replaces the small ↵ arrow that used to mark the
+                    // selected row.  Shows the actual paste affordance
+                    // right next to the highlighted item so the user
+                    // sees what releasing ⌘ will do.  Header lost its
+                    // "⌘ Paste" chip in the same change — this is its
+                    // new home.
+                    HStack(spacing: 4) {
+                        Text("Release")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.accentColor.opacity(0.85))
+                        Text("⌘")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .foregroundColor(.accentColor)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.12),
+                                        in: RoundedRectangle(cornerRadius: 3))
+                        Text("to paste")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.accentColor.opacity(0.85))
+                    }
                 }
             }
 
