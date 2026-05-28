@@ -235,12 +235,14 @@ struct MainWindowView: View {
                             // speed.
                             sliderCardRow(
                                 icon: "hourglass",
-                                label: "Open delay",
+                                label: "Open delay slider",
                                 value: manager.firstOpenDelay == 0
                                     ? "Off"
                                     : String(format: "%.0f ms", manager.firstOpenDelay * 1000),
                                 active: manager.firstOpenDelay != 0,
-                                caption: "Release ⌘ within this window to paste the front item without opening the popup."
+                                caption: manager.highlightOpenDelaySlider
+                                    ? "← Drag to adjust the threshold. Lower = popup opens sooner; higher = more time before the popup appears."
+                                    : "Release ⌘ within this window to paste the front item without opening the popup."
                             ) {
                                 Slider(
                                     value: Binding(
@@ -251,6 +253,24 @@ struct MainWindowView: View {
                                 )
                                 .tint(.accent)
                             }
+                            .padding(6)
+                            .overlay(
+                                // Pulsing accent ring when launched from the
+                                // fast-paste alert's "Open delay slider"
+                                // button — clears automatically after a few
+                                // seconds via pulseOpenDelaySlider().
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.accent,
+                                            lineWidth: manager.highlightOpenDelaySlider ? 2 : 0)
+                                    .shadow(color: .accent.opacity(manager.highlightOpenDelaySlider ? 0.6 : 0),
+                                            radius: manager.highlightOpenDelaySlider ? 8 : 0)
+                                    .animation(
+                                        manager.highlightOpenDelaySlider
+                                            ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true)
+                                            : .default,
+                                        value: manager.highlightOpenDelaySlider
+                                    )
+                            )
                             cardDivider()
                             VStack(alignment: .leading, spacing: 8) {
                                 cardRow(icon: "eye", label: "Always show preview") {

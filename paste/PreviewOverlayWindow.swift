@@ -94,13 +94,14 @@ class PreviewOverlayWindow: NSPanel {
             arrowOffsetX: arrowX
         )
 
-        if let hv = hostingView {
-            hv.rootView = view
-        } else {
-            let hv = NSHostingView(rootView: view)
-            contentView = hv
-            hostingView = hv
-        }
+        // Always create a fresh NSHostingView — reusing it preserves the
+        // inner SwiftUI tree (ScrollView offset, LazyVStack realised rows,
+        // even @ObservedObject snapshots) across hide/show, which is what
+        // caused the "popup shows yesterday's list" bug.  Recreating is
+        // cheap (~few ms) and guarantees a clean state.
+        let hv = NSHostingView(rootView: view)
+        contentView = hv
+        hostingView = hv
 
         setFrame(NSRect(x: x, y: y, width: w, height: totalH), display: true)
         if !isVisible { orderFront(nil) }
@@ -135,13 +136,10 @@ class PreviewOverlayWindow: NSPanel {
             arrowOffsetX: 0,
             showArrow: false
         )
-        if let hv = hostingView {
-            hv.rootView = view
-        } else {
-            let hv = NSHostingView(rootView: view)
-            contentView = hv
-            hostingView = hv
-        }
+        // Always recreate — see comment in show(at:) above.
+        let hv = NSHostingView(rootView: view)
+        contentView = hv
+        hostingView = hv
         setFrame(NSRect(x: x, y: y, width: w, height: bodyH), display: true)
         if !isVisible { orderFront(nil) }
     }
@@ -192,32 +190,11 @@ struct PopoverPreviewView: View {
     private var items: [ClipboardItem] { manager.displayItems }
     private var selectedIndex: Int     { manager.selectedIndex }
 
-    /// "Sticky bottom" scrolling: selected item moves naturally through
-    /// positions 0 → (visibleCount-1) at the top of the list. Once it hits
-    /// the bottom slot, it stays anchored there and earlier items scroll up
-    /// to keep the selection always visible without forcing centering.
-    ///
-    /// Examples with visibleCount=5 and 10 items:
-    ///   selectedIndex 0 → window [0..5)  selection at row 0
-    ///   selectedIndex 3 → window [0..5)  selection at row 3
-    ///   selectedIndex 4 → window [0..5)  selection at row 4 (bottom)
-    ///   selectedIndex 5 → window [1..6)  selection at row 4 (list scrolled +1)
-    ///   selectedIndex 9 → window [5..10) selection at row 4
+    /// Row height — the popup's viewport is `rowHeight × visibleCount` tall.
+    /// The inner `ScrollView` scrolls smoothly past that viewport when the
+    /// ring holds more items than fit, and keyboard cycling auto-scrolls the
+    /// selected row back into view via `ScrollViewReader.scrollTo`.
     private static let rowHeight: CGFloat = 72
-
-    private var visibleRange: Range<Int> {
-        let total = items.count
-        guard total > 0 else { return 0..<0 }
-        let win   = min(visibleCount, total)
-        let start: Int
-        if selectedIndex < win {
-            start = 0                                        // hasn't hit bottom yet
-        } else {
-            start = selectedIndex - (win - 1)                // anchor at bottom
-        }
-        let clampedStart = max(0, min(start, total - win))
-        return clampedStart..<(clampedStart + win)
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -261,6 +238,25 @@ struct PopoverPreviewView: View {
                     .buttonStyle(.plain)
                     .help("Show how Clipen works again")
 
+                    // ── Debug: force-trigger the fast-paste hint panel ──
+                    // Tiny play-circle button next to the Clipen logo.  Tap
+                    // it to bring up the FastPasteHintPanel on demand so the
+                    // styling / copy / button behaviour can be reviewed
+                    // without having to actually fast-tap ⌘V from scratch.
+                    Button {
+                        let ms = Int(manager.firstOpenDelay * 1000)
+                        manager.fastPasteHintPanel.show(delayMs: ms) {
+                            AppDelegate.shared?.openMainWindow()
+                            manager.pulseOpenDelaySlider()
+                        }
+                    } label: {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.accentColor.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Preview the fast-paste hint panel")
+
                     Spacer()
 
                     // The "⌘ Paste" affordance moved out of the header — it's
@@ -279,7 +275,7 @@ struct PopoverPreviewView: View {
                             // the matching step advances.
                             if manager.popupCoachStep == 0
                                || (manager.coachReplayActive && manager.coachReplayStep == 0) {
-                                CoachBubble(text: "Hold ⌘ + tap V to cycle items")
+                                CoachBubble(text: "Hold ⌘ and tap V a few times to cycle items")
                                     .offset(y: 38)
                                     .allowsHitTesting(false)
                             }
@@ -293,7 +289,7 @@ struct PopoverPreviewView: View {
                             // X coach — first-run step 1 or replay step 1.
                             if manager.popupCoachStep == 1
                                || (manager.coachReplayActive && manager.coachReplayStep == 1) {
-                                CoachBubble(text: "Tap X to transform")
+                                CoachBubble(text: "Tap X a few times to cycle transforms")
                                     .offset(y: 38)
                                     .allowsHitTesting(false)
                             }
@@ -451,20 +447,47 @@ struct PopoverPreviewView: View {
                             }
                         }
                     } else {
-                        // ── Normal clipboard ring ──
+                        // ── Normal clipboard ring — native vertical ScrollView ──
+                        // Smooth scroll wheel / trackpad scrolling; keyboard
+                        // V/⇧V still drives the selection and the ScrollView
+                        // auto-scrolls to keep the highlighted row in view.
                         if items.isEmpty {
                             Text("No items with this tag")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
-                            ForEach(Array(items[visibleRange].enumerated()), id: \.element.id) { pair in
-                                let absoluteIndex = visibleRange.lowerBound + pair.offset
-                                PopoverRow(item: pair.element,
-                                           index: absoluteIndex,
-                                           isSelected: manager.selectionArmed && absoluteIndex == selectedIndex)
-                                if absoluteIndex < visibleRange.upperBound - 1 {
-                                    Divider().padding(.leading, 38)
+                            ScrollViewReader { proxy in
+                                ScrollView(.vertical, showsIndicators: true) {
+                                    LazyVStack(spacing: 0) {
+                                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                                            PopoverRow(item: item,
+                                                       index: idx,
+                                                       isSelected: manager.selectionArmed && idx == selectedIndex)
+                                                .id(idx)
+                                                .contentShape(Rectangle())
+                                                .onTapGesture(count: 2) {
+                                                    manager.uiSelectItem(at: idx)
+                                                    manager.commitPaste()
+                                                }
+                                                .onTapGesture(count: 1) {
+                                                    manager.uiSelectItem(at: idx)
+                                                }
+                                            if idx < items.count - 1 {
+                                                Divider().padding(.leading, 38)
+                                            }
+                                        }
+                                    }
+                                }
+                                .onChange(of: selectedIndex) { _, newIdx in
+                                    guard items.indices.contains(newIdx) else { return }
+                                    withAnimation(.easeOut(duration: 0.12)) {
+                                        proxy.scrollTo(newIdx, anchor: .center)
+                                    }
+                                }
+                                .onAppear {
+                                    guard items.indices.contains(selectedIndex) else { return }
+                                    proxy.scrollTo(selectedIndex, anchor: .center)
                                 }
                             }
                         }
@@ -774,6 +797,24 @@ struct PopoverRow: View {
             // items in the current category instead.
             HStack(spacing: 8) {
                 ItemTagStrip(tags: item.tags, maxVisible: 4, style: .plainComma)
+
+                if item.isSecret {
+                    HStack(spacing: 3) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 8, weight: .bold))
+                        Text("Secret")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(Color.red.opacity(0.35), lineWidth: 0.5)
+                    )
+                    .help("Detected as a likely secret. Stored encrypted at rest.")
+                }
 
                 if let badge = item.diffBadge {
                     Text("∆ \(badge)")

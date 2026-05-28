@@ -39,6 +39,7 @@ final class AuthManager: ObservableObject {
 
     private let cacheKey = "backendFeatureFlagsCache"
     private let clickCountKey = "backendFeatureFlagsClickCount"
+    private let fastPasteCountKey = "backendFastPasteCount"
     private let lastRefreshClickKey = "backendFeatureFlagsLastRefreshClick"
     private let lastUpdateCheckClickKey = "backendFeatureFlagsLastUpdateCheckClick"
     private let installKeyDefaultsKey = "backendFeatureFlagsInstallKey"
@@ -77,6 +78,24 @@ final class AuthManager: ObservableObject {
             UserDefaults.standard.set(nextClickCount, forKey: lastUpdateCheckClickKey)
             AppDelegate.shared?.checkForUpdatesInBackgroundIfAllowed()
         }
+    }
+
+    /// Increment the lifetime fast-paste counter (⌘V tapped + released inside
+    /// the first-open-delay window — popup never appeared, normal system-paste
+    /// behaviour kicked in).  Persisted locally and also reported to the
+    /// backend on the next refresh via `fastPasteCount` in RefreshFlagsRequest,
+    /// so we can see how often users land on the implicit "fast paste" path
+    /// vs the cycle popup.
+    func registerFastPasteAction() {
+        let next = UserDefaults.standard.integer(forKey: fastPasteCountKey) + 1
+        UserDefaults.standard.set(next, forKey: fastPasteCountKey)
+        // A fast paste is functionally a ⌘V — let the standard pipeline run
+        // (refresh-throttle + update check) so it isn't a second-class action.
+        registerCommandVAction()
+    }
+
+    var fastPasteCount: Int {
+        UserDefaults.standard.integer(forKey: fastPasteCountKey)
     }
 
     /// Track per-tool usage deltas locally; flushed on the next backend
@@ -158,7 +177,8 @@ final class AuthManager: ObservableObject {
             clickCount: currentClickCount,
             appVersion: appVersion,
             osVersion: osVersion,
-            toolUsageCounts: pendingToolUsageCounts()
+            toolUsageCounts: pendingToolUsageCounts(),
+            fastPasteCount: fastPasteCount
         ))
 
         URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
@@ -403,6 +423,7 @@ private struct RefreshFlagsRequest: Encodable {
     let appVersion: String
     let osVersion: String
     let toolUsageCounts: [String: Int]
+    let fastPasteCount: Int
 
     enum CodingKeys: String, CodingKey {
         case installKey = "install_key"
@@ -410,6 +431,7 @@ private struct RefreshFlagsRequest: Encodable {
         case appVersion = "app_version"
         case osVersion = "os_version"
         case toolUsageCounts = "tool_usage_counts"
+        case fastPasteCount = "fast_paste_count"
     }
 }
 

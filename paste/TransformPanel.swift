@@ -67,13 +67,13 @@ class TransformPanel: NSPanel {
             arrowCenterYFromTop: 120
         ))
 
-        if let hv = hostingView {
-            hv.rootView = measuringView
-        } else {
-            let hv = NSHostingView(rootView: measuringView)
-            contentView = hv
-            hostingView = hv
-        }
+        // Always create a fresh NSHostingView — reusing it preserves the
+        // inner SwiftUI tree (ScrollView offset, materialised rows,
+        // @ObservedObject snapshots) across hide/show.  See the matching
+        // comment in PreviewOverlayWindow.show().
+        let hv = NSHostingView(rootView: measuringView)
+        contentView = hv
+        hostingView = hv
 
         // Force a layout pass BEFORE asking for fittingSize so the new
         // rootView's intrinsic height is what we actually use (otherwise
@@ -82,8 +82,8 @@ class TransformPanel: NSPanel {
         // list — overflow scrolls within the panel, no need to grow the
         // panel itself.  Keeps the panel feeling like a stable Transforms
         // panel that just has one tool currently expanded.
-        hostingView?.layoutSubtreeIfNeeded()
-        let measured = hostingView?.fittingSize.height ?? 0
+        hv.layoutSubtreeIfNeeded()
+        let measured = hv.fittingSize.height
         let h = min(max(measured > 0 ? measured : 560, 360), 620)
 
         var x = placeRight ? preferredRightX : leftX
@@ -99,7 +99,10 @@ class TransformPanel: NSPanel {
             arrowOnLeadingSide: placeRight,
             arrowCenterYFromTop: arrowCenterYFromTop
         ))
-        hostingView?.rootView = finalView
+        // Swap rootView on the SAME instance to get the final geometry —
+        // this is a normal SwiftUI update on a fresh tree, not the stale
+        // reuse the recreation above is protecting against.
+        hv.rootView = finalView
 
         setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
         if !isVisible { orderFront(nil) }
@@ -328,6 +331,13 @@ struct TransformView: View {
                                 isProcessing: idx == selectedTransformIndex && isProcessing
                             )
                             .id(idx)
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) {
+                                manager.uiApplyTransform(at: idx)
+                            }
+                            .onTapGesture(count: 1) {
+                                manager.uiSelectTransform(at: idx)
+                            }
 
                             // INLINE picker — nested directly under whichever
                             // PDF-page tool the user activated.  Two tools
@@ -407,10 +417,26 @@ struct TransformRow: View {
                         ProgressView()
                             .scaleEffect(0.55)
                             .tint(isSelected ? .white : .accentColor)
-                    } else if isSelected || isHovered {
+                    } else if isSelected {
+                        HStack(spacing: 4) {
+                            Text("Release")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.white.opacity(0.85))
+                            Text("⌘")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.white.opacity(0.2),
+                                            in: RoundedRectangle(cornerRadius: 3))
+                            Text("to paste")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                    } else if isHovered {
                         Image(systemName: "return")
                             .font(.system(size: 9))
-                            .foregroundColor(isSelected ? .white.opacity(0.7) : .accentColor.opacity(0.7))
+                            .foregroundColor(.accentColor.opacity(0.7))
                     }
                 }
                 if let preview = display.preview {

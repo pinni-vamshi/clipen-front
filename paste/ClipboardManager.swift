@@ -179,6 +179,20 @@ class ClipboardManager: ObservableObject {
     /// "No text found in image" after a failed transform. Cleared automatically.
     @Published var transientStatus: String? = nil
 
+    /// When true, the "Open delay" slider card in MainWindowView draws a
+    /// pulsing accent-color glow + instructional caption.  Flipped on by
+    /// `pulseOpenDelaySlider()` (called when the user clicks the "Open
+    /// delay slider" button in the first-fast-paste alert) and auto-clears
+    /// after a few seconds.  Pure UI affordance — no persistence.
+    @Published var highlightOpenDelaySlider: Bool = false
+
+    func pulseOpenDelaySlider(duration: TimeInterval = 6.0) {
+        DispatchQueue.main.async { [weak self] in self?.highlightOpenDelaySlider = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
+            self?.highlightOpenDelaySlider = false
+        }
+    }
+
     /// Set `transientStatus` to a message, then clear it after a few seconds.
     func flashStatus(_ msg: String, duration: TimeInterval = 2.5) {
         DispatchQueue.main.async { [weak self] in self?.transientStatus = msg }
@@ -238,6 +252,7 @@ class ClipboardManager: ObservableObject {
     let previewWindow  = PreviewOverlayWindow()
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
+    let fastPasteHintPanel = FastPasteHintPanel()
     /// Mirrors `AXIsProcessTrusted()`. Initialized synchronously so the
     /// onboarding screen doesn't flash on launch for users who already
     /// granted permission in a previous run. Refreshed by a 1Hz timer in
@@ -541,8 +556,9 @@ class ClipboardManager: ObservableObject {
             guard let html, !html.isEmpty,
                   let plain = Self.plainText(fromHTML: htmlData),
                   !plain.isEmpty else { continue }
-            guard !shouldIgnoreSensitiveText(plain) else { return }
-            addItem(ClipboardItem(content: .html(html, plain: plain)))
+            var item = ClipboardItem(content: .html(html, plain: plain))
+            item.isSecret = detectSecret(plain)
+            addItem(item)
             return
         }
 
@@ -551,15 +567,16 @@ class ClipboardManager: ObservableObject {
            let rtfData = pb.data(forType: .rtf),
            let attrStr = NSAttributedString(rtf: rtfData, documentAttributes: nil),
            !attrStr.string.isEmpty {
-            guard !shouldIgnoreSensitiveText(attrStr.string) else { return }
-            addItem(ClipboardItem(content: .richText(attrStr, plain: attrStr.string)))
+            var item = ClipboardItem(content: .richText(attrStr, plain: attrStr.string))
+            item.isSecret = detectSecret(attrStr.string)
+            addItem(item)
             return
         }
 
         // 4. Plain text
         if let str = pb.string(forType: .string), !str.isEmpty {
-            guard !shouldIgnoreSensitiveText(str) else { return }
-            let item = ClipboardItem(content: .text(str))
+            var item = ClipboardItem(content: .text(str))
+            item.isSecret = detectSecret(str)
             addItem(item)
             if fetchURLTitles {
                 let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -725,10 +742,15 @@ class ClipboardManager: ObservableObject {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private func shouldIgnoreSensitiveText(_ text: String) -> Bool {
-        guard autoIgnoreSecrets, SecretDetector.isLikelySecret(text) else { return false }
-        flashStatus("Secret ignored. Toggle this in Settings if you want to save it.")
-        return true
+    /// True if the text looks like an API key / token / password.  Honours the
+    /// user's `autoIgnoreSecrets` toggle: when the toggle is OFF, we still
+    /// capture everything but never flag — the user explicitly opted out of
+    /// the security overlay.  When ON (default), suspected secrets get the
+    /// flag so the row shows the red lock badge.  Items are captured either
+    /// way — the on-disk history is AES-GCM encrypted regardless.
+    private func detectSecret(_ text: String) -> Bool {
+        guard autoIgnoreSecrets else { return false }
+        return SecretDetector.isLikelySecret(text)
     }
 
     private func addItem(_ item: ClipboardItem) {
@@ -917,13 +939,12 @@ class ClipboardManager: ObservableObject {
                 }
                 // Release-while-pending cases:
                 //  • pendingFirstOpen → fast-paste front item, no popup
-                //  • popup visible + armed → commit paste
-                //  • popup visible + idle (timer disarmed highlight) → hard
-                //    dismiss, nothing pasted
+                //  • popup visible → commit paste (Space-preview panel, if
+                //    open, is torn down inside commitPaste — so releasing ⌘
+                //    while previewing now ALSO pastes the highlighted row
+                //    instead of just dismissing the preview).
                 if pendingFirstOpen {
                     DispatchQueue.main.async { [weak self] in self?.fastPasteFront() }
-                } else if itemPreviewPanel.isVisible {
-                    DispatchQueue.main.async { [weak self] in self?.dismissPreview() }
                 } else if previewWindow.isVisible {
                     // ⌘ release while the popup is open ALWAYS commits the
                     // highlighted row.  No more idle-timer "disarm" path:
@@ -1286,16 +1307,10 @@ class ClipboardManager: ObservableObject {
             transformPanel.showUpgradePrompt(near: previewWindow.frame)
             return
         }
-        // First-run coach (step 1 → step 2 = done): pressing X for the first
-        // time means the user has now used both core gestures.  Retire the
-        // coach permanently.
-        if popupCoachStep == 1 { popupCoachStep = 2 }
-        // Replay coach: completing the X step retires the replay for this
-        // session.  Persistent step is unchanged either way.
-        if coachReplayActive && coachReplayStep == 1 {
-            coachReplayStep = 2
-            coachReplayActive = false
-        }
+        // (X coach advancement moved into cycleTransform() — pressing X
+        // ONCE just opens the transform panel.  The user needs to TAP X a
+        // few more times to feel the cycle through different tools before
+        // we retire the bubble.  See cycleTransform() for the rule.)
         inTransformStage = true
         refreshTransformDisplaysCache()
         guard !transformDisplaysCache.isEmpty else {
@@ -1318,6 +1333,18 @@ class ClipboardManager: ObservableObject {
         guard !transformDisplaysCache.isEmpty else { return }
         transformIndex = (transformIndex + 1) % transformDisplaysCache.count
         updateTransformPanel()
+
+        // Coach step 1 → done: only after the user has cycled through a
+        // few transforms.  Opening the panel once doesn't count — the
+        // point of the bubble is to teach that X is a CYCLE, not a single
+        // action.  Three taps inside the panel proves the user got it.
+        if popupCoachStep == 1 && transformCycleCount >= 3 {
+            popupCoachStep = 2
+        }
+        if coachReplayActive && coachReplayStep == 1 && transformCycleCount >= 3 {
+            coachReplayStep = 2
+            coachReplayActive = false
+        }
     }
 
     /// ⌘⇧X — step one transform BACKWARD in the cached display list.
@@ -1641,18 +1668,18 @@ class ClipboardManager: ObservableObject {
         previewVisible = true
         cycleCount += 1
 
-        // First-run coach (step 0 → step 1): once the user has cycled at
-        // least twice they've clearly grasped the V gesture — graduate them
-        // to the X-transform coach bubble.
-        if popupCoachStep == 0 && cycleCount >= 2 {
+        // First-run coach (step 0 → step 1): only graduate after THREE
+        // distinct V taps in the current session.  Two felt too quick —
+        // user barely formed the gesture before the bubble jumped away.
+        // Three gives the user time to actually feel the cycling rhythm.
+        if popupCoachStep == 0 && cycleCount >= 3 {
             popupCoachStep = 1
         }
-        // Replay coach (independent of persisted step): same rule using a
-        // session-local cycle anchor so the bubble advances based on cycles
-        // performed AFTER the replay started, not since-app-launch.
+        // Replay coach: same 3-tap rule, anchored to the replay's start
+        // cycle so the count is "3 MORE taps from now."
         if coachReplayActive,
            coachReplayStep == 0,
-           cycleCount - coachReplayCycleAnchor >= 2 {
+           cycleCount - coachReplayCycleAnchor >= 3 {
             coachReplayStep = 1
         }
 
@@ -2298,7 +2325,42 @@ class ClipboardManager: ObservableObject {
         selectedIndex = 0
         inTransformStage = false
         transformIndex = 0
+        // Count this as a fast-paste event (released ⌘ before the popup
+        // could open).  Persists locally + ships to backend on next refresh,
+        // and ALSO runs the standard ⌘V pipeline (refresh-throttle, update
+        // check) since this is a real paste action from the user's POV.
+        AuthManager.shared.registerFastPasteAction()
         commitPaste()
+        // First time only: surface a small educational alert telling the
+        // user what just happened and how to invoke the popup on purpose.
+        // Fired AFTER commitPaste so the synthetic ⌘V doesn't race with
+        // NSAlert.runModal stealing focus from the target app.
+        showFastPasteHintIfNeeded()
+    }
+
+    private let fastPasteHintShownKey = "hasShownFastPasteHint"
+
+    /// First time we hit the fast-paste path, surface a one-shot NSAlert
+    /// explaining the timing model so the user understands they CAN reach
+    /// Clipen's clipboard picker by holding ⌘ a little longer.  Persisted
+    /// so it only fires once per install.
+    private func showFastPasteHintIfNeeded() {
+        guard !UserDefaults.standard.bool(forKey: fastPasteHintShownKey) else { return }
+        UserDefaults.standard.set(true, forKey: fastPasteHintShownKey)
+        let delayMs = max(1, Int((firstOpenDelay * 1000).rounded()))
+        // Defer so the paste's synthetic ⌘V has already fired into the
+        // target app before we steal focus with the alert.
+        // Show the branded SwiftUI panel instead of NSAlert.  Deferred so the
+        // synthetic ⌘V from commitPaste has already fired into the target app
+        // before we steal focus.  The "Adjust delay" button closes the panel,
+        // brings the main window forward, and pulses the slider card.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+            guard let self else { return }
+            self.fastPasteHintPanel.show(delayMs: delayMs) {
+                AppDelegate.shared?.openMainWindow()
+                ClipboardManager.shared.pulseOpenDelaySlider()
+            }
+        }
     }
 
     private func deleteSelected() {
@@ -2601,6 +2663,56 @@ class ClipboardManager: ObservableObject {
         commitPaste()
     }
 
+    // MARK: - UI-driven navigation (mouse scroll & click in preview panels)
+
+    func uiSelectItem(at absoluteIndex: Int) {
+        guard previewWindow.isVisible,
+              displayItems.indices.contains(absoluteIndex) else { return }
+        selectedIndex = absoluteIndex
+        selectionArmed = true
+        syncItemPreviewWithSelection()
+    }
+
+    func uiScrollNext() {
+        guard previewWindow.isVisible, !displayItems.isEmpty else { return }
+        if inTransformStage { exitTransformStage() }
+        selectedIndex = (selectedIndex + 1) % displayItems.count
+        selectionArmed = true
+        syncItemPreviewWithSelection()
+    }
+
+    func uiScrollPrev() {
+        guard previewWindow.isVisible, !displayItems.isEmpty else { return }
+        if inTransformStage { exitTransformStage() }
+        let n = displayItems.count
+        selectedIndex = (selectedIndex - 1 + n) % n
+        selectionArmed = true
+        syncItemPreviewWithSelection()
+    }
+
+    func uiScrollTransformNext() {
+        guard inTransformStage else { return }
+        cycleTransform()
+    }
+
+    func uiScrollTransformPrev() {
+        guard inTransformStage else { return }
+        cycleTransformBackward()
+    }
+
+    func uiSelectTransform(at index: Int) {
+        guard inTransformStage, transformDisplaysCache.indices.contains(index) else { return }
+        transformIndex = index
+        updateTransformPanel()
+    }
+
+    func uiApplyTransform(at index: Int) {
+        guard inTransformStage, transformDisplaysCache.indices.contains(index) else { return }
+        transformIndex = index
+        updateTransformPanel()
+        commitPaste()
+    }
+
     // MARK: - Hybrid search (lexical + semantic + recency)
 
     // Cache key uses (query, items.count, embeddedItemCount).  The embedded
@@ -2894,6 +3006,9 @@ class ClipboardManager: ObservableObject {
         // recomputeEmbeddingsInBackground catches up.  ~2 KB per item × 200
         // items = ~400 KB extra in the manifest, well worth it.
         let embedding: [Float]?
+        /// Optional for backward compat — older manifests (pre-v1.0.43) don't
+        /// have this field and decode as nil, which loads as `false`.
+        let isSecret:  Bool?
     }
 
     /// `Application Support/Clipen`.  `lazy` so the directory-create call runs
@@ -2994,7 +3109,7 @@ class ClipboardManager: ObservableObject {
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: nil, filePath: nil, filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding)
+                                     embedding: item.embedding, isSecret: item.isSecret)
             case .image(_, let rawData, let dataType):
                 // Image bytes never go in the manifest anymore — written to
                 // an encrypted blob under blobs/image/<uuid>.bin.  Manifest
@@ -3009,7 +3124,7 @@ class ClipboardManager: ObservableObject {
                                          imageData: nil, imageBlob: rel, imageType: dataType.rawValue,
                                          rtfData: nil, plainText: nil, filePath: nil, filePaths: nil, html: nil,
                                          sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                         embedding: item.embedding)
+                                         embedding: item.embedding, isSecret: item.isSecret)
                 }
                 // Inline fallback — keep old 8 MB cap so a giant screenshot
                 // can't blow up the manifest if the blob layer failed.
@@ -3019,7 +3134,7 @@ class ClipboardManager: ObservableObject {
                                      imageData: rawData, imageBlob: nil, imageType: dataType.rawValue,
                                      rtfData: nil, plainText: nil, filePath: nil, filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding)
+                                     embedding: item.embedding, isSecret: item.isSecret)
             case .richText(let attrStr, let plain):
                 let range = NSRange(location: 0, length: attrStr.length)
                 let rtf = try? attrStr.data(from: range,
@@ -3030,28 +3145,28 @@ class ClipboardManager: ObservableObject {
                                      rtfData: rtf, plainText: plain, filePath: nil,
                                      filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding)
+                                     embedding: item.embedding, isSecret: item.isSecret)
             case .html(let html, let plain):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: item.urlTitle, type: "html", text: nil,
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: plain, filePath: nil, filePaths: nil, html: html,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding)
+                                     embedding: item.embedding, isSecret: item.isSecret)
             case .file(let url):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "file", text: nil,
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: nil, filePath: url.path, filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding)
+                                     embedding: item.embedding, isSecret: item.isSecret)
             case .files(let urls):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "files", text: nil,
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: nil, filePath: nil, filePaths: urls.map(\.path), html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding)
+                                     embedding: item.embedding, isSecret: item.isSecret)
             }
         }
         guard let plain = try? enc.encode(persisted),
@@ -3125,6 +3240,7 @@ class ClipboardManager: ObservableObject {
             item.urlTitle = p.urlTitle
             item.sourceAppName = p.sourceAppName
             item.sourceBundleID = p.sourceBundleID
+            item.isSecret = p.isSecret ?? false
             // Restore persisted embedding so semantic search is HOT from
             // launch — no 1-3 second warm-up while recomputeEmbeddingsIn
             // Background fills them in one by one.
@@ -3163,6 +3279,10 @@ struct ClipboardItem: Identifiable {
     var diffBadge: String?  = nil
     var sourceAppName: String? = nil { didSet { rebuildSearchHaystacks() } }
     var sourceBundleID: String? = nil
+    /// Detected as a likely secret (API key, token, password-shaped substring).
+    /// Captured anyway — the on-disk history is AES-GCM encrypted — but the
+    /// row renders a red lock badge so the user sees it's flagged.
+    var isSecret: Bool = false
 
     // Pre-normalised search haystacks — built ONCE at init so the per-keystroke
     // hot path (hybridSearch → lexicalScore) doesn't do disk I/O or string
