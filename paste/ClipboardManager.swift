@@ -526,20 +526,30 @@ class ClipboardManager: ObservableObject {
             }
         }
 
-        // 2. HTML (before RTF/plain text so web formatting survives)
+        // 2. HTML (before RTF/plain text so web formatting survives).
+        // The raw HTML string and the extracted plain-text both use
+        // multi-encoding fallbacks so WhatsApp / Notes / Slack content —
+        // which is often UTF-16 or wrapped in malformed wrappers WebKit's
+        // sync parser chokes on — still captures correctly.  Without these
+        // fallbacks, long pastes from those apps would silently drop.
         let htmlTypes: [NSPasteboard.PasteboardType] = [
             .init("public.html"),
             .init("Apple HTML pasteboard type")
         ]
         for type in htmlTypes {
-            if let htmlData = pb.data(forType: type),
-               let html = String(data: htmlData, encoding: .utf8),
-               let plain = Self.plainText(fromHTML: htmlData),
-               !plain.isEmpty {
-                guard !shouldIgnoreSensitiveText(plain) else { return }
-                addItem(ClipboardItem(content: .html(html, plain: plain)))
-                return
-            }
+            guard let htmlData = pb.data(forType: type) else { continue }
+            let html: String? = String(data: htmlData, encoding: .utf8)
+                ?? String(data: htmlData, encoding: .utf16)
+                ?? String(data: htmlData, encoding: .utf16BigEndian)
+                ?? String(data: htmlData, encoding: .utf16LittleEndian)
+                ?? String(data: htmlData, encoding: .isoLatin1)
+                ?? String(data: htmlData, encoding: .ascii)
+            guard let html, !html.isEmpty,
+                  let plain = Self.plainText(fromHTML: htmlData),
+                  !plain.isEmpty else { continue }
+            guard !shouldIgnoreSensitiveText(plain) else { return }
+            addItem(ClipboardItem(content: .html(html, plain: plain)))
+            return
         }
 
         // 3. RTF (before plain text — RTF also exposes .string)
@@ -657,12 +667,68 @@ class ClipboardManager: ObservableObject {
     }
 
     private static func plainText(fromHTML data: Data) -> String? {
-        guard let attr = NSAttributedString(
+        // Primary path: WebKit-backed parser via NSAttributedString.  Best
+        // fidelity (entities, lists, formatting), but slow + fails for some
+        // malformed/embedded HTML and can hang on huge pages.  Wrap in a
+        // single attempt; if it returns nil we fall back below.
+        if let attr = NSAttributedString(
             html: data,
             options: [.documentType: NSAttributedString.DocumentType.html],
             documentAttributes: nil
-        ) else { return nil }
-        return attr.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) {
+            let s = attr.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !s.isEmpty { return s }
+        }
+
+        // Fallback path: decode the raw HTML bytes to a String using whatever
+        // encoding works (UTF-8 then UTF-16 then ISO-Latin1 then ASCII), then
+        // strip tags with regex.  Loses formatting but keeps the TEXT — the
+        // whole point of being a clipboard manager.  Catches WhatsApp /
+        // Notes / Slack cases where the HTML is malformed or non-UTF-8 and
+        // WebKit's parser silently returns nil.
+        let raw: String? = String(data: data, encoding: .utf8)
+                       ?? String(data: data, encoding: .utf16)
+                       ?? String(data: data, encoding: .utf16BigEndian)
+                       ?? String(data: data, encoding: .utf16LittleEndian)
+                       ?? String(data: data, encoding: .isoLatin1)
+                       ?? String(data: data, encoding: .ascii)
+        guard let html = raw, !html.isEmpty else { return nil }
+        return stripHTMLTags(html)
+    }
+
+    /// Last-resort HTML→text: removes scripts/styles, strips tags, decodes
+    /// the handful of named entities WhatsApp/Notes actually use, collapses
+    /// whitespace.  Not perfect; good enough to never lose a paste to a
+    /// formatting quirk.
+    private static func stripHTMLTags(_ html: String) -> String? {
+        var s = html
+        // Drop <script>...</script> and <style>...</style> contents whole.
+        s = s.replacingOccurrences(of: "<script[\\s\\S]*?</script>",
+                                   with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "<style[\\s\\S]*?</style>",
+                                   with: " ", options: .regularExpression)
+        // Block-level tags → newline so paragraphs survive.
+        s = s.replacingOccurrences(of: "</(p|div|br|li|tr|h[1-6])[^>]*>",
+                                   with: "\n", options: [.regularExpression, .caseInsensitive])
+        s = s.replacingOccurrences(of: "<br[^>]*>", with: "\n",
+                                   options: [.regularExpression, .caseInsensitive])
+        // Strip remaining tags.
+        s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        // Decode the entities WhatsApp/Notes/Slack/email actually emit.
+        let entities: [(String, String)] = [
+            ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+            ("&quot;", "\""), ("&apos;", "'"), ("&#39;", "'"), ("&hellip;", "…"),
+            ("&mdash;", "—"), ("&ndash;", "–"), ("&copy;", "©"), ("&reg;", "®"),
+        ]
+        for (e, r) in entities { s = s.replacingOccurrences(of: e, with: r) }
+        // Numeric entities: &#123;
+        s = s.replacingOccurrences(of: "&#(\\d+);", with: " ",
+                                   options: .regularExpression) // crude, drops them; rare enough
+        // Collapse repeated whitespace but PRESERVE newlines.
+        s = s.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+        s = s.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func shouldIgnoreSensitiveText(_ text: String) -> Bool {
@@ -2877,7 +2943,8 @@ class ClipboardManager: ObservableObject {
         let urlTitle:  String?
         let type:      String   // "text" | "image" | "richText" | "file"
         let text:      String?
-        let imageData: Data?
+        let imageData: Data?         // legacy inline path (kept for old files)
+        let imageBlob: String?       // NEW: relative path under blobs/ when split out
         let imageType: String?
         let rtfData:   Data?
         let plainText: String?
@@ -2886,6 +2953,11 @@ class ClipboardManager: ObservableObject {
         let html:      String?
         let sourceAppName: String?
         let sourceBundleID: String?
+        // Persisted on-device sentence embedding so semantic search is hot
+        // the moment the app finishes launching — no 1-3s warm-up while
+        // recomputeEmbeddingsInBackground catches up.  ~2 KB per item × 200
+        // items = ~400 KB extra in the manifest, well worth it.
+        let embedding: [Float]?
     }
 
     /// `Application Support/Clipen`.  `lazy` so the directory-create call runs
@@ -2909,56 +2981,150 @@ class ClipboardManager: ObservableObject {
         historyDir.appendingPathComponent("history.json")
     }
 
+    /// Root directory for per-item binary blobs (image data, large rtf etc.),
+    /// sharded by primary tag so the directory tree doubles as a sanity
+    /// check when inspecting Application Support.  Each blob is its OWN
+    /// AES-GCM encrypted file — the manifest only stores a relative path,
+    /// not the bytes.  Goal: history.clip stays small (manifest only) so
+    /// the 1-second debounced rewrite is cheap regardless of ring size or
+    /// image dimensions.  No 8 MB image cap needed when bytes don't live
+    /// in the manifest.
+    private var blobsDir: URL {
+        historyDir.appendingPathComponent("blobs", isDirectory: true)
+    }
+
+    /// Write encrypted `data` to a new blob under `blobs/<tagDir>/<uuid>.bin`
+    /// and return the relative path ("image/abcd-1234.bin") for storage in
+    /// the manifest.  Returns nil on failure — caller falls back to inline.
+    private func writeBlob(_ data: Data, primaryTag: ClipboardTag) -> String? {
+        let tagDir = blobsDir.appendingPathComponent(primaryTag.folderName,
+                                                     isDirectory: true)
+        try? FileManager.default.createDirectory(at: tagDir, withIntermediateDirectories: true)
+        let id = UUID().uuidString.lowercased()
+        let fileURL = tagDir.appendingPathComponent("\(id).bin")
+        guard let cipher = HistoryCrypto.encrypt(data) else { return nil }
+        do {
+            try cipher.write(to: fileURL, options: [.atomic, .completeFileProtection])
+            return "\(primaryTag.folderName)/\(id).bin"
+        } catch {
+            return nil
+        }
+    }
+
+    /// Inverse of `writeBlob`.  Loads `blobs/<relative>`, AES-decrypts, returns
+    /// plaintext bytes or nil if the file is missing / corrupt / re-keyed.
+    private func readBlob(_ relativePath: String) -> Data? {
+        let fileURL = blobsDir.appendingPathComponent(relativePath)
+        guard let cipher = try? Data(contentsOf: fileURL),
+              let plain  = HistoryCrypto.decrypt(cipher) else { return nil }
+        return plain
+    }
+
+    /// Delete any blob files in `blobsDir` that are no longer referenced by
+    /// the current `items` ring.  Called after every save so the directory
+    /// can't accumulate orphans as the ring evicts old captures.
+    private func purgeOrphanBlobs(referenced: Set<String>) {
+        guard let enumerator = FileManager.default.enumerator(
+            at: blobsDir,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]) else { return }
+        for case let url as URL in enumerator {
+            guard let isFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile,
+                  isFile else { continue }
+            // Build the same "<tagDir>/<file>.bin" relative path that
+            // writeBlob returns so the comparison key is consistent.
+            let parent = url.deletingLastPathComponent().lastPathComponent
+            let name   = url.lastPathComponent
+            let rel    = "\(parent)/\(name)"
+            if !referenced.contains(rel) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+
     private func saveHistory() {
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
+        // Track which blob paths the new manifest references; everything
+        // ELSE in blobsDir gets purged at the end of this call so evicted
+        // items can't leak bytes on disk forever.
+        var referencedBlobs: Set<String> = []
+
         let persisted: [PersistedItem] = items.compactMap { item in
             switch item.content {
             case .text(let str):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: item.urlTitle, type: "text", text: str,
-                                     imageData: nil, imageType: nil, rtfData: nil, plainText: nil, filePath: nil,
-                                     filePaths: nil, html: nil,
-                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
+                                     imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
+                                     plainText: nil, filePath: nil, filePaths: nil, html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                     embedding: item.embedding)
             case .image(_, let rawData, let dataType):
+                // Image bytes never go in the manifest anymore — written to
+                // an encrypted blob under blobs/image/<uuid>.bin.  Manifest
+                // only carries the relative path.  No size cap.  Falls back
+                // to inline if blob write fails (disk full, sandbox, etc.)
+                // so a write hiccup never silently drops the capture.
+                let primary = item.primaryTag
+                if let rel = writeBlob(rawData, primaryTag: primary) {
+                    referencedBlobs.insert(rel)
+                    return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
+                                         urlTitle: nil, type: "image", text: nil,
+                                         imageData: nil, imageBlob: rel, imageType: dataType.rawValue,
+                                         rtfData: nil, plainText: nil, filePath: nil, filePaths: nil, html: nil,
+                                         sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                         embedding: item.embedding)
+                }
+                // Inline fallback — keep old 8 MB cap so a giant screenshot
+                // can't blow up the manifest if the blob layer failed.
                 guard rawData.count < 8_000_000 else { return nil }
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "image", text: nil,
-                                     imageData: rawData, imageType: dataType.rawValue, rtfData: nil,
-                                     plainText: nil, filePath: nil, filePaths: nil, html: nil,
-                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
+                                     imageData: rawData, imageBlob: nil, imageType: dataType.rawValue,
+                                     rtfData: nil, plainText: nil, filePath: nil, filePaths: nil, html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                     embedding: item.embedding)
             case .richText(let attrStr, let plain):
                 let range = NSRange(location: 0, length: attrStr.length)
                 let rtf = try? attrStr.data(from: range,
                                             documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: item.urlTitle, type: "richText", text: nil,
-                                     imageData: nil, imageType: nil, rtfData: rtf, plainText: plain, filePath: nil,
+                                     imageData: nil, imageBlob: nil, imageType: nil,
+                                     rtfData: rtf, plainText: plain, filePath: nil,
                                      filePaths: nil, html: nil,
-                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                     embedding: item.embedding)
             case .html(let html, let plain):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: item.urlTitle, type: "html", text: nil,
-                                     imageData: nil, imageType: nil, rtfData: nil, plainText: plain, filePath: nil,
-                                     filePaths: nil, html: html,
-                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
+                                     imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
+                                     plainText: plain, filePath: nil, filePaths: nil, html: html,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                     embedding: item.embedding)
             case .file(let url):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "file", text: nil,
-                                     imageData: nil, imageType: nil, rtfData: nil, plainText: nil, filePath: url.path,
-                                     filePaths: nil, html: nil,
-                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
+                                     imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
+                                     plainText: nil, filePath: url.path, filePaths: nil, html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                     embedding: item.embedding)
             case .files(let urls):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "files", text: nil,
-                                     imageData: nil, imageType: nil, rtfData: nil, plainText: nil, filePath: nil,
-                                     filePaths: urls.map(\.path), html: nil,
-                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID)
+                                     imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
+                                     plainText: nil, filePath: nil, filePaths: urls.map(\.path), html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                     embedding: item.embedding)
             }
         }
         guard let plain = try? enc.encode(persisted),
               let cipher = HistoryCrypto.encrypt(plain) else { return }
         try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
+        // Drop blob files no longer referenced by the manifest.  Runs after
+        // the manifest is on disk so a crash in the middle can never leave
+        // the manifest pointing at a deleted blob.
+        purgeOrphanBlobs(referenced: referencedBlobs)
     }
 
     private func loadHistory() {
@@ -2993,7 +3159,14 @@ class ClipboardManager: ObservableObject {
                 guard let str = p.text else { return nil }
                 content = .text(str)
             case "image":
-                guard let raw = p.imageData, let img = NSImage(data: raw) else { return nil }
+                // New format: imageBlob → read from blobs/<tag>/<uuid>.bin.
+                // Legacy format: imageData inline in the manifest.  Drop the
+                // item silently if neither resolves (file deleted, corrupt).
+                let raw: Data? = {
+                    if let rel = p.imageBlob, let d = readBlob(rel) { return d }
+                    return p.imageData
+                }()
+                guard let raw, let img = NSImage(data: raw) else { return nil }
                 content = .image(img, rawData: raw, dataType: .init(p.imageType ?? "public.png"))
             case "richText":
                 guard let rtf = p.rtfData,
@@ -3016,6 +3189,10 @@ class ClipboardManager: ObservableObject {
             item.urlTitle = p.urlTitle
             item.sourceAppName = p.sourceAppName
             item.sourceBundleID = p.sourceBundleID
+            // Restore persisted embedding so semantic search is HOT from
+            // launch — no 1-3 second warm-up while recomputeEmbeddingsIn
+            // Background fills them in one by one.
+            item.embedding = p.embedding
             return item
         }
         // Respect plan limit: keep all pinned + up to maxItems unpinned

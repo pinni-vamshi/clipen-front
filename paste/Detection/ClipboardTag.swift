@@ -23,6 +23,11 @@ enum ClipboardTag: String, Hashable, CaseIterable {
     case html
     case richText
 
+    /// Filesystem-safe folder name used by the blob storage layer when
+    /// sharding per-item binary blobs by primary tag.  Stable identifier
+    /// (matches the rawValue) — never change without a migration.
+    var folderName: String { rawValue }
+
     /// Lower = shown first in chips and strip sort order.
     var priority: Int {
         switch self {

@@ -26,6 +26,13 @@ struct MainWindowView: View {
     @State private var timeScrubPos: Double = 1.0   // 1.0 = now, 0.0 = oldest
     @AppStorage("hasSkippedAccessibility")   private var hasSkippedAccessibility   = false
     @AppStorage("hasSeenTutorial")           private var hasSeenTutorial           = false
+    // Distinct from hasSeenTutorial: only flipped when the user actually
+    // reaches the final page and taps Done.  If they dismiss via Esc / X
+    // before finishing, this stays false and the tutorial auto-reopens on
+    // the next launch — discoverability is non-negotiable, but we never
+    // trap them in it either (they can always Esc out, just at the cost
+    // of being asked again).
+    @AppStorage("hasCompletedTutorial")      private var hasCompletedTutorial      = false
 
     var filtered: [ClipboardItem] {
         guard !searchText.isEmpty else { return manager.displayItems }
@@ -594,8 +601,11 @@ struct MainWindowView: View {
                     clipboardArea
                 }
                 .onAppear {
-                    guard !hasSeenTutorial else { return }
-                    hasSeenTutorial = true
+                    // Re-present the tutorial until the user actually
+                    // completes it.  Closing via Esc/X leaves
+                    // hasCompletedTutorial=false so the next launch shows
+                    // it again — discoverability sticks.
+                    guard !hasCompletedTutorial else { return }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                         showTutorial = true
                     }
@@ -604,7 +614,7 @@ struct MainWindowView: View {
         }
         // When accessibility is granted while on that screen, auto-advance
         .onChange(of: manager.hasAccessibilityPermission) { _, granted in
-            if granted && !hasSeenTutorial {
+            if granted && !hasCompletedTutorial {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     hasSeenTutorial = true
                     showTutorial    = true
@@ -1218,6 +1228,10 @@ struct OnboardingView: View {
 
 struct TutorialSheet: View {
     @Binding var isPresented: Bool
+    /// Set to true ONLY when the user reaches the final page and taps Done.
+    /// The parent reads this to gate "should we auto-present again on next
+    /// launch."  Skipping via X / Esc leaves it false.
+    @AppStorage("hasCompletedTutorial") private var hasCompletedTutorial = false
 
     @ObservedObject private var manager = ClipboardManager.shared
 
@@ -1354,6 +1368,11 @@ struct TutorialSheet: View {
 
             Button {
                 if isLast {
+                    // Only HERE — reaching the last page and tapping Done —
+                    // do we mark the tutorial complete.  Dismiss via Esc or
+                    // the X button keeps it incomplete so the next launch
+                    // brings the user back here.
+                    hasCompletedTutorial = true
                     isPresented = false
                 } else {
                     withAnimation { page += 1 }
