@@ -232,16 +232,34 @@ struct PopoverPreviewView: View {
                 // most ⌘ is colored to signal release-state: green = paste,
                 // gray = dismiss.
                 HStack(spacing: 14) {
-                    HStack(spacing: 8) {
-                        Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
-                            .resizable()
-                            .frame(width: 18, height: 18)
-                            .cornerRadius(4)
-                        Text("Clipen")
-                            .font(.system(.callout, weight: .semibold))
-                            .lineLimit(1)
-                            .fixedSize()
+                    // Clipen logo + name doubles as a "replay the coach"
+                    // affordance.  Clicking it triggers a transient,
+                    // session-local replay via replayPopupCoach() — the
+                    // V-cycle and X-transform bubbles re-appear in turn,
+                    // advancing automatically as the user performs each
+                    // gesture again.  The persisted popupCoachStep is
+                    // never touched, so power users who clicked here out
+                    // of curiosity don't get their progress wiped.  Works
+                    // in the non-activating panel because SwiftUI Buttons
+                    // still receive clicks even when the window can't
+                    // take key focus.
+                    Button {
+                        manager.replayPopupCoach()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
+                                .resizable()
+                                .frame(width: 18, height: 18)
+                                .cornerRadius(4)
+                            Text("Clipen")
+                                .font(.system(.callout, weight: .semibold))
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .help("Show how Clipen works again")
 
                     Spacer()
 
@@ -252,12 +270,15 @@ struct PopoverPreviewView: View {
                     FlatHint(key: "V", label: "Next",
                              isActive: manager.popupHintV)
                         .overlay(alignment: .bottom) {
-                            // First-run coach step 0: teach the V cycle.
+                            // V coach — shown when first-run step is 0 OR
+                            // when the user clicked the Clipen logo to
+                            // replay the coach (transient, session-only).
                             // Bubble hangs BELOW the chip, anchored to its
                             // bottom edge so it stays attached even if the
                             // header re-layouts.  Disappears the moment
-                            // popupCoachStep advances.
-                            if manager.popupCoachStep == 0 {
+                            // the matching step advances.
+                            if manager.popupCoachStep == 0
+                               || (manager.coachReplayActive && manager.coachReplayStep == 0) {
                                 CoachBubble(text: "Hold ⌘ + tap V to cycle items")
                                     .offset(y: 38)
                                     .allowsHitTesting(false)
@@ -269,8 +290,9 @@ struct PopoverPreviewView: View {
                              enabled: auth.transformsEnabled,
                              isActive: manager.popupHintX)
                         .overlay(alignment: .bottom) {
-                            // First-run coach step 1: teach the X transform.
-                            if manager.popupCoachStep == 1 {
+                            // X coach — first-run step 1 or replay step 1.
+                            if manager.popupCoachStep == 1
+                               || (manager.coachReplayActive && manager.coachReplayStep == 1) {
                                 CoachBubble(text: "Tap X to transform")
                                     .offset(y: 38)
                                     .allowsHitTesting(false)

@@ -365,6 +365,22 @@ class ClipboardManager: ObservableObject {
         didSet { UserDefaults.standard.set(popupCoachStep, forKey: "popupCoachStep") }
     }
 
+    /// Transient replay flag — toggled true when the user clicks the Clipen
+    /// logo/name in the popup header to re-watch the coach.  NOT persisted:
+    /// stays for one popup session, retired on dismiss or completion.  The
+    /// persistent `popupCoachStep` is untouched — clicking the logo doesn't
+    /// reset the user's real progress, it just shows the bubbles again on
+    /// top of whatever step they're at.
+    @Published var coachReplayActive: Bool = false
+    /// Session-local coach step used only during a replay.  Mirrors the
+    /// shape of `popupCoachStep` (0 = V, 1 = X, 2 = done) but lives in
+    /// memory only.
+    @Published var coachReplayStep: Int = 0
+    /// Snapshot of `cycleCount` at the moment replay started.  Lets us
+    /// advance the replay's V step after the user cycles twice MORE,
+    /// regardless of how many cycles they've already accumulated.
+    private var coachReplayCycleAnchor: Int = 0
+
     @Published var searchQuery: String = ""
     /// Which result row is highlighted in the search overlay.
     @Published var searchSelectedIndex: Int = 0
@@ -1274,6 +1290,12 @@ class ClipboardManager: ObservableObject {
         // time means the user has now used both core gestures.  Retire the
         // coach permanently.
         if popupCoachStep == 1 { popupCoachStep = 2 }
+        // Replay coach: completing the X step retires the replay for this
+        // session.  Persistent step is unchanged either way.
+        if coachReplayActive && coachReplayStep == 1 {
+            coachReplayStep = 2
+            coachReplayActive = false
+        }
         inTransformStage = true
         refreshTransformDisplaysCache()
         guard !transformDisplaysCache.isEmpty else {
@@ -1624,6 +1646,14 @@ class ClipboardManager: ObservableObject {
         // to the X-transform coach bubble.
         if popupCoachStep == 0 && cycleCount >= 2 {
             popupCoachStep = 1
+        }
+        // Replay coach (independent of persisted step): same rule using a
+        // session-local cycle anchor so the bubble advances based on cycles
+        // performed AFTER the replay started, not since-app-launch.
+        if coachReplayActive,
+           coachReplayStep == 0,
+           cycleCount - coachReplayCycleAnchor >= 2 {
+            coachReplayStep = 1
         }
 
         // One-time hint: first ever cycle → flash "Tap ⌘X to transform"
@@ -2284,6 +2314,17 @@ class ClipboardManager: ObservableObject {
         syncItemPreviewWithSelection()
     }
 
+    /// Click handler for the Clipen logo/name in the popup header.  Forces
+    /// the coach bubbles to reappear for THIS popup session only — without
+    /// touching the persisted `popupCoachStep`.  Anchors the V-step's
+    /// "cycle twice more" counter to the current cycleCount so the bubble
+    /// advances based on cycles performed AFTER the replay started.
+    func replayPopupCoach() {
+        coachReplayStep        = 0
+        coachReplayCycleAnchor = cycleCount
+        coachReplayActive      = true
+    }
+
     /// Clamp `selectedIndex` to `displayItems` after ring mutations.
     private func clampSelectedIndexToDisplay() {
         let display = displayItems
@@ -2305,6 +2346,10 @@ class ClipboardManager: ObservableObject {
         tagFilter   = nil
         previewVisible   = false
         cycleCount       = 0
+        // Coach replay is single-session — close the popup, the replay is
+        // over.  Persistent popupCoachStep is intentionally NOT touched.
+        coachReplayActive = false
+        coachReplayStep   = 0
         // Always reset inline search state when popup closes
         isPopupSearchActive = false
         popupSearchQuery = ""
