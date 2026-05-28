@@ -293,7 +293,7 @@ class ClipboardManager: ObservableObject {
     /// notice the delay, long enough to absorb a relaxed "quick tap" of
     /// ~50–100 ms. User-tunable via the slider in the menu bar widget.
     @Published var firstOpenDelay: Double = {
-        let stored = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.15
+        let stored = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.12
         return min(max(stored, 0.0), 1.0)
     }() {
         didSet {
