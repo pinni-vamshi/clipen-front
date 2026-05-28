@@ -152,6 +152,14 @@ class ClipboardManager: ObservableObject {
     /// Number of items the Prediction tab shows.
     private let predictionLimit = 5
     private let pastePredictor = PastePredictor()
+
+    /// Which tab the popup opens on by default every session.
+    /// "recents"    → Recents chip (position 1) — the classic behaviour.
+    /// "prediction" → Prediction chip (position 2) — predictor runs immediately.
+    /// Stored in UserDefaults so it persists across launches.
+    @Published var defaultPopupTab: String = UserDefaults.standard.string(forKey: "defaultPopupTab") ?? "recents" {
+        didSet { UserDefaults.standard.set(defaultPopupTab, forKey: "defaultPopupTab") }
+    }
     // Plan-driven ring cap. private(set) — external code must use setRingSize(_:).
     // Never persisted to UserDefaults so it cannot be overridden via `defaults write`.
     @Published private(set) var maxItems: Int = 10 {
@@ -295,11 +303,62 @@ class ClipboardManager: ObservableObject {
             .sorted { $0.timestamp > $1.timestamp }
             .prefix(5)
             .compactMap { $0.embedding }
+        let fc = captureFieldContext()
         return PredictionContext(
-            targetAppName:  front?.localizedName,
-            targetBundleID: front?.bundleIdentifier,
-            recentEmbeddings: Array(recent)
+            targetAppName:    front?.localizedName,
+            targetBundleID:   front?.bundleIdentifier,
+            recentEmbeddings: Array(recent),
+            fieldPlaceholder: fc.placeholder,
+            fieldLabel:       fc.label,
+            windowTitle:      fc.windowTitle
         )
+    }
+
+    /// Reads the focused text field's placeholder text, accessible label,
+    /// and the active window title via the Accessibility API.  All three are
+    /// optional — if AX access is denied or the app doesn't expose them we
+    /// just get nils, which the predictor silently ignores.
+    private func captureFieldContext() -> (placeholder: String?, label: String?, windowTitle: String?) {
+        guard let appEl = focusedApplicationAXElement(),
+              let el    = focusedUIElement(in: appEl) else { return (nil, nil, nil) }
+
+        // 1. Placeholder  (e.g. "Enter your email", "Search…", "Phone number")
+        var phRef: CFTypeRef?
+        let placeholder = AXUIElementCopyAttributeValue(el, kAXPlaceholderValueAttribute as CFString, &phRef) == .success
+            ? (phRef as? String).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            : nil
+
+        // 2. Label / description  (set by the app developer, e.g. "Email field")
+        var descRef: CFTypeRef?
+        let label = AXUIElementCopyAttributeValue(el, kAXDescriptionAttribute as CFString, &descRef) == .success
+            ? (descRef as? String).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            : nil
+
+        // 3. Window title — climb the parent chain until we hit a window.
+        //    Most apps expose kAXWindowAttribute directly on the focused element.
+        var winTitle: String?
+        var winRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(el, kAXWindowAttribute as CFString, &winRef) == .success,
+           let winEl = winRef as! AXUIElement? {
+            var titleRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(winEl, kAXTitleAttribute as CFString, &titleRef) == .success {
+                winTitle = (titleRef as? String).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            }
+        }
+        // Fallback: try the app-level main window title.
+        if winTitle == nil {
+            var mainWinRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(appEl, kAXMainWindowAttribute as CFString, &mainWinRef) == .success,
+               let mainWin = mainWinRef as! AXUIElement? {
+                var titleRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(mainWin, kAXTitleAttribute as CFString, &titleRef) == .success {
+                    winTitle = (titleRef as? String).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                }
+            }
+        }
+        return (placeholder?.isEmpty == false ? placeholder : nil,
+                label?.isEmpty       == false ? label       : nil,
+                winTitle?.isEmpty    == false ? winTitle    : nil)
     }
 
     /// Tags that appear on at least one item in the full ring (ignoring
@@ -1887,6 +1946,13 @@ class ClipboardManager: ObservableObject {
     ///   2. Centre of the screen — fallback when no text field is focused.
     private func openPopupNow() {
         selectionArmed = true
+        // Apply the user's default tab preference each time the popup opens.
+        if defaultPopupTab == "prediction" {
+            predictionActive = true   // didSet clears tagFilter
+        } else {
+            predictionActive = false
+            tagFilter = nil
+        }
         if let textPos = focusedTextInputPosition() {
             previewWindow.show(at: textPos)
         } else {

@@ -3,9 +3,7 @@ import Accelerate
 
 /// Everything the predictor knows about the *moment of prediction* that is
 /// NOT carried on the individual clipboard items.  Built fresh each time the
-/// user opens the popup so the ranking reflects "what is true right now":
-/// which app is frontmost, what time it is, and what the user has been
-/// copying lately.
+/// user opens the popup so the ranking reflects "what is true right now".
 struct PredictionContext {
     /// The app the popup will paste into — the frontmost app when ⌘V fired.
     let targetAppName:  String?
@@ -16,95 +14,106 @@ struct PredictionContext {
     let calendarHour: Int
     /// 1–7 weekday of `now` (Sunday = 1), Calendar's convention.
     let weekday: Int
-    /// Embeddings of the most-recently-copied N items (newest first).  Used
-    /// to build a "what is the user thinking about right now" centroid —
-    /// items semantically close to the recent copy stream score higher.
+    /// Embeddings of the most-recently-copied N items (newest first).
     let recentEmbeddings: [[Float]]
 
-    init(targetAppName: String?,
-         targetBundleID: String?,
-         now: Date = Date(),
-         recentEmbeddings: [[Float]] = []) {
-        self.targetAppName  = targetAppName
-        self.targetBundleID = targetBundleID
-        self.now            = now
+    // ── Field-level context (from AX) ──────────────────────────────────────
+    /// Placeholder text of the focused input, e.g. "Enter email address" or
+    /// "Search…".  nil when no text field is focused or AX is unavailable.
+    let fieldPlaceholder: String?
+    /// Accessibility label / description of the focused field, e.g. "Phone".
+    let fieldLabel: String?
+    /// Title of the active window, e.g. "invoice.xlsx", "index.swift",
+    /// "New Message — Mail".  nil when unavailable.
+    let windowTitle: String?
+
+    /// Combined lower-cased signal text from all three field-context fields,
+    /// used by the scorer so it doesn't repeat the concat work per item.
+    var fieldSignal: String {
+        [fieldPlaceholder, fieldLabel, windowTitle]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+    }
+
+    init(targetAppName:    String?,
+         targetBundleID:   String?,
+         now:              Date       = Date(),
+         recentEmbeddings: [[Float]]  = [],
+         fieldPlaceholder: String?    = nil,
+         fieldLabel:       String?    = nil,
+         windowTitle:      String?    = nil) {
+        self.targetAppName    = targetAppName
+        self.targetBundleID   = targetBundleID
+        self.now              = now
         let cal = Calendar.current
-        self.calendarHour   = cal.component(.hour,    from: now)
-        self.weekday        = cal.component(.weekday, from: now)
+        self.calendarHour     = cal.component(.hour,    from: now)
+        self.weekday          = cal.component(.weekday, from: now)
         self.recentEmbeddings = recentEmbeddings
+        self.fieldPlaceholder = fieldPlaceholder
+        self.fieldLabel       = fieldLabel
+        self.windowTitle      = windowTitle
     }
 }
 
 /// A scored candidate — the item plus the breakdown of *why* it scored the
-/// way it did.  The breakdown is kept (not just the total) so the UI can,
-/// later, surface a "because you usually paste this into Xcode" reason, and
-/// so the scoring is debuggable.
+/// way it did.  The breakdown is kept so the UI can, later, surface a reason
+/// string ("because you usually paste this into Xcode"), and so the scoring
+/// is debuggable.
 struct PredictionResult {
     let item: ClipboardItem
     let total: Double
     let breakdown: [String: Double]
 }
 
-/// Standalone, dependency-light ranking engine.  Pure function of (items,
-/// context): give it the ring and the moment, get back the ordered guesses.
+/// Standalone, dependency-light ranking engine.  Pure function of
+/// (items, context): give it the ring and the moment, get back the guesses.
 /// Nothing here mutates state or touches the pasteboard — that keeps it
-/// trivially testable and lets `ClipboardManager` call it on every popup
-/// open without side effects.
+/// trivially testable.
 ///
-/// ## The "loop of thinking"
+/// ## The "loop of thinking"  (2 passes)
 ///
-/// The engine runs in two passes over the items:
+/// **Pass 1 — observe.**  Walk every item once and collect global facts:
+///   • `maxPasteCount`    — for frequency normalisation.
+///   • `recentCentroid`   — mean embedding of the user's last-N copies
+///                          (current "train of thought").
+///   • `appCentroid`      — mean embedding of items previously pasted into
+///                          the frontmost app ("what lives here").
+///   • `fieldTagHints`    — ClipboardTags implied by the focused field's
+///                          placeholder / label / window title.
 ///
-/// **Pass 1 — observe.** Walk every item once and accumulate the *global*
-/// facts a single item can't know on its own:
-///   • `maxPasteCount` — so raw frequency can be normalised 0…1.
-///   • `recentCentroid` — the mean embedding of the user's recent copies
-///     (from the context), i.e. the current "train of thought".
-///   • `appCentroid` — the mean embedding of every item that has previously
-///     been pasted into the *target* app, i.e. "what kind of thing tends to
-///     land here".
+/// **Pass 2 — judge.**  Score every item through these weighted stages:
 ///
-/// **Pass 2 — judge.** Walk every item again and, for each, run an ordered
-/// chain of scoring stages.  Every stage returns a 0…1 sub-score; the stages
-/// are combined with fixed weights into a single total.  The stages, in
-/// descending influence:
+///   1. App affinity   (0.28) — has this item gone into the current app before?
+///   2. Field context  (0.20) — does the item type match what the field wants?
+///                              e.g. placeholder "Email" → boost email items.
+///   3. Semantic fit   (0.18) — cosine vs. app centroid & recent-copy centroid.
+///   4. Paste recency  (0.13) — how recently was this item last pasted?
+///   5. Copy recency   (0.10) — how recently was this item copied?
+///   6. Frequency      (0.07) — total paste count, normalised.
+///   7. Time-of-day    (0.03) — pasted near this hour of day before?
+///   8. Pinned         (0.01) — small nudge for explicitly pinned items.
 ///
-///   1. App affinity      — has this exact item gone into the target app
-///                          before? (the single strongest signal)
-///   2. Semantic fit      — cosine of the item's embedding against the
-///                          target app's centroid AND the recent-copy
-///                          centroid (max of the two).
-///   3. Paste recency     — how long since this item was last pasted.
-///   4. Copy recency      — how long since this item entered the ring.
-///   5. Global frequency  — total paste count, normalised.
-///   6. Time-of-day       — was this item historically pasted near this hour?
-///   7. Pinned bonus      — a tiny nudge for explicitly pinned items.
-///
-/// Then sort by total descending and return the top `limit`.
+/// Sort descending, return top N.
 final class PastePredictor {
 
-    // MARK: Stage weights (sum ≈ 1.0)
-    //
-    // Tuned by intuition, not data — these are the knobs to turn once real
-    // usage telemetry exists.  Kept as named constants so the intent is
-    // legible and a future "learned weights" path can swap them out.
-    private struct Weights {
-        static let appAffinity   = 0.34
-        static let semantic      = 0.22
-        static let pasteRecency  = 0.16
-        static let copyRecency   = 0.12
-        static let frequency     = 0.10
-        static let timeOfDay     = 0.04
-        static let pinned        = 0.02
+    // MARK: Stage weights (sum = 1.0)
+    private struct W {
+        static let appAffinity  = 0.28
+        static let fieldContext = 0.20
+        static let semantic     = 0.18
+        static let pasteRecency = 0.13
+        static let copyRecency  = 0.10
+        static let frequency    = 0.07
+        static let timeOfDay    = 0.03
+        static let pinned       = 0.01
     }
 
-    /// Recency half-lives.  An item pasted `pasteHalfLife` seconds ago scores
-    /// 0.5 on the paste-recency stage; older decays exponentially toward 0.
-    private let pasteHalfLife: TimeInterval = 60 * 30      // 30 min
-    private let copyHalfLife:  TimeInterval = 60 * 60 * 4  // 4 hours
+    private let pasteHalfLife: TimeInterval = 60 * 30       // 30 min
+    private let copyHalfLife:  TimeInterval = 60 * 60 * 4   // 4 hours
 
-    /// Main entry point.  Returns the top-`limit` items the user is most
-    /// likely to want to paste right now, best-first.
+    // MARK: Public API
+
     func predict(from items: [ClipboardItem],
                  context: PredictionContext,
                  limit: Int = 5) -> [ClipboardItem] {
@@ -113,26 +122,18 @@ final class PastePredictor {
             .map { $0.item }
     }
 
-    /// Same as `predict` but exposes the full scored list with breakdowns —
-    /// useful for debugging / future "why" UI / unit tests.
     func scored(from items: [ClipboardItem],
                 context: PredictionContext) -> [PredictionResult] {
         guard !items.isEmpty else { return [] }
-
-        // ── PASS 1 — observe global facts ───────────────────────────────
         let stats = gatherStats(items: items, context: context)
-
-        // ── PASS 2 — judge each item ────────────────────────────────────
         var results: [PredictionResult] = []
         results.reserveCapacity(items.count)
         for item in items {
-            let breakdown = score(item: item, context: context, stats: stats)
-            let total = breakdown.values.reduce(0, +)
-            results.append(PredictionResult(item: item, total: total, breakdown: breakdown))
+            let bd = score(item: item, context: context, stats: stats)
+            results.append(PredictionResult(item: item,
+                                            total: bd.values.reduce(0, +),
+                                            breakdown: bd))
         }
-
-        // Best first.  Stable tiebreak on recency so equal scores still feel
-        // sensible (newest wins) rather than arbitrary.
         return results.sorted {
             if $0.total != $1.total { return $0.total > $1.total }
             return $0.item.timestamp > $1.item.timestamp
@@ -145,27 +146,36 @@ final class PastePredictor {
         var maxPasteCount: Int = 0
         var recentCentroid: [Float]? = nil
         var appCentroid:    [Float]? = nil
+        /// Tags inferred from the field context (placeholder + label + window title).
+        /// Used in the field-context stage so it's computed once, not per item.
+        var fieldTagHints: Set<String> = []
+        /// Whether the field signal contains any text at all — used to decide
+        /// whether to award a partial score for items with no tag match.
+        var hasFieldSignal: Bool = false
     }
 
     private func gatherStats(items: [ClipboardItem], context: PredictionContext) -> Stats {
         var stats = Stats()
 
-        // Max paste count for frequency normalisation.
         for item in items {
             if item.pasteCount > stats.maxPasteCount { stats.maxPasteCount = item.pasteCount }
         }
 
-        // "Train of thought" centroid — mean of the recent copy embeddings.
         stats.recentCentroid = mean(of: context.recentEmbeddings)
 
-        // Target-app centroid — mean embedding of items previously pasted
-        // into the frontmost app.  Only meaningful when we know the target.
         if let bid = context.targetBundleID {
-            let appEmbeddings = items.compactMap { item -> [Float]? in
+            let embeds = items.compactMap { item -> [Float]? in
                 guard (item.pasteCountByApp[bid] ?? 0) > 0 else { return nil }
                 return item.embedding
             }
-            stats.appCentroid = mean(of: appEmbeddings)
+            stats.appCentroid = mean(of: embeds)
+        }
+
+        // ── Field context: map the signal text to likely ClipboardTag names ──
+        let sig = context.fieldSignal
+        stats.hasFieldSignal = !sig.isEmpty
+        if !sig.isEmpty {
+            stats.fieldTagHints = inferTagHints(from: sig)
         }
 
         return stats
@@ -178,44 +188,72 @@ final class PastePredictor {
                        stats: Stats) -> [String: Double] {
         var b: [String: Double] = [:]
 
-        // 1. App affinity — fraction of this item's pastes that went into the
-        //    target app, blended with whether it has *ever* gone there.
-        b["appAffinity"] = appAffinity(item, context) * Weights.appAffinity
+        // 1. App affinity
+        b["appAffinity"] = appAffinity(item, context) * W.appAffinity
 
-        // 2. Semantic fit — best cosine against the two centroids.
-        b["semantic"] = semantic(item, stats) * Weights.semantic
+        // 2. Field context — does the item's type match what the field wants?
+        b["fieldContext"] = fieldContext(item, stats) * W.fieldContext
 
-        // 3. Paste recency — exponential decay on lastPastedAt.
+        // 3. Semantic fit
+        b["semantic"] = semantic(item, stats) * W.semantic
+
+        // 4. Paste recency
         b["pasteRecency"] = recency(item.lastPastedAt, half: pasteHalfLife, now: context.now)
-            * Weights.pasteRecency
+            * W.pasteRecency
 
-        // 4. Copy recency — exponential decay on the capture timestamp.
+        // 5. Copy recency
         b["copyRecency"] = recency(item.timestamp, half: copyHalfLife, now: context.now)
-            * Weights.copyRecency
+            * W.copyRecency
 
-        // 5. Global frequency — normalised paste count.
+        // 6. Frequency
         let freq = stats.maxPasteCount > 0
             ? Double(item.pasteCount) / Double(stats.maxPasteCount) : 0
-        b["frequency"] = freq * Weights.frequency
+        b["frequency"] = freq * W.frequency
 
-        // 6. Time-of-day — was the last paste near this hour of day?
-        b["timeOfDay"] = timeOfDay(item, context) * Weights.timeOfDay
+        // 7. Time-of-day
+        b["timeOfDay"] = timeOfDay(item, context) * W.timeOfDay
 
-        // 7. Pinned nudge.
-        b["pinned"] = (item.isPinned ? 1.0 : 0.0) * Weights.pinned
+        // 8. Pinned nudge
+        b["pinned"] = (item.isPinned ? 1.0 : 0.0) * W.pinned
 
         return b
     }
 
-    private func appAffinity(_ item: ClipboardItem, _ context: PredictionContext) -> Double {
-        guard let bid = context.targetBundleID,
-              item.pasteCount > 0 else { return 0 }
+    // MARK: - Stage implementations
+
+    private func appAffinity(_ item: ClipboardItem, _ ctx: PredictionContext) -> Double {
+        guard let bid = ctx.targetBundleID, item.pasteCount > 0 else { return 0 }
         let here = Double(item.pasteCountByApp[bid] ?? 0)
         guard here > 0 else { return 0 }
-        // Fraction of all pastes that landed in this app (0…1), softened by a
-        // floor so a single confident paste still counts strongly.
         let fraction = here / Double(item.pasteCount)
         return min(1.0, 0.5 + 0.5 * fraction)
+    }
+
+    /// Field-context scoring.
+    ///
+    /// The AX layer tells us the placeholder/label ("Enter email address",
+    /// "Phone number", "Search…") and the window title ("invoice.xlsx",
+    /// "index.swift", "New message").  We map these to tag hints and ask:
+    /// does the item carry a tag that matches the field's intent?
+    ///
+    ///   • Strong match (item tag ∈ hints)  → 1.0
+    ///   • Partial match (content preview contains a hint keyword) → 0.5
+    ///   • No signal at all                 → 0 (stage skipped gracefully)
+    private func fieldContext(_ item: ClipboardItem, _ stats: Stats) -> Double {
+        guard stats.hasFieldSignal else { return 0 }
+        let hints = stats.fieldTagHints
+        guard !hints.isEmpty else { return 0 }
+
+        // Check item's detected tags — strong signal.
+        let itemTagNames = Set(item.tags.map { $0.rawValue })
+        if !itemTagNames.isDisjoint(with: hints) { return 1.0 }
+
+        // Fallback: keyword present in the content preview — partial credit.
+        let preview = item.previewText.lowercased()
+        for hint in hints {
+            if preview.contains(hint) { return 0.5 }
+        }
+        return 0
     }
 
     private func semantic(_ item: ClipboardItem, _ stats: Stats) -> Double {
@@ -223,29 +261,76 @@ final class PastePredictor {
         var best: Double = 0
         if let c = stats.appCentroid    { best = max(best, Double(cosine(emb, c))) }
         if let c = stats.recentCentroid { best = max(best, Double(cosine(emb, c))) }
-        // Cosine is −1…1; clamp negatives to 0 so "unrelated" ≠ "penalised".
         return max(0, best)
     }
 
     private func recency(_ date: Date?, half: TimeInterval, now: Date) -> Double {
         guard let date else { return 0 }
         let age = max(0, now.timeIntervalSince(date))
-        // 2^(-age / halfLife): 1.0 at age 0, 0.5 at one half-life, → 0.
         return pow(2.0, -age / half)
     }
 
-    private func timeOfDay(_ item: ClipboardItem, _ context: PredictionContext) -> Double {
+    private func timeOfDay(_ item: ClipboardItem, _ ctx: PredictionContext) -> Double {
         guard let last = item.lastPastedAt else { return 0 }
         let lastHour = Calendar.current.component(.hour, from: last)
-        // Circular hour distance 0…12, mapped to 1…0 over a 6-hour window.
-        var diff = abs(lastHour - context.calendarHour)
+        var diff = abs(lastHour - ctx.calendarHour)
         if diff > 12 { diff = 24 - diff }
         return max(0, 1.0 - Double(diff) / 6.0)
     }
 
+    // MARK: - Field → tag hint mapping
+    //
+    // Maps words from the field signal (placeholder + label + window title)
+    // to ClipboardTag raw values.  The tag raw values are the same strings
+    // used by `TagDetector` (e.g. "email", "url", "code", "phone", etc.) so
+    // the comparison in fieldContext() is a simple Set intersection.
+
+    private static let tagKeywords: [(keywords: [String], tag: String)] = [
+        // Contacts / form fields
+        (["email", "mail", "e-mail", "@"],                      "email"),
+        (["phone", "tel", "mobile", "cell", "fax", "sms"],       "phone"),
+        (["address", "street", "city", "zip", "postal", "state", "country"], "address"),
+
+        // Web / network
+        (["url", "link", "website", "http", "https", "site",
+          "domain", "href"],                                      "url"),
+
+        // Code / programming — also from window title file extensions
+        (["code", "snippet", "function", "script",
+          ".swift", ".js", ".ts", ".jsx", ".tsx",
+          ".py", ".rb", ".go", ".cpp", ".c", ".h",
+          ".java", ".kt", ".rs", ".php"],                         "code"),
+
+        // Data formats
+        ([".json", "json", "key", "value", "api"],                "json"),
+        ([".md", "markdown", "readme"],                           "markdown"),
+        (["table", "csv", "row", "column", "spreadsheet"],        "table"),
+        (["html", "<html", "markup"],                             "html"),
+        (["latex", "tex", "equation", "formula"],                 "latex"),
+
+        // Files
+        ([".pdf"],                                                 "pdf"),
+
+        // Colour / design
+        (["color", "colour", "hex", "#", "rgb", "hsl"],           "color"),
+    ]
+
+    /// Produce a set of ClipboardTag raw values suggested by the signal text.
+    private func inferTagHints(from signal: String) -> Set<String> {
+        var hints = Set<String>()
+        for (keywords, tag) in Self.tagKeywords {
+            for kw in keywords {
+                if signal.contains(kw) {
+                    hints.insert(tag)
+                    break
+                }
+            }
+        }
+        return hints
+    }
+
     // MARK: - Vector helpers
 
-    /// Element-wise mean of equally-sized vectors.  Returns nil for empty.
     private func mean(of vectors: [[Float]]) -> [Float]? {
         guard let first = vectors.first else { return nil }
         let dim = first.count
@@ -262,12 +347,11 @@ final class PastePredictor {
         return out
     }
 
-    /// Cosine similarity between two equally-sized vectors via Accelerate.
     private func cosine(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else { return 0 }
         var dot: Float = 0; vDSP_dotpr(a, 1, b, 1, &dot, vDSP_Length(a.count))
-        var na: Float = 0; vDSP_svesq(a, 1, &na, vDSP_Length(a.count))
-        var nb: Float = 0; vDSP_svesq(b, 1, &nb, vDSP_Length(b.count))
+        var na: Float = 0;  vDSP_svesq(a, 1, &na, vDSP_Length(a.count))
+        var nb: Float = 0;  vDSP_svesq(b, 1, &nb, vDSP_Length(b.count))
         let denom = sqrt(na) * sqrt(nb)
         return denom > 0 ? dot / denom : 0
     }
