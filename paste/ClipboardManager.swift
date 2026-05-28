@@ -352,6 +352,19 @@ class ClipboardManager: ObservableObject {
     // MARK: - Search overlay state (standalone ⌘F window — kept for future use)
     let searchOverlayWindow = SearchOverlayWindow()
     /// Live search query — updated as the user types in the search overlay.
+    /// First-run coach for the popup itself.  Two steps only, surfaced as
+    /// small accent-colored bubbles attached to the existing V and X hint
+    /// chips in the popup header — no big overlay, no separate window:
+    ///   0 → highlight V chip, "Hold ⌘ and tap V to cycle"
+    ///        advances after the user cycles ≥ 2 times
+    ///   1 → highlight X chip, "Tap X to transform"
+    ///        advances after the user enters transform stage
+    ///   2 → done; nothing rendered.  Persisted in UserDefaults so a single
+    ///        completion sticks across launches; partial progress resumes.
+    @Published var popupCoachStep: Int = UserDefaults.standard.integer(forKey: "popupCoachStep") {
+        didSet { UserDefaults.standard.set(popupCoachStep, forKey: "popupCoachStep") }
+    }
+
     @Published var searchQuery: String = ""
     /// Which result row is highlighted in the search overlay.
     @Published var searchSelectedIndex: Int = 0
@@ -1257,6 +1270,10 @@ class ClipboardManager: ObservableObject {
             transformPanel.showUpgradePrompt(near: previewWindow.frame)
             return
         }
+        // First-run coach (step 1 → step 2 = done): pressing X for the first
+        // time means the user has now used both core gestures.  Retire the
+        // coach permanently.
+        if popupCoachStep == 1 { popupCoachStep = 2 }
         inTransformStage = true
         refreshTransformDisplaysCache()
         guard !transformDisplaysCache.isEmpty else {
@@ -1601,6 +1618,13 @@ class ClipboardManager: ObservableObject {
 
         previewVisible = true
         cycleCount += 1
+
+        // First-run coach (step 0 → step 1): once the user has cycled at
+        // least twice they've clearly grasped the V gesture — graduate them
+        // to the X-transform coach bubble.
+        if popupCoachStep == 0 && cycleCount >= 2 {
+            popupCoachStep = 1
+        }
 
         // One-time hint: first ever cycle → flash "Tap ⌘X to transform"
         if !UserDefaults.standard.bool(forKey: "seenTransformHint") {

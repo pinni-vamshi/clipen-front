@@ -408,7 +408,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 38;
+				CURRENT_PROJECT_VERSION = 39;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -425,7 +425,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.35;
+				MARKETING_VERSION = 1.0.36;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -446,7 +446,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 38;
+				CURRENT_PROJECT_VERSION = 39;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -463,7 +463,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.35;
+				MARKETING_VERSION = 1.0.36;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

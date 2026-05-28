@@ -251,11 +251,31 @@ struct PopoverPreviewView: View {
                     // to its target.  Header stays focused on cycle hints.
                     FlatHint(key: "V", label: "Next",
                              isActive: manager.popupHintV)
+                        .overlay(alignment: .bottom) {
+                            // First-run coach step 0: teach the V cycle.
+                            // Bubble hangs BELOW the chip, anchored to its
+                            // bottom edge so it stays attached even if the
+                            // header re-layouts.  Disappears the moment
+                            // popupCoachStep advances.
+                            if manager.popupCoachStep == 0 {
+                                CoachBubble(text: "Hold ⌘ + tap V to cycle items")
+                                    .offset(y: 38)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                     FlatHint(key: "⇧V", label: "Prev",
                              isActive: manager.popupHintShiftV)
                     FlatHint(key: "X", label: "Transform",
                              enabled: auth.transformsEnabled,
                              isActive: manager.popupHintX)
+                        .overlay(alignment: .bottom) {
+                            // First-run coach step 1: teach the X transform.
+                            if manager.popupCoachStep == 1 {
+                                CoachBubble(text: "Tap X to transform")
+                                    .offset(y: 38)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                     SpaceKeyFlatHint(label: "Preview",
                                      isActive: manager.popupHintSpace)
                 }
@@ -511,6 +531,56 @@ struct ShortcutChip: View {
                 .foregroundColor(.secondary)
         }
         .opacity(enabled ? 1.0 : 0.35)
+    }
+}
+
+// MARK: - First-run coach bubble for the popup header
+//
+// Small accent-colored callout that hovers below an existing hint chip
+// (V on step 0, X on step 1) the first time the user sees the popup.
+// No big overlay, no separate window — just a glow + text bubble attached
+// to the chip itself so the existing layout teaches the gesture.  Driven
+// by ClipboardManager.popupCoachStep which auto-advances as the user
+// performs each gesture.
+
+struct CoachBubble: View {
+    let text: String
+    @State private var pulse: Bool = false
+
+    var body: some View {
+        VStack(spacing: 3) {
+            // Triangle pointer on top so the bubble visually attaches up to
+            // the chip it's coaching.
+            Triangle()
+                .fill(Color.accentColor)
+                .frame(width: 9, height: 5)
+            Text(text)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                .fixedSize()
+        }
+        .shadow(color: .accentColor.opacity(0.4), radius: pulse ? 8 : 3, x: 0, y: 2)
+        .scaleEffect(pulse ? 1.04 : 1.0)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+}
+
+/// Down-pointing triangle used as the coach bubble's tail.
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }
 
