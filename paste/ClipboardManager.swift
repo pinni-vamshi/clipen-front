@@ -304,13 +304,28 @@ class ClipboardManager: ObservableObject {
             .prefix(5)
             .compactMap { $0.embedding }
         let fc = captureFieldContext()
+        // Build a single natural-language query describing *where* we're about
+        // to paste — app name + window title + field placeholder/label — and
+        // embed it.  This gives the predictor a continuous, always-present
+        // per-app signal (cosine of each item against this query) so the
+        // ranking genuinely changes between Notes / ChatGPT / Cursor even
+        // before any paste history has accumulated.
+        let querySource = [front?.localizedName, fc.windowTitle, fc.placeholder, fc.label]
+            .compactMap { $0 }
+            .joined(separator: ". ")
+        var contextEmbedding: [Float]? = nil
+        if !querySource.isEmpty, let emb = nlEmbedding,
+           let v = emb.vector(for: ClipboardItem.normalize(querySource)) {
+            contextEmbedding = v.map { Float($0) }
+        }
         return PredictionContext(
             targetAppName:    front?.localizedName,
             targetBundleID:   front?.bundleIdentifier,
             recentEmbeddings: Array(recent),
             fieldPlaceholder: fc.placeholder,
             fieldLabel:       fc.label,
-            windowTitle:      fc.windowTitle
+            windowTitle:      fc.windowTitle,
+            contextEmbedding: contextEmbedding
         )
     }
 

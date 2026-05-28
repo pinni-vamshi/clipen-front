@@ -26,6 +26,11 @@ struct PredictionContext {
     /// Title of the active window, e.g. "invoice.xlsx", "index.swift",
     /// "New Message — Mail".  nil when unavailable.
     let windowTitle: String?
+    /// Embedding of a natural-language description of the paste destination
+    /// (app name + window title + placeholder + label).  The predictor scores
+    /// each item by cosine against this — an always-present per-app signal
+    /// that makes the ranking change between apps even at cold start.
+    let contextEmbedding: [Float]?
 
     /// Combined lower-cased signal text from all three field-context fields,
     /// used by the scorer so it doesn't repeat the concat work per item.
@@ -42,7 +47,8 @@ struct PredictionContext {
          recentEmbeddings: [[Float]]  = [],
          fieldPlaceholder: String?    = nil,
          fieldLabel:       String?    = nil,
-         windowTitle:      String?    = nil) {
+         windowTitle:      String?    = nil,
+         contextEmbedding: [Float]?   = nil) {
         self.targetAppName    = targetAppName
         self.targetBundleID   = targetBundleID
         self.now              = now
@@ -53,6 +59,7 @@ struct PredictionContext {
         self.fieldPlaceholder = fieldPlaceholder
         self.fieldLabel       = fieldLabel
         self.windowTitle      = windowTitle
+        self.contextEmbedding = contextEmbedding
     }
 }
 
@@ -84,29 +91,41 @@ struct PredictionResult {
 ///
 /// **Pass 2 — judge.**  Score every item through these weighted stages:
 ///
-///   1. App affinity   (0.28) — has this item gone into the current app before?
-///   2. Field context  (0.20) — does the item type match what the field wants?
+///   0. Context match  (0.30) — cosine of the item vs. an embedding of the
+///                              paste destination ("Notes", "Cursor main.py",
+///                              "ChatGPT Message…").  ALWAYS present, so it's
+///                              what makes the ranking differ between apps
+///                              before any paste history exists.
+///   1. App affinity   (0.22) — has this item gone into the current app before?
+///   2. Field context  (0.12) — does the item type match what the field wants?
 ///                              e.g. placeholder "Email" → boost email items.
-///   3. Semantic fit   (0.18) — cosine vs. app centroid & recent-copy centroid.
-///   4. Paste recency  (0.13) — how recently was this item last pasted?
-///   5. Copy recency   (0.10) — how recently was this item copied?
-///   6. Frequency      (0.07) — total paste count, normalised.
-///   7. Time-of-day    (0.03) — pasted near this hour of day before?
-///   8. Pinned         (0.01) — small nudge for explicitly pinned items.
+///   3. Semantic fit   (0.12) — cosine vs. app centroid & recent-copy centroid.
+///   4. Paste recency  (0.11) — how recently was this item last pasted?
+///   5. Copy recency   (0.07) — how recently was this item copied?
+///   6. Frequency      (0.04) — total paste count, normalised.
+///   7. Time-of-day    (0.015)— pasted near this hour of day before?
+///   8. Pinned         (0.005)— small nudge for explicitly pinned items.
 ///
 /// Sort descending, return top N.
 final class PastePredictor {
 
     // MARK: Stage weights (sum = 1.0)
+    //
+    // `contextMatch` (semantic app/field query) and `appAffinity` (learned
+    // paste history) are the two signals that make the ranking differ between
+    // apps.  appAffinity is empty at cold start, so contextMatch carries the
+    // per-app differentiation until paste history accumulates — hence it gets
+    // the largest weight.
     private struct W {
-        static let appAffinity  = 0.28
-        static let fieldContext = 0.20
-        static let semantic     = 0.18
-        static let pasteRecency = 0.13
-        static let copyRecency  = 0.10
-        static let frequency    = 0.07
-        static let timeOfDay    = 0.03
-        static let pinned       = 0.01
+        static let contextMatch = 0.30
+        static let appAffinity  = 0.22
+        static let fieldContext = 0.12
+        static let semantic     = 0.12
+        static let pasteRecency = 0.11
+        static let copyRecency  = 0.07
+        static let frequency    = 0.04
+        static let timeOfDay    = 0.015
+        static let pinned       = 0.005
     }
 
     private let pasteHalfLife: TimeInterval = 60 * 30       // 30 min
@@ -188,6 +207,11 @@ final class PastePredictor {
                        stats: Stats) -> [String: Double] {
         var b: [String: Double] = [:]
 
+        // 0. Context match — cosine of the item vs. the app/field query
+        //    embedding.  Always present (app name alone gives a query), so
+        //    this is what makes the ranking differ between apps at cold start.
+        b["contextMatch"] = contextMatch(item, context) * W.contextMatch
+
         // 1. App affinity
         b["appAffinity"] = appAffinity(item, context) * W.appAffinity
 
@@ -220,6 +244,18 @@ final class PastePredictor {
     }
 
     // MARK: - Stage implementations
+
+    /// Cosine similarity of the item's content embedding against the
+    /// app/field query embedding.  Cosine is −1…1; we clamp to 0…1 and apply
+    /// a mild curve so only genuinely related items get a meaningful boost.
+    private func contextMatch(_ item: ClipboardItem, _ ctx: PredictionContext) -> Double {
+        guard let q = ctx.contextEmbedding, let emb = item.embedding else { return 0 }
+        let c = Double(cosine(emb, q))
+        guard c > 0 else { return 0 }
+        // Square it: 0.8→0.64, 0.4→0.16 — sharpens the gap between a strong
+        // contextual match and a weak one so the ranking reorders decisively.
+        return c * c
+    }
 
     private func appAffinity(_ item: ClipboardItem, _ ctx: PredictionContext) -> Double {
         guard let bid = ctx.targetBundleID, item.pasteCount > 0 else { return 0 }
