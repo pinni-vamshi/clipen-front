@@ -701,18 +701,34 @@ struct TagFilterStrip: View {
         let tags = manager.availableTags
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
+                // 1 — Recents (everything, no filter).
                 TagFilterChip(
                     tag: nil,
-                    selected: manager.tagFilter == nil,
+                    selected: manager.tagFilter == nil && !manager.predictionActive,
                     shortcutNumber: 1
                 ) {
+                    manager.predictionActive = false
                     manager.tagFilter = nil
                 }
+                // 2 — Prediction (the predictor's top guesses).  Distinct
+                // gradient styling so it reads as "smart", not just another tag.
+                TagFilterChip(
+                    tag: nil,
+                    selected: manager.predictionActive,
+                    shortcutNumber: 2,
+                    customIcon: "sparkles",
+                    customLabel: "Prediction",
+                    isPrediction: true
+                ) {
+                    manager.predictionActive.toggle()
+                }
+                // 3+ — type tags.
                 ForEach(Array(tags.enumerated()), id: \.element) { idx, tag in
+                    let n = idx + 3
                     TagFilterChip(
                         tag: tag,
                         selected: manager.tagFilter == tag,
-                        shortcutNumber: idx + 2 <= 9 ? idx + 2 : nil
+                        shortcutNumber: n <= 9 ? n : nil
                     ) {
                         manager.tagFilter = (manager.tagFilter == tag) ? nil : tag
                     }
@@ -730,7 +746,30 @@ struct TagFilterChip: View {
     let tag: ClipboardTag?
     let selected: Bool
     var shortcutNumber: Int? = nil      // 1…9, used as ⌘N keybinding
+    /// Overrides for non-tag chips (Recents / Prediction).  When nil the
+    /// chip derives its look from `tag` as before.
+    var customIcon:  String? = nil
+    var customLabel: String? = nil
+    /// Prediction chip gets a purple→blue gradient fill when selected.
+    var isPrediction: Bool = false
     let action: () -> Void
+
+    private var icon:  String { customIcon  ?? tag?.icon  ?? "clock" }
+    private var label: String { customLabel ?? tag?.label ?? "Recents" }
+
+    private var fill: AnyShapeStyle {
+        if selected {
+            if isPrediction {
+                return AnyShapeStyle(LinearGradient(
+                    colors: [Color(hex: "#A855F7"), Color(hex: "#4F8EF7")],
+                    startPoint: .leading, endPoint: .trailing))
+            } else {
+                return AnyShapeStyle(Color.accentColor)
+            }
+        } else {
+            return AnyShapeStyle(Color.primary.opacity(0.08))
+        }
+    }
 
     var body: some View {
         Button(action: action) {
@@ -740,21 +779,21 @@ struct TagFilterChip: View {
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .foregroundColor(selected ? .white.opacity(0.85) : .secondary.opacity(0.75))
                 }
-                Image(systemName: tag?.icon ?? "clock")
+                Image(systemName: icon)
                     .font(.system(size: 9, weight: .semibold))
-                Text(tag?.label ?? "Recents")
+                Text(label)
                     .font(.system(size: 10, weight: .semibold))
             }
-            .foregroundColor(selected ? .white : .secondary)
+            .foregroundColor(selected ? .white : (isPrediction ? Color(hex: "#A855F7") : .secondary))
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(selected ? Color.accentColor : Color.primary.opacity(0.08))
-            )
+            .background(Capsule(style: .continuous).fill(fill))
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(selected ? Color.clear : Color.primary.opacity(0.06), lineWidth: 1)
+                    .stroke(selected ? Color.clear
+                                     : (isPrediction ? Color(hex: "#A855F7").opacity(0.35)
+                                                     : Color.primary.opacity(0.06)),
+                            lineWidth: 1)
             )
         }
         .buttonStyle(.plain)

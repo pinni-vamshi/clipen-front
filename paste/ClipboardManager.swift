@@ -101,6 +101,15 @@ class ClipboardManager: ObservableObject {
     /// on `dismissPreview` so each new ⌘V session starts at Recents.
     @Published var tagFilter: ClipboardTag? = nil {
         didSet {
+            if _suppressFilterDidSet { return }
+            // Selecting any type tag exits prediction mode — the two views are
+            // mutually exclusive.  Flip the backing store directly so we don't
+            // recurse into predictionActive's didSet (we invalidate once below).
+            if tagFilter != nil && predictionActive {
+                _suppressFilterDidSet = true
+                predictionActive = false
+                _suppressFilterDidSet = false
+            }
             invalidateDisplayItems()
             // Reset selection — old index almost certainly points past the
             // shorter filtered list. Re-arm so the new top row is highlighted.
@@ -111,6 +120,38 @@ class ClipboardManager: ObservableObject {
             }
         }
     }
+
+    /// The "Prediction" chip (position 2 in the popup strip).  When true,
+    /// `displayItems` is replaced by `PastePredictor`'s top-N guesses instead
+    /// of the tag-filtered ring.  Mutually exclusive with `tagFilter`.
+    @Published var predictionActive: Bool = false {
+        didSet {
+            if _suppressFilterDidSet { return }
+            if oldValue == predictionActive { return }
+            // Turning prediction ON clears any active tag filter so the two
+            // chips never both look selected.
+            if predictionActive && tagFilter != nil {
+                _suppressFilterDidSet = true
+                tagFilter = nil
+                _suppressFilterDidSet = false
+            }
+            invalidateDisplayItems()
+            selectedIndex = 0
+            selectionArmed = true
+            if previewWindow.isVisible {
+                syncItemPreviewWithSelection()
+            }
+        }
+    }
+
+    /// Re-entrancy guard shared by `tagFilter` / `predictionActive`: when one
+    /// clears the other for mutual exclusion, this suppresses the cleared
+    /// property's own didSet so we invalidate exactly once.
+    private var _suppressFilterDidSet = false
+
+    /// Number of items the Prediction tab shows.
+    private let predictionLimit = 5
+    private let pastePredictor = PastePredictor()
     // Plan-driven ring cap. private(set) — external code must use setRingSize(_:).
     // Never persisted to UserDefaults so it cannot be overridden via `defaults write`.
     @Published private(set) var maxItems: Int = 10 {
@@ -218,6 +259,15 @@ class ClipboardManager: ObservableObject {
         } else {
             source = items
         }
+        // Prediction mode replaces the normal ring entirely: the predictor
+        // ranks `source` and we show its top-N, best-first.  No tag filter,
+        // no pinned reorder — the order IS the prediction.
+        if predictionActive {
+            displayItems = pastePredictor.predict(from: source,
+                                                  context: makePredictionContext(),
+                                                  limit: predictionLimit)
+            return
+        }
         let filtered: [ClipboardItem]
         if let tag = tagFilter {
             filtered = source.filter { $0.tags.contains(tag) }
@@ -233,6 +283,23 @@ class ClipboardManager: ObservableObject {
         }
         if isReversed { unpinned.reverse() }
         displayItems = pinnedAtBottom ? unpinned + pinned : pinned + unpinned
+    }
+
+    /// Snapshot the live moment for the predictor: the app that will receive
+    /// the paste (frontmost now) plus the embeddings of the most-recently
+    /// copied items as the user's current "train of thought".
+    private func makePredictionContext() -> PredictionContext {
+        let front = NSWorkspace.shared.frontmostApplication
+        // Newest-first copy stream → take the freshest few embeddings.
+        let recent = items
+            .sorted { $0.timestamp > $1.timestamp }
+            .prefix(5)
+            .compactMap { $0.embedding }
+        return PredictionContext(
+            targetAppName:  front?.localizedName,
+            targetBundleID: front?.bundleIdentifier,
+            recentEmbeddings: Array(recent)
+        )
     }
 
     /// Tags that appear on at least one item in the full ring (ignoring
@@ -1587,6 +1654,9 @@ class ClipboardManager: ObservableObject {
     /// source item back on the pasteboard. Transformed output is never added
     /// to the Clipen ring.
     private func finishTransformPaste(message: String?, restoring source: ClipboardItem?) {
+        // Record destination on the SOURCE item (the one the user picked)
+        // before hiding panels — frontmost is still the target app.
+        if let source { recordPasteDestination(for: source.id) }
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()
@@ -1750,15 +1820,24 @@ class ClipboardManager: ObservableObject {
     /// Out-of-range indices (e.g. ⌘5 with only 3 categories) are ignored.
     /// Opens the popup if it isn't already visible.
     private func selectCategoryByIndex(_ idx: Int) {
-        let tags: [ClipboardTag?] = [nil] + availableTags
-        guard idx >= 0, idx < tags.count else { return }
+        // Strip layout: 0 = Recents (nil filter), 1 = Prediction, 2+ = tags.
+        // ⌘1 = Recents, ⌘2 = Prediction, ⌘3 = first type tag, etc.
+        let total = 2 + availableTags.count
+        guard idx >= 0, idx < total else { return }
 
         let wasFirstOpen = !previewWindow.isVisible
         if wasFirstOpen {
             cancelPendingFirstOpen()
             openPopupNow()
         }
-        tagFilter = tags[idx]
+        if idx == 0 {
+            predictionActive = false
+            tagFilter = nil
+        } else if idx == 1 {
+            predictionActive = true        // didSet clears tagFilter
+        } else {
+            tagFilter = availableTags[idx - 2]   // didSet clears prediction
+        }
         selectionArmed = true
         previewVisible = true
         cycleCount += 1
@@ -1850,6 +1929,14 @@ class ClipboardManager: ObservableObject {
         let results = searchResults
         guard !results.isEmpty else { closeSearch(); return }
         let item = results[min(searchSelectedIndex, results.count - 1)]
+
+        // searchReturnApp is the destination — the app that was frontmost when
+        // the search opened.  Record before we close the search overlay.
+        if let returnApp = searchReturnApp {
+            recordPaste(itemID: item.id,
+                        appName: returnApp.localizedName,
+                        bundleID: returnApp.bundleIdentifier)
+        }
 
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -2185,6 +2272,9 @@ class ClipboardManager: ObservableObject {
         }
         let item = results[min(popupSearchSelectedIndex, results.count - 1)]
 
+        // Popup is non-activating — frontmost is still the target app.
+        recordPasteDestination(for: item.id)
+
         let pb = NSPasteboard.general
         pb.clearContents()
         write(item, to: pb)
@@ -2405,6 +2495,7 @@ class ClipboardManager: ObservableObject {
         transformIndex   = 0
         selectedIndex    = 0
         selectionArmed   = true
+        predictionActive = false
         tagFilter   = nil
         previewVisible   = false
         cycleCount       = 0
@@ -2444,6 +2535,31 @@ class ClipboardManager: ObservableObject {
     }
 
     // MARK: - Paste
+
+    /// Record the current frontmost app as the paste destination on the item
+    /// with the given ID.  Call this right before the synthetic ⌘V fires so
+    /// the popup is still visible (non-activating) and frontmost == target.
+    private func recordPasteDestination(for itemID: UUID) {
+        guard let dest = NSWorkspace.shared.frontmostApplication else { return }
+        recordPaste(itemID: itemID,
+                    appName: dest.localizedName,
+                    bundleID: dest.bundleIdentifier)
+    }
+
+    /// Single source of truth for "this item was just pasted into `appName`".
+    /// Stamps destination metadata AND bumps the frequency counters the
+    /// predictor reads.  Called from every paste path (plain, transform,
+    /// search overlay, popup search) so no paste escapes the tally.
+    private func recordPaste(itemID: UUID, appName: String?, bundleID: String?) {
+        guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
+        items[idx].pastedToAppName  = appName
+        items[idx].pastedToBundleID = bundleID
+        items[idx].lastPastedAt     = Date()
+        items[idx].pasteCount      += 1
+        if let bid = bundleID {
+            items[idx].pasteCountByApp[bid, default: 0] += 1
+        }
+    }
 
     func commitPaste() {
         guard !items.isEmpty else {
@@ -2525,6 +2641,9 @@ class ClipboardManager: ObservableObject {
         inTransformStage = false; transformIndex = 0
 
         let item = displayItems[selectedIndex]
+        // Record which app is receiving this paste BEFORE we hide the popup
+        // (popup is non-activating → frontmost is still the target app).
+        recordPasteDestination(for: item.id)
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
 
         let pb = NSPasteboard.general
@@ -3009,6 +3128,15 @@ class ClipboardManager: ObservableObject {
         /// Optional for backward compat — older manifests (pre-v1.0.43) don't
         /// have this field and decode as nil, which loads as `false`.
         let isSecret:  Bool?
+        /// Where the item was most recently pasted.  Optional — old manifests
+        /// (pre-v1.0.47) won't have these fields and decode as nil.
+        let pastedToAppName:  String?
+        let pastedToBundleID: String?
+        let lastPastedAt:     Date?
+        /// Frequency signals for the predictor.  Optional for backward compat
+        /// — manifests written before the predictor landed decode as nil → 0 / [:].
+        let pasteCount:        Int?
+        let pasteCountByApp:   [String: Int]?
     }
 
     /// `Application Support/Clipen`.  `lazy` so the directory-create call runs
@@ -3109,7 +3237,12 @@ class ClipboardManager: ObservableObject {
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: nil, filePath: nil, filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding, isSecret: item.isSecret)
+                                     embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp)
             case .image(_, let rawData, let dataType):
                 // Image bytes never go in the manifest anymore — written to
                 // an encrypted blob under blobs/image/<uuid>.bin.  Manifest
@@ -3124,7 +3257,12 @@ class ClipboardManager: ObservableObject {
                                          imageData: nil, imageBlob: rel, imageType: dataType.rawValue,
                                          rtfData: nil, plainText: nil, filePath: nil, filePaths: nil, html: nil,
                                          sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                         embedding: item.embedding, isSecret: item.isSecret)
+                                         embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp)
                 }
                 // Inline fallback — keep old 8 MB cap so a giant screenshot
                 // can't blow up the manifest if the blob layer failed.
@@ -3134,7 +3272,12 @@ class ClipboardManager: ObservableObject {
                                      imageData: rawData, imageBlob: nil, imageType: dataType.rawValue,
                                      rtfData: nil, plainText: nil, filePath: nil, filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding, isSecret: item.isSecret)
+                                     embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp)
             case .richText(let attrStr, let plain):
                 let range = NSRange(location: 0, length: attrStr.length)
                 let rtf = try? attrStr.data(from: range,
@@ -3145,28 +3288,48 @@ class ClipboardManager: ObservableObject {
                                      rtfData: rtf, plainText: plain, filePath: nil,
                                      filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding, isSecret: item.isSecret)
+                                     embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp)
             case .html(let html, let plain):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: item.urlTitle, type: "html", text: nil,
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: plain, filePath: nil, filePaths: nil, html: html,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding, isSecret: item.isSecret)
+                                     embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp)
             case .file(let url):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "file", text: nil,
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: nil, filePath: url.path, filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding, isSecret: item.isSecret)
+                                     embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp)
             case .files(let urls):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "files", text: nil,
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: nil, filePath: nil, filePaths: urls.map(\.path), html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
-                                     embedding: item.embedding, isSecret: item.isSecret)
+                                     embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp)
             }
         }
         guard let plain = try? enc.encode(persisted),
@@ -3241,6 +3404,11 @@ class ClipboardManager: ObservableObject {
             item.sourceAppName = p.sourceAppName
             item.sourceBundleID = p.sourceBundleID
             item.isSecret = p.isSecret ?? false
+            item.pastedToAppName  = p.pastedToAppName
+            item.pastedToBundleID = p.pastedToBundleID
+            item.lastPastedAt     = p.lastPastedAt
+            item.pasteCount       = p.pasteCount ?? 0
+            item.pasteCountByApp  = p.pasteCountByApp ?? [:]
             // Restore persisted embedding so semantic search is HOT from
             // launch — no 1-3 second warm-up while recomputeEmbeddingsIn
             // Background fills them in one by one.
@@ -3283,6 +3451,24 @@ struct ClipboardItem: Identifiable {
     /// Captured anyway — the on-disk history is AES-GCM encrypted — but the
     /// row renders a red lock badge so the user sees it's flagged.
     var isSecret: Bool = false
+
+    /// App the item was most recently pasted *into* (destination).  Recorded
+    /// in commitPaste / finishTransformPaste / commitSearchPaste at the moment
+    /// the synthetic ⌘V fires, so it always reflects the actual receiving app.
+    /// nil = never pasted yet.
+    var pastedToAppName:  String? = nil
+    var pastedToBundleID: String? = nil
+    /// Wall-clock time of the most recent paste of this item.
+    var lastPastedAt: Date? = nil
+
+    /// Total number of times this item has ever been pasted (any app).  A
+    /// raw frequency signal for the predictor — items the user pastes over
+    /// and over (a signature, an address, a code snippet) score higher.
+    var pasteCount: Int = 0
+    /// Per-destination paste tally keyed by bundle identifier.  Lets the
+    /// predictor ask "how often has THIS item gone into the app that's
+    /// currently frontmost?" — the strongest single contextual signal.
+    var pasteCountByApp: [String: Int] = [:]
 
     // Pre-normalised search haystacks — built ONCE at init so the per-keystroke
     // hot path (hybridSearch → lexicalScore) doesn't do disk I/O or string
