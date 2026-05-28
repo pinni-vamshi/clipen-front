@@ -1007,6 +1007,20 @@ struct DarkItemRow: View {
                         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
                 }
 
+                // Source app badge — where this was copied FROM
+                if let appName = item.sourceAppName {
+                    AppBadge(name: appName, bundleID: item.sourceBundleID, arrow: nil)
+                }
+
+                // Destination badges — ALL apps this item has ever been pasted
+                // into, sorted by paste count (most-used first) so the most
+                // relevant app lands closest to the source badge.
+                let sortedDests = item.pastedToAppNames
+                    .sorted { (item.pasteCountByApp[$0.key] ?? 0) > (item.pasteCountByApp[$1.key] ?? 0) }
+                ForEach(sortedDests, id: \.key) { bid, name in
+                    AppBadge(name: name, bundleID: bid, arrow: "→")
+                }
+
                 Spacer()
 
                 Text(relativeTime(item.timestamp))
@@ -1123,6 +1137,44 @@ struct DarkItemRow: View {
         if s < 60 { return "\(s)s ago" }
         if s < 3600 { return "\(s/60)m ago" }
         return "\(s/3600)h ago"
+    }
+}
+
+// MARK: - App source / destination badge
+
+/// Small pill showing an app name (optionally prefixed with an arrow).
+/// Used in DarkItemRow to show copied-from and pasted-to context.
+private struct AppBadge: View {
+    let name:     String
+    let bundleID: String?
+    /// nil = no arrow prefix; "→" = pasted-to badge
+    let arrow:    String?
+
+    /// Real app icon when available, otherwise a generic SF symbol.
+    private var appIcon: NSImage? {
+        guard let bid = bundleID,
+              let path = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bid)?.path else {
+            return nil
+        }
+        return NSWorkspace.shared.icon(forFile: path)
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            if let arrow { Text(arrow).font(.system(size: 8, weight: .medium)).foregroundColor(Color(hex: "#666666")) }
+            if let icon = appIcon {
+                Image(nsImage: icon).resizable().frame(width: 11, height: 11).cornerRadius(2)
+            } else {
+                Image(systemName: "app.fill").font(.system(size: 8)).foregroundColor(Color(hex: "#555555"))
+            }
+            Text(name)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(Color(hex: "#666666"))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(Color(hex: "#232323"), in: RoundedRectangle(cornerRadius: 4))
     }
 }
 

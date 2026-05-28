@@ -2558,6 +2558,11 @@ class ClipboardManager: ObservableObject {
         items[idx].pasteCount      += 1
         if let bid = bundleID {
             items[idx].pasteCountByApp[bid, default: 0] += 1
+            // Accumulate every destination the item has ever landed in so
+            // the UI can show ALL destination apps, not just the last one.
+            if let name = appName {
+                items[idx].pastedToAppNames[bid] = name
+            }
         }
     }
 
@@ -3137,6 +3142,9 @@ class ClipboardManager: ObservableObject {
         /// — manifests written before the predictor landed decode as nil → 0 / [:].
         let pasteCount:        Int?
         let pasteCountByApp:   [String: Int]?
+        /// All destination app names ever recorded for this item.  Optional —
+        /// old manifests decode as nil, synthesised from pastedToAppName below.
+        let pastedToAppNames:  [String: String]?
     }
 
     /// `Application Support/Clipen`.  `lazy` so the directory-create call runs
@@ -3242,7 +3250,8 @@ class ClipboardManager: ObservableObject {
                                      pastedToBundleID: item.pastedToBundleID,
                                      lastPastedAt: item.lastPastedAt,
                                      pasteCount: item.pasteCount,
-                                     pasteCountByApp: item.pasteCountByApp)
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
             case .image(_, let rawData, let dataType):
                 // Image bytes never go in the manifest anymore — written to
                 // an encrypted blob under blobs/image/<uuid>.bin.  Manifest
@@ -3262,7 +3271,8 @@ class ClipboardManager: ObservableObject {
                                      pastedToBundleID: item.pastedToBundleID,
                                      lastPastedAt: item.lastPastedAt,
                                      pasteCount: item.pasteCount,
-                                     pasteCountByApp: item.pasteCountByApp)
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
                 }
                 // Inline fallback — keep old 8 MB cap so a giant screenshot
                 // can't blow up the manifest if the blob layer failed.
@@ -3277,7 +3287,8 @@ class ClipboardManager: ObservableObject {
                                      pastedToBundleID: item.pastedToBundleID,
                                      lastPastedAt: item.lastPastedAt,
                                      pasteCount: item.pasteCount,
-                                     pasteCountByApp: item.pasteCountByApp)
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
             case .richText(let attrStr, let plain):
                 let range = NSRange(location: 0, length: attrStr.length)
                 let rtf = try? attrStr.data(from: range,
@@ -3293,7 +3304,8 @@ class ClipboardManager: ObservableObject {
                                      pastedToBundleID: item.pastedToBundleID,
                                      lastPastedAt: item.lastPastedAt,
                                      pasteCount: item.pasteCount,
-                                     pasteCountByApp: item.pasteCountByApp)
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
             case .html(let html, let plain):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: item.urlTitle, type: "html", text: nil,
@@ -3305,7 +3317,8 @@ class ClipboardManager: ObservableObject {
                                      pastedToBundleID: item.pastedToBundleID,
                                      lastPastedAt: item.lastPastedAt,
                                      pasteCount: item.pasteCount,
-                                     pasteCountByApp: item.pasteCountByApp)
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
             case .file(let url):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "file", text: nil,
@@ -3317,7 +3330,8 @@ class ClipboardManager: ObservableObject {
                                      pastedToBundleID: item.pastedToBundleID,
                                      lastPastedAt: item.lastPastedAt,
                                      pasteCount: item.pasteCount,
-                                     pasteCountByApp: item.pasteCountByApp)
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
             case .files(let urls):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "files", text: nil,
@@ -3329,7 +3343,8 @@ class ClipboardManager: ObservableObject {
                                      pastedToBundleID: item.pastedToBundleID,
                                      lastPastedAt: item.lastPastedAt,
                                      pasteCount: item.pasteCount,
-                                     pasteCountByApp: item.pasteCountByApp)
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
             }
         }
         guard let plain = try? enc.encode(persisted),
@@ -3409,6 +3424,15 @@ class ClipboardManager: ObservableObject {
             item.lastPastedAt     = p.lastPastedAt
             item.pasteCount       = p.pasteCount ?? 0
             item.pasteCountByApp  = p.pasteCountByApp ?? [:]
+            // Restore the full set of destination-app names.  For items
+            // written by earlier builds (pre-1.0.49) we synthesise a single
+            // entry from pastedToAppName + pastedToBundleID so the badges
+            // are still populated on first launch after upgrade.
+            if let names = p.pastedToAppNames, !names.isEmpty {
+                item.pastedToAppNames = names
+            } else if let bid = p.pastedToBundleID, let name = p.pastedToAppName {
+                item.pastedToAppNames = [bid: name]
+            }
             // Restore persisted embedding so semantic search is HOT from
             // launch — no 1-3 second warm-up while recomputeEmbeddingsIn
             // Background fills them in one by one.
@@ -3469,6 +3493,12 @@ struct ClipboardItem: Identifiable {
     /// predictor ask "how often has THIS item gone into the app that's
     /// currently frontmost?" — the strongest single contextual signal.
     var pasteCountByApp: [String: Int] = [:]
+    /// Human-readable name for every app this item has *ever* been pasted
+    /// into, keyed by bundle identifier.  Grows over time — pasting the
+    /// same item into Xcode, then Slack, then Notes records all three.
+    /// Displayed as destination-app badges in the main window and feeds
+    /// the predictor's app-affinity stage alongside `pasteCountByApp`.
+    var pastedToAppNames: [String: String] = [:]
 
     // Pre-normalised search haystacks — built ONCE at init so the per-keystroke
     // hot path (hybridSearch → lexicalScore) doesn't do disk I/O or string
