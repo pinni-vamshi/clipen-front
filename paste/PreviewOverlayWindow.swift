@@ -365,14 +365,6 @@ struct PopoverPreviewView: View {
                     .transition(.opacity)
                 }
 
-                // Dismiss countdown strip — isolated to its own subview so the
-                // 50ms progress tick only re-renders this 2pt strip, not the
-                // whole popup body.
-                if manager.dismissTimeout > 0 {
-                    DismissProgressStrip(ticker: manager.dismissTicker)
-                        .frame(height: 2)
-                }
-
                 Divider()
 
                 // Bind once: popupSearchResults is a computed property that
@@ -483,31 +475,6 @@ struct PopoverPreviewView: View {
     }
 }
 
-/// Isolated subview for the dismiss-countdown progress bar. Only this view
-/// observes the 50ms-tick `DismissTicker`, so progress updates don't ripple
-/// into the rest of the popup (rows, chips, header).
-struct DismissProgressStrip: View {
-    @ObservedObject var ticker: DismissTicker
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Rectangle().fill(Color.primary.opacity(0.06))
-                Rectangle()
-                    .fill(ticker.frozen
-                          ? Color.accentColor.opacity(0.7)
-                          : Color.secondary.opacity(0.3))
-                    .frame(width: geo.size.width * ticker.progress)
-                    .animation(
-                        ticker.frozen
-                            ? .easeOut(duration: 0.15)
-                            : .linear(duration: 0.05),
-                        value: ticker.progress
-                    )
-            }
-        }
-    }
-}
 
 // MARK: - Shortcut chip
 //

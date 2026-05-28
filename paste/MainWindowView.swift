@@ -229,23 +229,6 @@ struct MainWindowView: View {
                                 .buttonStyle(.plain)
                             }
                             cardDivider()
-                            sliderCardRow(
-                                icon: "timer",
-                                label: "Idle timer",
-                                value: manager.dismissTimeout == 0 ? "Off" : "\(Int(manager.dismissTimeout))s",
-                                active: manager.dismissTimeout != 0,
-                                caption: "Clears the highlight after idle; popup stays until you release ⌘ or press Esc."
-                            ) {
-                                Slider(
-                                    value: Binding(
-                                        get: { manager.dismissTimeout },
-                                        set: { manager.dismissTimeout = $0.rounded() }
-                                    ),
-                                    in: 0...15
-                                )
-                                    .tint(.accent)
-                            }
-                            cardDivider()
                             // Quick ⌘V tap-and-release → paste front item
                             // without flashing the popup. Slider in ms so
                             // the user can tune the threshold to their tap

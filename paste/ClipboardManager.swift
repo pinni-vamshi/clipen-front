@@ -42,14 +42,6 @@ private enum HistoryCrypto {
     }
 }
 
-/// Tiny ObservableObject that the popup's progress strip observes
-/// directly. Keeping these two state vars off the main ClipboardManager
-/// means a 50ms progress tick doesn't blow up the entire popup body —
-/// only the 2pt-tall progress rectangle re-renders.
-final class DismissTicker: ObservableObject {
-    @Published var progress: Double = 1.0
-    @Published var frozen:   Bool   = false
-}
 
 private enum SecretDetector {
     static func isLikelySecret(_ value: String) -> Bool {
@@ -91,10 +83,10 @@ class ClipboardManager: ObservableObject {
         didSet { invalidateDisplayItems() }
     }
     @Published var selectedIndex: Int = 0
-    /// When the popup is visible but the idle timer has fired, we clear the
-    /// row highlight (`selectionArmed == false`) while keeping `selectedIndex`
-    /// so the next ⌘V re-highlights the same row. Releasing ⌘ while disarmed
-    /// dismisses without pasting.
+    /// Always true while the popup is visible.  Kept as a property because
+    /// a few legacy code paths still read it; the auto-disarm timer that
+    /// used to flip it false has been removed entirely — the popup model
+    /// is now: hold ⌘, cycle with V, release ⌘ = paste.  Esc to cancel.
     @Published var selectionArmed: Bool = true
 
     /// Popup header legend — blue while the matching key/modifier is held.
@@ -115,7 +107,6 @@ class ClipboardManager: ObservableObject {
             selectedIndex = 0
             selectionArmed = true
             if previewWindow.isVisible {
-                scheduleDismissTimer()
                 syncItemPreviewWithSelection()
             }
         }
@@ -255,22 +246,6 @@ class ClipboardManager: ObservableObject {
     /// tap creation races with TCC propagation.
     @Published var hasAccessibilityPermission: Bool = AXIsProcessTrusted()
     private var accessibilityPollTimer: Timer?
-    /// Dismiss countdown state lives on its own ObservableObject so the
-    /// 50ms progress tick only re-renders the small progress strip, not
-    /// the entire popup body. Previously this was @Published on the
-    /// ClipboardManager itself — every tick fired `objectWillChange` on
-    /// the manager, causing the full PopoverPreviewView (rows, chips,
-    /// header) to re-evaluate 20× per second.
-    let dismissTicker = DismissTicker()
-    // Convenience pass-throughs for non-view code that still reads them.
-    var dismissProgress: Double {
-        get { dismissTicker.progress }
-        set { dismissTicker.progress = newValue }
-    }
-    var timerFrozen: Bool {
-        get { dismissTicker.frozen }
-        set { dismissTicker.frozen = newValue }
-    }
     // Internal counters — only set internally, never read by views.
     // Kept as plain stored properties so writes don't trigger SwiftUI
     // re-renders on every keypress.
@@ -306,13 +281,6 @@ class ClipboardManager: ObservableObject {
     }
 
     private let nlEmbedding: NLEmbedding? = NLEmbedding.sentenceEmbedding(for: .english)
-
-    /// Seconds of inactivity before the row highlight clears (`softDisarm`).
-    /// The popup stays open; releasing ⌘ while disarmed dismisses without
-    /// pasting. `0` disables auto-clear (highlight stays until Esc or ⌘ up).
-    @Published var dismissTimeout: Double = UserDefaults.standard.object(forKey: "dismissTimeout") as? Double ?? 3.0 {
-        didSet { UserDefaults.standard.set(dismissTimeout, forKey: "dismissTimeout") }
-    }
 
     /// How long (in seconds) we wait after the user's first ⌘V tap of a
     /// session before actually opening the popup. If the user releases ⌘
@@ -352,9 +320,6 @@ class ClipboardManager: ObservableObject {
     }
 
     private var pollTimer: Timer?
-    private var dismissTimer: Timer?
-    private var progressTimer: Timer?
-    private var dismissStartTime: Date?
     private var permissionRetryTimer: Timer?
     /// Exponential backoff for the permission-retry loop: 1s → 2s → … → 30s.
     /// Reset to 1s on every fresh `attemptEventTap()`.
@@ -931,11 +896,11 @@ class ClipboardManager: ObservableObject {
                 } else if itemPreviewPanel.isVisible {
                     DispatchQueue.main.async { [weak self] in self?.dismissPreview() }
                 } else if previewWindow.isVisible {
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        if self.selectionArmed { self.commitPaste() }
-                        else { self.dismissPreview() }
-                    }
+                    // ⌘ release while the popup is open ALWAYS commits the
+                    // highlighted row.  No more idle-timer "disarm" path:
+                    // popup stays armed as long as it's visible, just like
+                    // ⌘Tab.  To cancel without pasting, press Esc.
+                    DispatchQueue.main.async { [weak self] in self?.commitPaste() }
                 }
             }
             return Unmanaged.passUnretained(event)
@@ -1033,8 +998,6 @@ class ClipboardManager: ObservableObject {
                     guard let self else { return }
                     if self.popupSearchQuery.isEmpty {
                         self.isPopupSearchActive = false
-                        self.timerFrozen = false
-                        self.scheduleDismissTimer()
                     } else {
                         self.popupSearchQuery = ""
                         self.popupSearchSelectedIndex = 0
@@ -1208,14 +1171,10 @@ class ClipboardManager: ObservableObject {
                     self.isPopupSearchActive.toggle()
                     if self.isPopupSearchActive {
                         // Freeze dismiss timer while the user is typing.
-                        self.dismissTimer?.invalidate(); self.dismissTimer = nil
-                        self.timerFrozen = true
                     } else {
                         // Search cancelled — clear query and resume normal timer.
                         self.popupSearchQuery = ""
                         self.popupSearchSelectedIndex = 0
-                        self.timerFrozen = false
-                        self.scheduleDismissTimer()
                     }
                 }
                 return nil
@@ -1307,9 +1266,7 @@ class ClipboardManager: ObservableObject {
         transformIndex   = 0
         transformStageActive = true
         // Freeze dismiss timer while inspecting transforms
-        dismissTimer?.invalidate(); dismissTimer = nil
         stageRevertTimer?.invalidate(); stageRevertTimer = nil
-        timerFrozen = true
         updateTransformPanel()
     }
 
@@ -1358,7 +1315,6 @@ class ClipboardManager: ObservableObject {
         transformPanel.hide()
         itemPreviewPanel.hide()
         // Unfreeze and restart dismiss countdown
-        scheduleDismissTimer()
     }
 
     /// Rebuild transform list from current usage scores; keep highlight on the same tool id.
@@ -1414,7 +1370,6 @@ class ClipboardManager: ObservableObject {
               selectedIndex < displayItems.count else { return }
         if itemPreviewPanel.isVisible {
             itemPreviewPanel.hide()
-            scheduleDismissTimer()
         } else {
             showSelectedItemPreview()
         }
@@ -1423,9 +1378,6 @@ class ClipboardManager: ObservableObject {
     private func showSelectedItemPreview() {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
         itemPreviewPanel.show(for: displayItems[selectedIndex], near: previewWindow.frame)
-        dismissTimer?.invalidate(); dismissTimer = nil
-        progressTimer?.invalidate(); progressTimer = nil
-        timerFrozen = true
     }
 
     private func applyAlwaysShowItemPreviewPolicy() {
@@ -1447,8 +1399,6 @@ class ClipboardManager: ObservableObject {
                   selectedIndex < displayItems.count else {
                 if itemPreviewPanel.isVisible {
                     itemPreviewPanel.hide()
-                    timerFrozen = false
-                    scheduleDismissTimer()
                 }
                 return
             }
@@ -1574,8 +1524,6 @@ class ClipboardManager: ObservableObject {
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()
-        dismissTimer?.invalidate(); dismissTimer = nil
-        progressTimer?.invalidate(); progressTimer = nil
         selectionArmed = true
         if let message { flashStatus(message) }
 
@@ -1646,7 +1594,6 @@ class ClipboardManager: ObservableObject {
                 selectionArmed = true
                 previewVisible = true
                 cycleCount += 1
-                scheduleDismissTimer()
                 return
             }
             selectedIndex = (selectedIndex + 1) % display.count
@@ -1665,7 +1612,6 @@ class ClipboardManager: ObservableObject {
         }
 
         syncItemPreviewWithSelection()
-        scheduleDismissTimer()
     }
 
     /// ⌘⇧V — step one item BACKWARD in the current category.  Mirrors
@@ -1695,7 +1641,6 @@ class ClipboardManager: ObservableObject {
         previewVisible = true
         cycleCount += 1
         syncItemPreviewWithSelection()
-        scheduleDismissTimer()
     }
 
     /// Top-row number keycodes (kVK_ANSI_1 … kVK_ANSI_9) mapped to the
@@ -1737,7 +1682,6 @@ class ClipboardManager: ObservableObject {
         previewVisible = true
         cycleCount += 1
         syncItemPreviewWithSelection()
-        scheduleDismissTimer()
     }
 
     /// Jump `step` items forward through the ring (default 5). Bound to
@@ -1763,7 +1707,6 @@ class ClipboardManager: ObservableObject {
         previewVisible = true
         cycleCount += 1
         syncItemPreviewWithSelection()
-        scheduleDismissTimer()
     }
 
     /// Fired by the delay timer when the user kept ⌘ held past
@@ -1777,7 +1720,6 @@ class ClipboardManager: ObservableObject {
         openPopupNow()
         previewVisible = true
         cycleCount += 1
-        scheduleDismissTimer()
     }
 
     /// Centralised "open the panel" — two states only:
@@ -1800,7 +1742,6 @@ class ClipboardManager: ObservableObject {
         searchQuery = ""
         searchSelectedIndex = 0
         isSearchMode = true
-        timerFrozen  = true   // keep paste popup alive while user searches
         searchOverlayWindow.show()
     }
 
@@ -1808,7 +1749,6 @@ class ClipboardManager: ObservableObject {
         isSearchMode = false
         searchQuery  = ""
         searchSelectedIndex = 0
-        timerFrozen  = false
         searchOverlayWindow.hide()
         let app = searchReturnApp
         searchReturnApp = nil
@@ -1877,8 +1817,6 @@ class ClipboardManager: ObservableObject {
         inPageRangeMode      = true
 
         // Freeze auto-dismiss — same trick as popup-search.
-        dismissTimer?.invalidate(); dismissTimer = nil
-        timerFrozen = true
 
         let modeLabel = (outputMode == .perPageImages) ? "images" : "PDF"
         flashStatus("Pick pages → \(modeLabel) · ↵ paste · ␣ preview")
@@ -1913,8 +1851,6 @@ class ClipboardManager: ObservableObject {
         pageRangeOutputMode  = .combinedPDF
         itemPreviewPanel.hide()
         // Resume the dismiss countdown.
-        timerFrozen = false
-        scheduleDismissTimer()
     }
 
     func togglePageRangeManualPage(_ index: Int) {
@@ -2322,72 +2258,13 @@ class ClipboardManager: ObservableObject {
         if displayItems.isEmpty { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
         syncItemPreviewWithSelection()
-        scheduleDismissTimer()
     }
 
-    private func scheduleDismissTimer() {
-        if itemPreviewPanel.isVisible {
-            timerFrozen = true
-            dismissTimer?.invalidate();  dismissTimer  = nil
-            progressTimer?.invalidate(); progressTimer = nil
-            return
-        }
-        timerFrozen    = false
-        dismissProgress = 1.0
-        guard dismissTimeout > 0 else {
-            dismissTimer?.invalidate();  dismissTimer  = nil
-            progressTimer?.invalidate(); progressTimer = nil
-            return
-        }
-
-        dismissStartTime = Date()
-
-        // Reset the existing dismiss timer's fire date instead of allocating
-        // a new Timer + run-loop source on every cycle. ~100µs vs ~300µs and
-        // less GC pressure during fast cycling.
-        if let t = dismissTimer, t.isValid {
-            t.fireDate = Date(timeIntervalSinceNow: dismissTimeout)
-        } else {
-            let t = Timer(timeInterval: dismissTimeout, repeats: false) { [weak self] _ in
-                DispatchQueue.main.async { self?.softDisarm() }
-            }
-            RunLoop.main.add(t, forMode: .common)
-            dismissTimer = t
-        }
-
-        // The progress ticker reads dismissStartTime live, so a single
-        // long-lived timer covers the whole session — no need to recreate.
-        if progressTimer == nil || !(progressTimer?.isValid ?? false) {
-            let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-                guard let self, let start = self.dismissStartTime, !self.timerFrozen else { return }
-                let elapsed = Date().timeIntervalSince(start)
-                self.dismissProgress = max(0, 1.0 - elapsed / self.dismissTimeout)
-            }
-            RunLoop.main.add(t, forMode: .common)
-            progressTimer = t
-        }
-    }
-
-    /// Clamp `selectedIndex` to `displayItems` after ring mutations or
-    /// while the popup is idle (highlight cleared but index remembered).
+    /// Clamp `selectedIndex` to `displayItems` after ring mutations.
     private func clampSelectedIndexToDisplay() {
         let display = displayItems
         guard !display.isEmpty else { return }
         selectedIndex = min(max(0, selectedIndex), display.count - 1)
-    }
-
-    /// Idle timeout: clear the row highlight but keep the popup open. The
-    /// remembered `selectedIndex` is unchanged — the next ⌘V only re-arms
-    /// the highlight without advancing; the ⌘V after that moves forward.
-    private func softDisarm() {
-        selectionArmed = false
-        dismissTimer?.invalidate()
-        dismissTimer = nil
-        progressTimer?.invalidate()
-        progressTimer = nil
-        dismissStartTime = nil
-        dismissProgress = 0
-        syncItemPreviewWithSelection()
     }
 
     private func dismissPreview() {
@@ -2395,8 +2272,6 @@ class ClipboardManager: ObservableObject {
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()
-        dismissTimer?.invalidate();  dismissTimer = nil
-        progressTimer?.invalidate(); progressTimer = nil
         stageRevertTimer?.invalidate(); stageRevertTimer = nil
         cancelPendingFirstOpen()
         inTransformStage = false
@@ -2404,8 +2279,6 @@ class ClipboardManager: ObservableObject {
         selectedIndex    = 0
         selectionArmed   = true
         tagFilter   = nil
-        dismissProgress  = 1.0
-        timerFrozen      = false
         previewVisible   = false
         cycleCount       = 0
         // Always reset inline search state when popup closes
@@ -2500,8 +2373,6 @@ class ClipboardManager: ObservableObject {
                         self.transformPanel.hide()
                         self.itemPreviewPanel.hide()
                         self.previewWindow.hide()
-                        self.dismissTimer?.invalidate(); self.dismissTimer = nil
-                        self.progressTimer?.invalidate(); self.progressTimer = nil
                         self.selectionArmed = true
                         self.handleTransformResult(result, restoring: item, toolID: selectedToolID)
                     }
@@ -2514,8 +2385,6 @@ class ClipboardManager: ObservableObject {
                 transformPanel.hide()
                 itemPreviewPanel.hide()
                 previewWindow.hide()
-                dismissTimer?.invalidate(); dismissTimer = nil
-                progressTimer?.invalidate(); progressTimer = nil
                 selectionArmed = true
                 handleTransformResult(result, restoring: item, toolID: selectedToolID)
                 return
@@ -2525,8 +2394,6 @@ class ClipboardManager: ObservableObject {
         inTransformStage = false; transformIndex = 0
 
         let item = displayItems[selectedIndex]
-        dismissTimer?.invalidate(); dismissTimer = nil
-        progressTimer?.invalidate(); progressTimer = nil
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
 
         let pb = NSPasteboard.general
