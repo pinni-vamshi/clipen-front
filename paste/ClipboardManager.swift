@@ -755,6 +755,17 @@ class ClipboardManager: ObservableObject {
         if let first = items.first(where: { !$0.isPinned }),
            item.isDuplicate(of: first) { return }
 
+        // Bug #2 — preserve V-cycle position across external pasteboard
+        // writes.  Previously `selectedIndex = 0` at the end of this method
+        // would snap the popup's highlight back to row 0 every time any app
+        // (Universal Clipboard, Alfred, a browser extension) wrote to the
+        // pasteboard mid-cycle.  Now: if the popup is visible, remember the
+        // currently-highlighted item BY ID before the insert, then re-resolve
+        // its new index after `items.didSet → invalidateDisplayItems` runs.
+        let preservedSelectionID: UUID? = previewWindow.isVisible
+            ? (displayItems.indices.contains(selectedIndex) ? displayItems[selectedIndex].id : nil)
+            : nil
+
         var item = item
         if item.sourceAppName == nil, let app = NSWorkspace.shared.frontmostApplication {
             item.sourceAppName = app.localizedName
@@ -774,7 +785,13 @@ class ClipboardManager: ObservableObject {
         if unpinned.count > maxItems, let oldest = unpinned.last {
             items.remove(at: oldest)
         }
-        selectedIndex = 0
+
+        if let preservedSelectionID,
+           let newIdx = displayItems.firstIndex(where: { $0.id == preservedSelectionID }) {
+            selectedIndex = newIdx
+        } else {
+            selectedIndex = 0
+        }
 
         if let str = item.textForEmbedding {
             let itemID = item.id

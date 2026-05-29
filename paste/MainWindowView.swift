@@ -27,18 +27,29 @@ struct MainWindowView: View {
     @AppStorage("hasSkippedAccessibility")   private var hasSkippedAccessibility   = false
     @AppStorage("hasSeenTutorial")           private var hasSeenTutorial           = false
 
+    /// Main-window-local chip filter — DECOUPLED from `manager.tagFilter`
+    /// (which belongs to the popup).  Clicking a chip here filters this
+    /// window's list only; it no longer mutates the popup's category.
+    @State private var mainTagFilter: ClipboardTag? = nil
+    /// Main-window-local row selection — DECOUPLED from `manager.selectedIndex`
+    /// (which belongs to the popup's V-cycle).  Cycling V in the popup no
+    /// longer moves the highlight in this window.
+    @State private var mainSelectedID: UUID? = nil
+
+    /// Items after applying THIS window's chip filter (not the popup's).
+    /// Built directly from `manager.items` so the popup's `displayItems`
+    /// (which depends on `manager.tagFilter`, `timeScrubDate` etc.) never
+    /// touches what the main window shows.
+    private var mainFilteredItems: [ClipboardItem] {
+        guard let tag = mainTagFilter else { return manager.items }
+        return manager.items.filter { $0.tags.contains(tag) }
+    }
+
     var filtered: [ClipboardItem] {
-        guard !searchText.isEmpty else { return manager.displayItems }
-        // Hybrid scorer cached internally — calling it any number of times
-        // per render is free (O(1) cache hit) as long as the query+items+
-        // embeddedCount are unchanged.  We still pay for the set-intersect
-        // below, so we filter once and reuse via SwiftUI's diffing.
+        guard !searchText.isEmpty else { return mainFilteredItems }
         let hits = manager.hybridSearch(query: searchText)
-        // displayItems is a stored property (not a heavy computed) — building
-        // a Set is the cost we want to amortise.  Cap at hits.count so we
-        // don't pay for an enormous Set when there are only a few hits.
         if hits.isEmpty { return [] }
-        let visibleIDs = Set(manager.displayItems.map { $0.id })
+        let visibleIDs = Set(mainFilteredItems.map { $0.id })
         return hits.filter { visibleIDs.contains($0.id) }
     }
 
@@ -844,9 +855,9 @@ struct MainWindowView: View {
                     label: "All",
                     icon: "square.grid.2x2",
                     count: manager.items.count,
-                    isSelected: manager.tagFilter == nil
+                    isSelected: mainTagFilter == nil
                 ) {
-                    manager.tagFilter = nil
+                    mainTagFilter = nil
                 }
 
                 ForEach(manager.availableTags, id: \.self) { tag in
@@ -854,9 +865,9 @@ struct MainWindowView: View {
                         label: tag.label,
                         icon: tag.icon,
                         count: manager.itemCount(for: tag),
-                        isSelected: manager.tagFilter == tag
+                        isSelected: mainTagFilter == tag
                     ) {
-                        manager.tagFilter = tag
+                        mainTagFilter = tag
                     }
                 }
             }
@@ -920,7 +931,7 @@ struct MainWindowView: View {
                     DarkItemRow(
                         item: item,
                         index: index,
-                        isSelected: item.id == manager.displayItems[safe: manager.selectedIndex]?.id,
+                        isSelected: mainSelectedID == item.id,
                         isHovered: hoveredID == item.id,
                         onDelete: {
                             if let real = manager.items.firstIndex(where: { $0.id == item.id }) {
@@ -929,6 +940,9 @@ struct MainWindowView: View {
                         }
                     )
                     .onHover { hoveredID = $0 ? item.id : nil }
+                    .onTapGesture(count: 1) {
+                        mainSelectedID = item.id
+                    }
                     .onTapGesture(count: 2) {
                         if let real = manager.items.firstIndex(where: { $0.id == item.id }) {
                             manager.pasteItem(at: real)
