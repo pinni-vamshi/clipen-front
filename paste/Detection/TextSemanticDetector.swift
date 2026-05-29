@@ -14,6 +14,29 @@ import Foundation
 /// high-confidence source of structural tags.
 enum TextSemanticDetector {
     static func candidates(for text: String) -> [DetectionCandidate] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // URLs, emails and file paths tokenise into ordinary dictionary words
+        // ("drive", "road", "select", "lane") that falsely trigger Address /
+        // SQL / Code here — e.g. a GitHub link landing in the Address chip.
+        // They already receive precise, high-confidence deterministic tags in
+        // TextTraditionalDetectors, so semantic scoring adds only noise. Skip
+        // it for anything that is clearly a single locator rather than prose.
+        let lead = trimmed.lowercased()
+        if lead.hasPrefix("http://") || lead.hasPrefix("https://")
+            || lead.hasPrefix("www.") || lead.hasPrefix("file://")
+            || lead.hasPrefix("/") || lead.hasPrefix("~/")
+            || lead.hasPrefix("mailto:") {
+            return []
+        }
+        // A single whitespace-free token containing a URL/path/email shape is
+        // also a locator, not prose (e.g. "github.com/foo/drive-bar").
+        if !trimmed.contains(where: { $0 == " " || $0 == "\n" || $0 == "\t" }),
+           trimmed.contains("://") || trimmed.contains("@")
+            || (trimmed.contains("/") && trimmed.contains(".")) {
+            return []
+        }
+
         let lowered = text.lowercased()
         guard lowered.count >= 12 else { return [] }
 
