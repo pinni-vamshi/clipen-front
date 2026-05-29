@@ -1145,56 +1145,28 @@ class ClipboardManager: ObservableObject {
             }
 
             if shift && !opt {
-                // ⌘⇧V — step BACK one item in the current category.  Was:
-                // cycle category forward; categories are now reachable via
-                // ⌘1 … ⌘9 (chip-numbered).  V/⇧V is now a symmetric pair:
-                // forward / backward within the active ring filter.
-                DispatchQueue.main.async { [weak self] in
-                    if self?.inTransformStage == true { self?.exitTransformStage() }
-                    self?.cyclePrevious()
-                }
+                DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }
                 return nil
             }
 
             if opt {
-                // ⌘+⌥V — jump 5 items forward (skip ahead through the ring).
-                // Replaces the old "cycle one step back" binding — users
-                // hit ⌥V to leapfrog, not to nudge backward.
-                DispatchQueue.main.async { [weak self] in
-                    if self?.inTransformStage == true { self?.exitTransformStage() }
-                    self?.jumpForward(by: 5)
-                }
+                // ⌘⌥V — jump 5 items forward
+                DispatchQueue.main.async { [weak self] in self?.jumpForward(by: 5) }
             } else {
-                // ⌘V — cycle forward
-                DispatchQueue.main.async { [weak self] in
-                    if self?.inTransformStage == true { self?.exitTransformStage() }
-                    self?.cycleNext()
-                }
+                // ⌘V — next item
+                DispatchQueue.main.async { [weak self] in self?.cycleNext() }
             }
             return nil
         }
 
-        // X — enter transform stage on first press, then cycle through
-        // tools.  Symmetric pair with V/⇧V:
-        //   ⌘X       → next transform tool (forward)
-        //   ⌘⇧X      → previous transform tool (backward) — only meaningful
-        //              once you're already in the transform stage; before
-        //              that, both X and ⇧X enter the stage on the first
-        //              tool, matching what users expect from the V pair.
+        // X / ⇧X — same as V / ⇧V: move the selection one step down or up.
         if key == 7 && previewWindow.isVisible {
-            // Ignore key-repeat while holding X — one step per physical press.
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
                 return nil
             }
-            let goBack = shift && !opt
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.selectionArmed else { return }
-                if self.inTransformStage {
-                    if goBack { self.cycleTransformBackward() }
-                    else      { self.cycleTransform() }
-                } else {
-                    self.enterTransformStage()
-                }
+                if shift { self?.cyclePrevious() }
+                else      { self?.cycleNext() }
             }
             return nil
         }
@@ -1208,10 +1180,7 @@ class ClipboardManager: ObservableObject {
         // the category chip strip itself, so the binding is discoverable.
         if let target = Self.numberRowKeycodeToIndex[key],
            previewWindow.isVisible || pendingFirstOpen {
-            DispatchQueue.main.async { [weak self] in
-                if self?.inTransformStage == true { self?.exitTransformStage() }
-                self?.selectCategoryByIndex(target)
-            }
+            DispatchQueue.main.async { [weak self] in self?.selectCategoryByIndex(target) }
             return nil
         }
 
@@ -1635,24 +1604,12 @@ class ClipboardManager: ObservableObject {
         let display = displayItems
         guard !display.isEmpty else { return }
 
-        let isFirstOpen = !previewWindow.isVisible
-
-        if isFirstOpen {
+        if !previewWindow.isVisible {
             if pendingFirstOpen {
-                // Second ⌘V tap arrived inside the delay window → user
-                // clearly wants the popup. Cancel the pending timer, open
-                // immediately, and advance to row 1 (matching the count of
-                // V taps so far).
                 cancelPendingFirstOpen()
-                // openPopupNow() resets tagFilter (and thus selectedIndex=0).
-                // Set the advance AFTER it so the second tap lands on row 1.
                 openPopupNow()
                 selectedIndex = min(1, display.count - 1)
             } else if firstOpenDelay > 0 {
-                // First-ever V tap of this ⌘-hold session. Defer opening
-                // the popup by `firstOpenDelay` so a fast tap-and-release
-                // behaves like normal system paste (handled in handleEvent
-                // when ⌘ goes up).
                 selectedIndex = 0
                 pendingFirstOpen = true
                 pendingFirstOpenTimer?.invalidate()
@@ -1663,49 +1620,19 @@ class ClipboardManager: ObservableObject {
                 pendingFirstOpenTimer = t
                 return
             } else {
-                // Delay disabled — preserve the old instant-open behavior.
                 selectedIndex = 0
                 openPopupNow()
             }
         } else {
-            // Popup already open: first ⌘V after an idle disarm only
-            // re-highlights the same row; the next ⌘V advances.
-            if !selectionArmed {
-                clampSelectedIndexToDisplay()
-                selectionArmed = true
-                previewVisible = true
-                cycleCount += 1
-                return
-            }
             selectedIndex = (selectedIndex + 1) % display.count
         }
 
         previewVisible = true
         cycleCount += 1
 
-        // First-run coach (step 0 → step 1): only graduate after THREE
-        // distinct V taps in the current session.  Two felt too quick —
-        // user barely formed the gesture before the bubble jumped away.
-        // Three gives the user time to actually feel the cycling rhythm.
-        if popupCoachStep == 0 && cycleCount >= 3 {
-            popupCoachStep = 1
-        }
-        // Replay coach: same 3-tap rule, anchored to the replay's start
-        // cycle so the count is "3 MORE taps from now."
-        if coachReplayActive,
-           coachReplayStep == 0,
-           cycleCount - coachReplayCycleAnchor >= 3 {
-            coachReplayStep = 1
-        }
-
-        // One-time hint: first ever cycle → flash "Tap ⌘X to transform"
-        if !UserDefaults.standard.bool(forKey: "seenTransformHint") {
-            UserDefaults.standard.set(true, forKey: "seenTransformHint")
-            showFirstCycleHint = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { [weak self] in
-                self?.showFirstCycleHint = false
-            }
-        }
+        if popupCoachStep == 0 && cycleCount >= 3 { popupCoachStep = 1 }
+        if coachReplayActive, coachReplayStep == 0,
+           cycleCount - coachReplayCycleAnchor >= 3 { coachReplayStep = 1 }
 
         syncItemPreviewWithSelection()
     }
@@ -1724,14 +1651,7 @@ class ClipboardManager: ObservableObject {
             selectedIndex = display.count - 1
             openPopupNow()
         } else {
-            if !selectionArmed {
-                clampSelectedIndexToDisplay()
-                selectionArmed = true
-            } else {
-                // Wrap negative: -1 % n is implementation-defined in Swift,
-                // so compute explicitly.
-                selectedIndex = (selectedIndex - 1 + display.count) % display.count
-            }
+            selectedIndex = (selectedIndex - 1 + display.count) % display.count
         }
 
         previewVisible = true
