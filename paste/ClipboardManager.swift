@@ -1579,6 +1579,7 @@ class ClipboardManager: ObservableObject {
     /// source item back on the pasteboard. Transformed output is never added
     /// to the Clipen ring.
     private func finishTransformPaste(message: String?, restoring source: ClipboardItem?) {
+        let pasteTarget = NSWorkspace.shared.frontmostApplication
         // Record destination on the SOURCE item (the one the user picked)
         // before hiding panels — frontmost is still the target app.
         if let source { recordPasteDestination(for: source.id) }
@@ -1589,6 +1590,31 @@ class ClipboardManager: ObservableObject {
         if let message { flashStatus(message) }
 
         isSimulatingPaste = true
+
+        // Restore helper — puts the original item back on the pasteboard so
+        // pollClipboard() cannot capture the transformed payload into the ring.
+        let restoreSource: () -> Void = { [weak self] in
+            guard let self, let source else { return }
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            self.write(source, to: pb)
+            self.lastChangeCount = pb.changeCount
+        }
+
+        // Use injection for Spotlight/Raycast/Alfred (text transforms only).
+        let pbText = NSPasteboard.general.string(forType: .string)
+        if let text = pbText, !text.isEmpty,
+           text.count <= Self.maxInjectionLength,
+           shouldInjectCharacters(to: pasteTarget) {
+            injectCharacters(text) { [weak self] in
+                restoreSource()
+                self?.isSimulatingPaste = false
+                self?.selectedIndex = 0
+                self?.selectionArmed = true
+            }
+            return
+        }
+
         let src  = CGEventSource(stateID: .combinedSessionState)
         let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
         let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
@@ -1599,12 +1625,7 @@ class ClipboardManager: ObservableObject {
             guard let self else { return }
             // Restore the original item BEFORE clearing isSimulatingPaste so
             // pollClipboard() cannot capture the transformed payload into the ring.
-            if let source {
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                self.write(source, to: pb)
-                self.lastChangeCount = pb.changeCount
-            }
+            restoreSource()
             self.isSimulatingPaste = false
             self.selectedIndex = 0
             self.selectionArmed = true
@@ -1829,6 +1850,19 @@ class ClipboardManager: ObservableObject {
 
         let returnApp = searchReturnApp
         searchReturnApp = nil
+
+        // Injection path: if destination is Spotlight/Raycast/Alfred, type
+        // the text directly instead of activating the app and simulating ⌘V.
+        if let text = extractTextForInjection(from: item),
+           text.count <= Self.maxInjectionLength,
+           shouldInjectCharacters(to: returnApp) {
+            isSimulatingPaste = true
+            injectCharacters(text) { [weak self] in
+                self?.isSimulatingPaste = false
+            }
+            AuthManager.shared.registerCommandVAction()
+            return
+        }
 
         if let returnApp { NSApp.activate(); returnApp.activate(options: []) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
@@ -2126,6 +2160,68 @@ class ClipboardManager: ObservableObject {
         AuthManager.shared.registerCommandVAction()
     }
 
+    // MARK: - Character injection (Spotlight / Raycast / Alfred)
+
+    /// Apps that have text input fields but don't receive simulated ⌘V from
+    /// external processes.  Spotlight is detected as nil frontmostApplication.
+    private static let injectionBundleIDs: Set<String> = [
+        "com.raycast.macos",
+        "com.runningwithcrayons.Alfred",
+    ]
+
+    /// Max characters to inject char-by-char. Beyond this, fall back to ⌘V.
+    private static let maxInjectionLength = 5_000
+
+    /// True when `app` is known to ignore externally simulated ⌘V.
+    private func shouldInjectCharacters(to app: NSRunningApplication?) -> Bool {
+        if app == nil { return true } // Spotlight / system search bar (no frontmost app)
+        guard let id = app?.bundleIdentifier else { return false }
+        return Self.injectionBundleIDs.contains(id)
+    }
+
+    /// Extracts the pasteable plain-text string from a clipboard item, or nil
+    /// if the content is not text (files, images, etc. cannot be injected).
+    private func extractTextForInjection(from item: ClipboardItem) -> String? {
+        switch item.content {
+        case .text(let t):               return t.isEmpty ? nil : t
+        case .richText(_, plain: let t),
+             .html(_, plain: let t):    return t.isEmpty ? nil : t
+        default:                         return nil
+        }
+    }
+
+    /// Types `text` character-by-character using CGEvent keyboard events at HID
+    /// level.  Works in Spotlight, Raycast, and Alfred which ignore ⌘V.
+    /// `completion` is called on the main thread after all characters are sent.
+    private func injectCharacters(_ text: String, completion: (() -> Void)? = nil) {
+        let src = CGEventSource(stateID: .combinedSessionState)
+        // Yield briefly so the popup finishes dismissing before characters land.
+        DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.06) {
+            for scalar in text.unicodeScalars {
+                var chars: [UniChar]
+                if scalar.value <= 0xFFFF {
+                    chars = [UniChar(scalar.value)]
+                } else {
+                    // Encode supplementary character as UTF-16 surrogate pair.
+                    let v = scalar.value - 0x10000
+                    chars = [UniChar(0xD800 | (v >> 10)), UniChar(0xDC00 | (v & 0x3FF))]
+                }
+                chars.withUnsafeBufferPointer { ptr in
+                    guard let base = ptr.baseAddress else { return }
+                    if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
+                        down.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
+                        down.post(tap: .cgAnnotatedSessionEventTap)
+                    }
+                    if let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
+                        up.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
+                        up.post(tap: .cgAnnotatedSessionEventTap)
+                    }
+                }
+            }
+            DispatchQueue.main.async { completion?() }
+        }
+    }
+
 
     // MARK: - Embedding recomputation
 
@@ -2392,8 +2488,9 @@ class ClipboardManager: ObservableObject {
             return
         }
         pendingPasteItemID = nil
-        // Record which app is receiving this paste BEFORE we hide the popup
-        // (popup is non-activating → frontmost is still the target app).
+        // Capture target before hiding panels — popup is non-activating so
+        // frontmostApplication is still the destination app at this point.
+        let pasteTarget = NSWorkspace.shared.frontmostApplication
         recordPasteDestination(for: item.id)
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
 
@@ -2403,18 +2500,33 @@ class ClipboardManager: ObservableObject {
         lastChangeCount = pb.changeCount
 
         isSimulatingPaste = true
-        let src  = CGEventSource(stateID: .combinedSessionState)
-        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-        let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-        down?.flags = .maskCommand; up?.flags = .maskCommand
-        down?.post(tap: .cgAnnotatedSessionEventTap)
-        up?.post(tap: .cgAnnotatedSessionEventTap)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.isSimulatingPaste = false
-            self?.selectedIndex    = 0
-            self?.selectionArmed   = true
-            self?.previewVisible   = false
-            self?.cycleCount       = 0
+
+        // Use character injection for Spotlight (nil frontmost), Raycast, Alfred,
+        // and any other app that ignores externally simulated ⌘V.
+        if let text = extractTextForInjection(from: item),
+           text.count <= Self.maxInjectionLength,
+           shouldInjectCharacters(to: pasteTarget) {
+            injectCharacters(text) { [weak self] in
+                self?.isSimulatingPaste = false
+                self?.selectedIndex    = 0
+                self?.selectionArmed   = true
+                self?.previewVisible   = false
+                self?.cycleCount       = 0
+            }
+        } else {
+            let src  = CGEventSource(stateID: .combinedSessionState)
+            let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
+            let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
+            down?.flags = .maskCommand; up?.flags = .maskCommand
+            down?.post(tap: .cgAnnotatedSessionEventTap)
+            up?.post(tap: .cgAnnotatedSessionEventTap)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.isSimulatingPaste = false
+                self?.selectedIndex    = 0
+                self?.selectionArmed   = true
+                self?.previewVisible   = false
+                self?.cycleCount       = 0
+            }
         }
         AuthManager.shared.registerCommandVAction()
     }
