@@ -1727,7 +1727,7 @@ class ClipboardManager: ObservableObject {
         searchOverlayWindow.hide()
         let app = searchReturnApp
         searchReturnApp = nil
-        app?.activate(options: .activateIgnoringOtherApps)
+        if let app { NSApp.activate(); app.activate(options: []) }
     }
 
     func searchSelectNext() {
@@ -1769,7 +1769,7 @@ class ClipboardManager: ObservableObject {
         let returnApp = searchReturnApp
         searchReturnApp = nil
 
-        returnApp?.activate(options: .activateIgnoringOtherApps)
+        if let returnApp { NSApp.activate(); returnApp.activate(options: []) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
             self?.simulateCommandV()
         }
