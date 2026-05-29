@@ -26,6 +26,17 @@ struct PredictionContext {
     /// Title of the active window, e.g. "invoice.xlsx", "index.swift",
     /// "New Message — Mail".  nil when unavailable.
     let windowTitle: String?
+    /// AX role / subrole of the focused field, e.g. "AXTextField AXSearchField"
+    /// or "AXTextArea".  Tells the scorer what KIND of input this is — a search
+    /// box wants short queries, a text area wants long-form content.  nil when
+    /// unavailable.
+    let fieldRole: String?
+    /// Text already typed into the focused field (capped, secure fields
+    /// excluded).  Strong context — if the user has typed "Dear Sir," the
+    /// destination embedding shifts toward letter/email content.  nil when
+    /// the field is empty, secure, or unreadable.  Never persisted — lives
+    /// only for the duration of one popup.
+    let fieldText: String?
     /// Embedding of a natural-language description of the paste destination
     /// (app name + window title + placeholder + label).  The predictor scores
     /// each item by cosine against this — an always-present per-app signal
@@ -35,7 +46,7 @@ struct PredictionContext {
     /// Combined lower-cased signal text from all three field-context fields,
     /// used by the scorer so it doesn't repeat the concat work per item.
     var fieldSignal: String {
-        [fieldPlaceholder, fieldLabel, windowTitle]
+        [fieldPlaceholder, fieldLabel, windowTitle, fieldRole, fieldText]
             .compactMap { $0 }
             .joined(separator: " ")
             .lowercased()
@@ -48,6 +59,8 @@ struct PredictionContext {
          fieldPlaceholder: String?    = nil,
          fieldLabel:       String?    = nil,
          windowTitle:      String?    = nil,
+         fieldRole:        String?    = nil,
+         fieldText:        String?    = nil,
          contextEmbedding: [Float]?   = nil) {
         self.targetAppName    = targetAppName
         self.targetBundleID   = targetBundleID
@@ -59,6 +72,8 @@ struct PredictionContext {
         self.fieldPlaceholder = fieldPlaceholder
         self.fieldLabel       = fieldLabel
         self.windowTitle      = windowTitle
+        self.fieldRole        = fieldRole
+        self.fieldText        = fieldText
         self.contextEmbedding = contextEmbedding
     }
 }

@@ -121,6 +121,20 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    /// Master switch for the whole prediction feature.  When false the
+    /// Prediction chip is hidden from the popup strip, ⌘-shortcuts skip it,
+    /// and the "Popup opens on" preference can't land on Prediction.  Persisted
+    /// so the user's choice survives launches.  Default on.
+    @Published var predictionEnabled: Bool = UserDefaults.standard.object(forKey: "predictionEnabled") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(predictionEnabled, forKey: "predictionEnabled")
+            // Disabling while the Prediction view is live → fall back to Recents.
+            if !predictionEnabled && predictionActive {
+                predictionActive = false   // didSet rebuilds displayItems
+            }
+        }
+    }
+
     /// The "Prediction" chip (position 2 in the popup strip).  When true,
     /// `displayItems` is replaced by `PastePredictor`'s top-N guesses instead
     /// of the tag-filtered ring.  Mutually exclusive with `tagFilter`.
@@ -305,12 +319,15 @@ class ClipboardManager: ObservableObject {
             .compactMap { $0.embedding }
         let fc = captureFieldContext()
         // Build a single natural-language query describing *where* we're about
-        // to paste — app name + window title + field placeholder/label — and
-        // embed it.  This gives the predictor a continuous, always-present
-        // per-app signal (cosine of each item against this query) so the
-        // ranking genuinely changes between Notes / ChatGPT / Cursor even
-        // before any paste history has accumulated.
-        let querySource = [front?.localizedName, fc.windowTitle, fc.placeholder, fc.label]
+        // to paste — app name + window title + field placeholder/label + the
+        // input's role and whatever text is already typed there — and embed
+        // it.  This gives the predictor a continuous, always-present per-app
+        // signal (cosine of each item against this query) so the ranking
+        // genuinely changes between Notes / ChatGPT / Cursor — and now between
+        // a search box vs. a body field within the SAME app — even before any
+        // paste history has accumulated.
+        let querySource = [front?.localizedName, fc.windowTitle, fc.placeholder,
+                           fc.label, fc.role, fc.value]
             .compactMap { $0 }
             .joined(separator: ". ")
         var contextEmbedding: [Float]? = nil
@@ -325,17 +342,21 @@ class ClipboardManager: ObservableObject {
             fieldPlaceholder: fc.placeholder,
             fieldLabel:       fc.label,
             windowTitle:      fc.windowTitle,
+            fieldRole:        fc.role,
+            fieldText:        fc.value,
             contextEmbedding: contextEmbedding
         )
     }
 
     /// Reads the focused text field's placeholder text, accessible label,
-    /// and the active window title via the Accessibility API.  All three are
-    /// optional — if AX access is denied or the app doesn't expose them we
-    /// just get nils, which the predictor silently ignores.
-    private func captureFieldContext() -> (placeholder: String?, label: String?, windowTitle: String?) {
+    /// the active window title, the input's AX role/subrole, and any text
+    /// already typed into it via the Accessibility API.  All are optional —
+    /// if AX access is denied or the app doesn't expose them we just get nils,
+    /// which the predictor silently ignores.  Secure (password) fields never
+    /// return their value.
+    private func captureFieldContext() -> (placeholder: String?, label: String?, windowTitle: String?, role: String?, value: String?) {
         guard let appEl = focusedApplicationAXElement(),
-              let el    = focusedUIElement(in: appEl) else { return (nil, nil, nil) }
+              let el    = focusedUIElement(in: appEl) else { return (nil, nil, nil, nil, nil) }
 
         // 1. Placeholder  (e.g. "Enter your email", "Search…", "Phone number")
         var phRef: CFTypeRef?
@@ -371,9 +392,37 @@ class ClipboardManager: ObservableObject {
                 }
             }
         }
+        // 4. Role + subrole — what KIND of input this is (search box, text
+        //    area, secure field…).  We also use the subrole to detect secure
+        //    fields so we never read a password's value.
+        var roleRef: CFTypeRef?
+        let role = AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &roleRef) == .success
+            ? (roleRef as? String) : nil
+        var subroleRef: CFTypeRef?
+        let subrole = AXUIElementCopyAttributeValue(el, kAXSubroleAttribute as CFString, &subroleRef) == .success
+            ? (subroleRef as? String) : nil
+        let isSecure = subrole == (kAXSecureTextFieldSubrole as String)
+        let roleSignal = [role, subrole].compactMap { $0 }.joined(separator: " ")
+
+        // 5. Current field value — what the user has already typed.  Skipped
+        //    for secure fields (never read passwords) and capped so a huge
+        //    document doesn't dominate the embedding.  Ephemeral: used only to
+        //    build the in-memory context embedding, never stored.
+        var value: String?
+        if !isSecure {
+            var valRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &valRef) == .success,
+               let raw = (valRef as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !raw.isEmpty {
+                value = String(raw.prefix(120))
+            }
+        }
+
         return (placeholder?.isEmpty == false ? placeholder : nil,
                 label?.isEmpty       == false ? label       : nil,
-                winTitle?.isEmpty    == false ? winTitle    : nil)
+                winTitle?.isEmpty    == false ? winTitle    : nil,
+                roleSignal.isEmpty            ? nil : roleSignal,
+                value)
     }
 
     /// Tags that appear on at least one item in the full ring (ignoring
@@ -1263,6 +1312,18 @@ class ClipboardManager: ObservableObject {
 
         if key == 9 { // V — ⌘V cycle, ⌘⌥V jump+5, ⌘⇧V next category
             if isSimulatingPaste { return Unmanaged.passUnretained(event) }
+            // One logical step per physical press — swallow OS key-repeat
+            // (mirrors the X handler).  Without this, holding/firing V fast
+            // spins cycleNext at the autorepeat rate; on a large ring that
+            // merely scrolls quickly, but on a SHORT list (Prediction's 5, or
+            // a sparse tag category) it wraps so fast the selection looks
+            // frozen on one row — which read as "cycling only works in
+            // Recents."  Recents just has enough rows to make the motion
+            // visible.  Swallowing repeats makes every category step evenly.
+            if previewWindow.isVisible,
+               event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
+                return nil
+            }
             // Optional strict mode: only activate popup flows while user is
             // actively focused in a text-editable element.
             if !previewWindow.isVisible,
@@ -1775,8 +1836,12 @@ class ClipboardManager: ObservableObject {
                 // immediately, and advance to row 1 (matching the count of
                 // V taps so far).
                 cancelPendingFirstOpen()
-                selectedIndex = min(1, display.count - 1)
+                // openPopupNow() applies the default-tab preference, whose
+                // predictionActive/tagFilter didSet resets selectedIndex to 0.
+                // Set the advance AFTER it so the second tap actually lands on
+                // row 1 in Prediction mode too (previously the reset ate it).
                 openPopupNow()
+                selectedIndex = min(1, display.count - 1)
             } else if firstOpenDelay > 0 {
                 // First-ever V tap of this ⌘-hold session. Defer opening
                 // the popup by `firstOpenDelay` so a fast tap-and-release
@@ -1894,9 +1959,12 @@ class ClipboardManager: ObservableObject {
     /// Out-of-range indices (e.g. ⌘5 with only 3 categories) are ignored.
     /// Opens the popup if it isn't already visible.
     private func selectCategoryByIndex(_ idx: Int) {
-        // Strip layout: 0 = Recents (nil filter), 1 = Prediction, 2+ = tags.
-        // ⌘1 = Recents, ⌘2 = Prediction, ⌘3 = first type tag, etc.
-        let total = 2 + availableTags.count
+        // Strip layout mirrors the chip strip, which hides the Prediction slot
+        // when the feature is off:
+        //   prediction ON  → 0 = Recents, 1 = Prediction, 2+ = tags
+        //   prediction OFF → 0 = Recents,                  1+ = tags
+        let predSlots = predictionEnabled ? 1 : 0
+        let total = 1 + predSlots + availableTags.count
         guard idx >= 0, idx < total else { return }
 
         let wasFirstOpen = !previewWindow.isVisible
@@ -1907,10 +1975,10 @@ class ClipboardManager: ObservableObject {
         if idx == 0 {
             predictionActive = false
             tagFilter = nil
-        } else if idx == 1 {
+        } else if predictionEnabled && idx == 1 {
             predictionActive = true        // didSet clears tagFilter
         } else {
-            tagFilter = availableTags[idx - 2]   // didSet clears prediction
+            tagFilter = availableTags[idx - 1 - predSlots]   // didSet clears prediction
         }
         selectionArmed = true
         previewVisible = true
@@ -1961,17 +2029,22 @@ class ClipboardManager: ObservableObject {
     ///   2. Centre of the screen — fallback when no text field is focused.
     private func openPopupNow() {
         selectionArmed = true
-        // Apply the user's default tab preference each time the popup opens.
-        if defaultPopupTab == "prediction" {
-            predictionActive = true   // didSet clears tagFilter
-        } else {
-            predictionActive = false
-            tagFilter = nil
-        }
+        // Show the window first so the popup appears instantly, then apply the
+        // default tab.  Setting predictionActive synchronously triggers AX
+        // queries + Core ML embedding before show() — doing it after eliminates
+        // that latency from the perceived open time.
         if let textPos = focusedTextInputPosition() {
             previewWindow.show(at: textPos)
         } else {
             previewWindow.showCentered()
+        }
+        // Apply the user's default tab preference each time the popup opens.
+        // Ignore a "prediction" preference when the feature is disabled.
+        if defaultPopupTab == "prediction" && predictionEnabled {
+            predictionActive = true   // didSet clears tagFilter
+        } else {
+            predictionActive = false
+            tagFilter = nil
         }
         syncItemPreviewWithSelection()
     }
@@ -3494,10 +3567,9 @@ class ClipboardManager: ObservableObject {
             default:
                 return nil
             }
-            var item = ClipboardItem(content: content, id: p.id, timestamp: p.timestamp)
+            var item = ClipboardItem(content: content, id: p.id, timestamp: p.timestamp,
+                                     urlTitle: p.urlTitle, sourceAppName: p.sourceAppName)
             item.isPinned = p.isPinned
-            item.urlTitle = p.urlTitle
-            item.sourceAppName = p.sourceAppName
             item.sourceBundleID = p.sourceBundleID
             item.isSecret = p.isSecret ?? false
             item.pastedToAppName  = p.pastedToAppName
@@ -3594,10 +3666,19 @@ struct ClipboardItem: Identifiable {
     private(set) var searchEmbedNorm:   String = ""
     private(set) var searchMetaNorm:    String = ""
 
-    init(content: ClipboardContent, id: UUID = UUID(), timestamp: Date = Date()) {
+    /// `urlTitle` / `sourceAppName` are assigned here (not after init) on the
+    /// load path so their `didSet` doesn't fire — setting them post-init would
+    /// trigger `rebuildSearchHaystacks()` twice more per item (FS I/O for file
+    /// items), once each, on top of the single rebuild below.  Inside `init`
+    /// property observers don't run, so the haystacks are built exactly once
+    /// with the final field values.
+    init(content: ClipboardContent, id: UUID = UUID(), timestamp: Date = Date(),
+         urlTitle: String? = nil, sourceAppName: String? = nil) {
         self.id        = id
         self.timestamp = timestamp
         self.content   = content
+        self.urlTitle      = urlTitle
+        self.sourceAppName = sourceAppName
         self.detectedColor = ContentDetector.detectedColor(for: content)
         self.detectedType  = ContentDetector.detectedType(for: content, color: self.detectedColor)
         self.tags         = TagDetector.tags(for: content, color: self.detectedColor)

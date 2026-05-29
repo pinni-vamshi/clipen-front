@@ -712,19 +712,25 @@ struct TagFilterStrip: View {
                 }
                 // 2 — Prediction (the predictor's top guesses).  Distinct
                 // gradient styling so it reads as "smart", not just another tag.
-                TagFilterChip(
-                    tag: nil,
-                    selected: manager.predictionActive,
-                    shortcutNumber: 2,
-                    customIcon: "sparkles",
-                    customLabel: "Prediction",
-                    isPrediction: true
-                ) {
-                    manager.predictionActive.toggle()
+                // Hidden entirely when the user disables prediction in settings;
+                // the tag chips then shift down to fill the ⌘2… slots.
+                if manager.predictionEnabled {
+                    TagFilterChip(
+                        tag: nil,
+                        selected: manager.predictionActive,
+                        shortcutNumber: 2,
+                        customIcon: "sparkles",
+                        customLabel: "Prediction",
+                        isPrediction: true
+                    ) {
+                        manager.predictionActive.toggle()
+                    }
                 }
-                // 3+ — type tags.
+                // type tags — start at ⌘3 when the Prediction chip is shown,
+                // ⌘2 when it's hidden, so the numbers always match what's visible.
+                let tagBase = manager.predictionEnabled ? 3 : 2
                 ForEach(Array(tags.enumerated()), id: \.element) { idx, tag in
-                    let n = idx + 3
+                    let n = idx + tagBase
                     TagFilterChip(
                         tag: tag,
                         selected: manager.tagFilter == tag,
