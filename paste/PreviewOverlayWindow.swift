@@ -697,10 +697,8 @@ struct TagFilterStrip: View {
     /// The chip ID that is currently selected — used to auto-scroll it into
     /// view when the user switches categories via keyboard (⌘1–⌘9).
     private var selectedChipID: Int {
-        if manager.predictionActive { return 1 }
         guard let tag = manager.tagFilter else { return 0 }
-        let tagBase = manager.predictionEnabled ? 2 : 1
-        return (manager.availableTags.firstIndex(of: tag) ?? 0) + tagBase
+        return (manager.availableTags.firstIndex(of: tag) ?? 0) + 1
     }
 
     var body: some View {
@@ -714,36 +712,15 @@ struct TagFilterStrip: View {
                     // 1 — Recents (everything, no filter).
                     TagFilterChip(
                         tag: nil,
-                        selected: manager.tagFilter == nil && !manager.predictionActive,
+                        selected: manager.tagFilter == nil,
                         shortcutNumber: 1
                     ) {
-                        manager.predictionActive = false
                         manager.tagFilter = nil
                     }
                     .id(0)
-                    // 2 — Prediction (the predictor's top guesses).  Distinct
-                    // gradient styling so it reads as "smart", not just another tag.
-                    // Hidden entirely when the user disables prediction in settings;
-                    // the tag chips then shift down to fill the ⌘2… slots.
-                    if manager.predictionEnabled {
-                        TagFilterChip(
-                            tag: nil,
-                            selected: manager.predictionActive,
-                            shortcutNumber: 2,
-                            customIcon: "sparkles",
-                            customLabel: "Prediction",
-                            isPrediction: true
-                        ) {
-                            manager.predictionActive = true
-                        }
-                        .id(1)
-                    }
-                    // type tags — start at ⌘3 when the Prediction chip is shown,
-                    // ⌘2 when it's hidden, so the numbers always match what's visible.
-                    let tagBase = manager.predictionEnabled ? 3 : 2
+                    // type tags — ⌘2, ⌘3, …
                     ForEach(Array(tags.enumerated()), id: \.element) { idx, tag in
-                        let n = idx + tagBase
-                        let chipID = idx + (manager.predictionEnabled ? 2 : 1)
+                        let n = idx + 2
                         TagFilterChip(
                             tag: tag,
                             selected: manager.tagFilter == tag,
@@ -751,7 +728,7 @@ struct TagFilterStrip: View {
                         ) {
                             manager.tagFilter = tag
                         }
-                        .id(chipID)
+                        .id(idx + 1)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -771,31 +748,13 @@ struct TagFilterStrip: View {
 struct TagFilterChip: View {
     let tag: ClipboardTag?
     let selected: Bool
-    var shortcutNumber: Int? = nil      // 1…9, used as ⌘N keybinding
-    /// Overrides for non-tag chips (Recents / Prediction).  When nil the
-    /// chip derives its look from `tag` as before.
+    var shortcutNumber: Int? = nil
     var customIcon:  String? = nil
     var customLabel: String? = nil
-    /// Prediction chip gets a purple→blue gradient fill when selected.
-    var isPrediction: Bool = false
     let action: () -> Void
 
     private var icon:  String { customIcon  ?? tag?.icon  ?? "clock" }
     private var label: String { customLabel ?? tag?.label ?? "Recents" }
-
-    private var fill: AnyShapeStyle {
-        if selected {
-            if isPrediction {
-                return AnyShapeStyle(LinearGradient(
-                    colors: [Color(hex: "#A855F7"), Color(hex: "#4F8EF7")],
-                    startPoint: .leading, endPoint: .trailing))
-            } else {
-                return AnyShapeStyle(Color.accentColor)
-            }
-        } else {
-            return AnyShapeStyle(Color.primary.opacity(0.08))
-        }
-    }
 
     var body: some View {
         Button(action: action) {
@@ -810,15 +769,15 @@ struct TagFilterChip: View {
                 Text(label)
                     .font(.system(size: 10, weight: .semibold))
             }
-            .foregroundColor(selected ? .white : (isPrediction ? Color(hex: "#A855F7") : .secondary))
+            .foregroundColor(selected ? .white : .secondary)
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(Capsule(style: .continuous).fill(fill))
+            .background(Capsule(style: .continuous)
+                .fill(selected ? AnyShapeStyle(Color.accentColor)
+                               : AnyShapeStyle(Color.primary.opacity(0.08))))
             .overlay(
                 Capsule(style: .continuous)
-                    .stroke(selected ? Color.clear
-                                     : (isPrediction ? Color(hex: "#A855F7").opacity(0.35)
-                                                     : Color.primary.opacity(0.06)),
+                    .stroke(selected ? Color.clear : Color.primary.opacity(0.06),
                             lineWidth: 1)
             )
         }

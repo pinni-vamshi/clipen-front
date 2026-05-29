@@ -222,64 +222,6 @@ struct MainWindowView: View {
                                 .buttonStyle(.plain)
                             }
                             cardDivider()
-                            VStack(alignment: .leading, spacing: 8) {
-                                cardRow(icon: "wand.and.stars", label: "Smart prediction") {
-                                    Toggle("", isOn: $manager.predictionEnabled)
-                                        .toggleStyle(.switch).controlSize(.mini).tint(.accent)
-                                }
-                                Text(manager.predictionEnabled
-                                     ? "Adds a Prediction category that ranks items by where you're likely to paste."
-                                     : "Prediction category is hidden; the popup shows Recents and type filters only.")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.textDim)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .padding(.horizontal, 12)
-                                    .padding(.bottom, 6)
-                            }
-                            if manager.predictionEnabled {
-                            cardDivider()
-                            cardRow(icon: "sparkles", label: "Popup opens on") {
-                                HStack(spacing: 0) {
-                                    Button {
-                                        manager.defaultPopupTab = "recents"
-                                    } label: {
-                                        Text("Recents")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundColor(manager.defaultPopupTab == "recents" ? .white : .secondary)
-                                            .padding(.horizontal, 9)
-                                            .padding(.vertical, 4)
-                                            .background(
-                                                manager.defaultPopupTab == "recents"
-                                                    ? AnyShapeStyle(Color.accentColor)
-                                                    : AnyShapeStyle(Color.clear),
-                                                in: RoundedRectangle(cornerRadius: 5)
-                                            )
-                                    }
-                                    .buttonStyle(.plain)
-                                    Button {
-                                        manager.defaultPopupTab = "prediction"
-                                    } label: {
-                                        Text("Prediction")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundColor(manager.defaultPopupTab == "prediction" ? .white : .secondary)
-                                            .padding(.horizontal, 9)
-                                            .padding(.vertical, 4)
-                                            .background(
-                                                manager.defaultPopupTab == "prediction"
-                                                    ? AnyShapeStyle(LinearGradient(
-                                                        colors: [Color(hex: "#A855F7"), Color(hex: "#4F8EF7")],
-                                                        startPoint: .leading, endPoint: .trailing))
-                                                    : AnyShapeStyle(Color.clear),
-                                                in: RoundedRectangle(cornerRadius: 5)
-                                            )
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(3)
-                                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
-                            }
-                            }
-                            cardDivider()
                             // Quick ⌘V tap-and-release → paste front item
                             // without flashing the popup. Slider in ms so
                             // the user can tune the threshold to their tap
