@@ -63,6 +63,7 @@ enum TextTraditionalDetectors {
     }
 
     private static func detectDelimitedTable(_ text: String) -> String? {
+        guard text.contains("\n") else { return nil }
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         guard lines.count >= 2, lines.count <= 200 else { return nil }
         for (delimiter, label) in [("\t", "TSV"), (",", "CSV")] {

@@ -2,6 +2,7 @@ import Foundation
 
 enum CodeLanguageDetector {
     static func detect(_ text: String) -> String? {
+        guard text.count <= 50_000 else { return nil }
         let checks: [(String, [String])] = [
             ("Swift",      ["func ", "var ", "let ", "guard ", "struct ", "import SwiftUI", "@State", ".self"]),
             ("Python",     ["def ", "import ", "print(", "if __name__", "elif ", "self.", "None", "True"]),

@@ -54,6 +54,13 @@ final class AuthManager: ObservableObject {
 
     private var refreshInFlight = false
 
+    // In-memory caches for UserDefaults tool-usage dictionaries so
+    // toolImportanceScore() doesn't do 4 full dict deserializations per tool per show.
+    private var _toolUsageTotalsCache: [String: Int]? = nil
+    private var _toolLastUsedAtCache: [String: Double]? = nil
+    private var _toolBucketUsageCache: [String: Int]? = nil
+    private var _globalBucketUsageCache: [String: Int]? = nil
+
     private init() {
         let hasBootstrappedFlags = hasPersistedFeatureState() || UserDefaults.standard.data(forKey: cacheKey) != nil
         loadCachedFeatureFlags()
@@ -113,18 +120,22 @@ final class AuthManager: ObservableObject {
 
         var totals = toolUsageTotals()
         totals[toolID, default: 0] += count
+        _toolUsageTotalsCache = totals
         UserDefaults.standard.set(totals, forKey: toolUsageTotalsKey)
 
         var lastUsed = toolLastUsedAt()
         lastUsed[toolID] = now.timeIntervalSince1970
+        _toolLastUsedAtCache = lastUsed
         UserDefaults.standard.set(lastUsed, forKey: toolLastUsedAtKey)
 
         var perToolBucket = toolBucketUsage()
         perToolBucket["\(toolID)|\(bucket)", default: 0] += count
+        _toolBucketUsageCache = perToolBucket
         UserDefaults.standard.set(perToolBucket, forKey: toolBucketUsageKey)
 
         var globalBucket = globalBucketUsage()
         globalBucket[bucket, default: 0] += count
+        _globalBucketUsageCache = globalBucket
         UserDefaults.standard.set(globalBucket, forKey: globalBucketUsageKey)
     }
 
@@ -259,70 +270,62 @@ final class AuthManager: ObservableObject {
     }
 
     private func toolUsageTotals() -> [String: Int] {
+        if let cached = _toolUsageTotalsCache { return cached }
         guard let raw = UserDefaults.standard.dictionary(forKey: toolUsageTotalsKey) else { return [:] }
         var counts: [String: Int] = [:]
         for (k, v) in raw {
             let value: Int
-            if let n = v as? Int {
-                value = n
-            } else if let n = v as? NSNumber {
-                value = n.intValue
-            } else {
-                continue
-            }
+            if let n = v as? Int { value = n }
+            else if let n = v as? NSNumber { value = n.intValue }
+            else { continue }
             if value > 0 { counts[k] = value }
         }
+        _toolUsageTotalsCache = counts
         return counts
     }
 
     private func toolLastUsedAt() -> [String: Double] {
+        if let cached = _toolLastUsedAtCache { return cached }
         guard let raw = UserDefaults.standard.dictionary(forKey: toolLastUsedAtKey) else { return [:] }
         var values: [String: Double] = [:]
         for (k, v) in raw {
             let value: Double
-            if let n = v as? Double {
-                value = n
-            } else if let n = v as? NSNumber {
-                value = n.doubleValue
-            } else {
-                continue
-            }
+            if let n = v as? Double { value = n }
+            else if let n = v as? NSNumber { value = n.doubleValue }
+            else { continue }
             if value > 0 { values[k] = value }
         }
+        _toolLastUsedAtCache = values
         return values
     }
 
     private func toolBucketUsage() -> [String: Int] {
+        if let cached = _toolBucketUsageCache { return cached }
         guard let raw = UserDefaults.standard.dictionary(forKey: toolBucketUsageKey) else { return [:] }
         var counts: [String: Int] = [:]
         for (k, v) in raw {
             let value: Int
-            if let n = v as? Int {
-                value = n
-            } else if let n = v as? NSNumber {
-                value = n.intValue
-            } else {
-                continue
-            }
+            if let n = v as? Int { value = n }
+            else if let n = v as? NSNumber { value = n.intValue }
+            else { continue }
             if value > 0 { counts[k] = value }
         }
+        _toolBucketUsageCache = counts
         return counts
     }
 
     private func globalBucketUsage() -> [String: Int] {
+        if let cached = _globalBucketUsageCache { return cached }
         guard let raw = UserDefaults.standard.dictionary(forKey: globalBucketUsageKey) else { return [:] }
         var counts: [String: Int] = [:]
         for (k, v) in raw {
             let value: Int
-            if let n = v as? Int {
-                value = n
-            } else if let n = v as? NSNumber {
-                value = n.intValue
-            } else {
-                continue
-            }
+            if let n = v as? Int { value = n }
+            else if let n = v as? NSNumber { value = n.intValue }
+            else { continue }
             if value > 0 { counts[k] = value }
         }
+        _globalBucketUsageCache = counts
         return counts
     }
 

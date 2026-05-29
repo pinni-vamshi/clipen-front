@@ -69,8 +69,17 @@ private enum SecretDetector {
         return [hasLower, hasUpper, hasDigit, hasSymbol].filter { $0 }.count >= 3
     }
 
+    private static var _regexCache: [String: NSRegularExpression] = [:]
     private static func matches(_ pattern: String, in text: String) -> Bool {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+        let regex: NSRegularExpression
+        if let cached = _regexCache[pattern] {
+            regex = cached
+        } else if let r = try? NSRegularExpression(pattern: pattern) {
+            _regexCache[pattern] = r
+            regex = r
+        } else {
+            return false
+        }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.firstMatch(in: text, range: range) != nil
     }
@@ -83,7 +92,11 @@ class ClipboardManager: ObservableObject {
     static var maxDataBytes: Int { AuthManager.shared.maxDataBytes }
 
     @Published var items: [ClipboardItem] = [] {
-        didSet { updatePendingPasteID() }
+        didSet {
+            _displayItems = nil
+            _availableTags = nil
+            updatePendingPasteID()
+        }
     }
     @Published var selectedIndex: Int = 0 {
         didSet { updatePendingPasteID() }
@@ -106,6 +119,7 @@ class ClipboardManager: ObservableObject {
     /// independent @State local filter — this property must never be touched from there.
     @Published var popupTagFilter: ClipboardTag? = nil {
         didSet {
+            _displayItems = nil
             selectedIndex = 0
             selectionArmed = true
             if previewWindow.isVisible { syncItemPreviewWithSelection() }
@@ -189,15 +203,20 @@ class ClipboardManager: ObservableObject {
 
     /// Exactly the same logic as `mainFilteredItems` in MainWindowView.
     /// One formula, both windows: items filtered by tag only.
+    private var _displayItems: [ClipboardItem]? = nil
     var displayItems: [ClipboardItem] {
-        guard let tag = popupTagFilter else { return items }
-        let result = items.filter { $0.tags.contains(tag) }
-        NSLog("[Clipen][TAGDIAG] popup filter=\(tag.rawValue) availableTags=\(availableTags.map(\.rawValue)) -> \(result.count) of \(items.count) items")
-        for it in result {
-            NSLog("[Clipen][TAGDIAG]   PASSED content=\(it.content.diagKind) tags=\(it.tags.map(\.rawValue)) primary=\(it.primaryTag.rawValue)")
+        if let cached = _displayItems { return cached }
+        let result: [ClipboardItem]
+        if let tag = popupTagFilter {
+            result = items.filter { $0.tags.contains(tag) }
+        } else {
+            result = items
         }
+        _displayItems = result
         return result
     }
+
+    private var _availableTags: [ClipboardTag]? = nil
 
     private func updatePendingPasteID() {
         pendingPasteItemID = displayItems.indices.contains(selectedIndex)
@@ -206,11 +225,14 @@ class ClipboardManager: ObservableObject {
 
     /// Tags that appear on at least one item in the full ring. Drives both popup + main window chip strips.
     var availableTags: [ClipboardTag] {
+        if let cached = _availableTags { return cached }
         var present = Set<ClipboardTag>()
         for item in items {
             for tag in item.tags { present.insert(tag) }
         }
-        return present.sorted { $0.priority < $1.priority }
+        let result = present.sorted { $0.priority < $1.priority }
+        _availableTags = result
+        return result
     }
 
     func itemCount(for tag: ClipboardTag) -> Int {
@@ -416,7 +438,13 @@ class ClipboardManager: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "maxItems")
         saveCancellable = $items
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
-            .sink { [weak self] _ in self?.saveHistory() }
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let snapshot = self.items
+                DispatchQueue.global(qos: .background).async {
+                    self.saveHistory(snapshot: snapshot)
+                }
+            }
     }
 
     // MARK: - Start
@@ -511,23 +539,30 @@ class ClipboardManager: ObservableObject {
                 ?? String(data: htmlData, encoding: .utf16LittleEndian)
                 ?? String(data: htmlData, encoding: .isoLatin1)
                 ?? String(data: htmlData, encoding: .ascii)
-            guard let html, !html.isEmpty,
-                  let plain = Self.plainText(fromHTML: htmlData),
-                  !plain.isEmpty else { continue }
-            var item = ClipboardItem(content: .html(html, plain: plain))
-            item.isSecret = detectSecret(plain)
-            addItem(item)
+            guard let html, !html.isEmpty else { continue }
+            // Parse HTML off main thread — NSAttributedString(html:) runs WebKit internally
+            // and can block 100–200 ms for large pages.
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self,
+                      let plain = Self.plainText(fromHTML: htmlData),
+                      !plain.isEmpty else { return }
+                var item = ClipboardItem(content: .html(html, plain: plain))
+                item.isSecret = self.detectSecret(plain)
+                DispatchQueue.main.async { self.addItem(item) }
+            }
             return
         }
 
         // 3. RTF (before plain text — RTF also exposes .string)
-        if captureRichText,
-           let rtfData = pb.data(forType: .rtf),
-           let attrStr = NSAttributedString(rtf: rtfData, documentAttributes: nil),
-           !attrStr.string.isEmpty {
-            var item = ClipboardItem(content: .richText(attrStr, plain: attrStr.string))
-            item.isSecret = detectSecret(attrStr.string)
-            addItem(item)
+        if captureRichText, let rtfData = pb.data(forType: .rtf) {
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self,
+                      let attrStr = NSAttributedString(rtf: rtfData, documentAttributes: nil),
+                      !attrStr.string.isEmpty else { return }
+                var item = ClipboardItem(content: .richText(attrStr, plain: attrStr.string))
+                item.isSecret = self.detectSecret(attrStr.string)
+                DispatchQueue.main.async { self.addItem(item) }
+            }
             return
         }
 
@@ -561,31 +596,8 @@ class ClipboardManager: ObservableObject {
             }
         }
 
-        // 6. Opaque passthrough — capture all types verbatim when private
-        // app-specific types are present (Photoshop layers, Sketch symbols,
-        // Procreate clips, etc.). Re-writing all types on paste lets the
-        // source app reconstruct its internal representation exactly.
-        let blobSkipPrefixes = ["public.", "com.apple.", "dyn.", "Apple ",
-                                "NSString", "CorePasteboardFlavorType", "NSFilenamesPboardType"]
-        let allPbTypes = pb.types ?? []
-        let privateTypes = allPbTypes.filter { t in
-            !blobSkipPrefixes.contains(where: { t.rawValue.hasPrefix($0) })
-        }
-        if !privateTypes.isEmpty {
-            var blobMap: [String: Data] = [:]
-            for t in allPbTypes {
-                // Skip zero-byte and very large per-type blobs (> 200 MB)
-                if let data = pb.data(forType: t), !data.isEmpty, data.count < Self.maxDataBytes {
-                    blobMap[t.rawValue] = data
-                }
-            }
-            if !blobMap.isEmpty {
-                addItem(ClipboardItem(content: .blob(blobMap)))
-                return
-            }
-        }
-
-        // 7. Images (fallback — no private types present)
+        // 6. Images — before blob so apps that add private metadata alongside
+        // a public image (e.g. Photos, Preview, Affinity) are stored as images.
         let imageTypes: [NSPasteboard.PasteboardType] = [
             .init("public.png"), .tiff,
             .init("com.adobe.pdf"), .init("public.jpeg"), .init("public.heic"),
@@ -600,6 +612,29 @@ class ClipboardManager: ObservableObject {
         if let img = NSImage(pasteboard: pb) {
             let data = img.pngData() ?? Data()
             addItem(ClipboardItem(content: .image(img, rawData: data, dataType: .init("public.png"))))
+            return
+        }
+
+        // 7. Opaque passthrough — last resort when only private app-specific types
+        // are present (Photoshop layers without a public image, Sketch symbols,
+        // Procreate clips, etc.). Re-writing all types on paste lets the source
+        // app reconstruct its internal representation exactly.
+        let blobSkipPrefixes = ["public.", "com.apple.", "dyn.", "Apple ",
+                                "NSString", "CorePasteboardFlavorType", "NSFilenamesPboardType"]
+        let allPbTypes = pb.types ?? []
+        let privateTypes = allPbTypes.filter { t in
+            !blobSkipPrefixes.contains(where: { t.rawValue.hasPrefix($0) })
+        }
+        if !privateTypes.isEmpty {
+            var blobMap: [String: Data] = [:]
+            for t in allPbTypes {
+                if let data = pb.data(forType: t), !data.isEmpty, data.count < Self.maxDataBytes {
+                    blobMap[t.rawValue] = data
+                }
+            }
+            if !blobMap.isEmpty {
+                addItem(ClipboardItem(content: .blob(blobMap)))
+            }
         }
     }
 
@@ -2931,7 +2966,7 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    private func saveHistory() {
+    private func saveHistory(snapshot: [ClipboardItem]? = nil) {
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         // Track which blob paths the new manifest references; everything
@@ -2939,7 +2974,8 @@ class ClipboardManager: ObservableObject {
         // items can't leak bytes on disk forever.
         var referencedBlobs: Set<String> = []
 
-        let persisted: [PersistedItem] = items.compactMap { item in
+        let itemsToSave = snapshot ?? items
+        let persisted: [PersistedItem] = itemsToSave.compactMap { item in
             switch item.content {
             case .text(let str):
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
@@ -3558,19 +3594,6 @@ enum ClipboardContent {
     /// Enables lossless round-trip for Photoshop layers, Sketch symbols, etc.
     case blob([String: Data])
 
-    /// Diagnostic-only: short label for the content case (used by [TAGDIAG] logs).
-    var diagKind: String {
-        switch self {
-        case .text:     return "text"
-        case .image:    return "image"
-        case .richText: return "richText"
-        case .html:     return "html"
-        case .file:     return "file"
-        case .files:    return "files"
-        case .svg:      return "svg"
-        case .blob(let d): return "blob(\(d.count)types)"
-        }
-    }
 }
 
 // MARK: - Extensions

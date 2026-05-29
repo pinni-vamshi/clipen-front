@@ -12,8 +12,18 @@ struct DetectionCandidate {
 }
 
 enum DetectionRegex {
+    private static var cache: [String: NSRegularExpression] = [:]
     static func matches(_ pattern: String, in text: String, options: NSRegularExpression.Options = []) -> Bool {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return false }
+        let key = pattern + String(options.rawValue)
+        let regex: NSRegularExpression
+        if let cached = cache[key] {
+            regex = cached
+        } else if let r = try? NSRegularExpression(pattern: pattern, options: options) {
+            cache[key] = r
+            regex = r
+        } else {
+            return false
+        }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.firstMatch(in: text, range: range) != nil
     }

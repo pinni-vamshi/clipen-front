@@ -55,8 +55,9 @@ enum ToolRegistry {
     }
 
     static func isAsync(item: ClipboardItem, index: Int) -> Bool {
-        guard tools(for: item).indices.contains(index) else { return false }
-        return tools(for: item)[index].isAsync
+        let t = tools(for: item)
+        guard t.indices.contains(index) else { return false }
+        return t[index].isAsync
     }
 
     static func runSync(item: ClipboardItem, index: Int) -> TransformOutput? {

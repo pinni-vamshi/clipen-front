@@ -14,7 +14,7 @@ class TransformPanel: NSPanel {
             backing:     .buffered,
             defer:       false
         )
-        level           = .floating
+        level           = .popUpMenu
         isOpaque        = false
         backgroundColor = .clear
         hasShadow       = false   // shadow drawn in SwiftUI — avoids double halo with NSPanel

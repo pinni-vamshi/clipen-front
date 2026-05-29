@@ -15,7 +15,7 @@ final class ItemPreviewPanel: NSPanel {
             backing: .buffered,
             defer: false
         )
-        level = .floating
+        level = .popUpMenu
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
@@ -201,7 +201,7 @@ private struct HTMLFilePreview: NSViewRepresentable {
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
-        load(url, in: view)
+        if view.url != url { load(url, in: view) }
     }
 
     private func load(_ url: URL, in view: WKWebView) {
@@ -271,6 +271,6 @@ private struct PDFPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ view: PDFView, context: Context) {
-        view.document = document
+        if view.document !== document { view.document = document }
     }
 }

@@ -91,10 +91,10 @@ enum PDFTools {
 
 enum PDFService {
     static func extractAllText(from pdf: PDFDocument) async -> String? {
-        let pages: [String] = (0..<pdf.pageCount).compactMap { pdf.page(at: $0)?.string }
-
+        let pageCount = pdf.pageCount
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                let pages: [String] = (0..<pageCount).compactMap { pdf.page(at: $0)?.string }
                 let combined = pages.joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 continuation.resume(returning: combined.isEmpty ? nil : combined)
@@ -103,9 +103,9 @@ enum PDFService {
     }
 
     static func extractFirstPageText(from pdf: PDFDocument) async -> String? {
-        let raw = pdf.page(at: 0)?.string ?? ""
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
+                let raw = pdf.page(at: 0)?.string ?? ""
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 continuation.resume(returning: trimmed.isEmpty ? nil : trimmed)
             }

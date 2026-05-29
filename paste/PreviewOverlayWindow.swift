@@ -14,7 +14,7 @@ class PreviewOverlayWindow: NSPanel {
             backing: .buffered,
             defer: false
         )
-        level = .floating
+        level = .popUpMenu
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
@@ -263,7 +263,6 @@ struct PopoverPreviewView: View {
                         selected: manager.popupTagFilter == tag,
                         shortcutNumber: (manager.availableTags.firstIndex(of: tag) ?? 0) + 2
                     ) {
-                        NSLog("[Clipen][TAGDIAG] CHIP TAPPED label=\(tag.label) rawValue=\(tag.rawValue) -> setting popupTagFilter")
                         manager.popupTagFilter = tag
                     }
                 }
@@ -312,7 +311,6 @@ struct PopoverPreviewView: View {
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(spacing: 0) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                                let _ = NSLog("[Clipen][RENDERDIAG] L1-FOREACH idx=\(idx) id=\(item.id.uuidString.prefix(8)) content=\(item.content.diagKind) tags=\(item.tags.map(\.rawValue)) filter=\(manager.popupTagFilter?.rawValue ?? "nil")")
                                 PopoverRow(item: item, index: idx,
                                            isSelected: manager.selectionArmed && idx == selectedIndex)
                                     .id(item.id)
@@ -366,7 +364,6 @@ struct PopoverRow: View {
     let isSelected: Bool
 
     var body: some View {
-        let _ = NSLog("[Clipen][RENDERDIAG] L2-ROWBODY idx=\(index) id=\(item.id.uuidString.prefix(8)) content=\(item.content.diagKind) primary=\(item.primaryTag.rawValue) tags=\(item.tags.map(\.rawValue)) isSelected=\(isSelected)")
         VStack(alignment: .leading, spacing: 5) {
             rowHeader
             rowContent.padding(.leading, 30)
@@ -422,10 +419,8 @@ struct PopoverRow: View {
 
     @ViewBuilder
     private var rowContent: some View {
-        let _ = NSLog("[Clipen][RENDERDIAG] L3-ROWCONTENT-ENTER idx=\(index) id=\(item.id.uuidString.prefix(8)) switchingOn=\(item.content.diagKind)")
         switch item.content {
         case .text(let str):
-            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=TEXT idx=\(index) id=\(item.id.uuidString.prefix(8)) preview=\(String(str.prefix(30)).replacingOccurrences(of: "\n", with: " "))")
             if let title = item.urlTitle {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1).foregroundColor(.primary)
@@ -443,15 +438,12 @@ struct PopoverRow: View {
                 }
             }
         case .richText(_, plain: let plain):
-            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=RICHTEXT idx=\(index) id=\(item.id.uuidString.prefix(8)) preview=\(String(plain.prefix(30)).replacingOccurrences(of: "\n", with: " "))")
             Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .html(_, plain: let plain):
-            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=HTML idx=\(index) id=\(item.id.uuidString.prefix(8)) preview=\(String(plain.prefix(30)).replacingOccurrences(of: "\n", with: " "))")
             Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .file(let url):
-            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=FILE idx=\(index) id=\(item.id.uuidString.prefix(8)) file=\(url.lastPathComponent)")
             HStack(spacing: 6) {
                 fileThumbnail(url, size: 28)
                 VStack(alignment: .leading, spacing: 1) {
@@ -462,7 +454,6 @@ struct PopoverRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .files(let urls):
-            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=FILES idx=\(index) id=\(item.id.uuidString.prefix(8)) count=\(urls.count)")
             HStack(spacing: 6) {
                 if let first = urls.first(where: FileKindDetector.isImageFile) {
                     fileThumbnail(first, size: 28)
@@ -477,7 +468,6 @@ struct PopoverRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .image(let img, _, _):
-            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=IMAGE idx=\(index) id=\(item.id.uuidString.prefix(8)) imgSize=\(Int(img.size.width))x\(Int(img.size.height))")
             VStack(alignment: .leading, spacing: 2) {
                 Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
                     .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
@@ -501,12 +491,34 @@ struct PopoverRow: View {
 
     @ViewBuilder
     private func fileThumbnail(_ url: URL, size: CGFloat) -> some View {
-        if FileKindDetector.isImageFile(url), let image = NSImage(contentsOf: url) {
-            Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-                .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 5))
-        } else {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                .resizable().frame(width: 14, height: 14)
+        AsyncFileThumbnail(url: url, size: size)
+    }
+}
+
+// MARK: - Async file thumbnail (loads icon/image off main thread)
+
+private struct AsyncFileThumbnail: View {
+    let url: URL
+    let size: CGFloat
+    @State private var image: NSImage? = nil
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 5))
+            } else {
+                RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.08))
+                    .frame(width: size, height: size)
+            }
+        }
+        .task(id: url) {
+            let loaded = await Task.detached(priority: .utility) { () -> NSImage? in
+                if FileKindDetector.isImageFile(url),
+                   let img = NSImage(contentsOf: url) { return img }
+                return NSWorkspace.shared.icon(forFile: url.path)
+            }.value
+            image = loaded
         }
     }
 }
