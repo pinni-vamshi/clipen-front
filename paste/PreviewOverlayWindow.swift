@@ -1,10 +1,11 @@
 import AppKit
 import SwiftUI
 
+// MARK: - NSPanel
+
 class PreviewOverlayWindow: NSPanel {
-    private var hostingView: NSHostingView<PopoverPreviewView>?
+
     private var visibleRowCount: Int = 5
-    private var isArrowAtBottom: Bool = true
 
     init() {
         super.init(
@@ -16,722 +17,504 @@ class PreviewOverlayWindow: NSPanel {
         level = .floating
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false          // we draw our own shadow inside SwiftUI
-        // Mouse events are accepted so the user can click category chips in
-        // the strip. The panel is `.nonactivatingPanel`, so clicks don't
-        // steal keyboard focus from the underlying app — ⌘ stays "held"
-        // through the click. Outside the chip area there's no tap target,
-        // so clicks just sit on the (currently inert) row views.
+        hasShadow = false
         ignoresMouseEvents = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
 
-    func show(at caretPos: NSPoint) {
-        let rowH: CGFloat    = 72
-        // Header = title row with inline V/X/Paste hints (~44) + category
-        // strip (~36). The standalone shortcut chip row is gone.
-        let headerH: CGFloat = 80
-        let arrowH: CGFloat  = 10
-        let gap: CGFloat     = 8
-        let w: CGFloat       = 420
-        let margin: CGFloat  = 12
-        // Cap visible rows at 5 (UX: any more and the popup feels overwhelming)
-        // but allow fewer if screen is small.
-        let maxVisible: Int  = 5
-
-        // Find the screen the caret is on, fall back to main
-        let screen = NSScreen.screens.first(where: { NSMouseInRect(caretPos, $0.visibleFrame, false) })?.visibleFrame
-                  ?? NSScreen.main?.visibleFrame
-                  ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-
-        // AppKit y grows UPWARD. "Above the caret" visually = higher y values.
-        //   visualSpaceAbove = room from caret up to screen top
-        //   visualSpaceBelow = room from caret down to screen bottom
-        // (The previous code had these swapped — fitsAbove evaluated against
-        //  the wrong axis, so the popup landed off-screen above the caret.)
-        let spaceAbove = screen.maxY - caretPos.y - gap
-        let spaceBelow = caretPos.y - screen.minY - gap
-
-        // Determine how many rows fit in the larger free side
-        let availableSpace = max(spaceAbove, spaceBelow) - headerH - arrowH - margin
-        let maxRows        = max(1, Int(availableSpace / rowH))
-        // Fixed slot count keeps popup height stable when switching categories
-        // (Images vs Recents can have very different item counts).
-        let slotCount      = min(maxVisible, maxRows)
-        let footerH: CGFloat = 26
-
-        let bodyH  = headerH + CGFloat(slotCount) * rowH + footerH
-        let totalH = bodyH + arrowH
-
-        // Prefer placing ABOVE the typing line (so it doesn't cover what's
-        // being typed). If there isn't enough room up there, fall to below.
-        let fitsAbove     = totalH <= spaceAbove
-        let arrowAtBottom = fitsAbove   // popup above ↦ arrow at popup's bottom pointing down
-        visibleRowCount = slotCount
-        isArrowAtBottom = arrowAtBottom
-
-        var x = caretPos.x - w / 2
-        var y: CGFloat
-
-        if fitsAbove {
-            // Popup above caret: bottom edge sits just above the caret + gap
-            y = caretPos.y + gap
-        } else {
-            // Popup below caret: top edge sits just below the caret − gap
-            y = caretPos.y - totalH - gap
-            y = max(screen.minY + margin, y)            // never go below screen bottom
-        }
-
-        // Clamp horizontally within screen
-        x = max(screen.minX + margin, min(x, screen.maxX - w - margin))
-
-        // Arrow tip X relative to panel
-        let arrowX = min(max(caretPos.x - x, 24), w - 24)
-
-        let view = PopoverPreviewView(
-            visibleCount: slotCount,
-            arrowAtBottom: arrowAtBottom,
-            arrowOffsetX: arrowX
-        )
-
-        // Always create a fresh NSHostingView — reusing it preserves the
-        // inner SwiftUI tree (ScrollView offset, LazyVStack realised rows,
-        // even @ObservedObject snapshots) across hide/show, which is what
-        // caused the "popup shows yesterday's list" bug.  Recreating is
-        // cheap (~few ms) and guarantees a clean state.
-        let hv = NSHostingView(rootView: view)
-        contentView = hv
-        hostingView = hv
-
-        setFrame(NSRect(x: x, y: y, width: w, height: totalH), display: true)
-        if !isVisible { orderFront(nil) }
+    /// Show popup anchored to the active text field's caret, falling back to
+    /// screen-center if no focused text input is found.
+    func show() {
+        let anchor = caretScreenRect()
+        showAnchored(to: anchor)
     }
 
-    /// Show the popup centred on the main screen — used when there is no
-    /// focused text input to anchor to. No caret arrow is drawn.
-    func showCentered() {
-        let rowH: CGFloat     = 72
-        let headerH: CGFloat  = 80
-        let footerH: CGFloat  = 26
-        let w: CGFloat        = 420
-        let margin: CGFloat   = 12
-        let maxVisible: Int   = 5
+    func showCentered() { showAnchored(to: nil) }
+
+    func hide() { orderOut(nil) }
+
+    // MARK: - Positioning
+
+    private func showAnchored(to caretRect: NSRect?) {
+        let rowH: CGFloat    = 72
+        let headerH: CGFloat = 80
+        let filterH: CGFloat = 36
+        let footerH: CGFloat = 26
+        let w: CGFloat       = 420
+        let margin: CGFloat  = 12
+        let maxVisible: Int  = 5
 
         let screen = NSScreen.main?.visibleFrame
                   ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
-        let availableH = screen.height - margin * 2 - headerH - footerH
-        let slotCount  = min(maxVisible, max(1, Int(availableH / rowH)))
-        let bodyH      = headerH + CGFloat(slotCount) * rowH + footerH
+        let slots = min(maxVisible, max(1, Int((screen.height - margin * 2 - headerH - filterH - footerH) / rowH)))
+        let bodyH = headerH + filterH + CGFloat(slots) * rowH + footerH
 
-        visibleRowCount = slotCount
-        isArrowAtBottom = false
+        visibleRowCount = slots
 
-        let x = screen.midX - w / 2
-        let y = screen.midY - bodyH / 2
+        let x: CGFloat
+        let y: CGFloat
 
-        let view = PopoverPreviewView(
-            visibleCount: slotCount,
-            arrowAtBottom: false,
-            arrowOffsetX: 0,
-            showArrow: false
-        )
-        // Always recreate — see comment in show(at:) above.
-        let hv = NSHostingView(rootView: view)
+        if let caret = caretRect {
+            // Horizontally: center popup on the caret, clamped to screen.
+            x = max(screen.minX + margin,
+                    min(caret.midX - w / 2, screen.maxX - w - margin))
+            // Vertically: prefer above the caret; fall back below if not enough space.
+            let aboveY = caret.minY - bodyH - 6
+            let belowY = caret.maxY + 6
+            if aboveY >= screen.minY + margin {
+                y = aboveY
+            } else if belowY + bodyH <= screen.maxY - margin {
+                y = belowY
+            } else {
+                // Not enough space either way — center vertically.
+                y = screen.midY - bodyH / 2
+            }
+        } else {
+            x = screen.midX - w / 2
+            y = screen.midY - bodyH / 2
+        }
+
+        let hv = NSHostingView(rootView: PopoverPreviewView(visibleCount: slots))
         contentView = hv
-        hostingView = hv
         setFrame(NSRect(x: x, y: y, width: w, height: bodyH), display: true)
         if !isVisible { orderFront(nil) }
     }
 
-    func hide() { orderOut(nil) }
+    // MARK: - Caret lookup via Accessibility
 
-    /// Anchor point at the center of the currently selected visible row.
-    /// Used by sibling panels (e.g. transform callout) so their arrows can
-    /// point at the same row the user is focused on.
-    func selectedRowAnchorPoint(selectedIndex: Int, totalItems: Int) -> NSPoint {
-        guard totalItems > 0 else {
-            return NSPoint(x: frame.maxX, y: frame.midY)
+    /// Returns the screen rect (macOS bottom-left origin) of the insertion point
+    /// in the frontmost app's focused text element, or nil if unavailable.
+    private func caretScreenRect() -> NSRect? {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return nil }
+        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+
+        var focusedRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement,
+                                            kAXFocusedUIElementAttribute as CFString,
+                                            &focusedRef) == .success,
+              let focusedRef else { return nil }
+        let focused = focusedRef as! AXUIElement  // swiftlint:disable:this force_cast
+
+        // Verify the element is a text-editable role before trusting caret data.
+        var roleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(focused, kAXRoleAttribute as CFString, &roleRef)
+        let role = roleRef as? String ?? ""
+        let textRoles: Set<String> = [
+            kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole,
+            "AXSearchField", "AXTextField", "AXTextArea", "AXWebArea"
+        ]
+        guard textRoles.contains(role) || role.hasPrefix("AXText") else { return nil }
+
+        // Try to get insertion-point bounds via parameterised range attribute.
+        var rangeRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focused,
+                                         kAXSelectedTextRangeAttribute as CFString,
+                                         &rangeRef) == .success,
+           let rangeRef {
+            var boundsRef: CFTypeRef?
+            if AXUIElementCopyParameterizedAttributeValue(focused,
+                                                          kAXBoundsForRangeParameterizedAttribute as CFString,
+                                                          rangeRef,
+                                                          &boundsRef) == .success,
+               let boundsRef {
+                var cgRect = CGRect.zero
+                // AXValueGetValue needs the exact AXValue type.
+                if AXValueGetValue(boundsRef as! AXValue, .cgRect, &cgRect),  // swiftlint:disable:this force_cast
+                   cgRect != .zero {
+                    return flipToMacOS(cgRect)
+                }
+            }
         }
 
-        let win = min(max(1, visibleRowCount), totalItems)
-        let start = selectedIndex < win ? 0 : selectedIndex - (win - 1)
-        let clampedStart = max(0, min(start, totalItems - win))
-        let rowInWindow = max(0, min(selectedIndex - clampedStart, win - 1))
+        // Fallback: use the element's own frame.
+        var frameRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(focused, "AXFrame" as CFString, &frameRef) == .success,
+           let frameRef {
+            var cgRect = CGRect.zero
+            if AXValueGetValue(frameRef as! AXValue, .cgRect, &cgRect), cgRect != .zero {  // swiftlint:disable:this force_cast
+                return flipToMacOS(cgRect)
+            }
+        }
 
-        let rowH: CGFloat = 72
+        return nil
+    }
+
+    /// Converts a CGRect in screen-flipped coordinates (top-left origin, as
+    /// returned by the Accessibility API) to macOS window-server coordinates
+    /// (bottom-left origin, as used by NSWindow.frame).
+    private func flipToMacOS(_ rect: CGRect) -> NSRect {
+        let screenH = NSScreen.screens.first?.frame.height ?? 0
+        return NSRect(x: rect.minX,
+                      y: screenH - rect.maxY,
+                      width: max(rect.width, 1),
+                      height: max(rect.height, 1))
+    }
+
+    /// Center Y of the currently-selected visible row — used by sibling panels
+    /// (transform callout, item preview) to anchor their arrows.
+    func selectedRowAnchorPoint(selectedIndex: Int, totalItems: Int) -> NSPoint {
+        guard totalItems > 0 else { return NSPoint(x: frame.maxX, y: frame.midY) }
+
+        let win            = min(max(1, visibleRowCount), totalItems)
+        let clampedStart   = max(0, min(selectedIndex < win ? 0 : selectedIndex - (win - 1),
+                                        totalItems - win))
+        let rowInWindow    = max(0, min(selectedIndex - clampedStart, win - 1))
+        let rowH: CGFloat  = 72
         let footerH: CGFloat = 26
-        let arrowH: CGFloat = 10
-
-        // Bubble sits above the bottom arrow when the popup is above caret.
-        let bubbleMinY = isArrowAtBottom ? (frame.minY + arrowH) : frame.minY
-        let rowsBottomY = bubbleMinY + footerH
-        let rowCenterY = rowsBottomY + (CGFloat(win - rowInWindow) - 0.5) * rowH
+        let rowsBottomY    = frame.minY + footerH
+        let rowCenterY     = rowsBottomY + (CGFloat(win - rowInWindow) - 0.5) * rowH
 
         return NSPoint(x: frame.maxX, y: rowCenterY)
     }
 }
 
-// MARK: - Popover-style container
+// MARK: - Popup SwiftUI view
 
 struct PopoverPreviewView: View {
-    // Position-dependent state — passed in once per popup session.
-    let visibleCount: Int        // how many rows actually fit on screen
-    let arrowAtBottom: Bool
-    let arrowOffsetX: CGFloat
-    var showArrow: Bool = true   // false when popup is centered (no caret to point at)
 
-    // Reactive state — read live from the manager so cycling only flips
-    // selectedIndex and SwiftUI re-renders via @ObservedObject without
-    // having to rebuild the entire view tree on every keypress.
+    let visibleCount: Int
+
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
 
+    // Popup always renders from displayItems — the exact same array that
+    // keyboard navigation (V/⌘V) and paste use. One array, one index,
+    // zero mismatch possible.
     private var items: [ClipboardItem] { manager.displayItems }
     private var selectedIndex: Int     { manager.selectedIndex }
 
-    /// Row height — the popup's viewport is `rowHeight × visibleCount` tall.
-    /// The inner `ScrollView` scrolls smoothly past that viewport when the
-    /// ring holds more items than fit, and keyboard cycling auto-scrolls the
-    /// selected row back into view via `ScrollViewReader.scrollTo`.
-    private static let rowHeight: CGFloat = 72
+    private static let rowH: CGFloat = 72
 
     var body: some View {
         VStack(spacing: 0) {
-            if showArrow && !arrowAtBottom {
-                arrowShape.padding(.leading, arrowOffsetX - 10)
-            }
+            header
+            categoryStrip
+            firstCycleHint
+            Divider()
+            rowArea
+            Divider()
+            footer
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 1))
+        .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
+    }
 
-            // Main bubble
-            VStack(spacing: 0) {
-                // Header — Clipen mark on the left, flat usage hints on
-                // the right (no chip boxes — just plain text). The right-
-                // most ⌘ is colored to signal release-state: green = paste,
-                // gray = dismiss.
-                HStack(spacing: 14) {
-                    // Clipen logo + name doubles as a "replay the coach"
-                    // affordance.  Clicking it triggers a transient,
-                    // session-local replay via replayPopupCoach() — the
-                    // V-cycle and X-transform bubbles re-appear in turn,
-                    // advancing automatically as the user performs each
-                    // gesture again.  The persisted popupCoachStep is
-                    // never touched, so power users who clicked here out
-                    // of curiosity don't get their progress wiped.  Works
-                    // in the non-activating panel because SwiftUI Buttons
-                    // still receive clicks even when the window can't
-                    // take key focus.
-                    Button {
-                        manager.replayPopupCoach()
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
-                                .resizable()
-                                .frame(width: 18, height: 18)
-                                .cornerRadius(4)
-                            Text("Clipen")
-                                .font(.system(.callout, weight: .semibold))
-                                .foregroundColor(.primary)
-                                .lineLimit(1)
-                                .fixedSize()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .help("Show how Clipen works again")
+    // MARK: Header
 
-                    Spacer()
-
-                    // The "⌘ Paste" affordance moved out of the header — it's
-                    // now shown inline on the currently-highlighted row as
-                    // "Release ⌘ to paste", which puts the action right next
-                    // to its target.  Header stays focused on cycle hints.
-                    FlatHint(key: "V", label: "Next",
-                             isActive: manager.popupHintV)
-                        .overlay(alignment: .bottom) {
-                            // V coach — shown when first-run step is 0 OR
-                            // when the user clicked the Clipen logo to
-                            // replay the coach (transient, session-only).
-                            // Bubble hangs BELOW the chip, anchored to its
-                            // bottom edge so it stays attached even if the
-                            // header re-layouts.  Disappears the moment
-                            // the matching step advances.
-                            if manager.popupCoachStep == 0
-                               || (manager.coachReplayActive && manager.coachReplayStep == 0) {
-                                CoachBubble(text: "Hold ⌘ and tap V a few times to cycle items")
-                                    .offset(y: 38)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                    FlatHint(key: "⇧V", label: "Prev",
-                             isActive: manager.popupHintShiftV)
-                    FlatHint(key: "X", label: "Transform",
-                             enabled: auth.transformsEnabled,
-                             isActive: manager.popupHintX)
-                        .overlay(alignment: .bottom) {
-                            // X coach — first-run step 1 or replay step 1.
-                            if manager.popupCoachStep == 1
-                               || (manager.coachReplayActive && manager.coachReplayStep == 1) {
-                                CoachBubble(text: "Tap X a few times to cycle transforms")
-                                    .offset(y: 38)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                    SpaceKeyFlatHint(label: "Preview",
-                                     isActive: manager.popupHintSpace)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-                // ── Inline search text box (always visible) ──
-                // Sits between the Clipen heading row and the category strip.
-                // Idle state: shows "⌘F · Search your copied items" as
-                // placeholder text — no border highlight.
-                // Active state (⌘F pressed): accent-colored border + caret;
-                // typed characters route through the event tap so the popup
-                // never has to steal focus. Popup dismiss timer is frozen
-                // while typing so the user can take their time.
+    private var header: some View {
+        HStack(spacing: 14) {
+            Button { manager.replayPopupCoach() } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(manager.isPopupSearchActive
-                                         ? .accentColor
-                                         : .secondary.opacity(0.55))
-                    Group {
-                        if manager.isPopupSearchActive {
-                            // BlinkingCursor sits at the caret position
-                            // (start when empty, end of query when typing) so
-                            // the user can see this is an active input even
-                            // though the non-activating panel can't host a
-                            // real TextField.
-                            if manager.popupSearchQuery.isEmpty {
-                                HStack(spacing: 0) {
-                                    BlinkingCursor()
-                                        .foregroundColor(.accentColor)
-                                    Text("Type to search… ⎋ to cancel")
-                                        .foregroundColor(.secondary.opacity(0.55))
-                                    Spacer(minLength: 0)
-                                }
-                            } else {
-                                HStack(spacing: 0) {
-                                    Text(manager.popupSearchQuery)
-                                        .foregroundColor(.primary)
-                                    BlinkingCursor()
-                                        .foregroundColor(.accentColor)
-                                    Spacer(minLength: 0)
-                                }
-                            }
-                        } else {
-                            HStack(spacing: 4) {
-                                Text("Press")
-                                Text("⌘F")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.primary.opacity(0.08),
-                                                in: RoundedRectangle(cornerRadius: 3))
-                                Text("to search your copied items")
-                            }
-                            .foregroundColor(.secondary.opacity(0.55))
-                        }
-                    }
-                    .font(.system(size: 12))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .lineLimit(1)
+                    Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
+                        .resizable().frame(width: 18, height: 18).cornerRadius(4)
+                    Text("Clipen")
+                        .font(.system(.callout, weight: .semibold))
+                        .foregroundColor(.primary).lineLimit(1).fixedSize()
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(Color.primary.opacity(manager.isPopupSearchActive ? 0.06 : 0.03))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(manager.isPopupSearchActive
-                                ? Color.accentColor.opacity(0.45)
-                                : Color.primary.opacity(0.08),
-                                lineWidth: 1)
-                )
-                .padding(.horizontal, 14)
-                .padding(.bottom, 6)
-                .animation(.easeInOut(duration: 0.15), value: manager.isPopupSearchActive)
+            }
+            .buttonStyle(.plain)
+            .help("Show how Clipen works again")
 
-                // Category strip — horizontal scrolling list of category
-                // pills the user can click to filter the ring. "Recents"
-                // (nil filter) is pinned first, then categories present in
-                // the ring in alphabetical order. Mouse-driven for now;
-                // keyboard nav is a future enhancement.
-                TagFilterStrip()
+            Spacer()
 
-                // First-time-ever cycle hint — appears on the very first
-                // ⌘V cycling and auto-disappears after a few seconds. Kept
-                // even though the chip row covers transforms; first-launch
-                // users benefit from the louder gradient version too.
-                if manager.showFirstCycleHint {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Tip: Tap X to transform the highlighted item")
-                            .font(.system(size: 11, weight: .medium))
-                        Spacer()
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(
-                        LinearGradient(colors: [Color(hex: "#4F8EF7"), Color(hex: "#A855F7")],
-                                       startPoint: .leading, endPoint: .trailing)
-                    )
-                    .transition(.opacity)
-                }
-
-                Divider()
-
-                // Bind once: popupSearchResults is a computed property that
-                // allocates a fresh Array<ClipboardItem>(prefix(5)) per call.
-                // Reading it once per body render (used in rows AND footer)
-                // is fine; reading it 3× would triple the alloc.
-                let popupResults = manager.isPopupSearchActive ? manager.popupSearchResults : []
-
-                // Fixed-height row area — shows search results or normal items.
-                VStack(spacing: 0) {
-                    if manager.isPopupSearchActive {
-                        // ── Search results ──
-                        let results = popupResults
-                        if manager.popupSearchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                            VStack(spacing: 6) {
-                                Image(systemName: "sparkle.magnifyingglass")
-                                    .font(.system(size: 22))
-                                    .foregroundColor(.secondary.opacity(0.35))
-                                Text("Semantic search — type anything")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else if results.isEmpty {
-                            VStack(spacing: 6) {
-                                Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 20))
-                                    .foregroundColor(.secondary.opacity(0.3))
-                                Text("No results for \"\(manager.popupSearchQuery)\"")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            ForEach(Array(results.prefix(visibleCount).enumerated()), id: \.element.id) { idx, item in
-                                PopoverRow(item: item,
-                                           index: idx,
-                                           isSelected: idx == manager.popupSearchSelectedIndex)
-                                    .onHover { if $0 { manager.popupSearchSelectedIndex = idx } }
-                                    .onTapGesture {
-                                        manager.popupSearchSelectedIndex = idx
-                                        manager.commitPopupSearchPaste()
-                                    }
-                                if idx < min(results.count, visibleCount) - 1 {
-                                    Divider().padding(.leading, 38)
-                                }
-                            }
-                        }
-                    } else {
-                        // ── Normal clipboard ring — native vertical ScrollView ──
-                        // Smooth scroll wheel / trackpad scrolling; keyboard
-                        // V/⇧V still drives the selection and the ScrollView
-                        // auto-scrolls to keep the highlighted row in view.
-                        if items.isEmpty {
-                            Text("No items with this tag")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            ScrollViewReader { proxy in
-                                ScrollView(.vertical, showsIndicators: true) {
-                                    LazyVStack(spacing: 0) {
-                                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                                            PopoverRow(item: item,
-                                                       index: idx,
-                                                       isSelected: manager.selectionArmed && idx == selectedIndex)
-                                                .id(idx)
-                                                .contentShape(Rectangle())
-                                                .onTapGesture(count: 2) {
-                                                    manager.uiSelectItem(at: idx)
-                                                    manager.commitPaste()
-                                                }
-                                                .onTapGesture(count: 1) {
-                                                    manager.uiSelectItem(at: idx)
-                                                }
-                                            if idx < items.count - 1 {
-                                                Divider().padding(.leading, 38)
-                                            }
-                                        }
-                                    }
-                                }
-                                .onChange(of: selectedIndex) { _, newIdx in
-                                    guard items.indices.contains(newIdx) else { return }
-                                    withAnimation(.easeOut(duration: 0.12)) {
-                                        proxy.scrollTo(newIdx, anchor: .center)
-                                    }
-                                }
-                                .onAppear {
-                                    guard items.indices.contains(selectedIndex) else { return }
-                                    proxy.scrollTo(selectedIndex, anchor: .center)
-                                }
-                            }
-                        }
+            FlatHint(key: "V", label: "Next", isActive: manager.popupHintV)
+                .overlay(alignment: .bottom) {
+                    if manager.popupCoachStep == 0
+                    || (manager.coachReplayActive && manager.coachReplayStep == 0) {
+                        CoachBubble(text: "Hold ⌘ and tap V a few times to cycle items")
+                            .offset(y: 38).allowsHitTesting(false)
                     }
                 }
-                .frame(height: Self.rowHeight * CGFloat(visibleCount), alignment: .top)
-                .animation(.easeInOut(duration: 0.15), value: manager.isPopupSearchActive)
-                .animation(.easeInOut(duration: 0.1), value: manager.popupSearchQuery)
 
-                Divider()
-                // Footer — search mode shows result count; normal mode shows position
-                if manager.isPopupSearchActive && !manager.popupSearchQuery.isEmpty {
-                    let count = popupResults.count   // reuse the body-local bind
-                    Text(count == 0 ? "No results" : "\(count) result\(count == 1 ? "" : "s")")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                } else {
-                    Text(items.isEmpty
-                         ? "0 of 0"
-                         : "\(min(selectedIndex + 1, items.count)) of \(items.count)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
+            FlatHint(key: "⇧V", label: "Prev", isActive: manager.popupHintShiftV)
+
+            FlatHint(key: "X", label: "Transform",
+                     enabled: auth.transformsEnabled,
+                     isActive: manager.popupHintX)
+                .overlay(alignment: .bottom) {
+                    if manager.popupCoachStep == 1
+                    || (manager.coachReplayActive && manager.coachReplayStep == 1) {
+                        CoachBubble(text: "Tap X a few times to cycle transforms")
+                            .offset(y: 38).allowsHitTesting(false)
+                    }
                 }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
 
-            if showArrow && arrowAtBottom {
-                arrowShape.padding(.leading, arrowOffsetX - 10)
-            }
+            SpaceKeyFlatHint(label: "Preview", isActive: manager.popupHintSpace)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
-    // Triangle arrow (points toward caret)
-    private var arrowShape: some View {
-        ArrowTip(pointingDown: arrowAtBottom)
-            .fill(.regularMaterial)
-            .frame(width: 20, height: 10)
-            .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: arrowAtBottom ? 2 : -2)
-    }
-}
+    // MARK: Category strip (popup-only — popupTagFilter, never touches main window)
 
-
-// MARK: - Shortcut chip
-//
-// Keycap-styled pill that advertises one gesture. The popup always shows
-// five chips (Next / Back / Transform / Delete / Paste) so the user has a
-// permanent legend of every interaction the popup responds to — no need
-// to remember anything between sessions.
-struct ShortcutChip: View {
-    let keys: String
-    let label: String
-    var enabled: Bool = true       // false = dimmed (e.g. transforms gated)
-    var emphasized: Bool = false   // true = paste / commit-style highlight
-
-    var body: some View {
-        HStack(spacing: 5) {
-            // Keycap
-            Text(keys)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundColor(emphasized ? .white : .primary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(emphasized
-                              ? Color.accentColor
-                              : Color.primary.opacity(0.12))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-                )
-
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.secondary)
-        }
-        .opacity(enabled ? 1.0 : 0.35)
-    }
-}
-
-// MARK: - First-run coach bubble for the popup header
-//
-// Small accent-colored callout that hovers below an existing hint chip
-// (V on step 0, X on step 1) the first time the user sees the popup.
-// No big overlay, no separate window — just a glow + text bubble attached
-// to the chip itself so the existing layout teaches the gesture.  Driven
-// by ClipboardManager.popupCoachStep which auto-advances as the user
-// performs each gesture.
-
-struct CoachBubble: View {
-    let text: String
-    @State private var pulse: Bool = false
-
-    var body: some View {
-        VStack(spacing: 3) {
-            // Triangle pointer on top so the bubble visually attaches up to
-            // the chip it's coaching.
-            Triangle()
-                .fill(Color.accentColor)
-                .frame(width: 9, height: 5)
-            Text(text)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
-                .fixedSize()
-        }
-        .shadow(color: .accentColor.opacity(0.4), radius: pulse ? 8 : 3, x: 0, y: 2)
-        .scaleEffect(pulse ? 1.04 : 1.0)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
-    }
-}
-
-/// Down-pointing triangle used as the coach bubble's tail.
-struct Triangle: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        p.closeSubpath()
-        return p
-    }
-}
-
-// MARK: - Flat hint (no chip boxes — just bold key + muted label)
-
-struct FlatHint: View {
-    private static let activeColor = Color(hex: "#4F8EF7")
-
-    let key: String
-    let label: String
-    var enabled: Bool = true
-    var isActive: Bool = false
-    var idleKeyColor: Color = .primary
-    var idleLabelColor: Color = .secondary
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(key)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundColor(isActive ? Self.activeColor : idleKeyColor)
-                .lineLimit(1)
-                .fixedSize()
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(isActive ? Self.activeColor : idleLabelColor)
-                .lineLimit(1)
-                .fixedSize()
-        }
-        .fixedSize()
-        .opacity(enabled ? 1.0 : 0.35)
-        .animation(.easeOut(duration: 0.1), value: isActive)
-    }
-}
-
-struct SpaceKeyFlatHint: View {
-    private static let activeColor = Color(hex: "#4F8EF7")
-
-    let label: String
-    var enabled: Bool = true
-    var isActive: Bool = false
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .stroke(isActive ? Self.activeColor : Color.primary.opacity(0.45), lineWidth: 1)
-                    .frame(width: 18, height: 10)
-                RoundedRectangle(cornerRadius: 1, style: .continuous)
-                    .fill(isActive ? Self.activeColor : Color.primary.opacity(0.7))
-                    .frame(width: 10, height: 1.5)
-            }
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(isActive ? Self.activeColor : .secondary)
-                .lineLimit(1)
-                .fixedSize()
-        }
-        .fixedSize()
-        .opacity(enabled ? 1.0 : 0.35)
-        .animation(.easeOut(duration: 0.1), value: isActive)
-    }
-}
-
-// MARK: - Tag filter strip
-
-struct TagFilterStrip: View {
-    @ObservedObject private var manager = ClipboardManager.shared
-
-    /// The chip ID that is currently selected — used to auto-scroll it into
-    /// view when the user switches categories via keyboard (⌘1–⌘9).
-    private var selectedChipID: Int {
-        guard let tag = manager.tagFilter else { return 0 }
-        return (manager.availableTags.firstIndex(of: tag) ?? 0) + 1
-    }
-
-    var body: some View {
-        // 1. Recents (default), 2. <first category>, 3. <second>, …
-        // Numbers ≤ 9 are key-bindable: ⌘1 → Recents, ⌘2 → first category, etc.
-        // Beyond 9 the prefix is dropped (no shortcut) — mouse-click only.
-        let tags = manager.availableTags
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    // 1 — Recents (everything, no filter).
+    private var categoryStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                TagFilterChip(tag: nil, selected: manager.popupTagFilter == nil, shortcutNumber: 1) {
+                    manager.popupTagFilter = nil
+                }
+                ForEach(manager.availableTags, id: \.self) { tag in
                     TagFilterChip(
-                        tag: nil,
-                        selected: manager.tagFilter == nil,
-                        shortcutNumber: 1
+                        tag: tag,
+                        selected: manager.popupTagFilter == tag,
+                        shortcutNumber: (manager.availableTags.firstIndex(of: tag) ?? 0) + 2
                     ) {
-                        manager.tagFilter = nil
-                    }
-                    .id(0)
-                    // type tags — ⌘2, ⌘3, …
-                    ForEach(Array(tags.enumerated()), id: \.element) { idx, tag in
-                        let n = idx + 2
-                        TagFilterChip(
-                            tag: tag,
-                            selected: manager.tagFilter == tag,
-                            shortcutNumber: n <= 9 ? n : nil
-                        ) {
-                            manager.tagFilter = tag
-                        }
-                        .id(idx + 1)
+                        NSLog("[Clipen][TAGDIAG] CHIP TAPPED label=\(tag.label) rawValue=\(tag.rawValue) -> setting popupTagFilter")
+                        manager.popupTagFilter = tag
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
             }
-            .onChange(of: selectedChipID) { _, id in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(id, anchor: .center)
-                }
-            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
         }
         .frame(height: 36)
         .background(Color.primary.opacity(0.02))
     }
+
+    // MARK: First-cycle hint banner
+
+    @ViewBuilder
+    private var firstCycleHint: some View {
+        if manager.showFirstCycleHint {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles").font(.system(size: 10, weight: .semibold))
+                Text("Tip: Tap X to transform the highlighted item")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .background(LinearGradient(colors: [Color(hex: "#4F8EF7"), Color(hex: "#A855F7")],
+                                       startPoint: .leading, endPoint: .trailing))
+            .transition(.opacity)
+        }
+    }
+
+    // MARK: Row area
+
+    private var rowArea: some View {
+        normalRingArea
+            .frame(height: Self.rowH * CGFloat(visibleCount), alignment: .top)
+    }
+
+    private var normalRingArea: some View {
+        Group {
+            if items.isEmpty {
+                Text("No items with this tag")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                                let _ = NSLog("[Clipen][RENDERDIAG] L1-FOREACH idx=\(idx) id=\(item.id.uuidString.prefix(8)) content=\(item.content.diagKind) tags=\(item.tags.map(\.rawValue)) filter=\(manager.popupTagFilter?.rawValue ?? "nil")")
+                                PopoverRow(item: item, index: idx,
+                                           isSelected: manager.selectionArmed && idx == selectedIndex)
+                                    .id(item.id)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture(count: 2) {
+                                        manager.uiSelectItem(at: idx)
+                                        manager.commitPaste()
+                                    }
+                                    .onTapGesture(count: 1) {
+                                        manager.uiSelectItem(at: idx)
+                                    }
+                                if idx < items.count - 1 {
+                                    Divider().padding(.leading, 38)
+                                }
+                            }
+                        }
+                    }
+                    .onChange(of: selectedIndex) { _, newIdx in
+                        guard items.indices.contains(newIdx) else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(items[newIdx].id, anchor: .center)
+                        }
+                    }
+                    .onAppear {
+                        guard items.indices.contains(selectedIndex) else { return }
+                        proxy.scrollTo(items[selectedIndex].id, anchor: .center)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        Text(items.isEmpty
+             ? "0 of 0"
+             : "\(min(selectedIndex + 1, items.count)) of \(items.count)")
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+    }
 }
 
+// MARK: - Row
+
+struct PopoverRow: View {
+    let item:       ClipboardItem
+    let index:      Int
+    let isSelected: Bool
+
+    var body: some View {
+        let _ = NSLog("[Clipen][RENDERDIAG] L2-ROWBODY idx=\(index) id=\(item.id.uuidString.prefix(8)) content=\(item.content.diagKind) primary=\(item.primaryTag.rawValue) tags=\(item.tags.map(\.rawValue)) isSelected=\(isSelected)")
+        VStack(alignment: .leading, spacing: 5) {
+            rowHeader
+            rowContent.padding(.leading, 30)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(isSelected ? Color.accentColor.opacity(0.40) : Color.clear, in: Rectangle())
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Rectangle().fill(Color.accentColor).frame(width: 3)
+            }
+        }
+    }
+
+    private var rowHeader: some View {
+        HStack(spacing: 8) {
+            ItemTagStrip(tags: item.tags, maxVisible: 4, style: .plainComma)
+
+            if item.isSecret {
+                HStack(spacing: 3) {
+                    Image(systemName: "lock.fill").font(.system(size: 8, weight: .bold))
+                    Text("Secret").font(.system(size: 8, weight: .bold))
+                }
+                .foregroundColor(.red)
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.red.opacity(0.35), lineWidth: 0.5))
+                .help("Detected as a likely secret. Stored encrypted at rest.")
+            }
+
+            if let badge = item.diffBadge {
+                Text("∆ \(badge)")
+                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+            }
+
+            Spacer()
+
+            if isSelected {
+                HStack(spacing: 4) {
+                    Text("Release").font(.system(size: 9, weight: .medium)).foregroundColor(.accentColor.opacity(0.85))
+                    Text("⌘")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.accentColor)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
+                    Text("to paste").font(.system(size: 9, weight: .medium)).foregroundColor(.accentColor.opacity(0.85))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var rowContent: some View {
+        let _ = NSLog("[Clipen][RENDERDIAG] L3-ROWCONTENT-ENTER idx=\(index) id=\(item.id.uuidString.prefix(8)) switchingOn=\(item.content.diagKind)")
+        switch item.content {
+        case .text(let str):
+            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=TEXT idx=\(index) id=\(item.id.uuidString.prefix(8)) preview=\(String(str.prefix(30)).replacingOccurrences(of: "\n", with: " "))")
+            if let title = item.urlTitle {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1).foregroundColor(.primary)
+                    Text(str).font(.system(size: 10, design: .monospaced)).lineLimit(1).foregroundColor(.primary.opacity(0.6))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 6) {
+                    if ClipboardManager.shared.showColorSwatches, let c = item.detectedColor {
+                        Circle().fill(Color(nsColor: c)).frame(width: 12, height: 12)
+                            .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 1))
+                    }
+                    Text(str).font(.system(size: 12, design: .monospaced)).lineLimit(2)
+                        .foregroundColor(.primary).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        case .richText(_, plain: let plain):
+            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=RICHTEXT idx=\(index) id=\(item.id.uuidString.prefix(8)) preview=\(String(plain.prefix(30)).replacingOccurrences(of: "\n", with: " "))")
+            Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .html(_, plain: let plain):
+            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=HTML idx=\(index) id=\(item.id.uuidString.prefix(8)) preview=\(String(plain.prefix(30)).replacingOccurrences(of: "\n", with: " "))")
+            Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .file(let url):
+            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=FILE idx=\(index) id=\(item.id.uuidString.prefix(8)) file=\(url.lastPathComponent)")
+            HStack(spacing: 6) {
+                fileThumbnail(url, size: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(url.lastPathComponent).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                    Text(item.metadataSummary ?? url.deletingLastPathComponent().path)
+                        .font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .files(let urls):
+            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=FILES idx=\(index) id=\(item.id.uuidString.prefix(8)) count=\(urls.count)")
+            HStack(spacing: 6) {
+                if let first = urls.first(where: FileKindDetector.isImageFile) {
+                    fileThumbnail(first, size: 28)
+                } else {
+                    Image(systemName: "doc.on.doc").frame(width: 14, height: 14)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(urls.count) files").font(.system(size: 11, weight: .medium)).lineLimit(1)
+                    Text(item.metadataSummary ?? urls.map(\.lastPathComponent).joined(separator: ", "))
+                        .font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .image(let img, _, _):
+            let _ = NSLog("[Clipen][RENDERDIAG] L3-DRAW case=IMAGE idx=\(index) id=\(item.id.uuidString.prefix(8)) imgSize=\(Int(img.size.width))x\(Int(img.size.height))")
+            VStack(alignment: .leading, spacing: 2) {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
+                if let summary = item.metadataSummary {
+                    Text(summary).font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
+                }
+            }
+        case .svg(let src):
+            Text(src).font(.system(size: 11, design: .monospaced)).lineLimit(2)
+                .foregroundColor(.primary).frame(maxWidth: .infinity, alignment: .leading)
+        case .blob(let typeMap):
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Private clipboard data")
+                    .font(.system(size: 11, weight: .medium)).foregroundColor(.primary)
+                Text(typeMap.keys.sorted().joined(separator: "  ·  "))
+                    .font(.system(size: 9, design: .monospaced)).lineLimit(1).foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func fileThumbnail(_ url: URL, size: CGFloat) -> some View {
+        if FileKindDetector.isImageFile(url), let image = NSImage(contentsOf: url) {
+            Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 5))
+        } else {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable().frame(width: 14, height: 14)
+        }
+    }
+}
+
+// MARK: - Category filter chip
+
 struct TagFilterChip: View {
-    let tag: ClipboardTag?
+    let tag:     ClipboardTag?
     let selected: Bool
     var shortcutNumber: Int? = nil
     var customIcon:  String? = nil
@@ -749,217 +532,107 @@ struct TagFilterChip: View {
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .foregroundColor(selected ? .white.opacity(0.85) : .secondary.opacity(0.75))
                 }
-                Image(systemName: icon)
-                    .font(.system(size: 9, weight: .semibold))
-                Text(label)
-                    .font(.system(size: 10, weight: .semibold))
+                Image(systemName: icon).font(.system(size: 9, weight: .semibold))
+                Text(label).font(.system(size: 10, weight: .semibold))
             }
             .foregroundColor(selected ? .white : .secondary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 9).padding(.vertical, 4)
             .background(Capsule(style: .continuous)
                 .fill(selected ? AnyShapeStyle(Color.accentColor)
                                : AnyShapeStyle(Color.primary.opacity(0.08))))
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(selected ? Color.clear : Color.primary.opacity(0.06),
-                            lineWidth: 1)
-            )
+            .overlay(Capsule(style: .continuous)
+                .stroke(selected ? Color.clear : Color.primary.opacity(0.06), lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
 }
 
-struct ArrowTip: Shape {
-    let pointingDown: Bool
+// MARK: - Header hint views
 
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        if pointingDown {
-            p.move(to: CGPoint(x: rect.midX, y: rect.maxY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        } else {
-            p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+struct FlatHint: View {
+    private static let activeColor = Color(hex: "#4F8EF7")
+
+    let key:   String
+    let label: String
+    var enabled:  Bool = true
+    var isActive: Bool = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(key)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(isActive ? Self.activeColor : .primary)
+                .lineLimit(1).fixedSize()
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(isActive ? Self.activeColor : .secondary)
+                .lineLimit(1).fixedSize()
         }
-        p.closeSubpath()
-        return p
+        .fixedSize()
+        .opacity(enabled ? 1.0 : 0.35)
+        .animation(.easeOut(duration: 0.1), value: isActive)
     }
 }
 
-// MARK: - Row
+struct SpaceKeyFlatHint: View {
+    private static let activeColor = Color(hex: "#4F8EF7")
 
-struct PopoverRow: View {
-    let item:       ClipboardItem
-    let index:      Int
-    let isSelected: Bool
+    let label:    String
+    var enabled:  Bool = true
+    var isActive: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-
-            // ── Header: type tags · diff badge · ↵ ──────
-            // The per-row number badge was removed: numbers now live on the
-            // category chips above (⌘1 → Recents, ⌘2 → first category, …)
-            // since ⌘1–9 now switches CATEGORY, not row.  V / ⇧V step through
-            // items in the current category instead.
-            HStack(spacing: 8) {
-                ItemTagStrip(tags: item.tags, maxVisible: 4, style: .plainComma)
-
-                if item.isSecret {
-                    HStack(spacing: 3) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 8, weight: .bold))
-                        Text("Secret")
-                            .font(.system(size: 8, weight: .bold))
-                    }
-                    .foregroundColor(.red)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(Color.red.opacity(0.35), lineWidth: 0.5)
-                    )
-                    .help("Detected as a likely secret. Stored encrypted at rest.")
-                }
-
-                if let badge = item.diffBadge {
-                    Text("∆ \(badge)")
-                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.orange)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
-                }
-
-                Spacer()
-
-                if isSelected {
-                    // Replaces the small ↵ arrow that used to mark the
-                    // selected row.  Shows the actual paste affordance
-                    // right next to the highlighted item so the user
-                    // sees what releasing ⌘ will do.  Header lost its
-                    // "⌘ Paste" chip in the same change — this is its
-                    // new home.
-                    HStack(spacing: 4) {
-                        Text("Release")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.accentColor.opacity(0.85))
-                        Text("⌘")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                            .foregroundColor(.accentColor)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(Color.accentColor.opacity(0.12),
-                                        in: RoundedRectangle(cornerRadius: 3))
-                        Text("to paste")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.accentColor.opacity(0.85))
-                    }
-                }
+        HStack(spacing: 4) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .stroke(isActive ? Self.activeColor : Color.primary.opacity(0.45), lineWidth: 1)
+                    .frame(width: 18, height: 10)
+                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    .fill(isActive ? Self.activeColor : Color.primary.opacity(0.7))
+                    .frame(width: 10, height: 1.5)
             }
-
-            // ── Content ──────────────────────────────────
-            Group {
-                switch item.content {
-                case .text(let str):
-                    if let title = item.urlTitle {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1)
-                                .foregroundColor(.primary)
-                            Text(str).font(.system(size: 10, design: .monospaced)).lineLimit(1)
-                                .foregroundColor(.primary.opacity(0.6))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        HStack(spacing: 6) {
-                            if ClipboardManager.shared.showColorSwatches, let c = item.detectedColor {
-                                Circle().fill(Color(nsColor: c)).frame(width: 12, height: 12)
-                                    .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 1))
-                            }
-                            Text(str).font(.system(size: 12, design: .monospaced)).lineLimit(2)
-                                .foregroundColor(.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                case .richText(_, plain: let plain):
-                    Text(plain).font(.system(size: 12)).lineLimit(2)
-                        .foregroundColor(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                case .html(_, plain: let plain):
-                    Text(plain).font(.system(size: 12)).lineLimit(2)
-                        .foregroundColor(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                case .file(let url):
-                    HStack(spacing: 6) {
-                        fileThumbnail(url, size: 28)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(url.lastPathComponent).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                            Text(item.metadataSummary ?? url.deletingLastPathComponent().path).font(.system(size: 9)).lineLimit(1)
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                case .files(let urls):
-                    HStack(spacing: 6) {
-                        if let firstImageURL = urls.first(where: FileKindDetector.isImageFile) {
-                            fileThumbnail(firstImageURL, size: 28)
-                        } else {
-                            Image(systemName: "doc.on.doc").frame(width: 14, height: 14)
-                        }
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("\(urls.count) files").font(.system(size: 11, weight: .medium)).lineLimit(1)
-                            Text(item.metadataSummary ?? urls.map(\.lastPathComponent).joined(separator: ", "))
-                                .font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                case .image(let img, _, _):
-                    VStack(alignment: .leading, spacing: 2) {
-                        Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
-                            .frame(maxWidth: 280, maxHeight: 48)
-                            .cornerRadius(5).clipped()
-                        if let summary = item.metadataSummary {
-                            Text(summary).font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
-                        }
-                    }
-                }
-            }
-            .padding(.leading, 30)
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(isActive ? Self.activeColor : .secondary)
+                .lineLimit(1).fixedSize()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        // Selected-row affordance — must remain visible even when the row
-        // content (an image preview, a wide file thumbnail) is opaque and
-        // covers most of the row.  Previously a faint 0.22-opacity tint sat
-        // *behind* the image and was barely visible as a thin frame, so V
-        // landing on an image row read as "V skipped that row."  Fix: a
-        // 3pt solid accent bar overlays the leading edge (always visible
-        // regardless of content) plus a stronger 0.40 background tint.
-        .background(isSelected ? Color.accentColor.opacity(0.40) : Color.clear, in: Rectangle())
-        .overlay(alignment: .leading) {
-            if isSelected {
-                Rectangle()
-                    .fill(Color.accentColor)
-                    .frame(width: 3)
-            }
+        .fixedSize()
+        .opacity(enabled ? 1.0 : 0.35)
+        .animation(.easeOut(duration: 0.1), value: isActive)
+    }
+}
+
+// MARK: - First-run coach bubble
+
+struct CoachBubble: View {
+    let text: String
+    @State private var pulse = false
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Triangle().fill(Color.accentColor).frame(width: 9, height: 5)
+            Text(text)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                .fixedSize()
+        }
+        .shadow(color: .accentColor.opacity(0.4), radius: pulse ? 8 : 3, x: 0, y: 2)
+        .scaleEffect(pulse ? 1.04 : 1.0)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { pulse = true }
         }
     }
+}
 
-    @ViewBuilder
-    private func fileThumbnail(_ url: URL, size: CGFloat) -> some View {
-        if FileKindDetector.isImageFile(url), let image = NSImage(contentsOf: url) {
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: size, height: size)
-                .clipShape(RoundedRectangle(cornerRadius: 5))
-        } else {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                .resizable()
-                .frame(width: 14, height: 14)
-        }
+struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }

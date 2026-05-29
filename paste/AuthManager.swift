@@ -10,26 +10,28 @@ import SwiftUI
 final class AuthManager: ObservableObject {
     static let shared = AuthManager()
 
-    @Published var ringLimit:           Int  = AuthManager.intState(for: "featureState.ringLimit")
-    @Published var transformsEnabled:   Bool = AuthManager.boolState(for: "featureState.transformsEnabled")
+    // ── Capabilities — Clipen is a fully free app. Every feature is always
+    // available; there is no Pro tier or plan gating. These were once
+    // backend-gated feature flags; they are now constants so the gating
+    // logic throughout the app resolves to "always on".
+    let transformsEnabled  = true
+    let semanticSearch      = true
+    let ocrEnabled          = true
+    let pdfTextExtract      = true
+    let timeScrub           = true
+    /// Upper bound for the user-adjustable ring size (matches the Stepper range).
+    let ringLimit           = 200
+
+    // ── Backend-driven runtime settings (NOT plan gating). These keep the
+    // capture pipeline and Sparkle update cadence in sync with the backend.
+    @Published var maxDataBytes:        Int  = AuthManager.intState(for: "featureState.maxDataBytes", fallback: 200 * 1024 * 1024)
     @Published var pinEnabled:          Bool = AuthManager.boolState(for: "featureState.pinEnabled")
-    @Published var semanticSearch:      Bool = AuthManager.boolState(for: "featureState.semanticSearch")
     @Published var urlTitles:           Bool = AuthManager.boolState(for: "featureState.urlTitles")
     @Published var richTextCapture:     Bool = AuthManager.boolState(for: "featureState.richTextCapture")
     @Published var fileCapture:         Bool = AuthManager.boolState(for: "featureState.fileCapture")
-    @Published var timeScrub:           Bool = AuthManager.boolState(for: "featureState.timeScrub")
-    @Published var ocrEnabled:          Bool = AuthManager.boolState(for: "featureState.ocr")
-    @Published var pdfTextExtract:      Bool = AuthManager.boolState(for: "featureState.pdfTextExtract")
     @Published var refreshEveryClicks:  Int  = AuthManager.intState(for: "featureState.refreshEveryClicks")
     @Published var updateCheckEveryClicks: Int = AuthManager.intState(for: "featureState.updateCheckEveryClicks")
     @Published var sparkleAutomaticChecks: Bool = AuthManager.boolState(for: "featureState.sparkleAutomaticChecks")
-
-    // ── Compatibility shims for the few views that still ask "is the user X?"
-    // Everyone has every feature; nobody has a backend account. Returning
-    // these constants lets the existing UI-gating logic keep working without
-    // a rewrite.
-    var isPro:      Bool { true }
-    var isSignedIn: Bool { false }
 
     /// Last user-facing error message, if any. The clipboard-side code path
     /// still surfaces errors (e.g. "Couldn't update Launch at login"), so
@@ -347,16 +349,11 @@ final class AuthManager: ObservableObject {
     }
 
     private func apply(_ flags: FeatureFlagsResponse) {
-        ringLimit = flags.ringLimit
-        transformsEnabled = flags.transformsEnabled
+        maxDataBytes = max(flags.maxDataBytes, 1024 * 1024)  // floor at 1 MB
         pinEnabled = flags.pinEnabled
-        semanticSearch = flags.semanticSearch
         urlTitles = flags.urlTitles
         richTextCapture = flags.richTextCapture
         fileCapture = flags.fileCapture
-        timeScrub = flags.timeScrub
-        ocrEnabled = flags.ocr
-        pdfTextExtract = flags.pdfTextExtract
         refreshEveryClicks = max(flags.refreshEveryClicks, 1)
         updateCheckEveryClicks = max(flags.updateCheckEveryClicks, 1)
         sparkleAutomaticChecks = flags.sparkleAutomaticChecks
@@ -406,10 +403,11 @@ final class AuthManager: ObservableObject {
         defaults.set(refreshEveryClicks, forKey: "featureState.refreshEveryClicks")
         defaults.set(updateCheckEveryClicks, forKey: "featureState.updateCheckEveryClicks")
         defaults.set(sparkleAutomaticChecks, forKey: "featureState.sparkleAutomaticChecks")
+        defaults.set(maxDataBytes, forKey: "featureState.maxDataBytes")
     }
 
-    private static func intState(for key: String) -> Int {
-        UserDefaults.standard.object(forKey: key) as? Int ?? 0
+    private static func intState(for key: String, fallback: Int = 0) -> Int {
+        UserDefaults.standard.object(forKey: key) as? Int ?? fallback
     }
 
     private static func boolState(for key: String) -> Bool {
@@ -439,6 +437,7 @@ private struct FeatureFlagsResponse: Codable {
     let success: Bool
     let plan: String?
     let ringLimit: Int
+    let maxDataBytes: Int
     let transformsEnabled: Bool
     let pinEnabled: Bool
     let semanticSearch: Bool

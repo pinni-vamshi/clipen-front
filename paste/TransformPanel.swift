@@ -5,6 +5,7 @@ import SwiftUI
 
 class TransformPanel: NSPanel {
     private var hostingView: NSHostingView<AnyView>?
+    private var cachedPanelHeight: CGFloat = 460
 
     init() {
         super.init(
@@ -36,6 +37,8 @@ class TransformPanel: NSPanel {
             case .file(let url):             return url.pathExtension.lowercased() == "pdf" ? nil : url.path
             case .files(let urls):           return urls.count == 1 ? urls[0].path : nil
             case .image:                     return nil
+            case .svg(let src):              return src
+            case .blob:                      return nil
             }
         }()
 
@@ -69,22 +72,25 @@ class TransformPanel: NSPanel {
 
         // Always create a fresh NSHostingView — reusing it preserves the
         // inner SwiftUI tree (ScrollView offset, materialised rows,
-        // @ObservedObject snapshots) across hide/show.  See the matching
-        // comment in PreviewOverlayWindow.show().
+        // @ObservedObject snapshots) across hide/show.
         let hv = NSHostingView(rootView: measuringView)
         contentView = hv
         hostingView = hv
 
-        // Force a layout pass BEFORE asking for fittingSize so the new
-        // rootView's intrinsic height is what we actually use (otherwise
-        // we'd see the pre-swap height when entering page-range mode).
-        // The picker is now rendered INLINE inside the scrollable tool
-        // list — overflow scrolls within the panel, no need to grow the
-        // panel itself.  Keeps the panel feeling like a stable Transforms
-        // panel that just has one tool currently expanded.
-        hv.layoutSubtreeIfNeeded()
-        let measured = hv.fittingSize.height
-        let h = min(max(measured > 0 ? measured : 560, 360), 620)
+        // When the panel is already visible (cycling with V), skip the
+        // synchronous layout+fittingSize pass — it blocks the main thread
+        // and causes lag when both preview and transform panels are open.
+        // Use the cached height from the last full measurement instead.
+        // On first show the panel is hidden, so we always measure then.
+        let h: CGFloat
+        if isVisible {
+            h = cachedPanelHeight
+        } else {
+            hv.layoutSubtreeIfNeeded()
+            let measured = hv.fittingSize.height
+            h = min(max(measured > 0 ? measured : 460, 360), 620)
+            cachedPanelHeight = h
+        }
 
         var x = placeRight ? preferredRightX : leftX
         x = max(screen.minX + 8, x)
@@ -105,22 +111,11 @@ class TransformPanel: NSPanel {
         hv.rootView = finalView
 
         setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
+        contentView?.needsDisplay = true
         if !isVisible { orderFront(nil) }
     }
 
     func hide() { orderOut(nil) }
-
-    func showUpgradePrompt(near popupFrame: NSRect) {
-        let w: CGFloat = 300
-        let h: CGFloat = 160
-        let x = popupFrame.maxX + 8
-        let y = popupFrame.midY - h / 2
-        let hv = NSHostingView(rootView: UpgradePromptView())
-        contentView = hv
-        setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
-        if !isVisible { orderFront(nil) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in self?.hide() }
-    }
 }
 
 private struct TransformCalloutView: View {
@@ -484,39 +479,3 @@ struct ContentTypeBadge: View {
     }
 }
 
-// MARK: - Upgrade prompt
-
-struct UpgradePromptView: View {
-    var body: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 28))
-                .foregroundColor(.orange)
-
-            VStack(spacing: 6) {
-                Text("Transforms are Pro")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.primary)
-                Text("Upgrade to unlock text transforms,\nunlimited ring size, and more.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            Button("Upgrade to Pro ->") {
-                NSWorkspace.shared.open(URL(string: "https://clipen.app/upgrade")!)
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 7)
-            .background(Color.orange, in: RoundedRectangle(cornerRadius: 7))
-            .buttonStyle(.plain)
-        }
-        .padding(20)
-        .frame(width: 300, height: 160)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(Color.orange.opacity(0.3), lineWidth: 1))
-    }
-}

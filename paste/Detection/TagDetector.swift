@@ -25,6 +25,9 @@ enum TagDetector {
     /// The single tag for an item.
     static func tag(for content: ClipboardContent, color: NSColor?) -> ClipboardTag {
         switch content {
+        case .svg:                return .svg
+        case .blob:               return .blob
+
         case .image(_, _, let dataType):
             return dataType.rawValue.localizedCaseInsensitiveContains("pdf") ? .pdf : .image
 

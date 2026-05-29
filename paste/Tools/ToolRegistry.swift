@@ -32,6 +32,12 @@ enum ToolRegistry {
 
         case .text, .richText, .html:
             return TextTools.all + FileTools.all
+
+        case .svg:
+            return TextTools.all  // SVG is text-editable; minify/copy tools apply
+
+        case .blob:
+            return []  // no transforms for opaque private data
         }
     }
 

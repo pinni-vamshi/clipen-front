@@ -161,7 +161,7 @@ enum FileKindDetector {
         }
     }
 
-    nonisolated static func readableText(from url: URL, maxBytes: Int = 1_000_000) -> String? {
+    nonisolated static func readableText(from url: URL, maxBytes: Int = ClipboardManager.maxDataBytes) -> String? {
         guard isTextFile(url),
               let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue,
               size <= maxBytes,
@@ -191,9 +191,8 @@ enum FileKindDetector {
             return trimmed.isEmpty ? nil : String(trimmed.prefix(maxChars))
 
         case "doc", "docx", "rtf", "rtfd", "odt", "pages":
-            let maxBytes = 10 * 1024 * 1024
             if let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue,
-               size > maxBytes { return nil }
+               size > ClipboardManager.maxDataBytes { return nil }
             guard let attr = try? NSAttributedString(url: url, options: [:], documentAttributes: nil) else { return nil }
             let trimmed = attr.string.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : String(trimmed.prefix(maxChars))

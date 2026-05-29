@@ -5,6 +5,8 @@ import SwiftUI
 enum ClipboardTag: String, Hashable, CaseIterable {
     case image
     case pdf
+    case svg
+    case blob
     case file
     case files
     case video
@@ -33,6 +35,8 @@ enum ClipboardTag: String, Hashable, CaseIterable {
         switch self {
         case .image:     return 10
         case .pdf:       return 12
+        case .svg:       return 13
+        case .blob:      return 15
         case .files:     return 14
         case .file:      return 16
         case .video:     return 18
@@ -55,6 +59,8 @@ enum ClipboardTag: String, Hashable, CaseIterable {
         switch self {
         case .image:    return "Image"
         case .pdf:      return "PDF"
+        case .svg:      return "SVG"
+        case .blob:     return "Private"
         case .file:     return "File"
         case .files:    return "Files"
         case .video:    return "Video"
@@ -79,6 +85,8 @@ enum ClipboardTag: String, Hashable, CaseIterable {
         switch self {
         case .image:    return "photo"
         case .pdf:      return "doc.richtext"
+        case .svg:      return "square.on.circle"
+        case .blob:     return "lock.doc"
         case .file:     return "doc"
         case .files:    return "doc.on.doc"
         case .video:    return "film"
@@ -108,7 +116,8 @@ enum ClipboardTag: String, Hashable, CaseIterable {
         case .email, .phone, .address: return .orange
         case .code:             return .blue
         case .url:              return .cyan
-        case .image, .pdf:      return .pink
+        case .image, .pdf, .svg: return .pink
+        case .blob:              return .purple
         case .video, .audio:    return .teal
         case .color:            return .yellow
         default:                return .gray

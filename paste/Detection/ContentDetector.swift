@@ -27,6 +27,8 @@ enum ContentDetector {
             return !urls.isEmpty && urls.allSatisfy(FileKindDetector.isImageFile) ? .image : .file
         case .text:
             return category(for: item.detectedType)
+        case .svg, .blob:
+            return .file
         }
     }
 

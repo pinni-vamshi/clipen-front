@@ -79,8 +79,11 @@ private enum SecretDetector {
 class ClipboardManager: ObservableObject {
     static let shared = ClipboardManager()
 
+    /// Single cap for all data handled by Clipen — backend-driven via features.py `max_data_bytes`.
+    static var maxDataBytes: Int { AuthManager.shared.maxDataBytes }
+
     @Published var items: [ClipboardItem] = [] {
-        didSet { invalidateDisplayItems() }
+        didSet { updatePendingPasteID() }
     }
     @Published var selectedIndex: Int = 0 {
         didSet { updatePendingPasteID() }
@@ -98,17 +101,14 @@ class ClipboardManager: ObservableObject {
     @Published private(set) var popupHintSpace = false
     @Published private(set) var popupHintCmd = false
 
-    /// Optional tag filter. `nil` = Recents (everything). When set,
-    /// `displayItems` is filtered to items that include that tag. Cleared
-    /// on `dismissPreview` so each new ⌘V session starts at Recents.
-    @Published var tagFilter: ClipboardTag? = nil {
+    /// Popup-only tag filter. nil = Recents (no filter).
+    /// Drives displayItems + popup chip strip. The main window has its own
+    /// independent @State local filter — this property must never be touched from there.
+    @Published var popupTagFilter: ClipboardTag? = nil {
         didSet {
-            invalidateDisplayItems()
             selectedIndex = 0
             selectionArmed = true
-            if previewWindow.isVisible {
-                syncItemPreviewWithSelection()
-            }
+            if previewWindow.isVisible { syncItemPreviewWithSelection() }
         }
     }
     // Plan-driven ring cap. private(set) — external code must use setRingSize(_:).
@@ -135,20 +135,6 @@ class ClipboardManager: ObservableObject {
         let clamped = min(max(size, 1), AuthManager.shared.ringLimit)
         maxItems = clamped
         UserDefaults.standard.set(clamped, forKey: "preferredRingSize")
-    }
-
-    @Published var isReversed: Bool = UserDefaults.standard.bool(forKey: "isReversed") {
-        didSet {
-            UserDefaults.standard.set(isReversed, forKey: "isReversed")
-            invalidateDisplayItems()
-        }
-    }
-
-    @Published var pinnedAtBottom: Bool = UserDefaults.standard.bool(forKey: "pinnedAtBottom") {
-        didSet {
-            UserDefaults.standard.set(pinnedAtBottom, forKey: "pinnedAtBottom")
-            invalidateDisplayItems()
-        }
     }
 
     @Published var captureRichText: Bool = UserDefaults.standard.object(forKey: "captureRichText") as? Bool ?? true {
@@ -201,39 +187,16 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    /// Cached, ordered view over `items`. Recomputed only when one of the
-    /// four source variables actually changes (items, isReversed,
-    /// pinnedAtBottom, timeScrubDate) — see `invalidateDisplayItems()`.
-    ///
-    /// Previously this was a computed property; SwiftUI re-reads it on every
-    /// `body` rebuild and on every `@ObservedObject` re-publish. With the
-    /// 50ms progress-bar tick alone that was 20+ O(n) recomputes per second
-    /// per visible view. Now the work happens once per real change.
-    @Published private(set) var displayItems: [ClipboardItem] = []
-
-    private func invalidateDisplayItems() {
-        let source: [ClipboardItem]
-        if let cutoff = timeScrubDate {
-            source = items.filter { $0.timestamp <= cutoff }
-        } else {
-            source = items
+    /// Exactly the same logic as `mainFilteredItems` in MainWindowView.
+    /// One formula, both windows: items filtered by tag only.
+    var displayItems: [ClipboardItem] {
+        guard let tag = popupTagFilter else { return items }
+        let result = items.filter { $0.tags.contains(tag) }
+        NSLog("[Clipen][TAGDIAG] popup filter=\(tag.rawValue) availableTags=\(availableTags.map(\.rawValue)) -> \(result.count) of \(items.count) items")
+        for it in result {
+            NSLog("[Clipen][TAGDIAG]   PASSED content=\(it.content.diagKind) tags=\(it.tags.map(\.rawValue)) primary=\(it.primaryTag.rawValue)")
         }
-        let filtered: [ClipboardItem]
-        if let tag = tagFilter {
-            filtered = source.filter { $0.tags.contains(tag) }
-        } else {
-            filtered = source
-        }
-        var pinned:   [ClipboardItem] = []
-        var unpinned: [ClipboardItem] = []
-        pinned.reserveCapacity(filtered.count)
-        unpinned.reserveCapacity(filtered.count)
-        for item in filtered {
-            if item.isPinned { pinned.append(item) } else { unpinned.append(item) }
-        }
-        if isReversed { unpinned.reverse() }
-        displayItems = pinnedAtBottom ? unpinned + pinned : pinned + unpinned
-        updatePendingPasteID()
+        return result
     }
 
     private func updatePendingPasteID() {
@@ -241,8 +204,7 @@ class ClipboardManager: ObservableObject {
             ? displayItems[selectedIndex].id : nil
     }
 
-    /// Tags that appear on at least one item in the full ring (ignoring
-    /// `tagFilter` and `timeScrubDate`). Drives the horizontal chip strip.
+    /// Tags that appear on at least one item in the full ring. Drives both popup + main window chip strips.
     var availableTags: [ClipboardTag] {
         var present = Set<ClipboardTag>()
         for item in items {
@@ -286,9 +248,6 @@ class ClipboardManager: ObservableObject {
     /// Fires once on the user's first ⌘V cycle — preview overlay shows ⌘X transform tip.
     @Published var showFirstCycleHint: Bool = false
     @Published var transformStageActive: Bool = false
-    @Published var timeScrubDate: Date? = nil {        // nil = show all; non-nil = show items up to this date
-        didSet { invalidateDisplayItems() }
-    }
 
     var launchAtLogin: Bool {
         get { SMAppService.mainApp.status == .enabled }
@@ -414,14 +373,6 @@ class ClipboardManager: ObservableObject {
     /// The app that was frontmost when search opened; restored on paste/close.
     private var searchReturnApp: NSRunningApplication?
 
-    // MARK: - Inline popup search state (⌘F while popup is open)
-    /// True while the search bar inside the popup is active.
-    @Published var isPopupSearchActive: Bool = false
-    /// Query text built character-by-character via the event tap (no key window needed).
-    @Published var popupSearchQuery: String = ""
-    /// Highlighted row index within popupSearchResults.
-    @Published var popupSearchSelectedIndex: Int = 0
-
     // MARK: - Inline page-range picker state ("Paste Specific Pages")
     /// True while the page-picker has replaced the tool list in TransformPanel.
     /// Keystrokes (digits / dash / comma / backspace / arrows / space / return / esc)
@@ -459,9 +410,6 @@ class ClipboardManager: ObservableObject {
     }
 
     /// Inline popup search results — capped at 5 (fits popup height).
-    var popupSearchResults: [ClipboardItem] {
-        Array(hybridSearch(query: popupSearchQuery).prefix(5))
-    }
 
     private init() {
         // maxItems is now plan-driven only — remove any stale UserDefaults value
@@ -598,7 +546,46 @@ class ClipboardManager: ObservableObject {
             return
         }
 
-        // 5. Images
+        // 5. SVG — before images so design-tool copies land here first.
+        let svgTypes: [NSPasteboard.PasteboardType] = [
+            .init("public.svg-image"),
+            .init("com.adobe.illustrator.svg"),
+            .init("org.w3.svg")
+        ]
+        for type in svgTypes {
+            if let data = pb.data(forType: type),
+               let str = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
+               !str.isEmpty {
+                addItem(ClipboardItem(content: .svg(str)))
+                return
+            }
+        }
+
+        // 6. Opaque passthrough — capture all types verbatim when private
+        // app-specific types are present (Photoshop layers, Sketch symbols,
+        // Procreate clips, etc.). Re-writing all types on paste lets the
+        // source app reconstruct its internal representation exactly.
+        let blobSkipPrefixes = ["public.", "com.apple.", "dyn.", "Apple ",
+                                "NSString", "CorePasteboardFlavorType", "NSFilenamesPboardType"]
+        let allPbTypes = pb.types ?? []
+        let privateTypes = allPbTypes.filter { t in
+            !blobSkipPrefixes.contains(where: { t.rawValue.hasPrefix($0) })
+        }
+        if !privateTypes.isEmpty {
+            var blobMap: [String: Data] = [:]
+            for t in allPbTypes {
+                // Skip zero-byte and very large per-type blobs (> 200 MB)
+                if let data = pb.data(forType: t), !data.isEmpty, data.count < Self.maxDataBytes {
+                    blobMap[t.rawValue] = data
+                }
+            }
+            if !blobMap.isEmpty {
+                addItem(ClipboardItem(content: .blob(blobMap)))
+                return
+            }
+        }
+
+        // 7. Images (fallback — no private types present)
         let imageTypes: [NSPasteboard.PasteboardType] = [
             .init("public.png"), .tiff,
             .init("com.adobe.pdf"), .init("public.jpeg"), .init("public.heic"),
@@ -773,7 +760,7 @@ class ClipboardManager: ObservableObject {
         // (Universal Clipboard, Alfred, a browser extension) wrote to the
         // pasteboard mid-cycle.  Now: if the popup is visible, remember the
         // currently-highlighted item BY ID before the insert, then re-resolve
-        // its new index after `items.didSet → invalidateDisplayItems` runs.
+        // its new index after items updates.
         let preservedSelectionID: UUID? = previewWindow.isVisible
             ? (displayItems.indices.contains(selectedIndex) ? displayItems[selectedIndex].id : nil)
             : nil
@@ -961,7 +948,7 @@ class ClipboardManager: ObservableObject {
                 // If search OR page-range picker is active, the user is typing
                 // / picking — ⌘ release must NOT close the popup or trigger a
                 // paste.  Both modes end only via ⎋ or ↵.
-                if (isPopupSearchActive || inPageRangeMode) && previewWindow.isVisible {
+                if inPageRangeMode && previewWindow.isVisible {
                     return Unmanaged.passUnretained(event)
                 }
                 // Release-while-pending cases:
@@ -1063,71 +1050,6 @@ class ClipboardManager: ObservableObject {
             }
         }
 
-        // ── Inline popup search routing ────────────────────────────────────
-        // When the search bar inside the popup is active we intercept ALL
-        // keystrokes here (before the ⌘-guard below) and route them to the
-        // popupSearchQuery string.  No window-focus change is needed because
-        // every key already flows through this tap.
-        if isPopupSearchActive && previewWindow.isVisible && !cmd {
-            switch key {
-            case 53: // Esc — clear query first; second Esc exits search
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    if self.popupSearchQuery.isEmpty {
-                        self.isPopupSearchActive = false
-                    } else {
-                        self.popupSearchQuery = ""
-                        self.popupSearchSelectedIndex = 0
-                    }
-                }
-                return nil
-            case 51: // ⌫ Backspace
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    if !self.popupSearchQuery.isEmpty {
-                        self.popupSearchQuery.removeLast()
-                        self.popupSearchSelectedIndex = 0
-                    }
-                }
-                return nil
-            case 36, 76: // Return / Enter
-                DispatchQueue.main.async { [weak self] in self?.commitPopupSearchPaste() }
-                return nil
-            case 125: // ↓
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    let max = max(0, self.popupSearchResults.count - 1)
-                    self.popupSearchSelectedIndex = min(self.popupSearchSelectedIndex + 1, max)
-                }
-                return nil
-            case 126: // ↑
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.popupSearchSelectedIndex = max(0, self.popupSearchSelectedIndex - 1)
-                }
-                return nil
-            default:
-                // Printable character — extract from CGEvent and append
-                var length: Int = 0
-                var chars = [UniChar](repeating: 0, count: 8)
-                event.keyboardGetUnicodeString(maxStringLength: 8,
-                                               actualStringLength: &length,
-                                               unicodeString: &chars)
-                if length > 0 {
-                    let s = String(utf16CodeUnits: Array(chars.prefix(length)), count: length)
-                        .filter { !$0.isNewline && $0.unicodeScalars.allSatisfy { $0.value >= 32 } }
-                    if !s.isEmpty {
-                        DispatchQueue.main.async { [weak self] in
-                            guard let self else { return }
-                            self.popupSearchQuery += s
-                            self.popupSearchSelectedIndex = 0
-                        }
-                        return nil
-                    }
-                }
-            }
-        }
-
         // Escape — cancel popup without pasting
         if key == 53 && previewWindow.isVisible {
             DispatchQueue.main.async { [weak self] in self?.dismissPreview() }
@@ -1165,8 +1087,7 @@ class ClipboardManager: ObservableObject {
             // actively focused in a text-editable element.
             if !previewWindow.isVisible,
                !pendingFirstOpen,
-               !showPopupOutsideTextInputs,
-               focusedTextInputPosition() == nil {
+               !showPopupOutsideTextInputs {
                 return Unmanaged.passUnretained(event)
             }
             if displayItems.isEmpty && !previewWindow.isVisible && !shift {
@@ -1188,14 +1109,19 @@ class ClipboardManager: ObservableObject {
             return nil
         }
 
-        // X / ⇧X — same as V / ⇧V: move the selection one step down or up.
+        // X — open the transform panel; ⌘X again cycles forward, ⌘⇧X cycles back.
         if key == 7 && previewWindow.isVisible {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
                 return nil
             }
             DispatchQueue.main.async { [weak self] in
-                if shift { self?.cyclePrevious() }
-                else      { self?.cycleNext() }
+                guard let self else { return }
+                if self.inTransformStage {
+                    if shift { self.cycleTransformBackward() }
+                    else      { self.cycleTransform() }
+                } else {
+                    self.enterTransformStage()
+                }
             }
             return nil
         }
@@ -1219,26 +1145,6 @@ class ClipboardManager: ObservableObject {
                 self.deleteSelected()
             }
             return nil
-        }
-
-        if key == 3 { // ⌘F
-            if previewWindow.isVisible {
-                // Popup is open → toggle inline search bar inside the popup
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.isPopupSearchActive.toggle()
-                    if self.isPopupSearchActive {
-                        // Freeze dismiss timer while the user is typing.
-                    } else {
-                        // Search cancelled — clear query and resume normal timer.
-                        self.popupSearchQuery = ""
-                        self.popupSearchSelectedIndex = 0
-                    }
-                }
-                return nil
-            }
-            // Popup is NOT open → pass through so other apps (Finder, browser) get ⌘F
-            return Unmanaged.passUnretained(event)
         }
 
         return Unmanaged.passUnretained(event)
@@ -1310,11 +1216,8 @@ class ClipboardManager: ObservableObject {
 
     private func enterTransformStage() {
         guard selectionArmed, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
-        // Free plan — transforms locked
-        guard AuthManager.shared.transformsEnabled else {
-            transformPanel.showUpgradePrompt(near: previewWindow.frame)
-            return
-        }
+        // Only one secondary panel at a time — close preview if open.
+        if itemPreviewPanel.isVisible { itemPreviewPanel.hide() }
         // (X coach advancement moved into cycleTransform() — pressing X
         // ONCE just opens the transform panel.  The user needs to TAP X a
         // few more times to feel the cycle through different tools before
@@ -1409,6 +1312,24 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    /// Rebuild the transform panel for the currently-selected item.  Called
+    /// when keyboard navigation (V / ⇧V / jump / category switch) moves the
+    /// selection WHILE the transform stage is open — without this the panel
+    /// keeps showing the previous item's transforms (e.g. text transforms
+    /// still visible after cycling onto an image).
+    private func syncTransformPanelWithSelection() {
+        guard inTransformStage, previewWindow.isVisible,
+              !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        transformDisplaysCache = ToolRegistry.displays(for: displayItems[selectedIndex])
+        guard !transformDisplaysCache.isEmpty else {
+            // New item can't be transformed — retire the stage/panel.
+            exitTransformStage()
+            return
+        }
+        transformIndex = 0
+        updateTransformPanel()
+    }
+
     private func updateTransformPanel() {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
         let anchor = previewWindow.selectedRowAnchorPoint(
@@ -1445,6 +1366,8 @@ class ClipboardManager: ObservableObject {
         if itemPreviewPanel.isVisible {
             itemPreviewPanel.hide()
         } else {
+            // Only one secondary panel at a time — close transforms if open.
+            if inTransformStage { exitTransformStage() }
             showSelectedItemPreview()
         }
     }
@@ -1664,6 +1587,7 @@ class ClipboardManager: ObservableObject {
            cycleCount - coachReplayCycleAnchor >= 3 { coachReplayStep = 1 }
 
         syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
     }
 
     /// ⌘⇧V — step one item BACKWARD in the current category.  Mirrors
@@ -1686,6 +1610,7 @@ class ClipboardManager: ObservableObject {
         previewVisible = true
         cycleCount += 1
         syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
     }
 
     /// Top-row number keycodes (kVK_ANSI_1 … kVK_ANSI_9) mapped to the
@@ -1724,15 +1649,16 @@ class ClipboardManager: ObservableObject {
             openPopupNow()
         }
         if idx == 0 {
-            tagFilter = nil
+            popupTagFilter = nil
         } else {
-            tagFilter = availableTags[idx - 1]
+            popupTagFilter = availableTags[idx - 1]
         }
         selectedIndex = 0
         selectionArmed = true
         previewVisible = true
         cycleCount += 1
         syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
     }
 
     /// Jump `step` items forward through the ring (default 5). Bound to
@@ -1758,6 +1684,7 @@ class ClipboardManager: ObservableObject {
         previewVisible = true
         cycleCount += 1
         syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
     }
 
     /// Fired by the delay timer when the user kept ⌘ held past
@@ -1778,12 +1705,8 @@ class ClipboardManager: ObservableObject {
     ///   2. Centre of the screen — fallback when no text field is focused.
     private func openPopupNow() {
         selectionArmed = true
-        tagFilter = nil
-        if let textPos = focusedTextInputPosition() {
-            previewWindow.show(at: textPos)
-        } else {
-            previewWindow.showCentered()
-        }
+        popupTagFilter = nil
+        previewWindow.show()
         syncItemPreviewWithSelection()
     }
 
@@ -2125,7 +2048,7 @@ class ClipboardManager: ObservableObject {
     }
 
     /// Post a synthetic ⌘V to the frontmost app.  Mirrors the handshake used
-    /// by commitSearchPaste / commitPopupSearchPaste so external panels share
+    /// by commitSearchPaste so external panels share
     /// one paste-simulation path.  Caller is responsible for restoring focus
     /// to the original app BEFORE calling this.
     func simulateCommandV() {
@@ -2142,37 +2065,6 @@ class ClipboardManager: ObservableObject {
         AuthManager.shared.registerCommandVAction()
     }
 
-    /// Paste the selected inline-popup-search result.
-    /// The popup is a non-activating panel so focus never left the target app;
-    /// we just write to NSPasteboard and fire a simulated ⌘V.
-    func commitPopupSearchPaste() {
-        let results = popupSearchResults
-        guard !results.isEmpty else {
-            isPopupSearchActive = false
-            popupSearchQuery = ""
-            return
-        }
-        let item = results[min(popupSearchSelectedIndex, results.count - 1)]
-
-        // Popup is non-activating — frontmost is still the target app.
-        recordPasteDestination(for: item.id)
-
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        write(item, to: pb)
-        lastChangeCount = pb.changeCount
-
-        isPopupSearchActive = false
-        popupSearchQuery = ""
-        popupSearchSelectedIndex = 0
-        previewWindow.hide()
-        transformPanel.hide()
-        itemPreviewPanel.hide()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.simulateCommandV()
-        }
-    }
 
     // MARK: - Embedding recomputation
 
@@ -2198,75 +2090,6 @@ class ClipboardManager: ObservableObject {
                 }
             }
         }
-    }
-
-    /// Returns caret/input position only when the current AX focused element
-    /// looks text-editable. Used for strict "typing-only popup" mode.
-    private func focusedTextInputPosition() -> NSPoint? {
-        let primaryH = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
-                    ?? NSScreen.main?.frame.height
-                    ?? 0
-        guard let appEl = focusedApplicationAXElement(),
-              let axEl = focusedUIElement(in: appEl),
-              isTextInputElement(axEl) else { return nil }
-        return textCaretPoint(for: axEl, primaryH: primaryH) ?? elementPoint(axEl, primaryH: primaryH)
-    }
-
-    private func focusedApplicationAXElement() -> AXUIElement? {
-        let systemWide = AXUIElementCreateSystemWide()
-        var appRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &appRef) == .success,
-              let appEl = appRef as! AXUIElement? else { return nil }
-        return appEl
-    }
-
-    private func focusedUIElement(in appEl: AXUIElement) -> AXUIElement? {
-        var elRef: CFTypeRef?
-        let focusedOK = AXUIElementCopyAttributeValue(
-            appEl, kAXFocusedUIElementAttribute as CFString, &elRef
-        ) == .success
-        return focusedOK ? (elRef as! AXUIElement?) : nil
-    }
-
-    private func textCaretPoint(for axEl: AXUIElement, primaryH: CGFloat) -> NSPoint? {
-        var rangeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axEl, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-              let rangeVal = rangeRef else { return nil }
-        var boundsRef: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(
-            axEl, kAXBoundsForRangeParameterizedAttribute as CFString,
-            rangeVal, &boundsRef
-        ) == .success, let boundsVal = boundsRef else { return nil }
-        var rect = CGRect.zero
-        guard AXValueGetValue(boundsVal as! AXValue, AXValueType.cgRect, &rect),
-              rect.origin.x.isFinite, rect.origin.y.isFinite,
-              rect.size.height > 0, rect.size.height < 200 else { return nil }
-        return NSPoint(x: rect.minX, y: primaryH - rect.maxY)
-    }
-
-    private func isTextInputElement(_ axEl: AXUIElement) -> Bool {
-        // Best signal: if the element exposes text range + bounds, it's a
-        // text-editable context (including rich web editors).
-        if textCaretPoint(for: axEl, primaryH: 1) != nil { return true }
-
-        var roleRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axEl, kAXRoleAttribute as CFString, &roleRef) == .success,
-              let role = roleRef as? String else { return false }
-        let knownTextRoles: Set<String> = [
-            kAXTextFieldRole as String,
-            kAXTextAreaRole as String,
-            kAXComboBoxRole as String,
-            "AXSearchField",
-            "AXWebArea"
-        ]
-        if knownTextRoles.contains(role) { return true }
-
-        var editableRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(axEl, "AXEditable" as CFString, &editableRef) == .success,
-           let editable = editableRef as? Bool {
-            return editable
-        }
-        return false
     }
 
     private func cancelPendingFirstOpen() {
@@ -2326,8 +2149,7 @@ class ClipboardManager: ObservableObject {
 
     private func deleteSelected() {
         guard selectionArmed, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
-        // Resolve by ID so filters (tagFilter, isReversed, pinnedAtBottom) never
-        // cause the wrong item to be deleted.
+        // Resolve by ID so popupTagFilter never causes the wrong item to be deleted.
         let target = displayItems[selectedIndex]
         guard let realIndex = items.firstIndex(where: { $0.id == target.id }) else { return }
         items.remove(at: realIndex)
@@ -2366,17 +2188,13 @@ class ClipboardManager: ObservableObject {
         transformIndex   = 0
         selectedIndex    = 0
         selectionArmed   = true
-        tagFilter   = nil
+        popupTagFilter   = nil
         previewVisible   = false
         cycleCount       = 0
         // Coach replay is single-session — close the popup, the replay is
         // over.  Persistent popupCoachStep is intentionally NOT touched.
         coachReplayActive = false
         coachReplayStep   = 0
-        // Always reset inline search state when popup closes
-        isPopupSearchActive = false
-        popupSearchQuery = ""
-        popupSearchSelectedIndex = 0
         // Reset page-range state too — no half-typed picker should outlive
         // a dismiss.
         inPageRangeMode = false
@@ -2384,24 +2202,6 @@ class ClipboardManager: ObservableObject {
         pageRangeManualPages = []
         pageRangePageCount = 0
         pageRangePDF = nil
-    }
-
-    /// Returns the BOTTOM-LEFT of the AX element's frame in AppKit coords.
-    /// (Bottom-left of the element ≈ where text baseline is in input fields.)
-    private func elementPoint(_ axEl: AXUIElement, primaryH: CGFloat) -> NSPoint? {
-        var posRef: CFTypeRef?; var sizeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(axEl, kAXPositionAttribute as CFString, &posRef) == .success,
-              AXUIElementCopyAttributeValue(axEl, kAXSizeAttribute as CFString, &sizeRef) == .success,
-              let posVal = posRef, let sizeVal = sizeRef else { return nil }
-        var cgPos = CGPoint.zero; var cgSize = CGSize.zero
-        guard AXValueGetValue(posVal  as! AXValue, AXValueType.cgPoint, &cgPos),
-              AXValueGetValue(sizeVal as! AXValue, AXValueType.cgSize,  &cgSize) else { return nil }
-        // AX rect is (cgPos, cgSize) in top-down. Bottom-left in AppKit:
-        //   y = primaryH - (cgPos.y + cgSize.height)
-        //   x = cgPos.x  (left edge — for very wide windows, midX would be off-screen-distant)
-        let x = cgPos.x + min(cgSize.width / 2, 60)   // small inset so arrow lands inside
-        let y = primaryH - (cgPos.y + cgSize.height)
-        return NSPoint(x: x, y: y)
     }
 
     // MARK: - Paste
@@ -2611,6 +2411,22 @@ class ClipboardManager: ObservableObject {
             let existing = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
             guard !existing.isEmpty else { return }
             pb.writeObjects(existing.map { makeFilePasteboardItem(for: $0) })
+
+        case .svg(let src):
+            let pitem = NSPasteboardItem()
+            let data = Data(src.utf8)
+            pitem.setData(data, forType: .init("public.svg-image"))
+            pitem.setString(src, forType: .string)
+            pb.writeObjects([pitem])
+
+        case .blob(let typeMap):
+            // Restore all original pasteboard types verbatim so the receiving
+            // app sees exactly what was written by the source app.
+            let pitem = NSPasteboardItem()
+            for (typeStr, data) in typeMap {
+                pitem.setData(data, forType: .init(typeStr))
+            }
+            pb.writeObjects([pitem])
         }
     }
 
@@ -2626,7 +2442,7 @@ class ClipboardManager: ObservableObject {
         // Legacy path list for older apps.
         item.setPropertyList([url.path], forType: .init("NSFilenamesPboardType"))
 
-        let maxInlineBytes = 50 * 1024 * 1024
+        let maxInlineBytes = Self.maxDataBytes
         guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentTypeKey, .fileSizeKey]),
               values.isDirectory != true,
               let fileSize = values.fileSize, fileSize <= maxInlineBytes,
@@ -2667,7 +2483,7 @@ class ClipboardManager: ObservableObject {
 
     func pasteItem(at itemsIndex: Int) {
         guard items.indices.contains(itemsIndex) else { return }
-        selectedIndex = isReversed ? (items.count - 1 - itemsIndex) : itemsIndex
+        selectedIndex = itemsIndex
         selectionArmed = true
         commitPaste()
     }
@@ -2680,6 +2496,7 @@ class ClipboardManager: ObservableObject {
         selectedIndex = absoluteIndex
         selectionArmed = true
         syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
     }
 
     func uiScrollNext() {
@@ -3159,9 +2976,7 @@ class ClipboardManager: ObservableObject {
                                      pasteCountByApp: item.pasteCountByApp,
                                      pastedToAppNames: item.pastedToAppNames)
                 }
-                // Inline fallback — keep old 8 MB cap so a giant screenshot
-                // can't blow up the manifest if the blob layer failed.
-                guard rawData.count < 8_000_000 else { return nil }
+                guard rawData.count < Self.maxDataBytes else { return nil }
                 return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                                      urlTitle: nil, type: "image", text: nil,
                                      imageData: rawData, imageBlob: nil, imageType: dataType.rawValue,
@@ -3222,6 +3037,39 @@ class ClipboardManager: ObservableObject {
                                      urlTitle: nil, type: "files", text: nil,
                                      imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
                                      plainText: nil, filePath: nil, filePaths: urls.map(\.path), html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                     embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
+
+            case .svg(let src):
+                return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
+                                     urlTitle: nil, type: "svg", text: src,
+                                     imageData: nil, imageBlob: nil, imageType: nil, rtfData: nil,
+                                     plainText: nil, filePath: nil, filePaths: nil, html: nil,
+                                     sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
+                                     embedding: item.embedding, isSecret: item.isSecret,
+                                     pastedToAppName: item.pastedToAppName,
+                                     pastedToBundleID: item.pastedToBundleID,
+                                     lastPastedAt: item.lastPastedAt,
+                                     pasteCount: item.pasteCount,
+                                     pasteCountByApp: item.pasteCountByApp,
+                                     pastedToAppNames: item.pastedToAppNames)
+
+            case .blob(let typeMap):
+                // Encode the full type→data map as JSON and store it in a blob
+                // file using the same encrypted blob infrastructure as images.
+                guard let jsonData = try? JSONEncoder().encode(typeMap),
+                      let rel = writeBlob(jsonData, primaryTag: .blob) else { return nil }
+                referencedBlobs.insert(rel)
+                return PersistedItem(id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
+                                     urlTitle: nil, type: "blob", text: nil,
+                                     imageData: nil, imageBlob: rel, imageType: nil, rtfData: nil,
+                                     plainText: nil, filePath: nil, filePaths: nil, html: nil,
                                      sourceAppName: item.sourceAppName, sourceBundleID: item.sourceBundleID,
                                      embedding: item.embedding, isSecret: item.isSecret,
                                      pastedToAppName: item.pastedToAppName,
@@ -3295,6 +3143,14 @@ class ClipboardManager: ObservableObject {
             case "files":
                 guard let paths = p.filePaths, !paths.isEmpty else { return nil }
                 content = .files(paths.map { URL(fileURLWithPath: $0) })
+            case "svg":
+                guard let str = p.text else { return nil }
+                content = .svg(str)
+            case "blob":
+                guard let rel = p.imageBlob, let raw = readBlob(rel),
+                      let typeMap = try? JSONDecoder().decode([String: Data].self, from: raw),
+                      !typeMap.isEmpty else { return nil }
+                content = .blob(typeMap)
             default:
                 return nil
             }
@@ -3444,6 +3300,8 @@ struct ClipboardItem: Identifiable {
         case .html(_, plain: let s):     return String(s.prefix(200))
         case .file(let url):             return url.lastPathComponent
         case .files(let urls):           return "\(urls.count) files"
+        case .svg:                       return "[SVG]"
+        case .blob(let d):               return "[\(d.count) private types]"
         }
     }
 
@@ -3455,6 +3313,8 @@ struct ClipboardItem: Identifiable {
         case .html:     return "globe"
         case .file:     return "doc"
         case .files:    return "doc.on.doc"
+        case .svg:      return "square.on.circle"
+        case .blob:     return "lock.doc"
         }
     }
 
@@ -3472,6 +3332,8 @@ struct ClipboardItem: Identifiable {
             return ext.isEmpty ? "File" : ext
         case .files(let urls):
             return "\(urls.count) Files"
+        case .svg:              return "SVG"
+        case .blob:             return "Private"
         }
     }
 
@@ -3484,6 +3346,8 @@ struct ClipboardItem: Identifiable {
         case .file(let url):
             return Self.iconName(for: url)
         case .files:            return "doc.on.doc"
+        case .svg:              return "square.on.circle"
+        case .blob:             return "lock.doc"
         }
     }
 
@@ -3623,6 +3487,10 @@ struct ClipboardItem: Identifiable {
             var s = prefix + parts.joined(separator: " | ")
             if let app = sourceAppName { s += " from \(app)" }
             return s
+        case .svg(let src):
+            return src.isEmpty ? nil : String(src.prefix(500))
+        case .blob(let d):
+            return d.isEmpty ? nil : "private data \(d.keys.sorted().joined(separator: " "))"
         }
     }
 
@@ -3684,6 +3552,25 @@ enum ClipboardContent {
     case html(String, plain: String)
     case file(URL)
     case files([URL])
+    /// SVG source text (public.svg-image, com.adobe.illustrator.svg, etc.)
+    case svg(String)
+    /// Opaque passthrough: all pasteboard types verbatim — key is the UTI string.
+    /// Enables lossless round-trip for Photoshop layers, Sketch symbols, etc.
+    case blob([String: Data])
+
+    /// Diagnostic-only: short label for the content case (used by [TAGDIAG] logs).
+    var diagKind: String {
+        switch self {
+        case .text:     return "text"
+        case .image:    return "image"
+        case .richText: return "richText"
+        case .html:     return "html"
+        case .file:     return "file"
+        case .files:    return "files"
+        case .svg:      return "svg"
+        case .blob(let d): return "blob(\(d.count)types)"
+        }
+    }
 }
 
 // MARK: - Extensions

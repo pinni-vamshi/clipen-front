@@ -9,7 +9,6 @@ struct MenuBarView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
     @Environment(\.openWindow) private var openWindow
-    @State private var scrubPosition:  Double = 1.0   // 1.0 = now, 0.0 = oldest item
     @State private var expandedItemID: UUID?  = nil
     @State private var showUpgradeToast = false
     @AppStorage("dismissedAccessibilityBanner") private var dismissedBanner = false
@@ -22,10 +21,6 @@ struct MenuBarView: View {
             }
             Divider()
             content
-            if manager.displayItems.count > 1 {
-                Divider()
-                timeScrubber
-            }
             Divider()
             firstOpenDelaySlider
             Divider()
@@ -87,15 +82,6 @@ struct MenuBarView: View {
                     .font(.headline)
             }
             Spacer()
-
-            Button {
-                manager.isReversed.toggle()
-            } label: {
-                Text(manager.isReversed ? "Oldest first" : "Newest first")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
 
             if !manager.items.isEmpty {
                 Button { manager.clearAll() } label: {
@@ -184,57 +170,6 @@ struct MenuBarView: View {
             }
             .frame(maxHeight: 400)
         }
-    }
-
-    // MARK: - Time machine scrubber
-
-    private var timeScrubber: some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 6) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 10))
-                    .foregroundColor(scrubPosition < 1.0 ? .accentColor : .secondary)
-                Text(scrubLabel)
-                    .font(.system(size: 10, weight: scrubPosition < 1.0 ? .semibold : .regular))
-                    .foregroundColor(scrubPosition < 1.0 ? .accentColor : .secondary)
-                Spacer()
-                if scrubPosition < 1.0 {
-                    Button("Now") {
-                        withAnimation { scrubPosition = 1.0 }
-                        manager.timeScrubDate = nil
-                    }
-                    .font(.system(size: 10, weight: .semibold))
-                    .buttonStyle(.plain)
-                    .foregroundColor(.accentColor)
-                }
-            }
-            Slider(value: $scrubPosition, in: 0...1)
-                .tint(scrubPosition < 1.0 ? .accentColor : .secondary)
-                .onChange(of: scrubPosition) { _, _ in applyTimeScrub() }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(scrubPosition < 1.0 ? Color.accentColor.opacity(0.04) : Color.clear)
-    }
-
-    private var scrubLabel: String {
-        guard scrubPosition < 1.0,
-              let oldest = manager.items.last?.timestamp else { return "Time Machine" }
-        let range  = Date().timeIntervalSince(oldest)
-        let cutoff = oldest.addingTimeInterval(range * scrubPosition)
-        let rel = RelativeDateTimeFormatter()
-        rel.unitsStyle = .short
-        return rel.localizedString(for: cutoff, relativeTo: Date())
-    }
-
-    private func applyTimeScrub() {
-        guard scrubPosition < 1.0,
-              let oldest = manager.items.last?.timestamp else {
-            manager.timeScrubDate = nil
-            return
-        }
-        let range = Date().timeIntervalSince(oldest)
-        manager.timeScrubDate = oldest.addingTimeInterval(range * scrubPosition)
     }
 
     // MARK: - First-open delay slider
@@ -451,6 +386,13 @@ struct ItemRow: View {
                         .font(.system(size: 10)).lineLimit(1).foregroundColor(.secondary)
                 }
             }
+
+        case .svg(let src):
+            Text(src).font(.system(size: 12, design: .monospaced)).lineLimit(3)
+
+        case .blob(let typeMap):
+            Text(typeMap.keys.sorted().joined(separator: ", "))
+                .font(.system(size: 11)).lineLimit(2).foregroundColor(.secondary)
         }
     }
 
@@ -544,6 +486,22 @@ struct InlineTransformExpansion: View {
                         }
                     }
                     .padding(10)
+
+                case .svg(let src):
+                    ScrollView {
+                        Text(src)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    }
+                    .frame(maxHeight: 110)
+
+                case .blob(let typeMap):
+                    Text(typeMap.keys.sorted().map { "· \($0)" }.joined(separator: "\n"))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
                 }
             }
             .background(Color.secondary.opacity(0.05))

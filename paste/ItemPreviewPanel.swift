@@ -108,6 +108,11 @@ private struct ItemPreviewView: View {
             filePreview(url)
         case .files(let urls):
             fileListPreview(urls)
+        case .svg(let src):
+            textPreview(src, monospaced: true)
+        case .blob(let typeMap):
+            textPreview(typeMap.keys.sorted().map { "· \($0)" }.joined(separator: "\n"),
+                        monospaced: true)
         }
     }
 
