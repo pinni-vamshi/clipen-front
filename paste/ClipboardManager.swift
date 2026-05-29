@@ -82,7 +82,9 @@ class ClipboardManager: ObservableObject {
     @Published var items: [ClipboardItem] = [] {
         didSet { invalidateDisplayItems() }
     }
-    @Published var selectedIndex: Int = 0
+    @Published var selectedIndex: Int = 0 {
+        didSet { updatePendingPasteID() }
+    }
     /// Always true while the popup is visible.  Kept as a property because
     /// a few legacy code paths still read it; the auto-disarm timer that
     /// used to flip it false has been removed entirely — the popup model
@@ -231,6 +233,12 @@ class ClipboardManager: ObservableObject {
         }
         if isReversed { unpinned.reverse() }
         displayItems = pinnedAtBottom ? unpinned + pinned : pinned + unpinned
+        updatePendingPasteID()
+    }
+
+    private func updatePendingPasteID() {
+        pendingPasteItemID = displayItems.indices.contains(selectedIndex)
+            ? displayItems[selectedIndex].id : nil
     }
 
     /// Tags that appear on at least one item in the full ring (ignoring
@@ -263,6 +271,10 @@ class ClipboardManager: ObservableObject {
     // Kept as plain stored properties so writes don't trigger SwiftUI
     // re-renders on every keypress.
     private var previewVisible: Bool = false
+    // ID of the item the user last explicitly selected. Resolved in
+    // commitPaste() so a displayItems rebuild between selection and ⌘ release
+    // never causes a stale-index paste (the root cause of the wrong-item bug).
+    private var pendingPasteItemID: UUID? = nil
     private var cycleCount: Int = 0
     private var transformCycleCount: Int = 0
     private var hintKeyVDown = false
@@ -1834,19 +1846,9 @@ class ClipboardManager: ObservableObject {
         let returnApp = searchReturnApp
         searchReturnApp = nil
 
-        // Restore focus to the original app, then fire ⌘V so it receives the paste.
         returnApp?.activate(options: .activateIgnoringOtherApps)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-            guard let self else { return }
-            self.isSimulatingPaste = true
-            let src  = CGEventSource(stateID: .combinedSessionState)
-            let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-            let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-            down?.flags = .maskCommand; up?.flags = .maskCommand
-            down?.post(tap: .cgAnnotatedSessionEventTap)
-            up?.post(tap: .cgAnnotatedSessionEventTap)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.isSimulatingPaste = false }
-            AuthManager.shared.registerCommandVAction()
+            self?.simulateCommandV()
         }
     }
 
@@ -2167,19 +2169,8 @@ class ClipboardManager: ObservableObject {
         transformPanel.hide()
         itemPreviewPanel.hide()
 
-        // Target app already has focus (non-activating popup never stole it).
-        // Fire ⌘V immediately so the app pastes the freshly written content.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            guard let self else { return }
-            self.isSimulatingPaste = true
-            let src  = CGEventSource(stateID: .combinedSessionState)
-            let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-            let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-            down?.flags = .maskCommand; up?.flags = .maskCommand
-            down?.post(tap: .cgAnnotatedSessionEventTap)
-            up?.post(tap: .cgAnnotatedSessionEventTap)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.isSimulatingPaste = false }
-            AuthManager.shared.registerCommandVAction()
+            self?.simulateCommandV()
         }
     }
 
@@ -2457,6 +2448,10 @@ class ClipboardManager: ObservableObject {
 
         // Stage 2: apply selected transform (sync OR async) and paste result
         if inTransformStage {
+            guard displayItems.indices.contains(selectedIndex) else {
+                previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
+                return
+            }
             let item     = displayItems[selectedIndex]
             let idx      = transformIndex
             let selectedToolID = transformDisplaysCache.indices.contains(idx)
@@ -2524,7 +2519,18 @@ class ClipboardManager: ObservableObject {
 
         inTransformStage = false; transformIndex = 0
 
-        let item = displayItems[selectedIndex]
+        // Resolve by ID — prevents stale-index paste when displayItems was
+        // rebuilt (new capture, filter change) between selection and ⌘ release.
+        let item: ClipboardItem
+        if let id = pendingPasteItemID, let found = items.first(where: { $0.id == id }) {
+            item = found
+        } else if displayItems.indices.contains(selectedIndex) {
+            item = displayItems[selectedIndex]
+        } else {
+            previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
+            return
+        }
+        pendingPasteItemID = nil
         // Record which app is receiving this paste BEFORE we hide the popup
         // (popup is non-activating → frontmost is still the target app).
         recordPasteDestination(for: item.id)

@@ -238,25 +238,6 @@ struct PopoverPreviewView: View {
                     .buttonStyle(.plain)
                     .help("Show how Clipen works again")
 
-                    // ── Debug: force-trigger the fast-paste hint panel ──
-                    // Tiny play-circle button next to the Clipen logo.  Tap
-                    // it to bring up the FastPasteHintPanel on demand so the
-                    // styling / copy / button behaviour can be reviewed
-                    // without having to actually fast-tap ⌘V from scratch.
-                    Button {
-                        let ms = Int(manager.firstOpenDelay * 1000)
-                        manager.fastPasteHintPanel.show(delayMs: ms) {
-                            AppDelegate.shared?.openMainWindow()
-                            manager.pulseOpenDelaySlider()
-                        }
-                    } label: {
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.accentColor.opacity(0.85))
-                    }
-                    .buttonStyle(.plain)
-                    .help("Preview the fast-paste hint panel")
-
                     Spacer()
 
                     // The "⌘ Paste" affordance moved out of the header — it's
@@ -440,7 +421,11 @@ struct PopoverPreviewView: View {
                                 PopoverRow(item: item,
                                            index: idx,
                                            isSelected: idx == manager.popupSearchSelectedIndex)
-                                    .onTapGesture { manager.commitPopupSearchPaste() }
+                                    .onHover { if $0 { manager.popupSearchSelectedIndex = idx } }
+                                    .onTapGesture {
+                                        manager.popupSearchSelectedIndex = idx
+                                        manager.commitPopupSearchPaste()
+                                    }
                                 if idx < min(results.count, visibleCount) - 1 {
                                     Divider().padding(.leading, 38)
                                 }
