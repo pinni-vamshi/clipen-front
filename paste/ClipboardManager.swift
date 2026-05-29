@@ -343,6 +343,18 @@ class ClipboardManager: ObservableObject {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var isSimulatingPaste = false
+
+    // MARK: - Caret position state (4-level fallback)
+
+    /// Level 1 — Exact blinker rect from IMK (requires Clipen input source enabled
+    /// in System Settings › Keyboard › Input Sources). Set by ClipboardInputController.
+    /// In AppKit screen coordinates (bottom-left origin).
+    var imkCaretRect: NSRect? = nil
+
+    /// Level 2 — Rect synthesised from the last left-click position (mouse down).
+    /// Gives a good approximation when the user clicked to focus a text field.
+    /// In AppKit screen coordinates (bottom-left origin).
+    var lastClickScreenRect: NSRect? = nil
     /// Caret position cached from the most recent popup open. AX queries in
     /// Safari/Chrome can take 100–300ms because their accessibility trees are
     /// huge; running them on every V tap turns each cycle into a stutter.
@@ -935,6 +947,7 @@ class ClipboardManager: ObservableObject {
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
+            | (1 << CGEventType.leftMouseDown.rawValue)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -1010,6 +1023,19 @@ class ClipboardManager: ObservableObject {
             notePopupHintModifiers(cmd: event.flags.contains(.maskCommand),
                                    shift: event.flags.contains(.maskShift))
             notePopupHintKeyUp(keycode: key)
+            return Unmanaged.passUnretained(event)
+        }
+
+        if type == .leftMouseDown {
+            // Track the click position for level-2 caret fallback.
+            // CGEvent.location is in Quartz display coordinates (top-left origin).
+            // Convert to AppKit screen coordinates (bottom-left origin).
+            let loc = event.location
+            let screenH = NSScreen.screens.first?.frame.height ?? 0
+            // Synthesize a 2×16 rect at the click point (approximates cursor height).
+            lastClickScreenRect = NSRect(x: loc.x - 1,
+                                         y: screenH - loc.y - 8,
+                                         width: 2, height: 16)
             return Unmanaged.passUnretained(event)
         }
 

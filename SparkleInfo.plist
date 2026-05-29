@@ -10,5 +10,24 @@
 	<true/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
+	<key>InputMethodConnectionName</key>
+	<string>ClipenInput</string>
+	<key>InputMethodServerControllerClass</key>
+	<string>ClipboardInputController</string>
+	<key>ComponentInputModeDict</key>
+	<dict>
+		<key>tsInputModeListKey</key>
+		<dict>
+			<key>com.clipen.inputmode.ASCII</key>
+			<dict>
+				<key>TISIntendedLanguage</key>
+				<string>en</string>
+				<key>TISInputSourceIsEnableCapable</key>
+				<true/>
+				<key>TISInputSourceIsSelectCapable</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
 </dict>
 </plist>

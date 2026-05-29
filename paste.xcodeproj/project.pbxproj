@@ -38,6 +38,7 @@
 		B10000000000000000000020 /* SearchOverlayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000020 /* SearchOverlayWindow.swift */; };
 		B10000000000000000000021 /* PageRangePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* PageRangePanel.swift */; };
 		B10000000000000000000022 /* FastPasteHintPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* FastPasteHintPanel.swift */; };
+		B10000000000000000000023 /* ClipboardInputController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000023 /* ClipboardInputController.swift */; };
 		B1000000000000000000001C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* Assets.xcassets */; };
 		EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68612FB7847C002CA5C3 /* Sparkle */; };
 		EE8C68652FB7847C002CA5C3 /* webp in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68642FB7847C002CA5C3 /* webp */; };
@@ -77,6 +78,7 @@
 		A10000000000000000000020 /* SearchOverlayWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchOverlayWindow.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* PageRangePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageRangePanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000022 /* FastPasteHintPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FastPasteHintPanel.swift; sourceTree = "<group>"; };
+		A10000000000000000000023 /* ClipboardInputController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardInputController.swift; sourceTree = "<group>"; };
 		EE8C684D2FB7847A002CA5C3 /* Clipen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipen.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -159,6 +161,7 @@
 				A10000000000000000000020 /* SearchOverlayWindow.swift */,
 				A10000000000000000000021 /* PageRangePanel.swift */,
 				A10000000000000000000022 /* FastPasteHintPanel.swift */,
+				A10000000000000000000023 /* ClipboardInputController.swift */,
 				A1000000000000000000000C /* TransformPanel.swift */,
 				A1000000000000000000001D /* paste.entitlements */,
 			);
@@ -257,6 +260,7 @@
 				B10000000000000000000020 /* SearchOverlayWindow.swift in Sources */,
 				B10000000000000000000021 /* PageRangePanel.swift in Sources */,
 				B10000000000000000000022 /* FastPasteHintPanel.swift in Sources */,
+				B10000000000000000000023 /* ClipboardInputController.swift in Sources */,
 				B1000000000000000000000C /* TransformPanel.swift in Sources */,
 				B1000000000000000000000D /* ClipboardCategory.swift in Sources */,
 				B1000000000000000000000E /* ClipboardContentType.swift in Sources */,
@@ -408,7 +412,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 73;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -425,7 +429,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.75;
+				MARKETING_VERSION = 1.0.76;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -446,7 +450,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 72;
+				CURRENT_PROJECT_VERSION = 73;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -463,7 +467,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.75;
+				MARKETING_VERSION = 1.0.76;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

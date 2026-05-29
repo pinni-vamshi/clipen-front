@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import InputMethodKit
 import Sparkle
 
 @main
@@ -32,6 +33,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Sparkle auto-update controller — must be retained for the app lifetime.
     private var updaterController: SPUStandardUpdaterController?
+
+    /// IMK server for caret-position tracking (level 1 of the 4-level fallback).
+    /// Retained for the app lifetime. Connects to text clients when the user
+    /// has added "Clipen" to System Settings › Keyboard › Input Sources.
+    private var inputMethodServer: IMKServer?
 
     private var statusItem: NSStatusItem?
     private var menuPanel: NSPanel?
@@ -90,6 +96,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.object(forKey: "SUAutomaticallyUpdate") == nil {
             updaterController?.updater.automaticallyDownloadsUpdates = true
         }
+
+        // Start the IMK server so text clients can connect and report caret rects.
+        // This only activates when the user has enabled "Clipen" in
+        // System Settings › Keyboard › Input Sources — otherwise it's a no-op.
+        let imkName = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
+                      ?? "ClipenInput"
+        inputMethodServer = IMKServer(name: imkName, bundleIdentifier: Bundle.main.bundleIdentifier)
 
         ClipboardManager.shared.startMonitoring()
         // Kick one background check shortly after launch so update availability
