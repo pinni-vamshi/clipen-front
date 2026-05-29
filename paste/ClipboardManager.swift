@@ -164,7 +164,7 @@ class ClipboardManager: ObservableObject {
     private var _suppressFilterDidSet = false
 
     /// Number of items the Prediction tab shows.
-    private let predictionLimit = 5
+    private let predictionLimit = 15
     private let pastePredictor = PastePredictor()
 
     /// Which tab the popup opens on by default every session.
@@ -1980,6 +1980,9 @@ class ClipboardManager: ObservableObject {
         } else {
             tagFilter = availableTags[idx - 1 - predSlots]   // didSet clears prediction
         }
+        // Always restart from the top of the newly selected category so V
+        // cycling begins at item 0 rather than wherever the user was before.
+        selectedIndex = 0
         selectionArmed = true
         previewVisible = true
         cycleCount += 1

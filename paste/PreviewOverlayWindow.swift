@@ -694,54 +694,74 @@ struct SpaceKeyFlatHint: View {
 struct TagFilterStrip: View {
     @ObservedObject private var manager = ClipboardManager.shared
 
+    /// The chip ID that is currently selected — used to auto-scroll it into
+    /// view when the user switches categories via keyboard (⌘1–⌘9).
+    private var selectedChipID: Int {
+        if manager.predictionActive { return 1 }
+        guard let tag = manager.tagFilter else { return 0 }
+        let tagBase = manager.predictionEnabled ? 2 : 1
+        return (manager.availableTags.firstIndex(of: tag) ?? 0) + tagBase
+    }
+
     var body: some View {
         // 1. Recents (default), 2. <first category>, 3. <second>, …
         // Numbers ≤ 9 are key-bindable: ⌘1 → Recents, ⌘2 → first category, etc.
         // Beyond 9 the prefix is dropped (no shortcut) — mouse-click only.
         let tags = manager.availableTags
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                // 1 — Recents (everything, no filter).
-                TagFilterChip(
-                    tag: nil,
-                    selected: manager.tagFilter == nil && !manager.predictionActive,
-                    shortcutNumber: 1
-                ) {
-                    manager.predictionActive = false
-                    manager.tagFilter = nil
-                }
-                // 2 — Prediction (the predictor's top guesses).  Distinct
-                // gradient styling so it reads as "smart", not just another tag.
-                // Hidden entirely when the user disables prediction in settings;
-                // the tag chips then shift down to fill the ⌘2… slots.
-                if manager.predictionEnabled {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    // 1 — Recents (everything, no filter).
                     TagFilterChip(
                         tag: nil,
-                        selected: manager.predictionActive,
-                        shortcutNumber: 2,
-                        customIcon: "sparkles",
-                        customLabel: "Prediction",
-                        isPrediction: true
+                        selected: manager.tagFilter == nil && !manager.predictionActive,
+                        shortcutNumber: 1
                     ) {
-                        manager.predictionActive.toggle()
+                        manager.predictionActive = false
+                        manager.tagFilter = nil
+                    }
+                    .id(0)
+                    // 2 — Prediction (the predictor's top guesses).  Distinct
+                    // gradient styling so it reads as "smart", not just another tag.
+                    // Hidden entirely when the user disables prediction in settings;
+                    // the tag chips then shift down to fill the ⌘2… slots.
+                    if manager.predictionEnabled {
+                        TagFilterChip(
+                            tag: nil,
+                            selected: manager.predictionActive,
+                            shortcutNumber: 2,
+                            customIcon: "sparkles",
+                            customLabel: "Prediction",
+                            isPrediction: true
+                        ) {
+                            manager.predictionActive = true
+                        }
+                        .id(1)
+                    }
+                    // type tags — start at ⌘3 when the Prediction chip is shown,
+                    // ⌘2 when it's hidden, so the numbers always match what's visible.
+                    let tagBase = manager.predictionEnabled ? 3 : 2
+                    ForEach(Array(tags.enumerated()), id: \.element) { idx, tag in
+                        let n = idx + tagBase
+                        let chipID = idx + (manager.predictionEnabled ? 2 : 1)
+                        TagFilterChip(
+                            tag: tag,
+                            selected: manager.tagFilter == tag,
+                            shortcutNumber: n <= 9 ? n : nil
+                        ) {
+                            manager.tagFilter = tag
+                        }
+                        .id(chipID)
                     }
                 }
-                // type tags — start at ⌘3 when the Prediction chip is shown,
-                // ⌘2 when it's hidden, so the numbers always match what's visible.
-                let tagBase = manager.predictionEnabled ? 3 : 2
-                ForEach(Array(tags.enumerated()), id: \.element) { idx, tag in
-                    let n = idx + tagBase
-                    TagFilterChip(
-                        tag: tag,
-                        selected: manager.tagFilter == tag,
-                        shortcutNumber: n <= 9 ? n : nil
-                    ) {
-                        manager.tagFilter = (manager.tagFilter == tag) ? nil : tag
-                    }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+            .onChange(of: selectedChipID) { _, id in
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(id, anchor: .center)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
         }
         .frame(height: 36)
         .background(Color.primary.opacity(0.02))
