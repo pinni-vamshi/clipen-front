@@ -8,16 +8,9 @@ enum ContentDetector {
     static func detectedType(for content: ClipboardContent, color: NSColor?) -> ClipboardContentType {
         guard case .text(let text) = content else { return .plain }
 
+        // Deterministic detectors only — highest-confidence match wins, else plain.
         let traditional = TextTraditionalDetectors.candidates(for: text, color: color)
-        if let strongTraditional = traditional
-            .filter({ $0.confidence >= 0.7 })
-            .max(by: { $0.confidence < $1.confidence }) {
-            return strongTraditional.type
-        }
-
-        let semantic = TextSemanticDetector.candidates(for: text)
-        let all = traditional + semantic
-        return all.max(by: { $0.confidence < $1.confidence })?.type ?? .plain
+        return traditional.max(by: { $0.confidence < $1.confidence })?.type ?? .plain
     }
 
     static func category(for item: ClipboardItem) -> ClipboardCategory {

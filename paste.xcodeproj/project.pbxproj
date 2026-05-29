@@ -25,7 +25,6 @@
 		B10000000000000000000010 /* ContentDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* ContentDetector.swift */; };
 		B10000000000000000000011 /* DetectionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* DetectionTypes.swift */; };
 		B10000000000000000000012 /* FileKindDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* FileKindDetector.swift */; };
-		B10000000000000000000013 /* TextSemanticDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* TextSemanticDetector.swift */; };
 		B10000000000000000000014 /* TextTraditionalDetectors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* TextTraditionalDetectors.swift */; };
 		B1000000000000000000001E /* ClipboardTag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001E /* ClipboardTag.swift */; };
 		B1000000000000000000001F /* TagDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001F /* TagDetector.swift */; };
@@ -63,7 +62,6 @@
 		A10000000000000000000010 /* ContentDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000011 /* DetectionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetectionTypes.swift; sourceTree = "<group>"; };
 		A10000000000000000000012 /* FileKindDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileKindDetector.swift; sourceTree = "<group>"; };
-		A10000000000000000000013 /* TextSemanticDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextSemanticDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000014 /* TextTraditionalDetectors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextTraditionalDetectors.swift; sourceTree = "<group>"; };
 		A1000000000000000000001E /* ClipboardTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardTag.swift; sourceTree = "<group>"; };
 		A1000000000000000000001F /* TagDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagDetector.swift; sourceTree = "<group>"; };
@@ -104,7 +102,6 @@
 				A10000000000000000000010 /* ContentDetector.swift */,
 				A10000000000000000000011 /* DetectionTypes.swift */,
 				A10000000000000000000012 /* FileKindDetector.swift */,
-				A10000000000000000000013 /* TextSemanticDetector.swift */,
 				A10000000000000000000014 /* TextTraditionalDetectors.swift */,
 				A1000000000000000000001E /* ClipboardTag.swift */,
 				A1000000000000000000001F /* TagDetector.swift */,
@@ -267,7 +264,6 @@
 				B10000000000000000000010 /* ContentDetector.swift in Sources */,
 				B10000000000000000000011 /* DetectionTypes.swift in Sources */,
 				B10000000000000000000012 /* FileKindDetector.swift in Sources */,
-				B10000000000000000000013 /* TextSemanticDetector.swift in Sources */,
 				B10000000000000000000014 /* TextTraditionalDetectors.swift in Sources */,
 				B1000000000000000000001E /* ClipboardTag.swift in Sources */,
 				B1000000000000000000001F /* TagDetector.swift in Sources */,
@@ -412,7 +408,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 59;
+				CURRENT_PROJECT_VERSION = 60;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -429,7 +425,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.56;
+				MARKETING_VERSION = 1.0.57;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -450,7 +446,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 59;
+				CURRENT_PROJECT_VERSION = 60;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -467,7 +463,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.56;
+				MARKETING_VERSION = 1.0.57;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

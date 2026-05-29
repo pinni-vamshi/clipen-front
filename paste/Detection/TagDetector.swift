@@ -1,106 +1,86 @@
 import AppKit
 import Foundation
 
-/// Assigns multiple tags per clipboard item using existing detectors on plain
-/// text plus structural tags from pasteboard content (image, file, html, …).
+/// Assigns EXACTLY ONE tag per clipboard item.
+///
+/// Rebuilt as a single-tag classifier: each item lands in one — and only one —
+/// category, so the filter chips never smear an item across multiple buckets
+/// (the old multi-tag system put a `.swift` file under Image, a GitHub URL
+/// under Address, etc.).  Detection is purely structural (pasteboard shape) +
+/// deterministic regex/syntax detectors in `TextTraditionalDetectors`.  No
+/// fuzzy/semantic keyword scoring — that was the source of the cross-category
+/// pollution.
 enum TagDetector {
-    /// Minimum confidence to attach a text-derived tag.
-    private static let minConfidence: Double = 0.5
-
+    /// Public API kept array-shaped so existing call sites (filtering,
+    /// `availableTags`, `ItemTagStrip`) are unchanged — the array always holds
+    /// exactly one element.
     static func tags(for content: ClipboardContent, color: NSColor?) -> [ClipboardTag] {
-        var found = Set<ClipboardTag>()
-        appendStructuralTags(for: content, into: &found)
-        if let plain = plainText(from: content), !plain.isEmpty {
-            appendTextTags(plain: plain, color: color, into: &found)
-            if let fileURL = resolvedLocalFileURL(from: plain) {
-                appendFileTypeTag(for: fileURL, into: &found)
-            }
-        }
-        if found.isEmpty {
-            found.insert(.text)
-        }
-        return found.sorted { $0.priority < $1.priority }
+        [tag(for: content, color: color)]
     }
 
     static func primaryTag(from tags: [ClipboardTag]) -> ClipboardTag {
         tags.first ?? .text
     }
 
-    // MARK: - Structural (pasteboard shape)
-
-    private static func appendStructuralTags(for content: ClipboardContent, into found: inout Set<ClipboardTag>) {
+    /// The single tag for an item.
+    static func tag(for content: ClipboardContent, color: NSColor?) -> ClipboardTag {
         switch content {
         case .image(_, _, let dataType):
-            if dataType.rawValue.localizedCaseInsensitiveContains("pdf") {
-                found.insert(.pdf)
-            } else {
-                found.insert(.image)
-            }
+            return dataType.rawValue.localizedCaseInsensitiveContains("pdf") ? .pdf : .image
+
         case .file(let url):
-            if url.pathExtension.lowercased() == "pdf" {
-                found.insert(.pdf)
-            } else if FileKindDetector.isImageFile(url) {
-                found.insert(.image)
-            } else if FileKindDetector.isVideoFile(url) {
-                found.insert(.video)
-            } else if FileKindDetector.isAudioFile(url) {
-                found.insert(.audio)
-            } else {
-                found.insert(.file)
-            }
+            return fileTag(for: url)
+
         case .files(let urls):
-            found.insert(.files)
-            guard !urls.isEmpty else { break }
-            if urls.allSatisfy(FileKindDetector.isImageFile) {
-                found.insert(.image)
-            } else if urls.allSatisfy(FileKindDetector.isVideoFile) {
-                found.insert(.video)
-            } else if urls.allSatisfy(FileKindDetector.isAudioFile) {
-                found.insert(.audio)
-            } else if urls.allSatisfy({ $0.pathExtension.lowercased() == "pdf" }) {
-                found.insert(.pdf)
-            }
-        case .html:
-            found.insert(.html)
-        case .richText:
-            found.insert(.richText)
-        case .text:
-            break
-        }
-    }
+            return filesTag(for: urls)
 
-    // MARK: - Plain-text detectors (existing pipeline)
+        case .html(_, plain: let plain):
+            return textTag(for: plain, color: nil) ?? .html
 
-    private static func appendTextTags(plain: String, color: NSColor?, into found: inout Set<ClipboardTag>) {
-        let traditional = TextTraditionalDetectors.candidates(for: plain, color: color)
-        let semantic = TextSemanticDetector.candidates(for: plain)
-        var bestByTag: [ClipboardTag: Double] = [:]
+        case .richText(_, plain: let plain):
+            return textTag(for: plain, color: nil) ?? .richText
 
-        for candidate in traditional + semantic {
-            guard candidate.confidence >= minConfidence,
-                  let tag = ClipboardTag.from(candidate.type) else { continue }
-            bestByTag[tag] = max(bestByTag[tag] ?? 0, candidate.confidence)
-        }
-
-        for (tag, _) in bestByTag {
-            found.insert(tag)
-        }
-
-        // Plain prose with no strong signal still gets .text when nothing else matched.
-        if bestByTag.isEmpty, !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            found.insert(.text)
-        }
-    }
-
-    private static func plainText(from content: ClipboardContent) -> String? {
-        switch content {
         case .text(let s):
-            return s
-        case .richText(_, plain: let s), .html(_, plain: let s):
-            return s
-        default:
-            return nil
+            // A bare path to a real file on disk is tagged by what it points to.
+            if let url = resolvedLocalFileURL(from: s) {
+                return fileTag(for: url)
+            }
+            return textTag(for: s, color: color) ?? .text
         }
+    }
+
+    // MARK: - Text (deterministic detectors only)
+
+    /// Highest-confidence traditional/regex tag for `plain`, or nil when the
+    /// text is ordinary prose with no structural signature.
+    private static func textTag(for plain: String, color: NSColor?) -> ClipboardTag? {
+        guard !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let candidates = TextTraditionalDetectors.candidates(for: plain, color: color)
+        guard let best = candidates.max(by: { $0.confidence < $1.confidence }),
+              let tag = ClipboardTag.from(best.type) else { return nil }
+        return tag
+    }
+
+    // MARK: - Files
+
+    /// Most specific tag for a single file URL.
+    private static func fileTag(for url: URL) -> ClipboardTag {
+        if url.pathExtension.lowercased() == "pdf" { return .pdf }
+        if FileKindDetector.isImageFile(url) { return .image }
+        if FileKindDetector.isVideoFile(url) { return .video }
+        if FileKindDetector.isAudioFile(url) { return .audio }
+        return .file
+    }
+
+    /// A multi-file bundle: collapse to the shared type if homogeneous,
+    /// otherwise the generic `.files` tag.
+    private static func filesTag(for urls: [URL]) -> ClipboardTag {
+        guard !urls.isEmpty else { return .files }
+        if urls.allSatisfy(FileKindDetector.isImageFile) { return .image }
+        if urls.allSatisfy(FileKindDetector.isVideoFile) { return .video }
+        if urls.allSatisfy(FileKindDetector.isAudioFile) { return .audio }
+        if urls.allSatisfy({ $0.pathExtension.lowercased() == "pdf" }) { return .pdf }
+        return .files
     }
 
     /// Returns a URL if `string` is a single local file path that exists on disk.
@@ -116,21 +96,5 @@ enum TagDetector {
             return nil
         }
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
-
-    /// Inserts the most specific file-type tag for `url` (image/video/audio/pdf/file).
-    private static func appendFileTypeTag(for url: URL, into found: inout Set<ClipboardTag>) {
-        let ext = url.pathExtension.lowercased()
-        if ext == "pdf" {
-            found.insert(.pdf)
-        } else if FileKindDetector.isImageFile(url) {
-            found.insert(.image)
-        } else if FileKindDetector.isVideoFile(url) {
-            found.insert(.video)
-        } else if FileKindDetector.isAudioFile(url) {
-            found.insert(.audio)
-        } else {
-            found.insert(.file)
-        }
     }
 }
