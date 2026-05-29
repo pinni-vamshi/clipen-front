@@ -12,6 +12,41 @@ enum FileKindDetector {
         }
     }
 
+    /// True programming-language source files.  Routed to the `.code` tag so
+    /// a `.swift`, `.py`, `.c`, etc. file lands in the Code chip instead of
+    /// the generic File chip.  Markup (html), data (json, yaml) and plain
+    /// text (txt, log) are deliberately NOT in here — they have their own
+    /// dedicated tags (.html, .json, .text).
+    nonisolated static func isCodeFile(_ url: URL) -> Bool {
+        switch fileExtension(url) {
+        case "swift", "py", "rb", "go", "rs", "java", "kt", "kts",
+             "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx",
+             "m", "mm", "js", "mjs", "cjs", "ts", "jsx", "tsx",
+             "php", "sh", "zsh", "bash", "fish", "ps1",
+             "sql", "css", "scss", "sass", "less",
+             "vue", "svelte", "lua", "pl", "r", "scala", "dart",
+             "ex", "exs", "erl", "clj", "cljs", "cljc",
+             "hs", "ml", "mli", "fs", "fsi", "vb", "asm", "s":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Plain-text-shaped files that don't belong to a more specific tag.
+    /// Routed to `.text` instead of the generic `.file` so the Text chip
+    /// surfaces things like `.txt`, `.log`, `.csv`, `.yml` etc.
+    nonisolated static func isPlainTextFile(_ url: URL) -> Bool {
+        switch fileExtension(url) {
+        case "txt", "text", "log", "csv", "tsv", "xml",
+             "yaml", "yml", "toml", "ini", "env", "plist",
+             "srt", "vtt", "ics", "vcf":
+            return true
+        default:
+            return false
+        }
+    }
+
     nonisolated static func isTextFile(_ url: URL) -> Bool {
         switch fileExtension(url) {
         case "txt", "text", "md", "markdown", "json", "csv", "tsv", "xml", "html", "htm",

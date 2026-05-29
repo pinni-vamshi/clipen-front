@@ -946,7 +946,21 @@ struct PopoverRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(isSelected ? Color.accentColor.opacity(0.22) : Color.clear, in: Rectangle())
+        // Selected-row affordance — must remain visible even when the row
+        // content (an image preview, a wide file thumbnail) is opaque and
+        // covers most of the row.  Previously a faint 0.22-opacity tint sat
+        // *behind* the image and was barely visible as a thin frame, so V
+        // landing on an image row read as "V skipped that row."  Fix: a
+        // 3pt solid accent bar overlays the leading edge (always visible
+        // regardless of content) plus a stronger 0.40 background tint.
+        .background(isSelected ? Color.accentColor.opacity(0.40) : Color.clear, in: Rectangle())
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(width: 3)
+            }
+        }
     }
 
     @ViewBuilder

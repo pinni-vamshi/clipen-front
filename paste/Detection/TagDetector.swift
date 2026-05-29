@@ -63,12 +63,22 @@ enum TagDetector {
 
     // MARK: - Files
 
-    /// Most specific tag for a single file URL.
+    /// Strict per-extension classification for a single file URL.  Each
+    /// extension maps to exactly one tag — no fuzzy fallthrough.
     private static func fileTag(for url: URL) -> ClipboardTag {
-        if url.pathExtension.lowercased() == "pdf" { return .pdf }
-        if FileKindDetector.isImageFile(url) { return .image }
-        if FileKindDetector.isVideoFile(url) { return .video }
-        if FileKindDetector.isAudioFile(url) { return .audio }
+        let ext = url.pathExtension.lowercased()
+        switch ext {
+        case "pdf":             return .pdf
+        case "md", "markdown":  return .markdown
+        case "json":            return .json
+        case "html", "htm":     return .html
+        default: break
+        }
+        if FileKindDetector.isImageFile(url)     { return .image }
+        if FileKindDetector.isVideoFile(url)     { return .video }
+        if FileKindDetector.isAudioFile(url)     { return .audio }
+        if FileKindDetector.isCodeFile(url)      { return .code }
+        if FileKindDetector.isPlainTextFile(url) { return .text }
         return .file
     }
 
@@ -76,10 +86,12 @@ enum TagDetector {
     /// otherwise the generic `.files` tag.
     private static func filesTag(for urls: [URL]) -> ClipboardTag {
         guard !urls.isEmpty else { return .files }
-        if urls.allSatisfy(FileKindDetector.isImageFile) { return .image }
-        if urls.allSatisfy(FileKindDetector.isVideoFile) { return .video }
-        if urls.allSatisfy(FileKindDetector.isAudioFile) { return .audio }
         if urls.allSatisfy({ $0.pathExtension.lowercased() == "pdf" }) { return .pdf }
+        if urls.allSatisfy(FileKindDetector.isImageFile)     { return .image }
+        if urls.allSatisfy(FileKindDetector.isVideoFile)     { return .video }
+        if urls.allSatisfy(FileKindDetector.isAudioFile)     { return .audio }
+        if urls.allSatisfy(FileKindDetector.isCodeFile)      { return .code }
+        if urls.allSatisfy(FileKindDetector.isPlainTextFile) { return .text }
         return .files
     }
 
