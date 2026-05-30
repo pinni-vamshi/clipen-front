@@ -351,10 +351,6 @@ class ClipboardManager: ObservableObject {
     /// In AppKit screen coordinates (bottom-left origin).
     var imkCaretRect: NSRect? = nil
 
-    /// Level 2 — Rect synthesised from the last left-click position (mouse down).
-    /// Gives a good approximation when the user clicked to focus a text field.
-    /// In AppKit screen coordinates (bottom-left origin).
-    var lastClickScreenRect: NSRect? = nil
     /// Caret position cached from the most recent popup open. AX queries in
     /// Safari/Chrome can take 100–300ms because their accessibility trees are
     /// huge; running them on every V tap turns each cycle into a stutter.
@@ -947,7 +943,6 @@ class ClipboardManager: ObservableObject {
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
-            | (1 << CGEventType.leftMouseDown.rawValue)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -1023,19 +1018,6 @@ class ClipboardManager: ObservableObject {
             notePopupHintModifiers(cmd: event.flags.contains(.maskCommand),
                                    shift: event.flags.contains(.maskShift))
             notePopupHintKeyUp(keycode: key)
-            return Unmanaged.passUnretained(event)
-        }
-
-        if type == .leftMouseDown {
-            // Track the click position for level-2 caret fallback.
-            // CGEvent.location is in Quartz display coordinates (top-left origin).
-            // Convert to AppKit screen coordinates (bottom-left origin).
-            let loc = event.location
-            let screenH = NSScreen.screens.first?.frame.height ?? 0
-            // Synthesize a 2×16 rect at the click point (approximates cursor height).
-            lastClickScreenRect = NSRect(x: loc.x - 1,
-                                         y: screenH - loc.y - 8,
-                                         width: 2, height: 16)
             return Unmanaged.passUnretained(event)
         }
 
@@ -2190,31 +2172,63 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    /// Types `text` character-by-character using CGEvent keyboard events at HID
-    /// level.  Works in Spotlight, Raycast, and Alfred which ignore ⌘V.
-    /// `completion` is called on the main thread after all characters are sent.
+    /// Inserts `text` into the currently focused text field.
+    ///
+    /// Strategy 1 — AX `kAXSelectedTextAttribute`:  Writes text directly into the
+    /// focused element's selection point.  This is how Raycast, Alfred, and any
+    /// standard NSTextField/NSTextView accept programmatic input; it bypasses ⌘V
+    /// routing entirely and works regardless of keyboard layout or event source.
+    ///
+    /// Strategy 2 — HID-level CGEvent:  Posts key-down/up pairs at `.cghidEventTap`
+    /// with the Unicode string override.  Unlike session-level posting, HID events
+    /// travel the full hardware event pipeline and reach even system overlays like
+    /// Spotlight that filter higher-level synthetic events.
+    ///
+    /// `completion` is invoked on the main thread after the text has been sent.
     private func injectCharacters(_ text: String, completion: (() -> Void)? = nil) {
-        let src = CGEventSource(stateID: .combinedSessionState)
-        // Yield briefly so the popup finishes dismissing before characters land.
+        // ── Strategy 1: AX attribute write ─────────────────────────────────────
+        // Our popup is non-activating, so the REAL focused element in the target
+        // app (Raycast search box, Alfred bar, etc.) is still the AX focused
+        // element throughout the entire interaction.
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(systemWide,
+                                         kAXFocusedUIElementAttribute as CFString,
+                                         &focusedRef) == .success,
+           let focusedRef {
+            let focused = focusedRef as! AXUIElement  // swiftlint:disable:this force_cast
+            if AXUIElementSetAttributeValue(focused,
+                                            kAXSelectedTextAttribute as CFString,
+                                            text as CFString) == .success {
+                completion?()
+                return
+            }
+        }
+
+        // ── Strategy 2: HID-level CGEvent keyboard simulation ──────────────────
+        // Fallback for apps whose AX attribute is read-only or unavailable
+        // (Spotlight, some custom input areas).  HID posting is indistinguishable
+        // from real hardware input to the window server.
+        let src = CGEventSource(stateID: .hidSystemState)
         DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.06) {
             for scalar in text.unicodeScalars {
                 var chars: [UniChar]
                 if scalar.value <= 0xFFFF {
                     chars = [UniChar(scalar.value)]
                 } else {
-                    // Encode supplementary character as UTF-16 surrogate pair.
+                    // Encode supplementary character as a UTF-16 surrogate pair.
                     let v = scalar.value - 0x10000
                     chars = [UniChar(0xD800 | (v >> 10)), UniChar(0xDC00 | (v & 0x3FF))]
                 }
                 chars.withUnsafeBufferPointer { ptr in
                     guard let base = ptr.baseAddress else { return }
-                    if let down = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
-                        down.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
-                        down.post(tap: .cgAnnotatedSessionEventTap)
+                    if let dn = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
+                        dn.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
+                        dn.post(tap: .cghidEventTap)
                     }
                     if let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
                         up.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
-                        up.post(tap: .cgAnnotatedSessionEventTap)
+                        up.post(tap: .cghidEventTap)
                     }
                 }
             }

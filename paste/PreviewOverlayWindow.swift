@@ -22,11 +22,10 @@ class PreviewOverlayWindow: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
 
-    /// Show popup anchored to the active text field's caret using a 4-level fallback:
+    /// Show popup anchored near the active text field using a 3-level fallback:
     ///   1. IMK — exact blinker rect from the text client (requires input source enabled)
-    ///   2. Last click — where the user last clicked (approximates focused text field)
-    ///   3. AX caret — Accessibility API insertion-point bounds
-    ///   4. Screen center — final fallback when all else fails
+    ///   2. AX — Accessibility API: insertion-point bounds, then focused element frame
+    ///   3. Screen center — final fallback when all else fails
     func show() {
         showAnchored(to: resolveCaretRect())
     }
@@ -83,21 +82,20 @@ class PreviewOverlayWindow: NSPanel {
         if !isVisible { orderFront(nil) }
     }
 
-    // MARK: - Caret lookup (4-level fallback)
+    // MARK: - Caret lookup (3-level fallback)
 
     private func resolveCaretRect() -> NSRect? {
         let mgr = ClipboardManager.shared
 
-        // Level 1: IMK — exact rect reported by the focused text client each keystroke.
+        // Level 1: IMK — exact blinker rect reported by the text client each keystroke.
+        // Requires "Clipen" enabled in System Settings › Keyboard › Input Sources.
         if let imk = mgr.imkCaretRect { return imk }
 
-        // Level 2: Last click — user clicked to focus a text field; position is close.
-        if let click = mgr.lastClickScreenRect { return click }
-
-        // Level 3: AX caret — query the Accessibility API for the insertion point.
+        // Level 2: AX — tries exact insertion-point bounds first, then falls back
+        // to the focused text element's own frame (the text box position).
         if let ax = caretScreenRect() { return ax }
 
-        // Level 4: screen center — nil → showAnchored centers the popup.
+        // Level 3: screen center — nil → showAnchored centers the popup.
         return nil
     }
 
