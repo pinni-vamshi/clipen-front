@@ -841,12 +841,13 @@ class ClipboardManager: ObservableObject {
                 guard let self, let emb = self.nlEmbedding,
                       let vector = emb.vector(for: str) else { return }
                 let floats = vector.map { Float($0) }
-                DispatchQueue.main.async {
-                    if let idx = self.items.firstIndex(where: { $0.id == itemID }),
-                       self.items[idx].embedding == nil {
-                        self.items[idx].embedding = floats
-                        self.embeddedItemCount += 1
-                    }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,
+                          let idx = self.items.firstIndex(where: { $0.id == itemID }),
+                          idx < self.items.count,
+                          self.items[idx].embedding == nil else { return }
+                    self.items[idx].embedding = floats
+                    self.embeddedItemCount += 1
                 }
             }
         }
@@ -868,8 +869,10 @@ class ClipboardManager: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .htmlDecoded
             guard !title.isEmpty else { return }
-            DispatchQueue.main.async {
-                guard let idx = self.items.firstIndex(where: { $0.id == itemID }) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let idx = self.items.firstIndex(where: { $0.id == itemID }),
+                      idx < self.items.count else { return }
                 self.items[idx].urlTitle = title
             }
         }.resume()
@@ -2252,12 +2255,13 @@ class ClipboardManager: ObservableObject {
                       let vector = emb.vector(for: str) else { continue }
                 let floats = vector.map { Float($0) }
                 let itemID = item.id
-                DispatchQueue.main.async {
-                    if let idx = self.items.firstIndex(where: { $0.id == itemID }),
-                       self.items[idx].embedding == nil {
-                        self.items[idx].embedding = floats
-                        self.embeddedItemCount += 1
-                    }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self,
+                          let idx = self.items.firstIndex(where: { $0.id == itemID }),
+                          idx < self.items.count,
+                          self.items[idx].embedding == nil else { return }
+                    self.items[idx].embedding = floats
+                    self.embeddedItemCount += 1
                 }
             }
         }
