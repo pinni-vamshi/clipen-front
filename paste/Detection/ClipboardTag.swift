@@ -4,6 +4,7 @@ import SwiftUI
 /// filter chips and tool pools key off these (not a single pasteboard heading).
 enum ClipboardTag: String, Hashable, CaseIterable {
     case image
+    case gif
     case pdf
     case svg
     case blob
@@ -11,6 +12,12 @@ enum ClipboardTag: String, Hashable, CaseIterable {
     case files
     case video
     case audio
+    case model3D
+    case document
+    case archive
+    case design
+    case font
+    case installer
     case url
     case json
     case markdown
@@ -34,6 +41,7 @@ enum ClipboardTag: String, Hashable, CaseIterable {
     var priority: Int {
         switch self {
         case .image:     return 10
+        case .gif:       return 11
         case .pdf:       return 12
         case .svg:       return 13
         case .blob:      return 15
@@ -41,6 +49,12 @@ enum ClipboardTag: String, Hashable, CaseIterable {
         case .file:      return 16
         case .video:     return 18
         case .audio:     return 20
+        case .model3D:   return 22
+        case .document:  return 23
+        case .design:    return 24
+        case .archive:   return 25
+        case .font:      return 26
+        case .installer: return 27
         case .url:       return 30
         case .json:      return 32
         case .table:     return 34
@@ -58,6 +72,7 @@ enum ClipboardTag: String, Hashable, CaseIterable {
     var label: String {
         switch self {
         case .image:    return "Image"
+        case .gif:      return "GIF"
         case .pdf:      return "PDF"
         case .svg:      return "SVG"
         case .blob:     return "Private"
@@ -65,6 +80,12 @@ enum ClipboardTag: String, Hashable, CaseIterable {
         case .files:    return "Files"
         case .video:    return "Video"
         case .audio:    return "Audio"
+        case .model3D:  return "3D"
+        case .document: return "Doc"
+        case .archive:  return "Archive"
+        case .design:   return "Design"
+        case .font:     return "Font"
+        case .installer: return "Installer"
         case .url:      return "URL"
         case .json:     return "JSON"
         case .markdown: return "MD"
@@ -84,6 +105,7 @@ enum ClipboardTag: String, Hashable, CaseIterable {
     var icon: String {
         switch self {
         case .image:    return "photo"
+        case .gif:      return "photo.stack"
         case .pdf:      return "doc.richtext"
         case .svg:      return "square.on.circle"
         case .blob:     return "lock.doc"
@@ -91,6 +113,12 @@ enum ClipboardTag: String, Hashable, CaseIterable {
         case .files:    return "doc.on.doc"
         case .video:    return "film"
         case .audio:    return "waveform"
+        case .model3D:  return "cube.transparent"
+        case .document: return "doc.text.fill"
+        case .archive:  return "archivebox"
+        case .design:   return "paintbrush.pointed"
+        case .font:     return "textformat"
+        case .installer: return "shippingbox"
         case .url:      return "link"
         case .json:     return "curlybraces"
         case .markdown: return "doc.plaintext"
@@ -117,8 +145,15 @@ enum ClipboardTag: String, Hashable, CaseIterable {
         case .code:             return .blue
         case .url:              return .cyan
         case .image, .pdf, .svg: return .pink
+        case .gif:               return .mint
         case .blob:              return .purple
         case .video, .audio:    return .teal
+        case .model3D:          return .indigo
+        case .document:         return .blue
+        case .archive:          return .brown
+        case .design:           return .pink
+        case .font:             return .purple
+        case .installer:        return .orange
         case .color:            return .yellow
         default:                return .gray
         }

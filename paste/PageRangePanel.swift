@@ -132,19 +132,26 @@ struct BlinkingCursor: View {
     var period: Double = 0.5
 
     @State private var visible: Bool = true
+    @State private var timer: Timer? = nil
 
     var body: some View {
         Text("▌")
             .opacity(visible ? 1 : 0)
-            // .common run-loop mode so the timer keeps firing during
-            // scroll/tracking; otherwise the cursor freezes whenever the
-            // user is interacting with another part of the panel.
-            .onReceive(Timer.publish(every: period, on: .main, in: .common).autoconnect()) { _ in
-                visible.toggle()
-            }
             // Render the cursor at the same width whether visible or not
             // so adjacent text doesn't shift sideways every blink.
             .frame(minWidth: 6, alignment: .leading)
+            .onAppear {
+                timer?.invalidate()
+                timer = Timer.scheduledTimer(withTimeInterval: period, repeats: true) { _ in
+                    visible.toggle()
+                }
+                // .common mode so the cursor keeps blinking during scroll/tracking.
+                if let t = timer { RunLoop.main.add(t, forMode: .common) }
+            }
+            .onDisappear {
+                timer?.invalidate()
+                timer = nil
+            }
     }
 }
 

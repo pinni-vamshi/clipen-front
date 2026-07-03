@@ -6,6 +6,9 @@ import SwiftUI
 class PreviewOverlayWindow: NSPanel {
 
     private var visibleRowCount: Int = 5
+    /// Retained for app lifetime so display-system observers (EDR/color-space)
+    /// are only registered ONCE. Subsequent show() calls update rootView in-place.
+    private var popoverHostingView: NSHostingView<PopoverPreviewView>?
 
     init() {
         super.init(
@@ -39,45 +42,71 @@ class PreviewOverlayWindow: NSPanel {
     private func showAnchored(to caretRect: NSRect?) {
         let rowH: CGFloat    = 72
         let headerH: CGFloat = 80
+        let searchH: CGFloat = 34
         let filterH: CGFloat = 36
         let footerH: CGFloat = 26
+        let arrowH: CGFloat  = 11   // callout triangle height
         let w: CGFloat       = 420
         let margin: CGFloat  = 12
         let maxVisible: Int  = 5
 
-        let screen = NSScreen.main?.visibleFrame
-                  ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        // Screen selection: prefer the screen containing the caret, then the
+        // screen under the mouse cursor, then NSScreen.main.
+        let screen: NSRect = {
+            if let caret = caretRect {
+                let p = NSPoint(x: caret.midX, y: caret.midY)
+                if let s = NSScreen.screens.first(where: { $0.frame.contains(p) }) {
+                    return s.visibleFrame
+                }
+            }
+            let mouse = NSEvent.mouseLocation
+            if let s = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) {
+                return s.visibleFrame
+            }
+            return NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        }()
 
-        let slots = min(maxVisible, max(1, Int((screen.height - margin * 2 - headerH - filterH - footerH) / rowH)))
-        let bodyH = headerH + filterH + CGFloat(slots) * rowH + footerH
+        let slots = min(maxVisible, max(1,
+            Int((screen.height - margin * 2 - headerH - searchH - filterH - footerH - arrowH) / rowH)))
+        let bodyH = headerH + searchH + filterH + CGFloat(slots) * rowH + footerH + arrowH
 
         visibleRowCount = slots
 
-        let x: CGFloat
-        let y: CGFloat
+        var x: CGFloat
+        var y: CGFloat = screen.midY - bodyH / 2   // safe default; overwritten below
+        var arrowDir = PopoverPreviewView.ArrowDirection.none
 
-        if let caret = caretRect {
-            // Horizontally: center popup on the caret, clamped to screen.
-            x = max(screen.minX + margin,
-                    min(caret.midX - w / 2, screen.maxX - w - margin))
-            // Vertically: prefer above the caret; fall back below if not enough space.
-            let aboveY = caret.minY - bodyH - 6
-            let belowY = caret.maxY + 6
-            if aboveY >= screen.minY + margin {
-                y = aboveY
-            } else if belowY + bodyH <= screen.maxY - margin {
-                y = belowY
-            } else {
-                // Not enough space either way — center vertically.
-                y = screen.midY - bodyH / 2
-            }
+        // Helper: resolve an anchor point from caret or mouse
+        let anchor: NSPoint = caretRect.map { NSPoint(x: $0.midX, y: $0.midY) }
+                              ?? NSEvent.mouseLocation
+
+        x = max(screen.minX + margin, min(anchor.x - w / 2, screen.maxX - w - margin))
+
+        let aboveY = anchor.y - bodyH - 6
+        let belowY = anchor.y + 6
+
+        if aboveY >= screen.minY + margin {
+            y = aboveY
+            arrowDir = .down   // popup above anchor → arrow at bottom pointing down
+        } else if belowY + bodyH <= screen.maxY - margin {
+            y = belowY
+            arrowDir = .up     // popup below anchor → arrow at top pointing up
         } else {
-            x = screen.midX - w / 2
             y = screen.midY - bodyH / 2
+            arrowDir = .none
         }
 
-        let hv = NSHostingView(rootView: PopoverPreviewView(visibleCount: slots))
-        contentView = hv
+        let popoverView = PopoverPreviewView(visibleCount: slots, arrowDirection: arrowDir)
+        if let hv = popoverHostingView {
+            // Reuse — just update the SwiftUI tree in-place.  This avoids
+            // re-registering with the display pipeline on every popup open,
+            // which was the root cause of the _MaximumEDRValueChangedNotification storm.
+            hv.rootView = popoverView
+        } else {
+            let hv = NSHostingView(rootView: popoverView)
+            contentView = hv
+            popoverHostingView = hv
+        }
         setFrame(NSRect(x: x, y: y, width: w, height: bodyH), display: true)
         if !isVisible { orderFront(nil) }
     }
@@ -89,7 +118,11 @@ class PreviewOverlayWindow: NSPanel {
 
         // Level 1: IMK — exact blinker rect reported by the text client each keystroke.
         // Requires "Clipen" enabled in System Settings › Keyboard › Input Sources.
-        if let imk = mgr.imkCaretRect { return imk }
+        // Only trust it if it's FRESH: the rect is never explicitly cleared, so a
+        // value from a field/app you've since left would otherwise anchor the popup
+        // at a stale blinker. A recent rect means the caret was updated on the very
+        // ⌘/V keystrokes that opened this popup.
+        if let imk = mgr.imkCaretRect, mgr.imkCaretRectIsFresh { return imk }
 
         // Level 2: AX — tries exact insertion-point bounds first, then falls back
         // to the focused text element's own frame (the text box position).
@@ -160,7 +193,10 @@ class PreviewOverlayWindow: NSPanel {
     /// returned by the Accessibility API) to macOS window-server coordinates
     /// (bottom-left origin, as used by NSWindow.frame).
     private func flipToMacOS(_ rect: CGRect) -> NSRect {
-        let screenH = NSScreen.screens.first?.frame.height ?? 0
+        // AX coordinates are flipped relative to the PRIMARY display (the one at
+        // the global origin), which is not guaranteed to be screens.first.
+        let screenH = (NSScreen.screens.first(where: { $0.frame.origin == .zero })
+                       ?? NSScreen.screens.first)?.frame.height ?? 0
         return NSRect(x: rect.minX,
                       y: screenH - rect.maxY,
                       width: max(rect.width, 1),
@@ -189,7 +225,10 @@ class PreviewOverlayWindow: NSPanel {
 
 struct PopoverPreviewView: View {
 
-    let visibleCount: Int
+    enum ArrowDirection { case up, down, none }
+
+    let visibleCount:    Int
+    let arrowDirection:  ArrowDirection
 
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
@@ -204,19 +243,30 @@ struct PopoverPreviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            categoryStrip
-            firstCycleHint
-            Divider()
-            rowArea
-            Divider()
-            footer
+            if arrowDirection == .up {
+                PopupCalloutArrow(pointing: .up)
+            }
+
+            VStack(spacing: 0) {
+                header
+                popupSearchBar
+                categoryStrip
+                firstCycleHint
+                Divider()
+                rowArea
+                Divider()
+                footer
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(SystemPopoverMaterial().clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.primary.opacity(0.1), lineWidth: 1))
+            .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
+
+            if arrowDirection == .down {
+                PopupCalloutArrow(pointing: .down)
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.primary.opacity(0.1), lineWidth: 1))
-        .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
     }
 
     // MARK: Header
@@ -263,6 +313,46 @@ struct PopoverPreviewView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    // MARK: Inline search bar
+
+    private var popupSearchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(manager.popupSearchQuery.isEmpty ? .secondary.opacity(0.4) : .accentColor)
+
+            if manager.popupSearchQuery.isEmpty {
+                Text("Type to search\u{2026}")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary.opacity(0.35))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(manager.popupSearchQuery)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button {
+                    manager.popupSearchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                .help("Clear search (Esc)")
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(manager.popupSearchQuery.isEmpty
+                    ? Color.primary.opacity(0.03)
+                    : Color.accentColor.opacity(0.06))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
     }
 
     // MARK: Category strip (popup-only — popupTagFilter, never touches main window)
@@ -328,7 +418,8 @@ struct PopoverPreviewView: View {
                         LazyVStack(spacing: 0) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                                 PopoverRow(item: item, index: idx,
-                                           isSelected: manager.selectionArmed && idx == selectedIndex)
+                                           isSelected: manager.selectionArmed && idx == selectedIndex,
+                                           markOrder: manager.markOrder(for: item.id))
                                     .id(item.id)
                                     .contentShape(Rectangle())
                                     .onTapGesture(count: 2) {
@@ -372,12 +463,94 @@ struct PopoverPreviewView: View {
     }
 }
 
+// MARK: - Drag preview
+
+/// Visual badge that appears attached to the cursor during a drag from the popup.
+/// Shows the item's type icon + label for single-item drags, or a stacked chip
+/// with a count badge for multi-item (marked) drags.
+private struct PopoverDragPreview: View {
+    let item:        ClipboardItem
+    let markedCount: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: item.iconName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white)
+
+            if markedCount > 1 {
+                Text("\(markedCount) items")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                // Stack indicator — three offset capsules suggest "multiple"
+                ZStack {
+                    ForEach(0..<min(markedCount, 3), id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.white.opacity(0.3 - Double(i) * 0.08))
+                            .frame(width: 18, height: 14)
+                            .offset(x: CGFloat(i) * 2, y: CGFloat(i) * -2)
+                    }
+                }
+                .frame(width: 24, height: 18)
+            } else {
+                Text(item.typeLabel)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            LinearGradient(
+                colors: markedCount > 1
+                    ? [Color(red: 0.20, green: 0.78, blue: 0.35), Color(red: 0.10, green: 0.60, blue: 0.25)]
+                    : [Color(red: 0.31, green: 0.56, blue: 0.97), Color(red: 0.66, green: 0.33, blue: 0.97)],
+                startPoint: .leading,
+                endPoint: .trailing
+            ),
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
+    }
+}
+
+// MARK: - Callout arrow
+
+private struct PopupCalloutArrow: View {
+    enum Direction { case up, down }
+    let pointing: Direction
+
+    var body: some View {
+        Canvas { ctx, size in
+            let w = size.width
+            let h = size.height
+            var path = Path()
+            switch pointing {
+            case .up:
+                path.move(to:    CGPoint(x: w / 2 - 11, y: h))
+                path.addLine(to: CGPoint(x: w / 2,      y: 1))
+                path.addLine(to: CGPoint(x: w / 2 + 11, y: h))
+            case .down:
+                path.move(to:    CGPoint(x: w / 2 - 11, y: 0))
+                path.addLine(to: CGPoint(x: w / 2,      y: h - 1))
+                path.addLine(to: CGPoint(x: w / 2 + 11, y: 0))
+            }
+            path.closeSubpath()
+            ctx.fill(path, with: .color(Color(.windowBackgroundColor).opacity(0.85)))
+            ctx.stroke(path, with: .color(Color.primary.opacity(0.08)), lineWidth: 1)
+        }
+        .frame(width: 420, height: 11)
+    }
+}
+
 // MARK: - Row
 
 struct PopoverRow: View {
     let item:       ClipboardItem
     let index:      Int
     let isSelected: Bool
+    /// 1-based position in the multi-paste mark queue, or nil if unmarked.
+    let markOrder:  Int?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -385,11 +558,14 @@ struct PopoverRow: View {
             rowContent.padding(.leading, 30)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(isSelected ? Color.accentColor.opacity(0.40) : Color.clear, in: Rectangle())
-        .overlay(alignment: .leading) {
-            if isSelected {
-                Rectangle().fill(Color.accentColor).frame(width: 3)
-            }
+        .background(isSelected ? Color.accentColor : Color.clear, in: Rectangle())
+        .onDrag {
+            // If this item is marked (part of the multi-paste queue), drag ALL
+            // marked items together. Otherwise drag just this item.
+            ClipboardManager.shared.markedItemsDragProvider(fallback: item)
+        } preview: {
+            PopoverDragPreview(item: item,
+                               markedCount: ClipboardManager.shared.markedItemIDs.count)
         }
     }
 
@@ -417,17 +593,35 @@ struct PopoverRow: View {
                     .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
             }
 
+            if item.userNote != nil {
+                Image(systemName: "pencil")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.secondary.opacity(0.6))
+                    .help("This item has a note")
+            }
+
             Spacer()
 
-            if isSelected {
-                HStack(spacing: 4) {
-                    Text("Release").font(.system(size: 9, weight: .medium)).foregroundColor(.accentColor.opacity(0.85))
-                    Text("⌘")
+            if let order = markOrder {
+                // Numbered badge — shows the item's position in the paste queue
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.20, green: 0.78, blue: 0.35))   // system green
+                        .frame(width: 20, height: 20)
+                    Text("\(order)")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white)
+                }
+                .help("Marked #\(order) for multi-paste — hold V to toggle")
+            } else if isSelected {
+                HStack(spacing: 5) {
+                    Text("Release").font(.system(size: 11, weight: .semibold)).foregroundColor(.accentColor)
+                    Text("⌘")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .foregroundColor(.accentColor)
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 3))
-                    Text("to paste").font(.system(size: 9, weight: .medium)).foregroundColor(.accentColor.opacity(0.85))
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(Color.accentColor.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+                    Text("to paste").font(.system(size: 11, weight: .semibold)).foregroundColor(.accentColor)
                 }
             }
         }
@@ -437,7 +631,9 @@ struct PopoverRow: View {
     private var rowContent: some View {
         switch item.content {
         case .text(let str):
-            if let title = item.urlTitle {
+            if item.tags.contains(.table) {
+                PopoverMiniTable(text: str)
+            } else if let title = item.urlTitle {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 12, weight: .medium)).lineLimit(1).foregroundColor(.primary)
                     Text(str).font(.system(size: 10, design: .monospaced)).lineLimit(1).foregroundColor(.primary.opacity(0.6))
@@ -456,7 +652,31 @@ struct PopoverRow: View {
         case .richText(_, plain: let plain):
             Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        case .html(_, plain: let plain):
+        case .html(let html, let plain):
+            if ClipboardManager.htmlContainsTable(html) {
+                HStack(spacing: 6) {
+                    Image(systemName: "tablecells")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.mint)
+                    VStack(alignment: .leading, spacing: 1) {
+                        let headerLine = plain
+                            .components(separatedBy: .newlines)
+                            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                            ?? plain
+                        Text(headerLine)
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1).foregroundColor(.primary)
+                        if let meta = item.metadataSummary {
+                            Text(meta).font(.system(size: 9)).foregroundColor(.secondary).lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        case .rtfd(_, plain: let plain):
             Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .file(let url):
@@ -483,10 +703,15 @@ struct PopoverRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        case .image(let img, _, _):
+        case .image(let img, let data, let dataType):
             VStack(alignment: .leading, spacing: 2) {
-                Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
+                if dataType.rawValue.contains("gif") {
+                    AnimatedImageView(data: data)
+                        .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
+                } else {
+                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
+                }
                 if let summary = item.metadataSummary {
                     Text(summary).font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
                 }
@@ -511,6 +736,54 @@ struct PopoverRow: View {
     }
 }
 
+// MARK: - Mini table preview (CSV / TSV)
+
+private struct PopoverMiniTable: View {
+    let text: String
+
+    private var rows: [[String]] {
+        let lines = text.components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard lines.count >= 2 else { return [] }
+        let delim: Character = text.contains("\t") ? "\t" : ","
+        return lines.prefix(2).map { line in
+            line.split(separator: delim, omittingEmptySubsequences: false)
+                .prefix(4).map { String($0.prefix(14)) }
+        }
+    }
+
+    var body: some View {
+        if rows.isEmpty {
+            Text(text).font(.system(size: 12, design: .monospaced)).lineLimit(2)
+                .foregroundColor(.primary).frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                    HStack(spacing: 3) {
+                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                            Text(cell)
+                                .font(.system(size: 9, design: .monospaced))
+                                .lineLimit(1)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(
+                                    rowIdx == 0
+                                        ? Color.mint.opacity(0.15)
+                                        : Color.primary.opacity(0.05),
+                                    in: RoundedRectangle(cornerRadius: 3)
+                                )
+                                .frame(maxWidth: 64, alignment: .leading)
+                        }
+                        if row.count > 4 {
+                            Text("…").font(.system(size: 9)).foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 // MARK: - Async file thumbnail (loads icon/image off main thread)
 
 private struct AsyncFileThumbnail: View {
@@ -532,7 +805,7 @@ private struct AsyncFileThumbnail: View {
             let loaded = await Task.detached(priority: .utility) { () -> NSImage? in
                 if FileKindDetector.isImageFile(url),
                    let img = NSImage(contentsOf: url) { return img }
-                return NSWorkspace.shared.icon(forFile: url.path)
+                return ClipenIconCache.shared.fileIcon(for: url)
             }.value
             image = loaded
         }

@@ -92,6 +92,20 @@ enum FileKindDetector {
         isVideoFile(url) || isAudioFile(url)
     }
 
+    /// 3D model files SceneKit can load via SCNScene (directly or through its
+    /// Model I/O bridge). Routed to the SceneKit preview so they render as a
+    /// rotatable 3D scene instead of a generic file icon.
+    nonisolated static func is3DModelFile(_ url: URL) -> Bool {
+        switch fileExtension(url) {
+        case "usdz", "usd", "usda", "usdc", "obj", "stl", "ply",
+             "dae", "abc", "scn", "fbx", "gltf", "glb",
+             "blend", "dwg", "dxf":
+            return true
+        default:
+            return false
+        }
+    }
+
     nonisolated static func isDocumentFile(_ url: URL) -> Bool {
         switch fileExtension(url) {
         case "ppt", "pptx", "pps", "ppsx", "pot", "potx",
@@ -119,15 +133,6 @@ enum FileKindDetector {
     nonisolated static func isDesignFile(_ url: URL) -> Bool {
         switch fileExtension(url) {
         case "psd", "ai", "sketch", "fig", "xd", "indd":
-            return true
-        default:
-            return false
-        }
-    }
-
-    nonisolated static func is3DFile(_ url: URL) -> Bool {
-        switch fileExtension(url) {
-        case "obj", "fbx", "stl", "dae", "blend", "dwg", "dxf", "usdz":
             return true
         default:
             return false

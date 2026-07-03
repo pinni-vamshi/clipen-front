@@ -10,12 +10,11 @@
 		B10000000000000000000001 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* AuthManager.swift */; };
 		B10000000000000000000002 /* ClipboardManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ClipboardManager.swift */; };
 		B10000000000000000000003 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* Color+Hex.swift */; };
-		B10000000000000000000004 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* ContentView.swift */; };
 		B10000000000000000000005 /* FileSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* FileSnapshotStore.swift */; };
 		B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ItemPreviewPanel.swift */; };
 		B10000000000000000000007 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Keychain.swift */; };
 		B10000000000000000000008 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* MainWindowView.swift */; };
-		B10000000000000000000009 /* MenuBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* MenuBarView.swift */; };
+		B10000000000000000000024 /* QuickClipPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* QuickClipPanel.swift */; };
 		B1000000000000000000000A /* pasteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* pasteApp.swift */; };
 		B1000000000000000000000B /* PreviewOverlayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000B /* PreviewOverlayWindow.swift */; };
 		B1000000000000000000000C /* TransformPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000C /* TransformPanel.swift */; };
@@ -48,12 +47,11 @@
 		A10000000000000000000001 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		A10000000000000000000002 /* ClipboardManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardManager.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
-		A10000000000000000000004 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A10000000000000000000005 /* FileSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSnapshotStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* ItemPreviewPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemPreviewPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000007 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		A10000000000000000000008 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
-		A10000000000000000000009 /* MenuBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarView.swift; sourceTree = "<group>"; };
+		A10000000000000000000024 /* QuickClipPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickClipPanel.swift; sourceTree = "<group>"; };
 		A1000000000000000000000A /* pasteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = pasteApp.swift; sourceTree = "<group>"; };
 		A1000000000000000000000B /* PreviewOverlayWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewOverlayWindow.swift; sourceTree = "<group>"; };
 		A1000000000000000000000C /* TransformPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransformPanel.swift; sourceTree = "<group>"; };
@@ -150,12 +148,11 @@
 				A10000000000000000000001 /* AuthManager.swift */,
 				A10000000000000000000002 /* ClipboardManager.swift */,
 				A10000000000000000000003 /* Color+Hex.swift */,
-				A10000000000000000000004 /* ContentView.swift */,
 				A10000000000000000000005 /* FileSnapshotStore.swift */,
 				A10000000000000000000006 /* ItemPreviewPanel.swift */,
 				A10000000000000000000007 /* Keychain.swift */,
 				A10000000000000000000008 /* MainWindowView.swift */,
-				A10000000000000000000009 /* MenuBarView.swift */,
+				A10000000000000000000024 /* QuickClipPanel.swift */,
 				A1000000000000000000000A /* pasteApp.swift */,
 				A1000000000000000000000B /* PreviewOverlayWindow.swift */,
 				A10000000000000000000020 /* SearchOverlayWindow.swift */,
@@ -249,12 +246,11 @@
 				B10000000000000000000001 /* AuthManager.swift in Sources */,
 				B10000000000000000000002 /* ClipboardManager.swift in Sources */,
 				B10000000000000000000003 /* Color+Hex.swift in Sources */,
-				B10000000000000000000004 /* ContentView.swift in Sources */,
 				B10000000000000000000005 /* FileSnapshotStore.swift in Sources */,
 				B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */,
 				B10000000000000000000007 /* Keychain.swift in Sources */,
 				B10000000000000000000008 /* MainWindowView.swift in Sources */,
-				B10000000000000000000009 /* MenuBarView.swift in Sources */,
+				B10000000000000000000024 /* QuickClipPanel.swift in Sources */,
 				B1000000000000000000000A /* pasteApp.swift in Sources */,
 				B1000000000000000000000B /* PreviewOverlayWindow.swift in Sources */,
 				B10000000000000000000020 /* SearchOverlayWindow.swift in Sources */,
@@ -412,7 +408,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 76;
+				CURRENT_PROJECT_VERSION = 90;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -429,7 +425,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.79;
+				MARKETING_VERSION = 1.0.93;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -450,7 +446,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 76;
+				CURRENT_PROJECT_VERSION = 90;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -467,7 +463,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.79;
+				MARKETING_VERSION = 1.0.93;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

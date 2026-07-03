@@ -30,7 +30,7 @@ enum ToolRegistry {
             }
             return FileTools.all
 
-        case .text, .richText, .html:
+        case .text, .richText, .rtfd, .html:
             return TextTools.all + FileTools.all
 
         case .svg:

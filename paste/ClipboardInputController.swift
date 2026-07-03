@@ -33,6 +33,7 @@ final class ClipboardInputController: IMKInputController {
         guard rect != .zero, rect.origin.x.isFinite, rect.origin.y.isFinite else { return }
         DispatchQueue.main.async {
             ClipboardManager.shared.imkCaretRect = rect
+            ClipboardManager.shared.imkCaretRectTimestamp = Date()
         }
     }
 }

@@ -33,6 +33,7 @@ class TransformPanel: NSPanel {
             switch item.content {
             case .text(let s):               return s
             case .richText(_, plain: let s): return s
+            case .rtfd(_, plain: let s):     return s
             case .html(_, plain: let s):     return s
             case .file(let url):             return url.pathExtension.lowercased() == "pdf" ? nil : url.path
             case .files(let urls):           return urls.count == 1 ? urls[0].path : nil
@@ -231,7 +232,7 @@ struct TransformView: View {
             outerHeader
             Divider()
             if let label = item.detectedType.badgeLabel {
-                detectedBadge(label: label)
+                detectedBadge(type: item.detectedType, label: label)
                 Divider()
             }
             // ── Middle: the tool list is ALWAYS shown.  When the user has
@@ -250,7 +251,7 @@ struct TransformView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(SystemPopoverMaterial().clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.primary.opacity(0.1), lineWidth: 1)
@@ -279,9 +280,9 @@ struct TransformView: View {
         .padding(.vertical, 9)
     }
 
-    private func detectedBadge(label: String) -> some View {
+    private func detectedBadge(type: ClipboardContentType, label: String) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: item.detectedType.sfIcon)
+            Image(systemName: type.sfIcon)
                 .font(.system(size: 10, weight: .semibold))
             Text(label)
                 .font(.system(size: 10, weight: .semibold))
@@ -290,10 +291,10 @@ struct TransformView: View {
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
         }
-        .foregroundColor(item.detectedType.badgeColor)
+        .foregroundColor(type.badgeColor)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(item.detectedType.badgeColor.opacity(0.12))
+        .background(type.badgeColor.opacity(0.12))
     }
 
     // MARK: - Middle: tool list (used when not in page-range mode)

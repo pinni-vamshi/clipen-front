@@ -19,7 +19,7 @@ enum ContentDetector {
             return .image
         case .html:
             return .html
-        case .richText:
+        case .richText, .rtfd:
             return .richText
         case .file(let url):
             return FileKindDetector.isImageFile(url) ? .image : .file

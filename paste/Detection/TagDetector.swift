@@ -29,7 +29,9 @@ enum TagDetector {
         case .blob:               return .blob
 
         case .image(_, _, let dataType):
-            return dataType.rawValue.localizedCaseInsensitiveContains("pdf") ? .pdf : .image
+            if dataType.rawValue.localizedCaseInsensitiveContains("pdf") { return .pdf }
+            if dataType.rawValue.localizedCaseInsensitiveContains("gif") { return .gif }
+            return .image
 
         case .file(let url):
             return fileTag(for: url)
@@ -42,6 +44,9 @@ enum TagDetector {
 
         case .richText(_, plain: let plain):
             return textTag(for: plain, color: nil) ?? .richText
+
+        case .rtfd(_, plain: let plain):
+            return textTag(for: plain, color: nil) ?? .table
 
         case .text(let s):
             // A bare path to a real file on disk is tagged by what it points to.
@@ -77,11 +82,18 @@ enum TagDetector {
         case "html", "htm":     return .html
         default: break
         }
+        if url.pathExtension.lowercased() == "gif" { return .gif }
         if FileKindDetector.isImageFile(url)     { return .image }
         if FileKindDetector.isVideoFile(url)     { return .video }
         if FileKindDetector.isAudioFile(url)     { return .audio }
+        if FileKindDetector.is3DModelFile(url)   { return .model3D }
+        if FileKindDetector.isDesignFile(url)    { return .design }
+        if FileKindDetector.isFontFile(url)      { return .font }
+        if FileKindDetector.isArchiveFile(url)   { return .archive }
+        if FileKindDetector.isInstallerFile(url) { return .installer }
         if FileKindDetector.isCodeFile(url)      { return .code }
         if FileKindDetector.isPlainTextFile(url) { return .text }
+        if FileKindDetector.isDocumentFile(url)  { return .document }
         return .file
     }
 
@@ -90,9 +102,15 @@ enum TagDetector {
     private static func filesTag(for urls: [URL]) -> ClipboardTag {
         guard !urls.isEmpty else { return .files }
         if urls.allSatisfy({ $0.pathExtension.lowercased() == "pdf" }) { return .pdf }
+        if urls.allSatisfy({ $0.pathExtension.lowercased() == "gif" }) { return .gif }
         if urls.allSatisfy(FileKindDetector.isImageFile)     { return .image }
         if urls.allSatisfy(FileKindDetector.isVideoFile)     { return .video }
         if urls.allSatisfy(FileKindDetector.isAudioFile)     { return .audio }
+        if urls.allSatisfy(FileKindDetector.is3DModelFile)   { return .model3D }
+        if urls.allSatisfy(FileKindDetector.isDesignFile)    { return .design }
+        if urls.allSatisfy(FileKindDetector.isFontFile)      { return .font }
+        if urls.allSatisfy(FileKindDetector.isArchiveFile)   { return .archive }
+        if urls.allSatisfy(FileKindDetector.isInstallerFile) { return .installer }
         if urls.allSatisfy(FileKindDetector.isCodeFile)      { return .code }
         if urls.allSatisfy(FileKindDetector.isPlainTextFile) { return .text }
         return .files

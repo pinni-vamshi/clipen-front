@@ -26,6 +26,7 @@ struct MainWindowView: View {
     @State private var hoveredID: UUID?      = nil
     @State private var mainSelectedID: UUID? = nil
     @State private var showTutorial          = false
+    @State private var showResetConfirm      = false
     @AppStorage("hasSkippedAccessibility") private var hasSkippedAccessibility = false
     @AppStorage("hasSeenTutorial")         private var hasSeenTutorial         = false
 
@@ -74,6 +75,12 @@ struct MainWindowView: View {
                                     set: { if !$0 { auth.clearError() } })) {
             Button("OK", role: .cancel) { auth.clearError() }
         } message: { Text(auth.lastError ?? "") }
+        .alert("Reset to Factory Defaults?", isPresented: $showResetConfirm) {
+            Button("Reset Everything", role: .destructive) { performFactoryReset() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will erase all clipboard history, settings, and saved data. The app will quit so changes take effect on next launch.")
+        }
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button { showTutorial = true } label: {
@@ -283,9 +290,41 @@ struct MainWindowView: View {
                     Spacer()
                 }
                 .padding(.horizontal, 12).padding(.vertical, 10)
+
+                cardDivider()
+
+                HStack {
+                    Spacer()
+                    Button("Reset to Factory Defaults…") { showResetConfirm = true }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color(hex: "#FF5555"))
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Color(hex: "#FF5555").opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(hex: "#FF5555").opacity(0.3), lineWidth: 1))
+                    Spacer()
+                }
+                .padding(.horizontal, 12).padding(.vertical, 10)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 14)
+    }
+
+    private func performFactoryReset() {
+        // Wipe clipboard history
+        manager.clearAll()
+
+        // Wipe all UserDefaults for this app
+        if let bundleID = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+            UserDefaults.standard.synchronize()
+        }
+
+        // Wipe Keychain (JWT + any stored secrets)
+        Keychain.wipeAll()
+
+        // Quit so next launch feels like a fresh install
+        NSApp.terminate(nil)
     }
 
     private func linkButton(_ title: String, _ urlString: String) -> some View {
@@ -626,6 +665,7 @@ struct DarkItemRow: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(isHovered ? Color(hex: "#1E1E1E") : (isSelected ? Color.accentDim : Color.clear))
         .contentShape(Rectangle())
+        .onDrag { item.makeItemProvider() }
     }
 
     private var rowHeader: some View {
@@ -701,6 +741,9 @@ struct DarkItemRow: View {
         case .html(_, plain: let plain):
             Text(plain).font(.system(size: 13)).lineLimit(2)
                 .foregroundColor(isSelected ? .white : Color(hex: "#CCCCCC"))
+        case .rtfd(_, plain: let plain):
+            Text(plain).font(.system(size: 13)).lineLimit(2)
+                .foregroundColor(isSelected ? .white : Color(hex: "#CCCCCC"))
         case .file(let url):
             HStack(spacing: 8) {
                 fileThumbnail(url, size: 32)
@@ -749,11 +792,10 @@ struct DarkItemRow: View {
 
     @ViewBuilder
     private func fileThumbnail(_ url: URL, size: CGFloat) -> some View {
-        if FileKindDetector.isImageFile(url), let image = NSImage(contentsOf: url) {
-            Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-                .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 5))
+        if FileKindDetector.isImageFile(url) {
+            MainWindowAsyncThumbnail(url: url, size: size)
         } else {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 18, height: 18)
+            Image(nsImage: ClipenIconCache.shared.fileIcon(for: url)).resizable().frame(width: 18, height: 18)
         }
     }
 
@@ -768,16 +810,39 @@ struct DarkItemRow: View {
 
 // MARK: - App source / destination badge
 
+/// Loads a local image file asynchronously so large images (RAW, TIFF, etc.)
+/// don't block the main-thread scroll view in the main window.
+private struct MainWindowAsyncThumbnail: View {
+    let url:  URL
+    let size: CGFloat
+    @State private var image: NSImage? = nil
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 5))
+            } else {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: size, height: size)
+            }
+        }
+        .task(id: url) {
+            let loaded = await Task.detached(priority: .utility) { NSImage(contentsOf: url) }.value
+            image = loaded
+        }
+    }
+}
+
 private struct AppBadge: View {
     let name:     String
     let bundleID: String?
     let arrow:    String?
 
     private var appIcon: NSImage? {
-        guard let bid = bundleID,
-              let path = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bid)?.path
-        else { return nil }
-        return NSWorkspace.shared.icon(forFile: path)
+        guard let bid = bundleID else { return nil }
+        return ClipenIconCache.shared.appIcon(forBundleID: bid)
     }
 
     var body: some View {
@@ -798,9 +863,10 @@ private struct AppBadge: View {
 // MARK: - Onboarding (animated empty state)
 
 struct OnboardingView: View {
-    @State private var step   = 0
-    @State private var fade   = true
-    @State private var bounce = false
+    @State private var step      = 0
+    @State private var fade      = true
+    @State private var bounce    = false
+    @State private var cycleTimer: Timer? = nil
 
     private let steps: [(icon: String, key: String, title: String, sub: String)] = [
         ("doc.on.clipboard.fill", "⌘C",        "Copy anything",        "Copy text, images, files or URLs anywhere on your Mac"),
@@ -852,20 +918,26 @@ struct OnboardingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { startCycle() }
+        .onDisappear {
+            cycleTimer?.invalidate()
+            cycleTimer = nil
+        }
     }
 
     private func startCycle() {
-        Timer.scheduledTimer(withTimeInterval: 2.8, repeats: true) { _ in
+        cycleTimer?.invalidate()
+        cycleTimer = Timer.scheduledTimer(withTimeInterval: 2.8, repeats: true) { _ in
             withAnimation { fade = false }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
                 step = (step + 1) % steps.count
                 withAnimation { fade = true }
                 bounce = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { bounce = false }
+                }
             }
+            if let t = cycleTimer { RunLoop.main.add(t, forMode: .common) }
         }
     }
-}
 
 // MARK: - Tutorial sheet
 
@@ -894,6 +966,7 @@ struct TutorialSheet: View {
             case .text(let s):               return s.trimmingCharacters(in: .whitespacesAndNewlines)
             case .richText(_, plain: let p): return p.trimmingCharacters(in: .whitespacesAndNewlines)
             case .html(_, plain: let p):     return p.trimmingCharacters(in: .whitespacesAndNewlines)
+            case .rtfd(_, plain: let p):     return p.trimmingCharacters(in: .whitespacesAndNewlines)
             default:                         return nil
             }
         })
