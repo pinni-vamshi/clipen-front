@@ -2,6 +2,7 @@ import Foundation
 
 enum TextTools {
     static let all: [ClipboardTool] = [
+        editTool,
         make("text.title-case", icon: "textformat", label: "Title Case", group: "CASE") {
             guard isPlainText($0) else { return nil }
             return $0.titleCased
@@ -73,13 +74,204 @@ enum TextTools {
                 .joined()
             return out == $0 ? nil : out
         },
+    ] + aiTools
+
+    // MARK: - Apple Intelligence (on-device Foundation Models)
+    //
+    // Every tool here checks AIService.isModelAvailable() in its preview —
+    // returning nil hides it from the list on macOS <26, with Apple
+    // Intelligence off, or on an ineligible device, same as any other
+    // not-applicable tool. Running the model itself is async-only (it's
+    // real on-device inference, not instant like the string tools above).
+
+    private static let aiTools: [ClipboardTool] = [
+        makeAI("ai.summarize", icon: "text.line.first.and.arrowtriangle.forward", label: "Summarize", group: "AI",
+               minLength: AIService.minSummarizableLength) { text in
+            await AIService.transform(
+                instructions: "You are a concise summarizer. Summarize the given text in 2-4 sentences. Output ONLY the summary, no preamble.",
+                text: text
+            )
+        },
+        makeAI("ai.key-points", icon: "list.bullet.rectangle", label: "Extract Key Points", group: "AI",
+               minLength: AIService.minSummarizableLength) { text in
+            await AIService.transform(
+                instructions: "Extract the key points from the given text as a short bulleted list (max 6 bullets, each one line). Output ONLY the list, no preamble.",
+                text: text
+            )
+        },
+        makeAI("ai.proofread", icon: "checkmark.seal", label: "Proofread & Fix Grammar", group: "AI",
+               minLength: 1) { text in
+            await AIService.transform(
+                instructions: "You are a careful proofreader. Fix spelling, grammar, and punctuation in the given text WITHOUT changing its meaning, tone, or structure. This is a CORRECTION task: produce a corrected version of the SAME text, not a response, reply, or answer to it. Output ONLY the corrected text, no preamble.",
+                text: text
+            )
+        },
+        makeAI("ai.rewrite-professional", icon: "briefcase", label: "Rewrite Professionally", group: "AI",
+               minLength: 1) { text in
+            await AIService.transform(
+                instructions: "Rewrite the given text in a clear, professional tone suitable for work communication, keeping the same meaning and roughly the same length. This is a REWRITE task: produce a new version of the SAME text, not a response, reply, or answer to it. Output ONLY the rewritten text, no preamble.",
+                text: text
+            )
+        },
+        makeAI("ai.rewrite-friendly", icon: "face.smiling", label: "Rewrite Casually", group: "AI",
+               minLength: 1) { text in
+            await AIService.transform(
+                instructions: "Rewrite the given text in a warm, casual, friendly tone, keeping the same meaning and roughly the same length. This is a REWRITE task: produce a new version of the SAME text, not a response, reply, or answer to it. Output ONLY the rewritten text, no preamble.",
+                text: text
+            )
+        },
+        makeAI("ai.explain", icon: "questionmark.bubble", label: "Explain This", group: "AI",
+               minLength: 1) { text in
+            await AIService.transform(
+                instructions: "Explain the given text simply and clearly, as if to someone unfamiliar with the topic. Keep it under 5 sentences. Output ONLY the explanation, no preamble.",
+                text: text
+            )
+        },
+        // "Convert to JSON/Table" only for UNSTRUCTURED text — text that's
+        // already valid JSON has its own deterministic Pretty/Minify tools,
+        // and text that's already comma/tab-delimited has the deterministic
+        // CSV/TSV-to-Markdown tool. Offering the AI version there too would
+        // be a second, redundant "table" option for the same input.
+        ClipboardTool(
+            id: "ai.convert-json", icon: "curlybraces", label: "Convert to JSON (AI)", group: "AI",
+            preview: { item in
+                guard AIService.isModelAvailable(),
+                      let text = input(for: item), AIService.fits(text),
+                      text.count >= 20, !isJSON(text) else { return nil }
+                return "Convert to JSON (AI)"
+            },
+            runAsync: { item in
+                guard let text = input(for: item), AIService.fits(text) else { return nil }
+                guard let result = await AIService.transform(
+                    instructions: "Convert the given text into well-structured JSON, inferring reasonable field names from its content. Output ONLY valid JSON, no markdown code fences, no preamble.",
+                    text: text
+                ) else {
+                    return .status("Apple Intelligence couldn't convert this to JSON.")
+                }
+                return .text(result)
+            }
+        ),
+        ClipboardTool(
+            id: "ai.convert-table", icon: "tablecells", label: "Convert to Table (AI)", group: "AI",
+            preview: { item in
+                guard AIService.isModelAvailable(),
+                      let text = input(for: item), AIService.fits(text),
+                      text.count >= 20, delimitedTableToMarkdown(text) == nil else { return nil }
+                return "Convert to a Markdown table (AI)"
+            },
+            runAsync: { item in
+                guard let text = input(for: item), AIService.fits(text) else { return nil }
+                guard let result = await AIService.transform(
+                    instructions: "Convert the given text into a well-structured Markdown table, inferring reasonable column headers from its content. Output ONLY the Markdown table, no preamble.",
+                    text: text
+                ) else {
+                    return .status("Apple Intelligence couldn't convert this to a table.")
+                }
+                return .text(result)
+            }
+        ),
+        // Interactive — like "Paste Specific Pages" for PDFs, runAsync here
+        // is a placeholder that never actually runs. ClipboardManager
+        // intercepts this exact tool ID in commitPaste and swaps the
+        // transform panel into an inline language picker instead: one entry
+        // point, all languages shown together in ONE menu the user searches/
+        // arrows through, translate-and-paste on Enter. (Earlier version of
+        // this tool listed all 20 languages as separate rows in the main
+        // transform list — wrong shape: that's 20 competing entries, not a
+        // single "Translate" action with a language choice inside it.)
+        ClipboardTool(
+            id: "ai.translate", icon: "character.bubble", label: "Translate", group: "AI",
+            preview: { item in
+                guard AIService.isModelAvailable(),
+                      let text = input(for: item), AIService.fits(text) else { return nil }
+                return "Pick a language…"
+            },
+            runAsync: { _ in .status("Pick a language in the panel.") }
+        ),
     ]
+
+    /// Every language the picker offers, in this order. (name, NLLanguage code)
+    static let supportedTranslationLanguages: [(name: String, code: String)] = [
+        ("English", "en"), ("Spanish", "es"), ("French", "fr"), ("German", "de"),
+        ("Italian", "it"), ("Portuguese", "pt"), ("Dutch", "nl"), ("Russian", "ru"),
+        ("Chinese (Simplified)", "zh-Hans"), ("Japanese", "ja"), ("Korean", "ko"),
+        ("Arabic", "ar"), ("Hindi", "hi"), ("Turkish", "tr"), ("Vietnamese", "vi"),
+        ("Polish", "pl"), ("Swedish", "sv"), ("Thai", "th"), ("Indonesian", "id"),
+        ("Greek", "el"),
+    ]
+
+    private static func makeAI(
+        _ id: String,
+        icon: String,
+        label: String,
+        group: String,
+        minLength: Int,
+        apply: @escaping (String) async -> String?
+    ) -> ClipboardTool {
+        ClipboardTool(
+            id: id,
+            icon: icon,
+            label: label,
+            group: group,
+            preview: { item in
+                guard AIService.isModelAvailable(),
+                      let text = input(for: item), AIService.fits(text),
+                      text.count >= minLength else { return nil }
+                return label
+            },
+            runAsync: { item in
+                guard let text = input(for: item), AIService.fits(text) else { return nil }
+                guard let result = await apply(text) else {
+                    return .status("Apple Intelligence couldn't process this.")
+                }
+                return .text(result)
+            }
+        )
+    }
+
+    /// Opens the reference (Quick Clip) panel with the cursor already in its
+    /// content editor, instead of transforming the text itself. The transform
+    /// popup is deliberately non-activating (so it can float over any app
+    /// without stealing focus) — it can't hold real keyboard focus, so a true
+    /// editable text box has to live in a window that can, which the
+    /// reference panel already is. Offered for any content with a plain-text
+    /// representation (text/richText/html/rtfd, including URLs — those are
+    /// just `.text` under the hood); table-shaped content gets the reference
+    /// panel's cell-grid editor instead of a plain box automatically.
+    private static let editTool = ClipboardTool(
+        id: "text.edit",
+        icon: "square.and.pencil",
+        label: "Edit",
+        group: "EDIT",
+        preview: { item in
+            guard ClipboardManager.editablePlainText(for: item) != nil else { return nil }
+            return "Edit in reference panel…"
+        },
+        runSync: { item in
+            guard ClipboardManager.editablePlainText(for: item) != nil else { return nil }
+            AuthManager.shared.registerToolUsage(toolID: "text.edit")
+            ClipboardManager.shared.openQuickClipPanel(for: item, focusContent: true)
+            return .status("Opened in reference panel for editing.")
+        },
+        runAsync: { item in
+            guard ClipboardManager.editablePlainText(for: item) != nil else { return nil }
+            AuthManager.shared.registerToolUsage(toolID: "text.edit")
+            await MainActor.run {
+                ClipboardManager.shared.openQuickClipPanel(for: item, focusContent: true)
+            }
+            return .status("Opened in reference panel for editing.")
+        }
+    )
 
     static func input(for item: ClipboardItem) -> String? {
         switch item.content {
         case .text(let s):               return s
         case .richText(_, plain: let s): return s
         case .html(_, plain: let s):     return s
+        // RTFD (Notes/TextEdit with attachments) carries the same plain-text
+        // representation as richText — omitting it here silently gave RTFD
+        // items ZERO text tools (no case/JSON/trim…), only the Edit tool.
+        case .rtfd(_, plain: let s):     return s
         case .file(let url) where url.pathExtension.lowercased() != "pdf":
             return FileKindDetector.readableText(from: url)
         default:

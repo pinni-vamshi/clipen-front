@@ -38,8 +38,19 @@ enum MediaTools {
 
 enum MediaService {
     static func mediaURL(for item: ClipboardItem) -> URL? {
-        guard case .file(let url) = item.content,
-              FileKindDetector.isMediaFile(url),
+        let url: URL
+        switch item.content {
+        case .file(let u):
+            url = u
+        // A one-element files-list IS a single file — the registry routes it
+        // to MediaTools, but this resolver only accepted `.file`, so a video
+        // captured as `.files([url])` showed ZERO tools.
+        case .files(let urls) where urls.count == 1:
+            url = urls[0]
+        default:
+            return nil
+        }
+        guard FileKindDetector.isMediaFile(url),
               FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
     }
@@ -106,7 +117,7 @@ enum MediaService {
                         return
                     }
                     continuation.resume(returning: .item(
-                        ClipboardItem(content: .image(image, rawData: pngData, dataType: .init("public.png"))),
+                        ClipboardItem(content: ClipboardContent.imageContent(rawData: pngData, dataType: .init("public.png"), fallback: image)!),
                         message: "Created first frame image."
                     ))
                 } catch {

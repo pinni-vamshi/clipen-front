@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PDFKit
 
 enum ToolRegistry {
     static func tools(for item: ClipboardItem) -> [ClipboardTool] {
@@ -23,10 +24,19 @@ enum ToolRegistry {
             return FileTools.all
 
         case .files(let urls):
-            if let first = urls.first,
-               urls.count == 1,
-               (FileKindDetector.isVideoFile(first) || FileKindDetector.isAudioFile(first)) {
-                return MediaTools.all
+            // A one-element files-list is functionally a single file — give it
+            // the same specialized pool a `.file` capture of that URL would
+            // get (media/PDF/image), not just the generic file tools.
+            if urls.count == 1, let first = urls.first {
+                if FileKindDetector.isVideoFile(first) || FileKindDetector.isAudioFile(first) {
+                    return MediaTools.all
+                }
+                if first.pathExtension.lowercased() == "pdf" {
+                    return PDFTools.all
+                }
+                if FileKindDetector.isImageFile(first) {
+                    return ImageTools.all + FileTools.all
+                }
             }
             return FileTools.all
 
@@ -101,11 +111,11 @@ enum ToolRegistry {
                !AuthManager.shared.pdfTextExtract {
                 return false
             }
-            if tool.preview(item) != nil { return true }
-            if let runSync = tool.runSync {
-                if case .status = runSync(item) { return false }
-            }
-            return false
+            // A tool is applicable iff it produces a preview for this item.
+            // (This used to ALSO execute runSync(item) when preview was nil,
+            // discard the output, and return false on every path anyway —
+            // running full transforms just to throw the result away.)
+            return tool.preview(item) != nil
         }
         let catalogOrder = Dictionary(uniqueKeysWithValues: tools.enumerated().map { ($1.id, $0) })
         return filtered.sorted { lhs, rhs in

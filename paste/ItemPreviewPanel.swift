@@ -8,71 +8,180 @@ import SwiftUI
 import WebKit
 @preconcurrency import PDFKit
 
-final class ItemPreviewPanel: NSPanel {
-    private var hostingView: NSHostingView<AnyView>?
+/// Real system NSPopover, anchored through an invisible helper panel — see the
+/// header comment on PreviewOverlayWindow for why this indirection exists: an
+/// NSPopover can only anchor to a view inside one of THIS app's own windows,
+/// never to a rect inside another app's window, so an invisible 1×1
+/// non-activating panel is positioned next to the ring popup and the popover
+/// anchors to a view inside that. Gets the same benefit as the ring popup:
+/// AppKit's own rounded box, vibrancy, and native pop-in animation for free,
+/// instead of the hand-drawn approximation this used to be.
+final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
+    private let anchorPanel: NSPanel
+    private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+    private let popover = NSPopover()
+    /// The anchor strip's frame for the CURRENT popover session, nil when
+    /// hidden. Placed once per session and never moved while shown — see
+    /// present() for why that invariant matters.
+    private var shownStrip: NSRect? = nil
+    /// True from show until hide. Closes the race where hide() lands while
+    /// the popover is still ANIMATING IN — popover.isShown is false then, so
+    /// the performClose was skipped and the preview finished appearing as an
+    /// orphan after the popup was already gone. popoverDidShow checks this
+    /// and immediately tears down any presentation nobody wants anymore.
+    private var wantsVisible = false
 
-    init() {
-        super.init(
+    /// `wantsVisible` is ANDed in because NSPopover's close is animated:
+    /// popover.isShown keeps returning true until the close animation
+    /// finishes, ~0.2s after hide() was called. Guards that ran in that
+    /// window ("is the preview open? refresh it") saw stale true and
+    /// re-showed a panel that was being dismissed — the "preview reappears
+    /// right after Esc closes everything" bug. Intent flips instantly;
+    /// isShown alone doesn't.
+    var isVisible: Bool { wantsVisible && popover.isShown }
+    /// Actual on-screen content rect (not the popover window's frame, which
+    /// includes AppKit's arrow/shadow chrome) — used by outside-click
+    /// dismissal to know whether a click landed inside this panel.
+    var frame: NSRect {
+        if let view = popover.contentViewController?.view, let win = view.window {
+            return win.convertToScreen(view.convert(view.bounds, to: nil))
+        }
+        return anchorPanel.frame
+    }
+
+    func popoverDidShow(_ notification: Notification) {
+        if !wantsVisible {
+            popover.performClose(nil)
+            anchorPanel.orderOut(nil)
+            return
+        }
+        // Defensive feedback loop: this panel is shared between two owners —
+        // the main ring popup's selection preview, and a QuickClipPanel's
+        // "similar items" hover preview. By the time the show animation
+        // actually finishes, re-verify one of those owners is still around.
+        // If neither is, whatever asked for this show() has since vanished
+        // (a race between show() firing and its owner closing mid-animation)
+        // and this would otherwise be left floating with nothing showing it.
+        let mainPopupVisible = ClipboardManager.shared.previewWindow.isVisible
+        let quickClipVisible = ClipboardManager.shared.hasVisibleQuickClipPanel
+        if !mainPopupVisible && !quickClipVisible {
+            popover.performClose(nil)
+            anchorPanel.orderOut(nil)
+        }
+    }
+
+    override init() {
+        anchorPanel = NSPanel(
             contentRect: .zero,
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
-        level = .popUpMenu
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = true
-        ignoresMouseEvents = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        anchorPanel.isOpaque = false
+        anchorPanel.backgroundColor = .clear
+        anchorPanel.hasShadow = false
+        anchorPanel.ignoresMouseEvents = true
+        anchorPanel.level = .popUpMenu
+        anchorPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        anchorPanel.contentView = anchorView
+
+        super.init()
+
+        popover.behavior = .applicationDefined
+        popover.animates = true
+        popover.delegate = self
     }
 
-    func show(for item: ClipboardItem, near popupFrame: NSRect) {
-        let view = AnyView(ItemPreviewView(item: item))
-        if let hostingView {
-            hostingView.rootView = view
+    func show(for item: ClipboardItem, near popupFrame: NSRect, anchorPoint: NSPoint? = nil) {
+        present(AnyView(ItemPreviewView(item: item)), width: 520, height: 420,
+                near: popupFrame, anchorPoint: anchorPoint)
+    }
+
+    /// Preview several marked items at once, stacked top-to-bottom in a single
+    /// scrolling panel. Used when the user presses Space with a multi-paste
+    /// queue active — one panel, scroll to see every marked item in order.
+    func show(forItems items: [ClipboardItem], near popupFrame: NSRect, anchorPoint: NSPoint? = nil) {
+        guard !items.isEmpty else { hide(); return }
+        present(AnyView(MultiItemPreviewView(items: items)), width: 520, height: 520,
+                near: popupFrame, anchorPoint: anchorPoint)
+    }
+
+    private func present(_ view: AnyView, width w: CGFloat, height h: CGFloat,
+                         near popupFrame: NSRect, anchorPoint: NSPoint?) {
+        let screen = NSScreen.main?.visibleFrame ?? .zero
+        let preferredRightX = popupFrame.maxX + 10
+        let rightFits = preferredRightX + w <= screen.maxX
+        let leftFits = popupFrame.minX - w - 10 >= screen.minX + 10
+        let placeRight = rightFits || !leftFits
+
+        popover.contentSize = NSSize(width: w, height: h)
+        if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
+            hostingController.rootView = view
         } else {
-            let hostingView = NSHostingView(rootView: view)
-            contentView = hostingView
-            self.hostingView = hostingView
+            popover.contentViewController = NSHostingController(rootView: view)
         }
 
-        let w: CGFloat = 520
-        let h: CGFloat = 420
-        let screen = NSScreen.main?.visibleFrame ?? .zero
-        var x = popupFrame.maxX + 10
-        if x + w > screen.maxX { x = popupFrame.minX - w - 10 }
-        x = max(screen.minX + 10, x)
-        // Align preview's top edge to popup's top edge (instead of vertical centering)
-        // so content starts from a stable top position while cycling items.
-        let y = max(screen.minY + 10, min(popupFrame.maxY - h, screen.maxY - h - 10))
+        // Stationary 1pt anchor strip spanning the source frame's full height,
+        // placed ONCE per popover session and never moved while shown. The
+        // previous approach — teleporting a 1×1 anchor window to the new row
+        // per cycle and re-calling show() — broke AppKit's popover attachment
+        // and replayed the full close+open animation on every keystroke.
+        // Row tracking happens via `positioningRect` inside the fixed strip.
+        // When the SOURCE frame itself changes (preview invoked from the
+        // popup vs the transform picker vs a Quick Clip panel), the strip
+        // must genuinely move, so that rare case is a real re-present.
+        let anchorY = anchorPoint?.y ?? popupFrame.midY
+        let stripHeight = max(1, popupFrame.height)
+        let desiredStrip = NSRect(x: placeRight ? popupFrame.maxX : popupFrame.minX,
+                                  y: popupFrame.minY, width: 1, height: stripHeight)
+        let localY = max(0, min(stripHeight - 1, anchorY - desiredStrip.minY))
+        let rowRect = NSRect(x: 0, y: localY, width: 1, height: 1)
 
-        setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
-        if !isVisible { orderFront(nil) }
+        wantsVisible = true
+        if popover.isShown, shownStrip == desiredStrip {
+            popover.positioningRect = rowRect
+            return
+        }
+
+        if popover.isShown { popover.performClose(nil) }
+        anchorPanel.setFrame(desiredStrip, display: false)
+        if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
+        shownStrip = desiredStrip
+        // Fast open with a REAL visible animation — see clipenAnimateIn.
+        // animates is restored so the close keeps the native fade-out.
+        popover.animates = false
+        popover.show(relativeTo: rowRect, of: anchorView,
+                     preferredEdge: placeRight ? .maxX : .minX)
+        popover.animates = true
+        popover.clipenAnimateIn()
     }
 
     func hide() {
-        // Reset the SwiftUI tree first so AVPlayer / QLPreviewView get dismantled
-        // (and stop playing) before the panel disappears.
-        hostingView?.rootView = AnyView(EmptyView())
-        orderOut(nil)
+        wantsVisible = false
+        // Reset the SwiftUI tree so AVPlayer / QuickLook / web previews are
+        // dismantled (and stop playing) — the content controller outlives the
+        // popover's close, so without this a video/audio preview could keep
+        // playing invisibly. The old NSPanel implementation did this too; it
+        // was lost in the NSPopover conversion.
+        if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
+            hostingController.rootView = AnyView(EmptyView())
+        }
+        if popover.isShown { popover.performClose(nil) }
+        anchorPanel.orderOut(nil)
+        shownStrip = nil
     }
 }
 
-private struct ItemPreviewView: View {
-    let item: ClipboardItem
+/// Stacked preview of every marked item, in marking order, inside one shared
+/// scrolling panel with the standard popover chrome.
+private struct MultiItemPreviewView: View {
+    let items: [ClipboardItem]
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    ItemTagStrip(tags: item.tags, maxVisible: 5, compact: false)
-                    if let metadata = item.metadataSummary {
-                        Text(metadata)
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                }
+                Text("\(items.count) marked")
+                    .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Text("Space to close")
                     .font(.system(size: 10))
@@ -83,15 +192,89 @@ private struct ItemPreviewView: View {
 
             Divider()
 
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(14)
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                        if idx > 0 { Divider() }
+                        HStack(spacing: 8) {
+                            Text("\(idx + 1)")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.accentColor)
+                                .frame(width: 18)
+                            ItemPreviewView(item: item, compact: true)
+                        }
+                        .padding(.leading, 8)
+                    }
+                }
+            }
         }
-        .background(SystemPopoverMaterial())
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .stroke(Color.primary.opacity(0.1), lineWidth: 1))
-        .shadow(color: .black.opacity(0.24), radius: 22, x: 0, y: 10)
+        // No background/clipShape/overlay/shadow here — hosted inside a real
+        // NSPopover now, which draws all of that itself.
+    }
+}
+
+private struct ItemPreviewView: View {
+    let item: ClipboardItem
+    /// When true, renders without the outer window chrome (header/background/
+    /// shadow) and at a fixed height so several can be stacked inside a shared
+    /// scrolling container — used by the marked-items multi preview.
+    var compact: Bool = false
+
+    var body: some View {
+        if compact {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 8) {
+                    ItemTagStrip(tags: item.tags, maxVisible: 5, compact: true)
+                    if let metadata = item.metadataSummary {
+                        Text(metadata)
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+
+                content
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 220)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+            }
+        } else {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ItemTagStrip(tags: item.tags, maxVisible: 5, compact: false)
+                        if let metadata = item.metadataSummary {
+                            Text(metadata)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("Space to close")
+                        Text("Double-tap Space to refer")
+                    }
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+                Divider()
+
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(14)
+            }
+            // No background/clipShape/overlay/shadow here — hosted inside a
+            // real NSPopover now, which draws all of that itself.
+        }
     }
 
     @ViewBuilder
@@ -101,15 +284,22 @@ private struct ItemPreviewView: View {
             if let url = Self.validWebURL(text) {
                 WebsitePreview(url: url)
             } else {
-                textPreview(text, monospaced: true)
+                RichTextContentPreview(text: text, detectedType: item.detectedType)
             }
         case .richText(let attrStr, _):
             AttributedTextPreview(attributedString: attrStr.adjustingColorsForCurrentAppearance())
         case .html(let html, let plain):
-            if ClipboardManager.htmlContainsTable(html) {
-                HTMLStringPreview(html: html)
-            } else {
+            // .html items only ever exist when the HTML carries real
+            // formatting (structure the plain-text extraction couldn't
+            // represent — see ClipboardManager+Capture's htmlMustSurvive /
+            // pasteboardPlain==plain check), so it's always worth rendering
+            // properly rather than gating on "does it contain a <table>".
+            // Fall back to flattened plain text only if there's truly
+            // nothing to render.
+            if plain.isEmpty && html.isEmpty {
                 textPreview(plain, monospaced: false)
+            } else {
+                HTMLStringPreview(html: html)
             }
         case .rtfd(let data, let plain):
             if let attrStr = NSAttributedString(rtfd: data, documentAttributes: nil) {
@@ -121,11 +311,17 @@ private struct ItemPreviewView: View {
             if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
                 PDFPreview(document: pdf)
             } else if dataType.rawValue.contains("gif") {
-                AnimatedImageView(data: data)
+                ZoomableImagePreview(image: image, animatedData: data)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             } else {
-                imagePreview(image)
+                // Full-res via fullResData — decoded ONCE inside the view
+                // (never here in body, which re-evaluates per render pass).
+                // The stored image is a ring thumbnail and this panel zooms
+                // to 8×.
+                ZoomableImagePreview(image: image, fullResData: data)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
         case .file(let url):
             filePreview(url)
@@ -158,54 +354,14 @@ private struct ItemPreviewView: View {
     }
 
     private func imagePreview(_ image: NSImage) -> some View {
-        Image(nsImage: image)
-            .resizable()
-            .scaledToFit()
+        ZoomableImagePreview(image: image)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder
     private func filePreview(_ url: URL) -> some View {
-        if url.pathExtension.lowercased() == "pdf", let pdf = PDFDocument(url: url) {
-            PDFPreview(document: pdf)
-        } else if url.pathExtension.lowercased() == "gif", let data = try? Data(contentsOf: url) {
-            AnimatedImageView(data: data)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        } else if let image = NSImage(contentsOf: url) {
-            imagePreview(image)
-        } else if FileKindDetector.isHTMLFile(url) {
-            HTMLFilePreview(url: url)
-        } else if let text = FileKindDetector.readableText(from: url) {
-            textPreview(text, monospaced: true)
-        } else if FileKindDetector.isMediaFile(url) {
-            AVMediaPreview(url: url)
-        } else if FileKindDetector.is3DModelFile(url) {
-            Model3DPreview(url: url)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        } else if FileManager.default.fileExists(atPath: url.path) {
-            QuickLookFilePreview(url: url)
-        } else if let docText = FileKindDetector.readableDocumentText(from: url) {
-            // Fallback when the file isn't on disk (e.g. evicted snapshot) but we
-            // cached extractable text from a document (docx, pptx, pages…).
-            textPreview(docText, monospaced: false)
-        } else {
-            VStack(spacing: 12) {
-                Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
-                    .resizable()
-                    .frame(width: 72, height: 72)
-                Text(url.lastPathComponent)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(2)
-                Text(url.path)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        FilePreviewContent(url: url)
     }
 
     private func fileListPreview(_ urls: [URL]) -> some View {
@@ -235,6 +391,484 @@ private struct ItemPreviewView: View {
     }
 }
 
+/// Extracts a cell grid out of table-bearing clipboard content so the row
+/// views (main popup rows, main window rows) can render an actual mini table
+/// instead of flattened plain text. Handles the two ways tables arrive:
+///   • richText/rtfd (Apple Notes, Pages, Word…) — NSTextTable blocks in the
+///     attributed string's paragraph styles, addressed by row/column.
+///   • html (browsers, Excel-as-html…) — <tr>/<td> parsed with a light regex.
+/// Results are NSCache'd per item ID — extraction walks the whole attributed
+/// string, far too heavy to redo on every scroll-frame row render.
+enum TableCellExtractor {
+    private static let cache = NSCache<NSUUID, NSArray>()
+
+    static func cells(for item: ClipboardItem) -> [[String]]? {
+        if let cached = cache.object(forKey: item.id as NSUUID) as? [[String]] {
+            return cached.isEmpty ? nil : cached
+        }
+        let result = extract(for: item) ?? []
+        cache.setObject(result as NSArray, forKey: item.id as NSUUID)
+        return result.isEmpty ? nil : result
+    }
+
+    private static func extract(for item: ClipboardItem) -> [[String]]? {
+        switch item.content {
+        case .richText(let attr, _):
+            return cells(from: attr)
+        case .rtfd(let data, _):
+            guard let attr = NSAttributedString(rtfd: data, documentAttributes: nil) else { return nil }
+            return cells(from: attr)
+        case .html(let html, _):
+            return cells(fromHTML: html)
+        default:
+            return nil
+        }
+    }
+
+    private static func cells(from attr: NSAttributedString) -> [[String]]? {
+        var grid: [Int: [Int: String]] = [:]
+        let full = NSRange(location: 0, length: attr.length)
+        attr.enumerateAttribute(.paragraphStyle, in: full) { value, range, _ in
+            guard let style = value as? NSParagraphStyle,
+                  let cell = style.textBlocks.first(where: { $0 is NSTextTableBlock }) as? NSTextTableBlock
+            else { return }
+            let text = (attr.string as NSString).substring(with: range)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let existing = grid[cell.startingRow]?[cell.startingColumn] ?? ""
+            grid[cell.startingRow, default: [:]][cell.startingColumn] =
+                existing.isEmpty ? text : existing + " " + text
+        }
+        guard !grid.isEmpty else { return nil }
+        return grid.keys.sorted().map { r in
+            let cols = grid[r] ?? [:]
+            return cols.keys.sorted().map { cols[$0] ?? "" }
+        }
+    }
+
+    private static func cells(fromHTML html: String) -> [[String]]? {
+        let opts: NSRegularExpression.Options = [.caseInsensitive, .dotMatchesLineSeparators]
+        guard let rowRe = try? NSRegularExpression(pattern: "<tr[^>]*>(.*?)</tr>", options: opts),
+              let cellRe = try? NSRegularExpression(pattern: "<t[dh][^>]*>(.*?)</t[dh]>", options: opts)
+        else { return nil }
+        let ns = html as NSString
+        var rows: [[String]] = []
+        for rowMatch in rowRe.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            let rowHTML = ns.substring(with: rowMatch.range(at: 1))
+            let rowNS = rowHTML as NSString
+            var cells: [String] = []
+            for cellMatch in cellRe.matches(in: rowHTML, range: NSRange(location: 0, length: rowNS.length)) {
+                let raw = rowNS.substring(with: cellMatch.range(at: 1))
+                let text = raw.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+                    .htmlDecoded
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                cells.append(text)
+            }
+            if !cells.isEmpty { rows.append(cells) }
+        }
+        return rows.isEmpty ? nil : rows
+    }
+}
+
+/// Compact real-table rendering for LIST ROWS (main popup + main window):
+/// a bordered grid of the first few rows/columns, so a copied table looks
+/// like a table at a glance instead of two lines of flattened text. The
+/// full-fidelity rendering still lives in the preview panel.
+struct MiniTablePreview: View {
+    let cells: [[String]]
+    var maxRows: Int = 2
+    var maxCols: Int = 3
+
+    var body: some View {
+        let rows = Array(cells.prefix(maxRows))
+        let colCount = max(1, min(maxCols, rows.map(\.count).max() ?? 1))
+        VStack(spacing: 0) {
+            ForEach(0..<rows.count, id: \.self) { r in
+                HStack(spacing: 0) {
+                    ForEach(0..<colCount, id: \.self) { c in
+                        Text(c < rows[r].count ? rows[r][c] : "")
+                            .font(.system(size: 9, weight: r == 0 ? .semibold : .regular))
+                            .lineLimit(1)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+                    }
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.25), lineWidth: 1))
+    }
+}
+
+/// Dispatches `.text` content by its DETECTED type (markdown / delimited
+/// table / code) instead of always rendering plain monospaced text — the
+/// detection (ClipboardContentType) already existed, but nothing previously
+/// rendered based on it. Shared between ItemPreviewPanel and QuickClipPanel.
+struct RichTextContentPreview: View {
+    let text: String
+    let detectedType: ClipboardContentType
+
+    var body: some View {
+        switch detectedType {
+        case .markdown:
+            MarkdownTextPreview(text: text)
+        case .table:
+            DelimitedTablePreview(text: text)
+        case .code(let language):
+            CodeSyntaxPreview(text: text, language: language)
+        default:
+            ScrollView {
+                Text(text)
+                    .font(.system(size: 13, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+/// Line-based Markdown renderer — headers, bullet/numbered lists, fenced code
+/// blocks (routed to CodeSyntaxPreview), and inline formatting (bold/italic/
+/// code spans/links) via AttributedString. Not a full CommonMark parser, but
+/// covers what people actually paste.
+struct MarkdownTextPreview: View {
+    let text: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(parsedBlocks) { $0.view }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        }
+    }
+
+    private struct Block: Identifiable {
+        let id = UUID()
+        let view: AnyView
+    }
+
+    private var parsedBlocks: [Block] {
+        var blocks: [Block] = []
+        var inCodeBlock = false
+        var codeBuffer: [String] = []
+        var codeLang: String? = nil
+
+        func flushCode() {
+            guard !codeBuffer.isEmpty else { return }
+            let joined = codeBuffer.joined(separator: "\n")
+            blocks.append(Block(view: AnyView(
+                CodeSyntaxPreview(text: joined, language: codeLang)
+                    .padding(8)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+            )))
+            codeBuffer = []
+            codeLang = nil
+        }
+
+        for rawLine in text.components(separatedBy: "\n") {
+            let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.hasPrefix("```") {
+                if inCodeBlock {
+                    flushCode()
+                    inCodeBlock = false
+                } else {
+                    inCodeBlock = true
+                    let lang = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
+                    codeLang = lang.isEmpty ? nil : String(lang)
+                }
+                continue
+            }
+            if inCodeBlock { codeBuffer.append(rawLine); continue }
+
+            if trimmed.hasPrefix("### ") {
+                blocks.append(Block(view: AnyView(
+                    Text(String(trimmed.dropFirst(4))).font(.system(size: 15, weight: .semibold)))))
+            } else if trimmed.hasPrefix("## ") {
+                blocks.append(Block(view: AnyView(
+                    Text(String(trimmed.dropFirst(3))).font(.system(size: 17, weight: .bold)))))
+            } else if trimmed.hasPrefix("# ") {
+                blocks.append(Block(view: AnyView(
+                    Text(String(trimmed.dropFirst(2))).font(.system(size: 20, weight: .bold)))))
+            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                let content = String(trimmed.dropFirst(2))
+                blocks.append(Block(view: AnyView(
+                    HStack(alignment: .top, spacing: 6) { Text("\u{2022}"); inlineText(content) })))
+            } else if let range = trimmed.range(of: #"^\d+\.\s"#, options: .regularExpression) {
+                let marker = String(trimmed[trimmed.startIndex..<range.upperBound])
+                let listContent = String(trimmed[range.upperBound...])
+                blocks.append(Block(view: AnyView(
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(marker.trimmingCharacters(in: .whitespaces)); inlineText(listContent)
+                    })))
+            } else if trimmed.isEmpty {
+                blocks.append(Block(view: AnyView(Spacer().frame(height: 4))))
+            } else {
+                blocks.append(Block(view: AnyView(inlineText(trimmed))))
+            }
+        }
+        if inCodeBlock { flushCode() }
+        return blocks
+    }
+
+    private func inlineText(_ s: String) -> some View {
+        let attributed = (try? AttributedString(
+            markdown: s,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
+        return Text(attributed)
+            .font(.system(size: 13))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Renders CSV/TSV-shaped text as an actual grid instead of raw delimited
+/// text — tries tab first (TSV), falls back to comma (CSV). First row is
+/// styled as a header.
+struct DelimitedTablePreview: View {
+    let text: String
+
+    private var rows: [[String]] {
+        let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return [] }
+        let delimiter = lines[0].contains("\t") ? "\t" : ","
+        return lines.map { $0.components(separatedBy: delimiter) }
+    }
+
+    var body: some View {
+        let data = rows
+        ScrollView([.horizontal, .vertical]) {
+            if data.isEmpty {
+                Text("No table data").foregroundColor(.secondary)
+            } else {
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
+                    ForEach(Array(data.enumerated()), id: \.offset) { rowIdx, row in
+                        GridRow {
+                            ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                                Text(cell.trimmingCharacters(in: .whitespaces))
+                                    .font(.system(size: 12,
+                                                 weight: rowIdx == 0 ? .semibold : .regular,
+                                                 design: .monospaced))
+                                    .foregroundColor(rowIdx == 0 ? .primary : .primary.opacity(0.85))
+                                    .lineLimit(1)
+                            }
+                        }
+                        if rowIdx == 0 {
+                            Divider().gridCellColumns(row.count)
+                        }
+                    }
+                }
+                .padding(10)
+            }
+        }
+    }
+}
+
+/// Lightweight, best-effort syntax coloring — real per-language keyword sets
+/// (not the detection heuristics CodeLanguageDetector uses, which are
+/// fingerprint phrases like "if __name__", not actual reserved words) plus
+/// generic string/number/whole-line-comment coloring. This is NOT a full
+/// tokenizer/parser per language (no block comments, no escape-aware string
+/// parsing, no inline trailing comments) — it's a genuine, working
+/// approximation, not a placeholder.
+struct CodeSyntaxPreview: View {
+    let text: String
+    let language: String?
+
+    private static let keywordSets: [String: Set<String>] = [
+        "Swift": ["func","var","let","if","else","guard","return","struct","class","enum","protocol",
+                  "extension","import","for","while","switch","case","default","break","continue","init",
+                  "self","Self","super","true","false","nil","private","public","internal","static",
+                  "override","in","as","is","try","catch","throw","throws","async","await"],
+        "Python": ["def","class","if","elif","else","return","import","from","for","while","in","try",
+                   "except","finally","with","as","pass","break","continue","lambda","None","True",
+                   "False","and","or","not","is","yield","global","nonlocal","raise","assert","del"],
+        "JavaScript": ["function","const","let","var","if","else","return","for","while","do","switch",
+                       "case","default","break","continue","class","extends","new","this","try","catch",
+                       "finally","throw","typeof","instanceof","in","of","async","await","import",
+                       "export","from","null","undefined","true","false"],
+        "TypeScript": ["function","const","let","var","if","else","return","for","while","interface",
+                       "type","class","extends","implements","new","this","try","catch","finally",
+                       "throw","import","export","from","null","undefined","true","false","public",
+                       "private","protected","readonly","async","await"],
+        "Rust": ["fn","let","mut","if","else","match","for","while","loop","return","struct","enum",
+                 "impl","trait","pub","use","mod","self","true","false","as","in","break","continue",
+                 "async","await","move","ref","where"],
+        "Go": ["func","var","const","if","else","for","range","switch","case","default","return",
+               "package","import","struct","interface","go","chan","select","defer","break",
+               "continue","true","false","nil","type","map"],
+        "Kotlin": ["fun","val","var","if","else","for","while","when","return","class","interface",
+                   "object","package","import","true","false","null","is","as","in","override",
+                   "private","public","companion","data"],
+        "Java": ["public","private","protected","class","interface","extends","implements","static",
+                 "final","void","if","else","for","while","switch","case","default","return","new",
+                 "this","super","true","false","null","try","catch","finally","throw","throws",
+                 "import","package"],
+        "C/C++": ["int","float","double","char","void","if","else","for","while","do","switch","case",
+                  "default","return","struct","class","public","private","protected","namespace",
+                  "using","include","define","static","const","true","false","nullptr","new","delete",
+                  "template","typename"],
+        "Shell": ["if","then","else","elif","fi","for","while","do","done","case","esac","function",
+                  "return","echo","export","local","in"],
+        "Ruby": ["def","end","class","module","if","elsif","else","unless","case","when","for","while",
+                 "until","return","true","false","nil","self","require","attr_accessor","yield",
+                 "begin","rescue","ensure"],
+        "SQL": ["SELECT","FROM","WHERE","INSERT","INTO","VALUES","UPDATE","SET","DELETE","CREATE",
+                "TABLE","ALTER","DROP","JOIN","LEFT","RIGHT","INNER","OUTER","ON","GROUP","BY",
+                "ORDER","HAVING","AND","OR","NOT","NULL","AS","DISTINCT","LIMIT"]
+    ]
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            Text(highlighted)
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(4)
+        }
+    }
+
+    private var highlighted: AttributedString {
+        var result = AttributedString()
+        let keywords = language.flatMap { Self.keywordSets[$0] } ?? []
+        for line in text.components(separatedBy: "\n") {
+            result += highlightLine(line, keywords: keywords)
+            result += AttributedString("\n")
+        }
+        return result
+    }
+
+    private func highlightLine(_ line: String, keywords: Set<String>) -> AttributedString {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("//") || trimmed.hasPrefix("#") || trimmed.hasPrefix("--") {
+            var s = AttributedString(line)
+            s.foregroundColor = .secondary
+            return s
+        }
+
+        var result = AttributedString()
+        var current = ""
+        var inString: Character? = nil
+
+        func flushWord() {
+            guard !current.isEmpty else { return }
+            var piece = AttributedString(current)
+            if keywords.contains(current) {
+                piece.foregroundColor = .purple
+                piece.font = .system(size: 12, weight: .semibold, design: .monospaced)
+            } else if current.first?.isNumber == true {
+                piece.foregroundColor = .orange
+            }
+            result += piece
+            current = ""
+        }
+
+        for ch in line {
+            if let quote = inString {
+                current.append(ch)
+                if ch == quote {
+                    var piece = AttributedString(current)
+                    piece.foregroundColor = .green
+                    result += piece
+                    current = ""
+                    inString = nil
+                }
+                continue
+            }
+            if ch == "\"" || ch == "'" {
+                flushWord()
+                inString = ch
+                current = String(ch)
+                continue
+            }
+            if ch.isLetter || ch.isNumber || ch == "_" {
+                current.append(ch)
+            } else {
+                flushWord()
+                result += AttributedString(String(ch))
+            }
+        }
+        if inString != nil {
+            var piece = AttributedString(current)
+            piece.foregroundColor = .green
+            result += piece
+        } else {
+            flushWord()
+        }
+        return result
+    }
+}
+
+/// Full per-type file preview dispatch (PDF, image, GIF, HTML, plain text,
+/// media, 3D model, QuickLook fallback, or a generic icon+name+path as a last
+/// resort). Shared between ItemPreviewPanel's own preview and QuickClipPanel
+/// so both surfaces render files identically — QuickClipPanel used to have
+/// its own much weaker duplicate that only ever showed an icon + filename,
+/// never actual PDF/image/media content.
+struct FilePreviewContent: View {
+    let url: URL
+
+    var body: some View {
+        Group {
+            if url.pathExtension.lowercased() == "pdf", let pdf = PDFDocument(url: url) {
+                PDFPreview(document: pdf)
+            } else if url.pathExtension.lowercased() == "gif", let data = try? Data(contentsOf: url),
+                      let gifImage = NSImage(data: data) {
+                ZoomableImagePreview(image: gifImage, animatedData: data)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            } else if let image = NSImage(contentsOf: url) {
+                ZoomableImagePreview(image: image)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            } else if FileKindDetector.isHTMLFile(url) {
+                HTMLFilePreview(url: url)
+            } else if let text = FileKindDetector.readableText(from: url) {
+                ScrollView {
+                    Text(text)
+                        .font(.system(size: 13, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else if FileKindDetector.isMediaFile(url) {
+                AVMediaPreview(url: url)
+            } else if FileKindDetector.is3DModelFile(url) {
+                Model3DPreview(url: url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            } else if FileManager.default.fileExists(atPath: url.path) {
+                QuickLookFilePreview(url: url)
+            } else if let docText = FileKindDetector.readableDocumentText(from: url) {
+                // Fallback when the file isn't on disk (e.g. evicted snapshot) but
+                // we cached extractable text from a document (docx, pptx, pages…).
+                ScrollView {
+                    Text(docText)
+                        .font(.system(size: 13))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                VStack(spacing: 12) {
+                    Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
+                        .resizable()
+                        .frame(width: 72, height: 72)
+                    Text(url.lastPathComponent)
+                        .font(.system(size: 15, weight: .semibold))
+                        .lineLimit(2)
+                    Text(url.path)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
 /// Renders a 3D model as a rotatable/zoomable scene. SceneKit loads .scn/.usd*
 /// natively; everything else (.obj/.stl/.fbx/.gltf/.dae/.ply/.abc/.glb) is
 /// bridged in through Model I/O's MDLAsset → SCNScene importer. Falls back to a
@@ -243,7 +877,7 @@ struct Model3DPreview: NSViewRepresentable {
     let url: URL
 
     func makeNSView(context: Context) -> SCNView {
-        let view = SCNView()
+        let view = SpinUntilTouchedSCNView()
         view.allowsCameraControl = true      // drag to rotate, scroll to zoom
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .clear
@@ -252,7 +886,9 @@ struct Model3DPreview: NSViewRepresentable {
         // The preview panel is non-activating (never key), so mouse-drag rotation
         // can't reach SceneKit. Auto-spin the whole scene so the model is seen
         // from all sides without interaction. Drag still works in any window that
-        // CAN become key (e.g. if the model is opened in the main window).
+        // CAN become key (the reference panel, the main window) — and there the
+        // spin stops on the first touch, so the camera doesn't fight the drag
+        // (see SpinUntilTouchedSCNView).
         Self.startAutoRotation(in: view)
         return view
     }
@@ -260,6 +896,30 @@ struct Model3DPreview: NSViewRepresentable {
     func updateNSView(_ view: SCNView, context: Context) {
         view.scene = Self.loadScene(url)
         Self.startAutoRotation(in: view)
+    }
+
+    /// Auto-spin is a showcase for when the model CAN'T be interacted with —
+    /// the moment the user actually grabs it (drag, scroll-zoom, or pinch in
+    /// a key-capable window like the reference panel), the spin must yield,
+    /// otherwise the pivot keeps rotating underneath the camera drag and the
+    /// model feels like it's fighting the mouse.
+    final class SpinUntilTouchedSCNView: SCNView {
+        private func stopAutoSpin() {
+            scene?.rootNode.childNode(withName: "clipenAutoSpin", recursively: false)?
+                .removeAllActions()
+        }
+        override func mouseDown(with event: NSEvent) {
+            stopAutoSpin()
+            super.mouseDown(with: event)
+        }
+        override func scrollWheel(with event: NSEvent) {
+            stopAutoSpin()
+            super.scrollWheel(with: event)
+        }
+        override func magnify(with event: NSEvent) {
+            stopAutoSpin()
+            super.magnify(with: event)
+        }
     }
 
     /// Wrap the model in a pivot node and spin it slowly around Y. Idempotent —
@@ -306,12 +966,25 @@ struct AnimatedImageView: NSViewRepresentable {
         view.imageScaling = .scaleProportionallyUpOrDown
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        context.coordinator.lastDataCount = data.count
         return view
     }
 
     func updateNSView(_ view: NSImageView, context: Context) {
+        // Re-decode ONLY when the payload actually changed. This runs on
+        // every SwiftUI render pass — and popup rows re-render on every
+        // keypress (hint flags) — so unconditionally rebuilding NSImage
+        // meant a full GIF decode + animation restart per keystroke.
+        guard context.coordinator.lastDataCount != data.count else { return }
+        context.coordinator.lastDataCount = data.count
         view.image = NSImage(data: data)
         view.animates = true
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var lastDataCount: Int = -1
     }
 }
 
@@ -320,6 +993,7 @@ private struct HTMLFilePreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let view = WKWebView()
+        view.allowsMagnification = true // pinch-zoom, like Safari
         load(url, in: view)
         return view
     }
@@ -387,19 +1061,209 @@ private struct QuickLookFilePreview: NSViewRepresentable {
     }
 }
 
-private struct PDFPreview: NSViewRepresentable {
+struct PDFPreview: NSViewRepresentable {
     let document: PDFDocument
 
-    func makeNSView(context: Context) -> PDFView {
-        let view = PDFView()
+    func makeNSView(context: Context) -> InteractivePDFView {
+        let view = InteractivePDFView()
         view.autoScales = true
         view.displayMode = .singlePageContinuous
+        // Interactive zoom: pinch on a trackpad zooms, scrolling pans —
+        // PDFView supports both natively but clamps to autoScales' fit
+        // factor unless the min/max range is opened up. minScaleFactor
+        // pinned to the size-to-fit factor keeps "zoomed all the way out"
+        // meaning "the whole page visible", never a lost-in-space sliver.
+        view.minScaleFactor = view.scaleFactorForSizeToFit
+        view.maxScaleFactor = 8
         view.document = document
         return view
     }
 
-    func updateNSView(_ view: PDFView, context: Context) {
-        if view.document !== document { view.document = document }
+    func updateNSView(_ view: InteractivePDFView, context: Context) {
+        if view.document !== document {
+            view.document = document
+            view.minScaleFactor = view.scaleFactorForSizeToFit
+        }
+    }
+
+    /// Same non-key-window reality as FitOnLayoutScrollView (see its doc
+    /// comment): the preview popover and reference panel never become key,
+    /// so PDFView's own gesture plumbing can't be relied on there. Pinch
+    /// and ⌘-scroll are handled from the raw pointer-routed events, and
+    /// acceptsFirstMouse lets link-clicks/drag-pans land on first click.
+    final class InteractivePDFView: PDFView {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func magnify(with event: NSEvent) {
+            scaleFactor = min(maxScaleFactor, max(minScaleFactor, scaleFactor * (1 + event.magnification)))
+        }
+
+        override func scrollWheel(with event: NSEvent) {
+            guard event.modifierFlags.contains(.command) else {
+                super.scrollWheel(with: event)
+                return
+            }
+            let delta = max(-10, min(10, event.scrollingDeltaY))
+            guard delta != 0 else { return }
+            scaleFactor = min(maxScaleFactor, max(minScaleFactor, scaleFactor * (1 + delta * 0.02)))
+        }
+    }
+}
+
+/// Zoomable, pannable image preview — one shared component for every place
+/// an image renders large (the floating item preview, the reference panel's
+/// content area, file previews). Pinch (or double-click) to zoom, scroll to
+/// pan while zoomed, double-click again to snap back to fit. Built on
+/// NSScrollView's native magnification so gestures feel identical to
+/// Preview.app rather than a hand-rolled SwiftUI gesture approximation.
+struct ZoomableImagePreview: NSViewRepresentable {
+    let image: NSImage
+    /// When set, the image view animates this payload's frame loop (GIFs) —
+    /// SwiftUI's Image and a plain NSImage assignment both show only the
+    /// first frame. Zoom/pan behave identically either way; animation is
+    /// the only difference, so GIFs get the same interactions as stills
+    /// instead of a separate non-zoomable code path.
+    var animatedData: Data? = nil
+    /// Full-resolution compressed bytes — when set, the view decodes THESE
+    /// (once) instead of showing `image`, which is only a ≤1024px ring
+    /// thumbnail for image items. The decode MUST happen in here, gated by
+    /// the data-changed check, and never at the call site: this view's
+    /// parent bodies re-evaluate on every @Published change (the popup
+    /// re-renders per keystroke), and a v1.0.144 regression that decoded
+    /// `NSImage(data:)` inline in those bodies re-decoded a multi-MB bitmap
+    /// on every render pass — 18% idle CPU and ~1 GB of memory churn.
+    var fullResData: Data? = nil
+
+    func makeNSView(context: Context) -> FitOnLayoutScrollView {
+        let scrollView = FitOnLayoutScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasHorizontalScroller = true
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = 1
+        scrollView.maxMagnification = 8
+
+        let imageView = NSImageView()
+        if let animatedData, let animated = NSImage(data: animatedData) {
+            imageView.image = animated
+            imageView.animates = true
+            scrollView.lastImageDataCount = animatedData.count
+        } else if let fullResData, let full = NSImage(data: fullResData) {
+            imageView.image = full
+            scrollView.lastImageDataCount = fullResData.count
+        } else {
+            imageView.image = image
+        }
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        scrollView.documentView = imageView
+
+        let doubleClick = NSClickGestureRecognizer(target: scrollView,
+                                                   action: #selector(FitOnLayoutScrollView.toggleZoom(_:)))
+        doubleClick.numberOfClicksRequired = 2
+        imageView.addGestureRecognizer(doubleClick)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: FitOnLayoutScrollView, context: Context) {
+        guard let imageView = scrollView.documentView as? NSImageView else { return }
+        if let animatedData {
+            // Same change-detection AnimatedImageView uses: re-decode only
+            // when the payload actually changed, never per render pass
+            // (updateNSView runs on every SwiftUI render).
+            guard scrollView.lastImageDataCount != animatedData.count else { return }
+            imageView.image = NSImage(data: animatedData)
+            imageView.animates = true
+            scrollView.lastImageDataCount = animatedData.count
+            scrollView.magnification = 1
+        } else if let fullResData {
+            guard scrollView.lastImageDataCount != fullResData.count else { return }
+            imageView.image = NSImage(data: fullResData) ?? image
+            scrollView.lastImageDataCount = fullResData.count
+            scrollView.magnification = 1
+        } else if imageView.image !== image {
+            imageView.image = image
+            scrollView.magnification = 1
+        }
+    }
+
+    /// NSScrollView whose document view tracks the visible area while at 1×
+    /// (so "not zoomed" always means "image fits the panel", including after
+    /// a window resize), and stops fighting the user once they've zoomed in.
+    ///
+    /// Every interaction below is handled from RAW pointer-routed events, on
+    /// purpose: this view lives inside non-activating panels and popovers
+    /// (the Space preview, the reference panel, similar-item previews) whose
+    /// windows may NEVER become key — the entire popup UI is deliberately
+    /// non-activating so keyboard focus stays in the app being pasted into.
+    /// In that world, gesture recognizers don't reliably engage and first
+    /// clicks are swallowed, which made zoom look completely dead. Scroll
+    /// and magnify events, however, are delivered to the window under the
+    /// POINTER regardless of key/active state — so pinch and ⌘-scroll are
+    /// handled explicitly, and acceptsFirstMouse makes the first click land.
+    final class FitOnLayoutScrollView: NSScrollView {
+        /// Byte count of the animated payload currently decoded into the
+        /// image view — updateNSView's cheap "did the GIF actually change"
+        /// check, mirroring AnimatedImageView's coordinator.
+        var lastImageDataCount: Int?
+
+        override func layout() {
+            super.layout()
+            if magnification <= 1.001 {
+                documentView?.frame = contentView.bounds
+            }
+        }
+
+        /// First click acts immediately (double-click zoom included) even
+        /// while the window isn't key — it never becomes key in the popup.
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        /// Trackpad pinch, from the raw event — no recognizer involved.
+        override func magnify(with event: NSEvent) {
+            applyZoom(factor: 1 + event.magnification, at: event.locationInWindow)
+        }
+
+        /// ⌘-scroll zooms (mouse-wheel users, and the guaranteed-delivery
+        /// fallback everywhere); plain scroll keeps panning while zoomed.
+        override func scrollWheel(with event: NSEvent) {
+            guard event.modifierFlags.contains(.command) else {
+                super.scrollWheel(with: event)
+                return
+            }
+            let delta = max(-10, min(10, event.scrollingDeltaY))
+            guard delta != 0 else { return }
+            applyZoom(factor: 1 + delta * 0.02, at: event.locationInWindow)
+        }
+
+        private func applyZoom(factor: CGFloat, at windowPoint: NSPoint) {
+            let target = min(maxMagnification, max(minMagnification, magnification * factor))
+            let point = documentView?.convert(windowPoint, from: nil) ?? .zero
+            setMagnification(target, centeredAt: point)
+            // Landing back at 1× must re-fit — layout() skips the re-fit
+            // while zoomed, so a resize mid-zoom would otherwise leave a
+            // stale fit frame behind.
+            if target <= 1.001 {
+                documentView?.frame = contentView.bounds
+            }
+        }
+
+        @objc func toggleZoom(_ gesture: NSClickGestureRecognizer) {
+            let target: CGFloat = magnification <= 1.001 ? 2.5 : 1
+            let point = gesture.location(in: documentView)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.25
+                animator().setMagnification(target, centeredAt: point)
+            }
+            // Zooming back out to 1× must also re-fit the document frame in
+            // case the window was resized while zoomed (layout() skips the
+            // re-fit whenever magnification is above 1).
+            if target == 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) { [weak self] in
+                    guard let self, self.magnification <= 1.001 else { return }
+                    self.documentView?.frame = self.contentView.bounds
+                }
+            }
+        }
     }
 }
 
@@ -415,6 +1279,7 @@ struct HTMLStringPreview: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let view = WKWebView()
         view.setValue(false, forKey: "drawsBackground") // Make background transparent
+        view.allowsMagnification = true // pinch-zoom on tables, like Safari
         loadHTML(view)
         context.coordinator.lastHTML = html
         return view
@@ -521,6 +1386,7 @@ struct WebsitePreview: NSViewRepresentable {
 
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
+        webView.allowsMagnification = true // pinch-zoom, like Safari
         webView.navigationDelegate = context.coordinator
         webView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(webView)

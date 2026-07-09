@@ -1,221 +1,199 @@
 import AppKit
 import SwiftUI
 
-// MARK: - NSPanel
+// MARK: - Real system NSPopover, anchored through an invisible helper panel
+//
+// This used to be a hand-drawn NSPanel: a manually clipped RoundedRectangle,
+// a custom NSVisualEffectView wrapper, a hand-painted triangle for the arrow,
+// and no entrance animation. All of that was an approximation of the native
+// Look Up / Quick Look popover chrome — never the real thing.
+//
+// NSPopover IS the real thing: AppKit draws the rounded box, the arrow, the
+// vibrancy, and — the part no amount of custom SwiftUI can replicate — the
+// native pop-in/pop-out animation (NSPopover.animates), for free.
+//
+// The catch: NSPopover.show(relativeTo:of:preferredEdge:) can only anchor to
+// a view inside ONE OF THIS APP'S OWN windows — never to a caret rect living
+// inside a completely different process (Safari, Notes, Mail…). The fix is
+// an invisible, non-activating 1×1 helper panel positioned exactly at the
+// caret point; the popover anchors to a view inside THAT panel, so on screen
+// it still appears exactly where the caret is, in any app.
+final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
+    /// True from show until hide — closes the animating-in race where hide()
+    /// finds popover.isShown still false, skips the close, and the popup
+    /// finishes presenting as an orphan after it was already dismissed.
+    private var wantsVisible = false
 
-class PreviewOverlayWindow: NSPanel {
+    func popoverDidShow(_ notification: Notification) {
+        if !wantsVisible {
+            popover.performClose(nil)
+            anchorPanel.orderOut(nil)
+        }
+    }
 
     private var visibleRowCount: Int = 5
-    /// Retained for app lifetime so display-system observers (EDR/color-space)
-    /// are only registered ONCE. Subsequent show() calls update rootView in-place.
-    private var popoverHostingView: NSHostingView<PopoverPreviewView>?
 
-    init() {
-        super.init(
+    /// Invisible, click-through, non-activating helper window. Its only job
+    /// is to sit at the caret's screen location so the popover has a view of
+    /// ours to anchor to. `.nonactivatingPanel` is the same style mask the
+    /// old hand-built panel used — it's what keeps showing this popover from
+    /// stealing keyboard focus away from whatever app you're pasting into.
+    private let anchorPanel: NSPanel
+    private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+    private let popover = NSPopover()
+
+    /// `wantsVisible` is ANDed in because NSPopover's close is animated:
+    /// popover.isShown keeps returning true until the close animation
+    /// finishes, ~0.2s after hide() was called. dismissPreview() resets
+    /// @Published state right after hiding, and those didSets check
+    /// `previewWindow.isVisible` — a stale true there re-showed the item
+    /// preview panel that had just been dismissed. Intent flips instantly.
+    var isVisible: Bool { wantsVisible && popover.isShown }
+    /// The popup CONTENT's actual on-screen rect once shown — used by
+    /// TransformPanel/ItemPreviewPanel anchoring and by the row-anchor math
+    /// in selectedRowAnchorPoint. Deliberately NOT the popover window's
+    /// frame: that includes AppKit's arrow/shadow chrome padding, which
+    /// shifted every row-anchor calculation by the chrome delta.
+    var frame: NSRect {
+        if let view = popover.contentViewController?.view, let win = view.window {
+            return win.convertToScreen(view.convert(view.bounds, to: nil))
+        }
+        return anchorPanel.frame
+    }
+
+    /// The popover's own backing NSWindow, if currently shown. Lets the
+    /// event tap tell "one of Clipen's OTHER windows (main window, reference
+    /// panel, …) is key" apart from "the ring popup itself happens to be
+    /// key" — only the former should suppress the popup's own key handling.
+    var window: NSWindow? { popover.contentViewController?.view.window }
+
+    override init() {
+        anchorPanel = NSPanel(
             contentRect: .zero,
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
-        level = .popUpMenu
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = false
-        ignoresMouseEvents = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        anchorPanel.isOpaque = false
+        anchorPanel.backgroundColor = .clear
+        anchorPanel.hasShadow = false
+        anchorPanel.ignoresMouseEvents = true
+        anchorPanel.level = .popUpMenu
+        anchorPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        anchorPanel.contentView = anchorView
+
+        super.init()
+
+        // .applicationDefined: we drive show/close ourselves (⌘ release, Esc,
+        // paste) — the same explicit lifecycle the old panel had. .transient
+        // would auto-close on outside clicks/losing key, which doesn't fit
+        // how the rest of Clipen manages this popup.
+        popover.behavior = .applicationDefined
+        popover.animates = true
+        popover.delegate = self
     }
 
-    /// Show popup anchored near the active text field using a 3-level fallback:
-    ///   1. IMK — exact blinker rect from the text client (requires input source enabled)
-    ///   2. AX — Accessibility API: insertion-point bounds, then focused element frame
-    ///   3. Screen center — final fallback when all else fails
+    /// Show popup anchored at the mouse cursor's current screen position.
+    /// This used to try IMK, then Accessibility-API caret lookup, then fall
+    /// back to the mouse only as a last resort — removed entirely. Both of
+    /// those required cooperation the target app frequently didn't actually
+    /// provide (IMK needs the user to manually enable "Clipen" as an input
+    /// source; AX caret bounds are unreliable or plain unimplemented in a lot
+    /// of custom/Electron/web-rendered text controls), so the popup would
+    /// silently fall back to the cursor anyway in exactly the cases it
+    /// mattered — just with extra unreliable machinery in between. One
+    /// position, always correct by definition: wherever the cursor is.
     func show() {
-        showAnchored(to: resolveCaretRect())
+        wantsVisible = true
+        showAnchored(to: NSEvent.mouseLocation)
     }
 
-    func showCentered() { showAnchored(to: nil) }
-
-    func hide() { orderOut(nil) }
+    func hide() {
+        wantsVisible = false
+        if popover.isShown { popover.performClose(nil) }
+        anchorPanel.orderOut(nil)
+    }
 
     // MARK: - Positioning
 
-    private func showAnchored(to caretRect: NSRect?) {
+    private func showAnchored(to anchor: NSPoint) {
         let rowH: CGFloat    = 72
         let headerH: CGFloat = 80
         let searchH: CGFloat = 34
         let filterH: CGFloat = 36
         let footerH: CGFloat = 26
-        let arrowH: CGFloat  = 11   // callout triangle height
-        let w: CGFloat       = 420
         let margin: CGFloat  = 12
         let maxVisible: Int  = 5
 
-        // Screen selection: prefer the screen containing the caret, then the
-        // screen under the mouse cursor, then NSScreen.main.
-        let screen: NSRect = {
-            if let caret = caretRect {
-                let p = NSPoint(x: caret.midX, y: caret.midY)
-                if let s = NSScreen.screens.first(where: { $0.frame.contains(p) }) {
-                    return s.visibleFrame
-                }
-            }
-            let mouse = NSEvent.mouseLocation
-            if let s = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) {
-                return s.visibleFrame
-            }
-            return NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        }()
+        let screen: NSRect = NSScreen.screens.first(where: { $0.frame.contains(anchor) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
         let slots = min(maxVisible, max(1,
-            Int((screen.height - margin * 2 - headerH - searchH - filterH - footerH - arrowH) / rowH)))
-        let bodyH = headerH + searchH + filterH + CGFloat(slots) * rowH + footerH + arrowH
+            Int((screen.height - margin * 2 - headerH - searchH - filterH - footerH) / rowH)))
+        let bodyH = headerH + searchH + filterH + CGFloat(slots) * rowH + footerH
 
         visibleRowCount = slots
 
-        var x: CGFloat
-        var y: CGFloat = screen.midY - bodyH / 2   // safe default; overwritten below
-        var arrowDir = PopoverPreviewView.ArrowDirection.none
+        // Prefer showing above the cursor (arrow points down at it); fall back
+        // to below if there isn't room above. NSPopover handles the final
+        // on-screen clamping/flip itself once given a preferred edge.
+        let aboveFits = (anchor.y - bodyH - 6) >= screen.minY + margin
+        let preferredEdge: NSRectEdge = aboveFits ? .maxY : .minY
 
-        // Helper: resolve an anchor point from caret or mouse
-        let anchor: NSPoint = caretRect.map { NSPoint(x: $0.midX, y: $0.midY) }
-                              ?? NSEvent.mouseLocation
-
-        x = max(screen.minX + margin, min(anchor.x - w / 2, screen.maxX - w - margin))
-
-        let aboveY = anchor.y - bodyH - 6
-        let belowY = anchor.y + 6
-
-        if aboveY >= screen.minY + margin {
-            y = aboveY
-            arrowDir = .down   // popup above anchor → arrow at bottom pointing down
-        } else if belowY + bodyH <= screen.maxY - margin {
-            y = belowY
-            arrowDir = .up     // popup below anchor → arrow at top pointing up
+        let popoverView = PopoverPreviewView(visibleCount: slots)
+        popover.contentSize = NSSize(width: 420, height: bodyH)
+        if let hostingController = popover.contentViewController as? NSHostingController<PopoverPreviewView> {
+            hostingController.rootView = popoverView
         } else {
-            y = screen.midY - bodyH / 2
-            arrowDir = .none
+            popover.contentViewController = NSHostingController(rootView: popoverView)
         }
 
-        let popoverView = PopoverPreviewView(visibleCount: slots, arrowDirection: arrowDir)
-        if let hv = popoverHostingView {
-            // Reuse — just update the SwiftUI tree in-place.  This avoids
-            // re-registering with the display pipeline on every popup open,
-            // which was the root cause of the _MaximumEDRValueChangedNotification storm.
-            hv.rootView = popoverView
-        } else {
-            let hv = NSHostingView(rootView: popoverView)
-            contentView = hv
-            popoverHostingView = hv
-        }
-        setFrame(NSRect(x: x, y: y, width: w, height: bodyH), display: true)
-        if !isVisible { orderFront(nil) }
-    }
+        // In practice show() only runs on popup open (openPopupNow guards on
+        // !isVisible), but enforce the invariant anyway: never move the
+        // anchor window or re-call show() under a live popover — that tears
+        // the attachment down and replays the open/close animation.
+        guard !popover.isShown else { return }
 
-    // MARK: - Caret lookup (3-level fallback)
-
-    private func resolveCaretRect() -> NSRect? {
-        let mgr = ClipboardManager.shared
-
-        // Level 1: IMK — exact blinker rect reported by the text client each keystroke.
-        // Requires "Clipen" enabled in System Settings › Keyboard › Input Sources.
-        // Only trust it if it's FRESH: the rect is never explicitly cleared, so a
-        // value from a field/app you've since left would otherwise anchor the popup
-        // at a stale blinker. A recent rect means the caret was updated on the very
-        // ⌘/V keystrokes that opened this popup.
-        if let imk = mgr.imkCaretRect, mgr.imkCaretRectIsFresh { return imk }
-
-        // Level 2: AX — tries exact insertion-point bounds first, then falls back
-        // to the focused text element's own frame (the text box position).
-        if let ax = caretScreenRect() { return ax }
-
-        // Level 3: screen center — nil → showAnchored centers the popup.
-        return nil
-    }
-
-    /// Returns the screen rect (macOS bottom-left origin) of the insertion point
-    /// in the frontmost app's focused text element, or nil if unavailable.
-    private func caretScreenRect() -> NSRect? {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else { return nil }
-        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
-
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement,
-                                            kAXFocusedUIElementAttribute as CFString,
-                                            &focusedRef) == .success,
-              let focusedRef else { return nil }
-        let focused = focusedRef as! AXUIElement  // swiftlint:disable:this force_cast
-
-        // Verify the element is a text-editable role before trusting caret data.
-        var roleRef: CFTypeRef?
-        AXUIElementCopyAttributeValue(focused, kAXRoleAttribute as CFString, &roleRef)
-        let role = roleRef as? String ?? ""
-        let textRoles: Set<String> = [
-            kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole,
-            "AXSearchField", "AXTextField", "AXTextArea", "AXWebArea"
-        ]
-        guard textRoles.contains(role) || role.hasPrefix("AXText") else { return nil }
-
-        // Try to get insertion-point bounds via parameterised range attribute.
-        var rangeRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focused,
-                                         kAXSelectedTextRangeAttribute as CFString,
-                                         &rangeRef) == .success,
-           let rangeRef {
-            var boundsRef: CFTypeRef?
-            if AXUIElementCopyParameterizedAttributeValue(focused,
-                                                          kAXBoundsForRangeParameterizedAttribute as CFString,
-                                                          rangeRef,
-                                                          &boundsRef) == .success,
-               let boundsRef {
-                var cgRect = CGRect.zero
-                // AXValueGetValue needs the exact AXValue type.
-                if AXValueGetValue(boundsRef as! AXValue, .cgRect, &cgRect),  // swiftlint:disable:this force_cast
-                   cgRect != .zero {
-                    return flipToMacOS(cgRect)
-                }
-            }
-        }
-
-        // Fallback: use the element's own frame.
-        var frameRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(focused, "AXFrame" as CFString, &frameRef) == .success,
-           let frameRef {
-            var cgRect = CGRect.zero
-            if AXValueGetValue(frameRef as! AXValue, .cgRect, &cgRect), cgRect != .zero {  // swiftlint:disable:this force_cast
-                return flipToMacOS(cgRect)
-            }
-        }
-
-        return nil
-    }
-
-    /// Converts a CGRect in screen-flipped coordinates (top-left origin, as
-    /// returned by the Accessibility API) to macOS window-server coordinates
-    /// (bottom-left origin, as used by NSWindow.frame).
-    private func flipToMacOS(_ rect: CGRect) -> NSRect {
-        // AX coordinates are flipped relative to the PRIMARY display (the one at
-        // the global origin), which is not guaranteed to be screens.first.
-        let screenH = (NSScreen.screens.first(where: { $0.frame.origin == .zero })
-                       ?? NSScreen.screens.first)?.frame.height ?? 0
-        return NSRect(x: rect.minX,
-                      y: screenH - rect.maxY,
-                      width: max(rect.width, 1),
-                      height: max(rect.height, 1))
+        // Position the invisible 1×1 anchor exactly at the cursor, on the
+        // correct screen, then order it front WITHOUT activating the app.
+        anchorPanel.setFrame(NSRect(x: anchor.x, y: anchor.y, width: 1, height: 1), display: false)
+        if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
+        // Fast open with a REAL visible animation — see clipenAnimateIn.
+        // animates is restored so the close keeps the native fade-out.
+        popover.animates = false
+        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: preferredEdge)
+        popover.animates = true
+        popover.clipenAnimateIn()
     }
 
     /// Center Y of the currently-selected visible row — used by sibling panels
     /// (transform callout, item preview) to anchor their arrows.
+    ///
+    /// Mirrors the REAL scroll behavior in `rowArea`, which calls
+    /// `proxy.scrollTo(id, anchor: .center)` — a continuous, always-recenter
+    /// scroll, not a discrete "window slides one row at a time" model. That
+    /// means: near the top of the list, scrolling clamps at the start (rows
+    /// sit at their natural unscrolled position); near the bottom, it clamps
+    /// at the end (rows sit at their natural from-the-bottom position); but
+    /// everywhere in between, the selected row is ALWAYS exactly centered in
+    /// the viewport, regardless of index. An earlier version of this function
+    /// assumed the discrete model, which only coincidentally matched reality
+    /// for the first few rows (before scrolling starts) and drifted further
+    /// off the further into the list you went.
     func selectedRowAnchorPoint(selectedIndex: Int, totalItems: Int) -> NSPoint {
         guard totalItems > 0 else { return NSPoint(x: frame.maxX, y: frame.midY) }
 
-        let win            = min(max(1, visibleRowCount), totalItems)
-        let clampedStart   = max(0, min(selectedIndex < win ? 0 : selectedIndex - (win - 1),
-                                        totalItems - win))
-        let rowInWindow    = max(0, min(selectedIndex - clampedStart, win - 1))
-        let rowH: CGFloat  = 72
+        let win: CGFloat    = CGFloat(min(max(1, visibleRowCount), totalItems))
+        let rowH: CGFloat   = 72
         let footerH: CGFloat = 26
-        let rowsBottomY    = frame.minY + footerH
-        let rowCenterY     = rowsBottomY + (CGFloat(win - rowInWindow) - 0.5) * rowH
+        let rowsBottomY     = frame.minY + footerH
+
+        let i               = CGFloat(selectedIndex)
+        let total           = CGFloat(totalItems)
+        let desiredScrollTopRows = i + 0.5 - win / 2
+        let maxScrollTopRows     = max(0, total - win)
+        let scrollTopRows   = max(0, min(desiredScrollTopRows, maxScrollTopRows))
+        let rowCenterY      = rowsBottomY + rowH * (win - i - 0.5 + scrollTopRows)
 
         return NSPoint(x: frame.maxX, y: rowCenterY)
     }
@@ -225,10 +203,7 @@ class PreviewOverlayWindow: NSPanel {
 
 struct PopoverPreviewView: View {
 
-    enum ArrowDirection { case up, down, none }
-
-    let visibleCount:    Int
-    let arrowDirection:  ArrowDirection
+    let visibleCount: Int
 
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
@@ -241,75 +216,112 @@ struct PopoverPreviewView: View {
 
     private static let rowH: CGFloat = 72
 
+    // No clipShape/background/overlay/shadow/arrow here anymore — this view
+    // is now hosted inside a real NSPopover, which draws the rounded box, the
+    // vibrancy, the arrow, and the entrance animation itself. Adding any of
+    // that here would just double up on what AppKit already provides.
     var body: some View {
         VStack(spacing: 0) {
-            if arrowDirection == .up {
-                PopupCalloutArrow(pointing: .up)
-            }
-
-            VStack(spacing: 0) {
-                header
-                popupSearchBar
-                categoryStrip
-                firstCycleHint
-                Divider()
-                rowArea
-                Divider()
-                footer
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .background(SystemPopoverMaterial().clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.primary.opacity(0.1), lineWidth: 1))
-            .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
-
-            if arrowDirection == .down {
-                PopupCalloutArrow(pointing: .down)
-            }
+            header
+            popupSearchBar
+            categoryStrip
+            firstCycleHint
+            Divider()
+            rowArea
+            Divider()
+            footer
         }
     }
 
     // MARK: Header
 
+    // Hints only — the Clipen icon + name that used to lead this row are
+    // gone (the user knows what app this is; the space is better spent on
+    // shortcuts). The coach-replay tap target went with the branding button;
+    // the coach bubbles themselves still show on their anchor hints.
     private var header: some View {
+        // Horizontally scrollable: 9 hints (7 keyboard + 2 mouse) no longer
+        // fit inside the popup's fixed 420pt width without clipping. A
+        // ScrollView here means an overflow scrolls instead of cutting hints
+        // off invisibly — scope this out further (grouping, or a
+        // "more hints" affordance) if it feels cramped in practice.
+        ScrollView(.horizontal, showsIndicators: false) {
+            headerContent
+        }
+    }
+
+    private var headerContent: some View {
         HStack(spacing: 14) {
-            Button { manager.replayPopupCoach() } label: {
-                HStack(spacing: 8) {
-                    Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
-                        .resizable().frame(width: 18, height: 18).cornerRadius(4)
-                    Text("Clipen")
-                        .font(.system(.callout, weight: .semibold))
-                        .foregroundColor(.primary).lineLimit(1).fixedSize()
+            // The "V · Next" hint slot IS the close control once a hold on
+            // the first V press has been confirmed (popupPinnedOpen) — same
+            // slot, not a separate button. A solid filled circle so it
+            // visibly reads as a clickable button, not a stray letter;
+            // icon only, no "Close" label needed next to it.
+            if manager.popupPinnedOpen {
+                Button {
+                    manager.dismissPreview()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.secondary)
                 }
+                .buttonStyle(.plain)
+                .help("Close (opened via hold — ⌘ release won't close this)")
+            } else {
+                FlatHint(key: "V", label: "Next", isActive: manager.popupHintV)
+                    .overlay(alignment: .bottom) {
+                        if manager.popupCoachStep == 0 {
+                            CoachBubble(text: "Hold ⌘ and tap V a few times to cycle items")
+                                .offset(y: 38).allowsHitTesting(false)
+                        }
+                    }
             }
-            .buttonStyle(.plain)
-            .help("Show how Clipen works again")
 
-            Spacer()
+            // Once pinned, ⌘ is typically no longer held — and V/C/X are ALL
+            // gated behind `guard cmd` in handleKeyDown, so Mark/Front/
+            // Transform stop actually doing anything at that point. Showing
+            // hints for dead shortcuts would be actively misleading, so
+            // pinned mode strips the header down to only what still works:
+            // the close button above, plus click/double-click below.
+            if !manager.popupPinnedOpen {
+                FlatHint(key: "⇧V", label: "Prev", isActive: manager.popupHintShiftV)
 
-            FlatHint(key: "V", label: "Next", isActive: manager.popupHintV)
-                .overlay(alignment: .bottom) {
-                    if manager.popupCoachStep == 0
-                    || (manager.coachReplayActive && manager.coachReplayStep == 0) {
-                        CoachBubble(text: "Hold ⌘ and tap V a few times to cycle items")
-                            .offset(y: 38).allowsHitTesting(false)
+                FlatHint(key: "hold V", label: "Mark", isActive: manager.popupHintVMark)
+
+                FlatHint(key: "C", label: "Front", isActive: manager.popupHintC)
+
+                FlatHint(key: "X", label: "Transform",
+                         enabled: auth.transformsEnabled,
+                         isActive: manager.popupHintX)
+                    .overlay(alignment: .bottom) {
+                        if manager.popupCoachStep == 1 {
+                            CoachBubble(text: "Tap X a few times to cycle transforms")
+                                .offset(y: 38).allowsHitTesting(false)
+                        }
                     }
-                }
 
-            FlatHint(key: "⇧V", label: "Prev", isActive: manager.popupHintShiftV)
+                // Click to preview, double-click to Refer — both are Space-key
+                // gestures, so both use the SAME spacebar-glyph icon language
+                // (single bar = single tap, doubled bar = double tap), not an
+                // unrelated SF Symbol. "Refer" opens the Reference panel; see
+                // its own doc note below for why it isn't called "Pin".
+                SpaceKeyFlatHint(label: "Preview", isActive: manager.popupHintSpace)
 
-            FlatHint(key: "X", label: "Transform",
-                     enabled: auth.transformsEnabled,
-                     isActive: manager.popupHintX)
-                .overlay(alignment: .bottom) {
-                    if manager.popupCoachStep == 1
-                    || (manager.coachReplayActive && manager.coachReplayStep == 1) {
-                        CoachBubble(text: "Tap X a few times to cycle transforms")
-                            .offset(y: 38).allowsHitTesting(false)
-                    }
-                }
+                // Renamed from "Pin" — that name already belongs to the
+                // ring's separate keep-from-eviction feature (togglePin/
+                // isPinned), so reusing it here for "send to the Reference
+                // panel" was actively confusing. "Refer" matches what this
+                // actually does.
+                DoubleSpaceKeyFlatHint(label: "Refer", isActive: manager.popupHintSpaceDoubleTap)
+            }
 
-            SpaceKeyFlatHint(label: "Preview", isActive: manager.popupHintSpace)
+            // Mouse equivalents of the keyboard hints above — click and
+            // double-click work on any row regardless of what's highlighted,
+            // ⌘ held or not, so these stay visible in BOTH states.
+            IconFlatHint(icon: "cursorarrow.click", label: "Preview")
+            IconFlatHint(icon: "cursorarrow.click.2", label: "Paste")
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -321,18 +333,26 @@ struct PopoverPreviewView: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundColor(manager.popupSearchQuery.isEmpty ? .secondary.opacity(0.4) : .accentColor)
+                .foregroundColor(manager.popupSearchQuery.isEmpty
+                                 ? (manager.isSearchActive ? .accentColor.opacity(0.7) : .secondary.opacity(0.4))
+                                 : .accentColor)
 
             if manager.popupSearchQuery.isEmpty {
-                Text("Type to search\u{2026}")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary.opacity(0.35))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 0) {
+                    Text(manager.isSearchActive ? "Type to search\u{2026}" : "Press F to search")
+                        .font(.system(size: 12))
+                        .foregroundColor(manager.isSearchActive ? .secondary.opacity(0.6) : .secondary.opacity(0.35))
+                    if manager.isSearchActive { BlinkingCursor() }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Text(manager.popupSearchQuery)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 0) {
+                    Text(manager.popupSearchQuery)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.primary)
+                    if manager.isSearchActive { BlinkingCursor() }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button {
                     manager.popupSearchQuery = ""
@@ -347,33 +367,62 @@ struct PopoverPreviewView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 34)
-        .background(manager.popupSearchQuery.isEmpty
+        .background(manager.popupSearchQuery.isEmpty && !manager.isSearchActive
                     ? Color.primary.opacity(0.03)
                     : Color.accentColor.opacity(0.06))
         .overlay(alignment: .bottom) {
             Divider()
         }
+        .overlay {
+            if manager.isSearchActive {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.5), lineWidth: 1)
+                    .padding(2)
+            }
+        }
     }
 
     // MARK: Category strip (popup-only — popupTagFilter, never touches main window)
 
+    /// Stable id for the "All" chip plus every tag chip, used to scroll the
+    /// active one into view. A plain enum instead of ClipboardTag? directly —
+    /// ScrollViewReader needs a Hashable id, and this reads more clearly at
+    /// the scrollTo call site than juggling an Optional.
+    private enum CategoryChipID: Hashable {
+        case all
+        case tag(ClipboardTag)
+    }
+
     private var categoryStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                TagFilterChip(tag: nil, selected: manager.popupTagFilter == nil, shortcutNumber: 1) {
-                    manager.popupTagFilter = nil
-                }
-                ForEach(manager.availableTags, id: \.self) { tag in
-                    TagFilterChip(
-                        tag: tag,
-                        selected: manager.popupTagFilter == tag,
-                        shortcutNumber: (manager.availableTags.firstIndex(of: tag) ?? 0) + 2
-                    ) {
-                        manager.popupTagFilter = tag
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    TagFilterChip(tag: nil, selected: manager.popupTagFilter == nil, shortcutNumber: 1) {
+                        manager.popupTagFilter = nil
+                    }
+                    .id(CategoryChipID.all)
+                    ForEach(manager.availableTags, id: \.self) { tag in
+                        TagFilterChip(
+                            tag: tag,
+                            selected: manager.popupTagFilter == tag,
+                            shortcutNumber: (manager.availableTags.firstIndex(of: tag) ?? 0) + 2
+                        ) {
+                            manager.popupTagFilter = tag
+                        }
+                        .id(CategoryChipID.tag(tag))
                     }
                 }
+                .padding(.horizontal, 12).padding(.vertical, 6)
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
+            // Keep the active category chip visible (centered) whenever the
+            // filter changes — including via ⌘1-9, not just clicking a chip
+            // that might already be scrolled off-screen.
+            .onChange(of: manager.popupTagFilter) { _, newValue in
+                let target: CategoryChipID = newValue.map(CategoryChipID.tag) ?? .all
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(target, anchor: .center)
+                }
+            }
         }
         .frame(height: 36)
         .background(Color.primary.opacity(0.02))
@@ -418,16 +467,28 @@ struct PopoverPreviewView: View {
                         LazyVStack(spacing: 0) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                                 PopoverRow(item: item, index: idx,
-                                           isSelected: manager.selectionArmed && idx == selectedIndex,
+                                           isSelected: idx == selectedIndex,
                                            markOrder: manager.markOrder(for: item.id))
                                     .id(item.id)
                                     .contentShape(Rectangle())
                                     .onTapGesture(count: 2) {
                                         manager.uiSelectItem(at: idx)
-                                        manager.commitPaste()
+                                        // Paste without closing the popup —
+                                        // lets the user double-click several
+                                        // items in a row, pasting each one,
+                                        // instead of the popup closing after
+                                        // the first (⌘-release still commits
+                                        // + closes normally, unaffected).
+                                        manager.pasteItemKeepingPopupOpen(id: item.id)
                                     }
                                     .onTapGesture(count: 1) {
                                         manager.uiSelectItem(at: idx)
+                                        // Single click both selects AND previews —
+                                        // same "peek" intent Space already provides,
+                                        // just reused here instead of requiring a
+                                        // separate keypress. Double-click (above)
+                                        // still pastes, unaffected.
+                                        manager.uiPreviewSelectedItem()
                                     }
                                 if idx < items.count - 1 {
                                     Divider().padding(.leading, 38)
@@ -442,6 +503,16 @@ struct PopoverPreviewView: View {
                         }
                     }
                     .onAppear {
+                        guard items.indices.contains(selectedIndex) else { return }
+                        proxy.scrollTo(items[selectedIndex].id, anchor: .center)
+                    }
+                    // The hosting controller (and this whole view hierarchy,
+                    // including the ScrollView's offset) survives hide/show —
+                    // onAppear above only fires once, ever. Without this,
+                    // scrolling manually then collapsing + reopening the
+                    // popup resumed at the stale offset instead of jumping
+                    // back to the selection. See popupOpenGeneration's doc.
+                    .onChange(of: manager.popupOpenGeneration) { _, _ in
                         guard items.indices.contains(selectedIndex) else { return }
                         proxy.scrollTo(items[selectedIndex].id, anchor: .center)
                     }
@@ -500,46 +571,21 @@ private struct PopoverDragPreview: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
+        // Subtle dark chip (near-black → dark grey), fully opaque — matches
+        // the app's dark chrome instead of the old loud blue→purple/green
+        // gradients.
         .background(
             LinearGradient(
-                colors: markedCount > 1
-                    ? [Color(red: 0.20, green: 0.78, blue: 0.35), Color(red: 0.10, green: 0.60, blue: 0.25)]
-                    : [Color(red: 0.31, green: 0.56, blue: 0.97), Color(red: 0.66, green: 0.33, blue: 0.97)],
-                startPoint: .leading,
-                endPoint: .trailing
+                colors: [Color(red: 0.11, green: 0.11, blue: 0.12),
+                         Color(red: 0.22, green: 0.22, blue: 0.24)],
+                startPoint: .top,
+                endPoint: .bottom
             ),
             in: RoundedRectangle(cornerRadius: 10, style: .continuous)
         )
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .stroke(Color.white.opacity(0.12), lineWidth: 1))
         .shadow(color: .black.opacity(0.28), radius: 8, x: 0, y: 3)
-    }
-}
-
-// MARK: - Callout arrow
-
-private struct PopupCalloutArrow: View {
-    enum Direction { case up, down }
-    let pointing: Direction
-
-    var body: some View {
-        Canvas { ctx, size in
-            let w = size.width
-            let h = size.height
-            var path = Path()
-            switch pointing {
-            case .up:
-                path.move(to:    CGPoint(x: w / 2 - 11, y: h))
-                path.addLine(to: CGPoint(x: w / 2,      y: 1))
-                path.addLine(to: CGPoint(x: w / 2 + 11, y: h))
-            case .down:
-                path.move(to:    CGPoint(x: w / 2 - 11, y: 0))
-                path.addLine(to: CGPoint(x: w / 2,      y: h - 1))
-                path.addLine(to: CGPoint(x: w / 2 + 11, y: 0))
-            }
-            path.closeSubpath()
-            ctx.fill(path, with: .color(Color(.windowBackgroundColor).opacity(0.85)))
-            ctx.stroke(path, with: .color(Color.primary.opacity(0.08)), lineWidth: 1)
-        }
-        .frame(width: 420, height: 11)
     }
 }
 
@@ -558,7 +604,9 @@ struct PopoverRow: View {
             rowContent.padding(.leading, 30)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(isSelected ? Color.accentColor : Color.clear, in: Rectangle())
+        .background(isSelected ? Color.accentColor : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 6)
         .onDrag {
             // If this item is marked (part of the multi-paste queue), drag ALL
             // marked items together. Otherwise drag just this item.
@@ -572,18 +620,6 @@ struct PopoverRow: View {
     private var rowHeader: some View {
         HStack(spacing: 8) {
             ItemTagStrip(tags: item.tags, maxVisible: 4, style: .plainComma)
-
-            if item.isSecret {
-                HStack(spacing: 3) {
-                    Image(systemName: "lock.fill").font(.system(size: 8, weight: .bold))
-                    Text("Secret").font(.system(size: 8, weight: .bold))
-                }
-                .foregroundColor(.red)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(Color.red.opacity(0.14), in: RoundedRectangle(cornerRadius: 3))
-                .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.red.opacity(0.35), lineWidth: 0.5))
-                .help("Detected as a likely secret. Stored encrypted at rest.")
-            }
 
             if let badge = item.diffBadge {
                 Text("∆ \(badge)")
@@ -603,16 +639,15 @@ struct PopoverRow: View {
             Spacer()
 
             if let order = markOrder {
-                // Numbered badge — shows the item's position in the paste queue
-                ZStack {
-                    Circle()
-                        .fill(Color(red: 0.20, green: 0.78, blue: 0.35))   // system green
-                        .frame(width: 20, height: 20)
-                    Text("\(order)")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                }
-                .help("Marked #\(order) for multi-paste — hold V to toggle")
+                // Ordinal label — shows the item's position in the paste queue
+                Text("\(order). marked")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color(red: 0.20, green: 0.78, blue: 0.35),   // system green
+                                in: Capsule())
+                    .help("Marked #\(order) for multi-paste — hold V to toggle")
             } else if isSelected {
                 HStack(spacing: 5) {
                     Text("Release").font(.system(size: 11, weight: .semibold)).foregroundColor(.accentColor)
@@ -649,36 +684,27 @@ struct PopoverRow: View {
                         .foregroundColor(.primary).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-        case .richText(_, plain: let plain):
-            Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        case .html(let html, let plain):
-            if ClipboardManager.htmlContainsTable(html) {
-                HStack(spacing: 6) {
-                    Image(systemName: "tablecells")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.mint)
-                    VStack(alignment: .leading, spacing: 1) {
-                        let headerLine = plain
-                            .components(separatedBy: .newlines)
-                            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                            ?? plain
-                        Text(headerLine)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1).foregroundColor(.primary)
-                        if let meta = item.metadataSummary {
-                            Text(meta).font(.system(size: 9)).foregroundColor(.secondary).lineLimit(1)
-                        }
-                    }
+        // richText / rtfd / html: if the content actually contains a table
+        // (Apple Notes / Pages / Word tables come through as rich text with
+        // NSTextTable blocks; browser/Excel tables as HTML <tr>/<td>), render
+        // a real mini table grid in the row — same visual promise the preview
+        // panel keeps — instead of two lines of flattened text.
+        case .richText(_, plain: let plain), .rtfd(_, plain: let plain):
+            if let cells = TableCellExtractor.cells(for: item) {
+                MiniTablePreview(cells: cells)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                }
             } else {
                 Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        case .rtfd(_, plain: let plain):
-            Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        case .html(_, let plain):
+            if let cells = TableCellExtractor.cells(for: item) {
+                MiniTablePreview(cells: cells)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         case .file(let url):
             HStack(spacing: 6) {
                 fileThumbnail(url, size: 28)
@@ -709,7 +735,10 @@ struct PopoverRow: View {
                     AnimatedImageView(data: data)
                         .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
                 } else {
-                    Image(nsImage: img).resizable().aspectRatio(contentMode: .fit)
+                    // Downsampled thumbnail — same scroll-perf fix as the main
+                    // window's rows (full-res bitmaps rescaled per frame).
+                    Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
+                        .resizable().aspectRatio(contentMode: .fit)
                         .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
                 }
                 if let summary = item.metadataSummary {
@@ -732,7 +761,12 @@ struct PopoverRow: View {
 
     @ViewBuilder
     private func fileThumbnail(_ url: URL, size: CGFloat) -> some View {
-        AsyncFileThumbnail(url: url, size: size)
+        if FileKindDetector.isImageFile(url) {
+            CachedFileThumbnail(url: url, size: size)
+        } else {
+            Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
+                .resizable().frame(width: size, height: size)
+        }
     }
 }
 
@@ -753,6 +787,9 @@ private struct PopoverMiniTable: View {
     }
 
     var body: some View {
+        // Compute once per render — `rows` parses the text, and referencing
+        // the computed property twice (isEmpty check + ForEach) parsed twice.
+        let rows = self.rows
         if rows.isEmpty {
             Text(text).font(.system(size: 12, design: .monospaced)).lineLimit(2)
                 .foregroundColor(.primary).frame(maxWidth: .infinity, alignment: .leading)
@@ -784,34 +821,6 @@ private struct PopoverMiniTable: View {
     }
 }
 
-// MARK: - Async file thumbnail (loads icon/image off main thread)
-
-private struct AsyncFileThumbnail: View {
-    let url: URL
-    let size: CGFloat
-    @State private var image: NSImage? = nil
-
-    var body: some View {
-        Group {
-            if let img = image {
-                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 5))
-            } else {
-                RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.08))
-                    .frame(width: size, height: size)
-            }
-        }
-        .task(id: url) {
-            let loaded = await Task.detached(priority: .utility) { () -> NSImage? in
-                if FileKindDetector.isImageFile(url),
-                   let img = NSImage(contentsOf: url) { return img }
-                return ClipenIconCache.shared.fileIcon(for: url)
-            }.value
-            image = loaded
-        }
-    }
-}
-
 // MARK: - Category filter chip
 
 struct TagFilterChip: View {
@@ -829,7 +838,7 @@ struct TagFilterChip: View {
         Button(action: action) {
             HStack(spacing: 5) {
                 if let n = shortcutNumber {
-                    Text("\(n).")
+                    Text("⌘\(n).")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
                         .foregroundColor(selected ? .white.opacity(0.85) : .secondary.opacity(0.75))
                 }
@@ -875,6 +884,33 @@ struct FlatHint: View {
     }
 }
 
+/// Icon-based sibling of `FlatHint` — same layout and active-state coloring,
+/// but an SF Symbol instead of a monospaced key label (for actions that read
+/// better as a glyph than as text, e.g. the pin-shaped "Refer" hint).
+struct IconFlatHint: View {
+    private static let activeColor = Color(hex: "#4F8EF7")
+
+    let icon:     String
+    let label:    String
+    var enabled:  Bool = true
+    var isActive: Bool = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(isActive ? Self.activeColor : .primary)
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(isActive ? Self.activeColor : .secondary)
+                .lineLimit(1).fixedSize()
+        }
+        .fixedSize()
+        .opacity(enabled ? 1.0 : 0.35)
+        .animation(.easeOut(duration: 0.1), value: isActive)
+    }
+}
+
 struct SpaceKeyFlatHint: View {
     private static let activeColor = Color(hex: "#4F8EF7")
 
@@ -891,6 +927,45 @@ struct SpaceKeyFlatHint: View {
                 RoundedRectangle(cornerRadius: 1, style: .continuous)
                     .fill(isActive ? Self.activeColor : Color.primary.opacity(0.7))
                     .frame(width: 10, height: 1.5)
+            }
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(isActive ? Self.activeColor : .secondary)
+                .lineLimit(1).fixedSize()
+        }
+        .fixedSize()
+        .opacity(enabled ? 1.0 : 0.35)
+        .animation(.easeOut(duration: 0.1), value: isActive)
+    }
+}
+
+/// Double-tap sibling of `SpaceKeyFlatHint` — the SAME spacebar-key glyph,
+/// drawn twice side by side, so "single tap = Preview" and "double tap =
+/// Refer" read as one consistent icon language instead of an unrelated
+/// SF Symbol standing in for "double-tap Space."
+struct DoubleSpaceKeyFlatHint: View {
+    private static let activeColor = Color(hex: "#4F8EF7")
+
+    let label:    String
+    var enabled:  Bool = true
+    var isActive: Bool = false
+
+    private var keyGlyph: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .stroke(isActive ? Self.activeColor : Color.primary.opacity(0.45), lineWidth: 1)
+                .frame(width: 14, height: 10)
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(isActive ? Self.activeColor : Color.primary.opacity(0.7))
+                .frame(width: 7, height: 1.5)
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            HStack(spacing: 2) {
+                keyGlyph
+                keyGlyph
             }
             Text(label)
                 .font(.system(size: 10, weight: .semibold))
@@ -935,5 +1010,48 @@ struct Triangle: Shape {
         p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         p.closeSubpath()
         return p
+    }
+}
+
+extension NSPopover {
+    /// Fast custom appear animation, shared by all three Clipen popovers
+    /// (main popup, transform panel, item preview). NSPopover's built-in
+    /// open animation is private (~0.25s, ignores NSAnimationContext) with
+    /// no duration knob — so the popovers are shown with `animates = false`
+    /// and this runs instead: a quick ease-out fade + subtle center-anchored
+    /// grow, so opening still FEELS animated, just much faster than stock.
+    func clipenAnimateIn(duration: TimeInterval = 0.17) {
+        guard let view = contentViewController?.view else { return }
+        view.wantsLayer = true
+        if let layer = view.layer {
+            // AppKit layers anchor at (0,0); re-anchor to the center (and
+            // compensate position) so the scale grows from the middle
+            // instead of the bottom-left corner.
+            let frame = layer.frame
+            layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            layer.position = CGPoint(x: frame.midX, y: frame.midY)
+
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0
+            fade.toValue = 1
+            let scale = CABasicAnimation(keyPath: "transform.scale")
+            scale.fromValue = 0.94
+            scale.toValue = 1
+            let group = CAAnimationGroup()
+            group.animations = [fade, scale]
+            group.duration = duration
+            group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            layer.add(group, forKey: "clipenPopIn")
+        }
+        // Also fade the popover WINDOW (chrome + arrow), so the frame
+        // doesn't pop in fully-formed around still-animating content.
+        if let win = view.window {
+            win.alphaValue = 0
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = duration
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                win.animator().alphaValue = 1
+            }
+        }
     }
 }

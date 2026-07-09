@@ -16,16 +16,11 @@ final class AuthManager: ObservableObject {
     let semanticSearch      = true
     let ocrEnabled          = true
     let pdfTextExtract      = true
-    let timeScrub           = true
     /// Upper bound for the user-adjustable ring size (matches the Stepper range).
-    let ringLimit           = 200
+    let ringLimit           = 500
 
     // ── All features hard-coded as enabled — no backend dependency.
-    let maxDataBytes:           Int  = 200 * 1024 * 1024  // 200 MB
-    let pinEnabled:             Bool = true
-    let urlTitles:              Bool = true
-    let richTextCapture:        Bool = true
-    let fileCapture:            Bool = true
+    let maxDataBytes:           Int  = 500 * 1024 * 1024  // 500 MB
     let sparkleAutomaticChecks: Bool = true
     let updateCheckEveryClicks: Int  = 50
 
@@ -43,6 +38,18 @@ final class AuthManager: ObservableObject {
     private let toolLastUsedAtKey          = "backendToolLastUsedAt"
     private let toolBucketUsageKey         = "backendToolBucketUsage"
     private let globalBucketUsageKey       = "backendGlobalBucketUsage"
+    /// Flat `"yyyy-MM-dd|toolID"` → count, mirroring the toolBucketUsageKey
+    /// pattern above. A day's numbers are only sent once that day is over —
+    /// sending "today" mid-day would always undercount, since the user could
+    /// still use more tools before midnight. `__cmdv__` is the synthetic
+    /// "toolID" used for the ⌘V/paste-action count.
+    private let dailyUsageKey              = "backendDailyUsageByDateTool"
+    private static let cmdVBucketToolID    = "__cmdv__"
+
+    /// Anonymous usage-ping endpoint — the deployed clipen_backend on Render.
+    /// (The old value, https://api.clipen.app, was a placeholder domain that
+    /// never existed in DNS — every ping failed silently and retried forever.)
+    private static let usageBaseURL = URL(string: "https://clipen-backend.onrender.com")!
 
     // In-memory caches for UserDefaults tool-usage dictionaries so
     // toolImportanceScore() doesn't do 4 full dict deserializations per tool per show.
@@ -56,7 +63,26 @@ final class AuthManager: ObservableObject {
             ClipboardManager.shared.applyPlanLimits(ringLimit: self.ringLimit)
             self.applyFeatureFlagsToRuntime()
         }
+        // One-time cleanup: this pending-counts dict was flushed by the old
+        // account/refresh backend call, which no longer exists — it just
+        // accumulated in UserDefaults forever, never sent, never cleared.
+        UserDefaults.standard.removeObject(forKey: toolUsageCountsKey)
+        flushCompletedDailyUsage()
+        // Periodic flush, independent of user activity. Launch + per-⌘V
+        // flushes alone had a real hole: a menu-bar session left running
+        // with no pastes never noticed midnight roll over, so the previous
+        // day's counts sat unsent until the NEXT paste or relaunch —
+        // "yesterday's data isn't in the database" even though nothing had
+        // failed. Every 30 minutes is a no-op unless a completed day is
+        // actually pending, and doubles as the retry cadence after a failed
+        // send (Render cold starts, offline stretches) without needing the
+        // user to paste again.
+        usageFlushTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
+            self?.flushCompletedDailyUsage()
+        }
     }
+
+    private var usageFlushTimer: Timer?
 
     func registerCommandVAction() {
         let nextClickCount = UserDefaults.standard.integer(forKey: clickCountKey) + 1
@@ -66,6 +92,141 @@ final class AuthManager: ObservableObject {
             UserDefaults.standard.set(nextClickCount, forKey: lastUpdateCheckClickKey)
             AppDelegate.shared?.checkForUpdatesInBackgroundIfAllowed()
         }
+        incrementDailyUsage(toolID: Self.cmdVBucketToolID, date: Self.dateKey(for: Date()))
+        // Cheap no-op most of the time (nothing to flush until a day rolls
+        // over) — called here too, not just at launch, so a menu-bar session
+        // left running for days still reports without needing a relaunch.
+        flushCompletedDailyUsage()
+    }
+
+    // MARK: - Daily usage reporting (previous completed day only)
+
+    /// Increments today's local count for `toolID` (or the synthetic ⌘V
+    /// bucket). Never sent immediately — only once that calendar day is over,
+    /// via flushCompletedDailyUsage(), so the number reported is always a
+    /// FINAL count, never a still-growing one from partway through the day.
+    private func incrementDailyUsage(toolID: String, count: Int = 1, date: String) {
+        guard !toolID.isEmpty, count > 0 else { return }
+        var counts = dailyUsageRaw()
+        counts["\(date)|\(toolID)", default: 0] += count
+        UserDefaults.standard.set(counts, forKey: dailyUsageKey)
+    }
+
+    private func dailyUsageRaw() -> [String: Int] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: dailyUsageKey) else { return [:] }
+        var counts: [String: Int] = [:]
+        for (k, v) in raw {
+            let value: Int
+            if let n = v as? Int { value = n }
+            else if let n = v as? NSNumber { value = n.intValue }
+            else { continue }
+            if value > 0 { counts[k] = value }
+        }
+        return counts
+    }
+
+    /// The user's LOCAL calendar day, strictly — not UTC. "Yesterday's data
+    /// shows up after midnight MY time" is the behavior a person expects;
+    /// the old UTC bucketing meant an IST user's day didn't roll over until
+    /// 5:30 AM local, so yesterday's counts looked missing all morning. The
+    /// backend stores the string verbatim per install, so mixed-timezone
+    /// installs don't collide — each install's days are its own local days.
+    private static func dateKey(for date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)
+    }
+
+    /// Anonymous, account-free usage reporting: sends per-tool and ⌘V counts
+    /// for every calendar day that's fully over but hasn't been sent yet —
+    /// never for today, since today's total is still growing. Handles
+    /// backlog (app not opened for several days) by flushing every completed
+    /// date it finds, not just the most recent one. Each date's local entries
+    /// are only cleared once the backend confirms the send succeeded — a
+    /// failed send is retried the next time this runs, next launch or paste.
+    private func flushCompletedDailyUsage() {
+        let todayKey = Self.dateKey(for: Date())
+        // Give up on dates older than this — if a day has been failing to
+        // send for a month (server never confirming, machine offline
+        // forever), it's stale telemetry, not something worth carrying in
+        // UserDefaults for eternity. String comparison works because the
+        // keys are zero-padded yyyy-MM-dd.
+        let expiryKey = Self.dateKey(for: Date().addingTimeInterval(-30 * 24 * 3600))
+        var byDate: [String: [String: Int]] = [:]
+        var expired: [(date: String, toolIDs: [String])] = []
+        for (compoundKey, value) in dailyUsageRaw() {
+            guard let sep = compoundKey.firstIndex(of: "|") else { continue }
+            let date = String(compoundKey[compoundKey.startIndex..<sep])
+            let toolID = String(compoundKey[compoundKey.index(after: sep)...])
+            if date < expiryKey {
+                expired.append((date, [toolID]))
+                continue
+            }
+            guard date < todayKey else { continue }
+            byDate[date, default: [:]][toolID] = value
+        }
+        for entry in expired {
+            removeSentDailyUsage(date: entry.date, toolIDs: entry.toolIDs)
+        }
+        for (date, counts) in byDate {
+            sendDailyUsage(date: date, counts: counts)
+        }
+    }
+
+    /// Dates with a POST currently in flight. flushCompletedDailyUsage runs
+    /// at launch AND on every ⌘V — without this guard, a burst of pastes
+    /// fired several identical requests for the same pending date at once.
+    private var usageSendsInFlight: Set<String> = []
+
+    private func sendDailyUsage(date: String, counts: [String: Int]) {
+        guard !usageSendsInFlight.contains(date) else { return }
+        usageSendsInFlight.insert(date)
+
+        var toolCounts = counts
+        let cmdVCount = toolCounts.removeValue(forKey: Self.cmdVBucketToolID) ?? 0
+
+        // 90s timeout, not 8: the backend runs on Render's free tier, which
+        // spins the service down when idle — a cold start takes 30-60s before
+        // the first response. 8s guaranteed the first ping after any idle
+        // period timed out (though it still woke the service, so the NEXT
+        // retry succeeded). This is a background call; nothing blocks on it.
+        var request = URLRequest(url: Self.usageBaseURL.appendingPathComponent("clipen/usage"),
+                                  timeoutInterval: 90)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "install_key": DeviceIdentity.installKey,
+            "date": date,
+            "cmd_v_count": cmdVCount,
+            "tool_usage_counts": toolCounts,
+            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                self.usageSendsInFlight.remove(date)
+                guard error == nil,
+                      let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode) else { return }
+                // The backend answers 200 with `"recorded": false` when its
+                // database isn't configured — HTTP success alone is NOT
+                // proof the counts were stored. Clearing local data on a
+                // recorded:false response would permanently lose that day.
+                guard let data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      json["recorded"] as? Bool == true else { return }
+                self.removeSentDailyUsage(date: date, toolIDs: Array(counts.keys))
+            }
+        }.resume()
+    }
+
+    private func removeSentDailyUsage(date: String, toolIDs: [String]) {
+        var raw = dailyUsageRaw()
+        for toolID in toolIDs { raw.removeValue(forKey: "\(date)|\(toolID)") }
+        UserDefaults.standard.set(raw, forKey: dailyUsageKey)
     }
 
     /// Increment the lifetime fast-paste counter (⌘V tapped + released inside
@@ -77,13 +238,26 @@ final class AuthManager: ObservableObject {
     func registerFastPasteAction() {
         let next = UserDefaults.standard.integer(forKey: fastPasteCountKey) + 1
         UserDefaults.standard.set(next, forKey: fastPasteCountKey)
-        // A fast paste is functionally a ⌘V — let the standard pipeline run
-        // (refresh-throttle + update check) so it isn't a second-class action.
-        registerCommandVAction()
+        // Deliberately NOT calling registerCommandVAction() here: fastPasteFront
+        // continues into commitPaste → simulatePaste, which registers the ⌘V —
+        // registering here too counted every fast paste TWICE in the daily
+        // cmd_v numbers (and double-ran the update-check throttle).
     }
 
     var fastPasteCount: Int {
         UserDefaults.standard.integer(forKey: fastPasteCountKey)
+    }
+
+    /// Count a UI action (mark, prev, move-to-front, search, reference pin,
+    /// similar items…) in the daily usage ping. Deliberately does NOT feed
+    /// the frequency/recency/bucket dictionaries — those drive
+    /// toolImportanceScore for ranking real transform tools, and action
+    /// counts in the shared bucket denominators would dilute that ranking.
+    /// Sent to the backend inside the same tool_usage_counts dict, under
+    /// "action."-prefixed IDs.
+    func registerActionUsage(actionID: String, count: Int = 1) {
+        guard !actionID.isEmpty, count > 0 else { return }
+        incrementDailyUsage(toolID: actionID, count: count, date: Self.dateKey(for: Date()))
     }
 
     /// Track per-tool usage deltas locally; flushed on the next backend
@@ -92,10 +266,7 @@ final class AuthManager: ObservableObject {
         guard !toolID.isEmpty, count > 0 else { return }
         let now = Date()
         let bucket = currentTimeBucket(for: now)
-
-        var counters = pendingToolUsageCounts()
-        counters[toolID, default: 0] += count
-        UserDefaults.standard.set(counters, forKey: toolUsageCountsKey)
+        incrementDailyUsage(toolID: toolID, count: count, date: Self.dateKey(for: now))
 
         var totals = toolUsageTotals()
         totals[toolID, default: 0] += count
@@ -150,23 +321,6 @@ final class AuthManager: ObservableObject {
         let wRecency = 0.35
         let wTimeAffinity = 0.20
         return (wFrequency * frequency) + (wRecency * recency) + (wTimeAffinity * timeAffinity)
-    }
-
-    private func pendingToolUsageCounts() -> [String: Int] {
-        guard let raw = UserDefaults.standard.dictionary(forKey: toolUsageCountsKey) else { return [:] }
-        var counts: [String: Int] = [:]
-        for (k, v) in raw {
-            let value: Int
-            if let n = v as? Int {
-                value = n
-            } else if let n = v as? NSNumber {
-                value = n.intValue
-            } else {
-                continue
-            }
-            if value > 0 { counts[k] = value }
-        }
-        return counts
     }
 
     private func toolUsageTotals() -> [String: Int] {
@@ -246,23 +400,14 @@ final class AuthManager: ObservableObject {
 
     private func applyFeatureFlagsToRuntime() {
         let ringLimit = ringLimit
-        let richTextCapture = richTextCapture
-        let fileCapture = fileCapture
-        let urlTitles = urlTitles
         let sparkleAutomaticChecks = sparkleAutomaticChecks
 
         DispatchQueue.main.async {
-            let manager = ClipboardManager.shared
-            manager.applyPlanLimits(ringLimit: ringLimit)
-            if manager.captureRichText != richTextCapture {
-                manager.captureRichText = richTextCapture
-            }
-            if manager.fetchURLTitles != urlTitles {
-                manager.fetchURLTitles = urlTitles
-            }
-            if manager.captureFiles != fileCapture {
-                manager.captureFiles = fileCapture
-            }
+            // This used to also force captureRichText / fetchURLTitles /
+            // captureFiles to the hard-coded flag values — silently stomping
+            // the user's own persisted preference toggles on every launch.
+            // Those are user settings; the "backend flags" for them are gone.
+            ClipboardManager.shared.applyPlanLimits(ringLimit: ringLimit)
             AppDelegate.shared?.automaticallyChecksForUpdates = sparkleAutomaticChecks
         }
     }

@@ -1,25 +1,68 @@
 import AppKit
 import SwiftUI
 
-// MARK: - NSPanel
-
-class TransformPanel: NSPanel {
-    private var hostingView: NSHostingView<AnyView>?
+/// Real system NSPopover, anchored through an invisible helper panel — same
+/// pattern as PreviewOverlayWindow and ItemPreviewPanel (see the header
+/// comment on PreviewOverlayWindow for the full rationale). AppKit now draws
+/// the rounded box, vibrancy, arrow, and entrance animation itself, anchored
+/// at the highlighted row's actual screen position via `anchorPoint`
+/// (computed by `PreviewOverlayWindow.selectedRowAnchorPoint`).
+class TransformPanel: NSObject, NSPopoverDelegate {
+    private let anchorPanel: NSPanel
+    private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
+    private let popover = NSPopover()
     private var cachedPanelHeight: CGFloat = 460
+    /// True from show until hide — closes the animating-in race where hide()
+    /// finds popover.isShown still false, skips the close, and the panel
+    /// finishes presenting as an orphan after the popup is gone.
+    private var wantsVisible = false
 
-    init() {
-        super.init(
+    func popoverDidShow(_ notification: Notification) {
+        if !wantsVisible {
+            popover.performClose(nil)
+            anchorPanel.orderOut(nil)
+        }
+    }
+    /// The anchor strip's frame for the CURRENT popover session, nil when
+    /// hidden. The strip is placed once per session and never moved while the
+    /// popover is shown — see show() for why that invariant matters.
+    private var shownStrip: NSRect? = nil
+
+    /// `wantsVisible` is ANDed in because NSPopover's close is animated:
+    /// popover.isShown stays true until the close animation finishes, so
+    /// guards running right after hide() saw a stale "still visible" and
+    /// could re-present a panel that was being dismissed. Intent flips
+    /// instantly; isShown alone doesn't. (Same fix as the sibling panels.)
+    var isVisible: Bool { wantsVisible && popover.isShown }
+    var frame: NSRect {
+        // The popover WINDOW's frame includes AppKit chrome (arrow + shadow
+        // padding) — callers doing anchor math need the actual content rect.
+        if let view = popover.contentViewController?.view, let win = view.window {
+            return win.convertToScreen(view.convert(view.bounds, to: nil))
+        }
+        return anchorPanel.frame
+    }
+
+    override init() {
+        anchorPanel = NSPanel(
             contentRect: .zero,
-            styleMask:   [.nonactivatingPanel, .borderless],
-            backing:     .buffered,
-            defer:       false
+            styleMask: [.nonactivatingPanel, .borderless],
+            backing: .buffered,
+            defer: false
         )
-        level           = .popUpMenu
-        isOpaque        = false
-        backgroundColor = .clear
-        hasShadow       = false   // shadow drawn in SwiftUI — avoids double halo with NSPanel
-        ignoresMouseEvents = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        anchorPanel.isOpaque = false
+        anchorPanel.backgroundColor = .clear
+        anchorPanel.hasShadow = false
+        anchorPanel.ignoresMouseEvents = true
+        anchorPanel.level = .popUpMenu
+        anchorPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        anchorPanel.contentView = anchorView
+
+        super.init()
+
+        popover.behavior = .applicationDefined
+        popover.animates = true
+        popover.delegate = self
     }
 
     func show(for item: ClipboardItem,
@@ -55,124 +98,80 @@ class TransformPanel: NSPanel {
         )
 
         let bubbleW: CGFloat = 290
-        let arrowW: CGFloat = 10
-        let w: CGFloat = bubbleW + arrowW
         let screen = NSScreen.main?.visibleFrame ?? .zero
 
         let preferredRightX = popupFrame.maxX + 8
-        let rightFits = preferredRightX + w <= screen.maxX
-        let leftX = popupFrame.minX - w - 8
-        let leftFits = leftX >= screen.minX + 8
+        let rightFits = preferredRightX + bubbleW <= screen.maxX
+        let leftFits = popupFrame.minX - bubbleW - 8 >= screen.minX + 8
         let placeRight = rightFits || !leftFits
-
-        let measuringView = AnyView(TransformCalloutView(
-            content: content,
-            arrowOnLeadingSide: placeRight,
-            arrowCenterYFromTop: 120
-        ))
-
-        // Always create a fresh NSHostingView — reusing it preserves the
-        // inner SwiftUI tree (ScrollView offset, materialised rows,
-        // @ObservedObject snapshots) across hide/show.
-        let hv = NSHostingView(rootView: measuringView)
-        contentView = hv
-        hostingView = hv
 
         // When the panel is already visible (cycling with V), skip the
         // synchronous layout+fittingSize pass — it blocks the main thread
         // and causes lag when both preview and transform panels are open.
         // Use the cached height from the last full measurement instead.
-        // On first show the panel is hidden, so we always measure then.
+        // On first show the panel is hidden, so we always measure then
+        // (with a throwaway hosting view, created only in that branch).
         let h: CGFloat
-        if isVisible {
+        if popover.isShown {
             h = cachedPanelHeight
         } else {
+            let hv = NSHostingView(rootView: content)
             hv.layoutSubtreeIfNeeded()
             let measured = hv.fittingSize.height
             h = min(max(measured > 0 ? measured : 460, 360), 620)
             cachedPanelHeight = h
         }
 
-        var x = placeRight ? preferredRightX : leftX
-        x = max(screen.minX + 8, x)
-
-        let targetY = anchorPoint?.y ?? popupFrame.midY
-        var y = targetY - h / 2
-        y = max(screen.minY + 8, min(y, screen.maxY - h - 8))
-        let arrowCenterYFromTop = (y + h) - targetY
-
-        let finalView = AnyView(TransformCalloutView(
-            content: content,
-            arrowOnLeadingSide: placeRight,
-            arrowCenterYFromTop: arrowCenterYFromTop
-        ))
-        // Swap rootView on the SAME instance to get the final geometry —
-        // this is a normal SwiftUI update on a fresh tree, not the stale
-        // reuse the recreation above is protecting against.
-        hv.rootView = finalView
-
-        setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
-        contentView?.needsDisplay = true
-        if !isVisible { orderFront(nil) }
-    }
-
-    func hide() { orderOut(nil) }
-}
-
-private struct TransformCalloutView: View {
-    let content: TransformView
-    let arrowOnLeadingSide: Bool
-    let arrowCenterYFromTop: CGFloat
-
-    var body: some View {
-        HStack(spacing: -1) {
-            if arrowOnLeadingSide {
-                // Panel is on the right of the preview, so arrow must point left
-                // back toward the selected row.
-                sideArrow(pointingRight: false)
-                content
-            } else {
-                content
-                // Panel is on the left of the preview, so arrow must point right
-                // back toward the selected row.
-                sideArrow(pointingRight: true)
-            }
-        }
-        // One shadow for arrow + bubble (panel hasShadow is off).
-        .shadow(color: .black.opacity(0.22), radius: 16, x: 0, y: 6)
-    }
-
-    private func sideArrow(pointingRight: Bool) -> some View {
-        GeometryReader { geo in
-            let topOffset = max(12, min(arrowCenterYFromTop - 10, geo.size.height - 32))
-            ZStack(alignment: .top) {
-                Color.clear
-                SideArrow(pointingRight: pointingRight)
-                    .fill(.regularMaterial)
-                    .frame(width: 10, height: 20)
-                    .offset(y: topOffset)
-            }
-        }
-        .frame(width: 10)
-    }
-}
-
-private struct SideArrow: Shape {
-    let pointingRight: Bool
-
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        if pointingRight {
-            p.move(to: CGPoint(x: rect.maxX, y: rect.midY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        popover.contentSize = NSSize(width: bubbleW, height: h)
+        if let hostingController = popover.contentViewController as? NSHostingController<TransformView> {
+            hostingController.rootView = content
         } else {
-            p.move(to: CGPoint(x: rect.minX, y: rect.midY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-            p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            popover.contentViewController = NSHostingController(rootView: content)
         }
-        p.closeSubpath()
-        return p
+
+        // The anchor is a stationary 1pt-wide strip spanning the popup's full
+        // height at whichever edge the panel sits on, placed ONCE per popover
+        // session and NEVER moved while the popover is shown. The previous
+        // approach — teleporting a 1×1 anchor window to the new row on every
+        // cycle and re-calling show() — broke AppKit's popover attachment:
+        // moving the anchor window under a live popover tears it down, and
+        // the re-show re-presents it, replaying the full close+open animation
+        // on every single keystroke. Tracking the highlighted row is done the
+        // supported way instead: updating `positioningRect` WITHIN the
+        // stationary strip, which moves the arrow without any re-present.
+        let anchorY = anchorPoint?.y ?? popupFrame.midY
+        let stripHeight = max(1, popupFrame.height)
+        let desiredStrip = NSRect(x: placeRight ? popupFrame.maxX : popupFrame.minX,
+                                  y: popupFrame.minY, width: 1, height: stripHeight)
+        let localY = max(0, min(stripHeight - 1, anchorY - desiredStrip.minY))
+        let rowRect = NSRect(x: 0, y: localY, width: 1, height: 1)
+
+        wantsVisible = true
+        if popover.isShown, shownStrip == desiredStrip {
+            popover.positioningRect = rowRect
+            return
+        }
+
+        // Fresh show — or the popup frame / side changed (rare), which needs
+        // a genuine re-present since the strip itself must move.
+        if popover.isShown { popover.performClose(nil) }
+        anchorPanel.setFrame(desiredStrip, display: false)
+        if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
+        shownStrip = desiredStrip
+        // Fast open with a REAL visible animation — see clipenAnimateIn.
+        // animates is restored so the close keeps the native fade-out.
+        popover.animates = false
+        popover.show(relativeTo: rowRect, of: anchorView,
+                     preferredEdge: placeRight ? .maxX : .minX)
+        popover.animates = true
+        popover.clipenAnimateIn()
+    }
+
+    func hide() {
+        wantsVisible = false
+        if popover.isShown { popover.performClose(nil) }
+        anchorPanel.orderOut(nil)
+        shownStrip = nil
     }
 }
 
@@ -251,11 +250,8 @@ struct TransformView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
         }
-        .background(SystemPopoverMaterial().clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
-        )
+        // No background/clipShape/overlay here — hosted inside a real
+        // NSPopover now, which draws all of that (plus the arrow) itself.
     }
 
     // MARK: - Outer chrome (always-on)
@@ -263,21 +259,39 @@ struct TransformView: View {
     private var outerHeader: some View {
         // Always renders the Transforms label — the picker now lives INLINE
         // under its tool row, so the header doesn't need to change context.
-        HStack(spacing: 6) {
-            Image(systemName: "wand.and.stars")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
-            Text("Transforms")
-                .font(.system(size: 12, weight: .semibold))
-            Spacer()
-            Text(manager.inPageRangeMode
-                 ? "↵ paste · ␣ preview · ⎋ cancel"
-                 : "⌘X next · ⌘⇧X prev · release ⌘ apply")
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
+        // Hints render on their own full-width row below the title (not
+        // crammed to the right of it), using the same icon + short-label
+        // FlatHint style as the main popup's header hints.
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Text("Transforms")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+            }
+
+            HStack(spacing: 14) {
+                if manager.inPageRangeMode {
+                    FlatHint(key: "↵", label: "Paste")
+                    FlatHint(key: "␣", label: "Preview", isActive: manager.popupHintSpace)
+                    FlatHint(key: "⎋", label: "Cancel")
+                } else if manager.inLanguagePickerMode {
+                    FlatHint(key: "↑↓", label: "Choose")
+                    FlatHint(key: "↵", label: "Translate")
+                    FlatHint(key: "⎋", label: "Cancel")
+                } else {
+                    FlatHint(key: "X", label: "Next", isActive: manager.popupHintX)
+                    FlatHint(key: "⇧X", label: "Prev", isActive: manager.popupHintShiftX)
+                    FlatHint(key: "hold X", label: "Close", isActive: manager.popupHintXHold)
+                }
+                Spacer()
+            }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
+        .padding(.top, 9)
+        .padding(.bottom, 8)
     }
 
     private func detectedBadge(type: ClipboardContentType, label: String) -> some View {
@@ -362,6 +376,26 @@ struct TransformView: View {
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                             }
 
+                            // Same nested-inline-picker pattern as the PDF page
+                            // picker above, for the "Translate" row.
+                            if display.id == "ai.translate" && manager.inLanguagePickerMode {
+                                InlineLanguagePicker()
+                                    .padding(.leading, 36)
+                                    .padding(.trailing, 8)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.accentColor.opacity(0.05))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
+                                    )
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 4)
+                                    .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+
                             if idx < displays.count - 1 {
                                 Divider().padding(.leading, 36)
                             }
@@ -370,6 +404,7 @@ struct TransformView: View {
                     .padding(.vertical, 6)
                     .padding(.horizontal, 8)
                     .animation(.easeInOut(duration: 0.15), value: manager.inPageRangeMode)
+                    .animation(.easeInOut(duration: 0.15), value: manager.inLanguagePickerMode)
                 }
                 .onChange(of: selectedTransformIndex) { _, newIdx in
                     guard displays.indices.contains(newIdx) else { return }
@@ -449,8 +484,10 @@ struct TransformRow: View {
         .background(
             isSelected
                 ? Color.accentColor
-                : (isHovered ? Color.accentColor.opacity(0.1) : Color.clear)
+                : (isHovered ? Color.accentColor.opacity(0.1) : Color.clear),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
+        .padding(.horizontal, 6)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovered)

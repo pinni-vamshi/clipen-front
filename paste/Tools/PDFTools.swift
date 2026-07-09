@@ -33,7 +33,68 @@ enum PDFTools {
         make("pdf.reduce-size", icon: "arrow.down.doc", label: "Reduce PDF Size", group: "OPTIMIZE") { pdf, data in
             await PDFService.reducedCopy(from: pdf, originalData: data)
         },
+        ClipboardTool(
+            id: "ai.pdf-summarize",
+            icon: "text.line.first.and.arrowtriangle.forward",
+            label: "Summarize",
+            group: "AI",
+            preview: { item in
+                guard AIService.isModelAvailable(), pdfInput(for: item) != nil else { return nil }
+                return "Summarize this PDF"
+            },
+            runAsync: { item in
+                guard let input = pdfInput(for: item) else { return nil }
+                guard let text = await PDFService.extractAllText(from: input.pdf), AIService.fits(text) else {
+                    return .status("No extractable text found in PDF.")
+                }
+                guard let summary = await AIService.transform(
+                    instructions: "You are a concise summarizer. Summarize the given document text in 2-5 sentences. Output ONLY the summary, no preamble.",
+                    text: text
+                ) else {
+                    return .status("Apple Intelligence couldn't summarize this.")
+                }
+                return .text(summary)
+            }
+        ),
+        ClipboardTool(
+            id: "ai.pdf-describe-pages",
+            icon: "text.below.photo",
+            label: "Describe Each Page (AI)",
+            group: "AI",
+            preview: { item in
+                // Renders + describes every page one at a time — capped at a
+                // small page count so this can't turn into a multi-minute
+                // run on a 200-page PDF. Requires the image-description
+                // capability specifically (not just the text model), since
+                // each page is handed to Foundation Models as a real image.
+                guard AIService.isImageDescribeAvailable(),
+                      let input = pdfInput(for: item),
+                      (1...Self.maxDescribablePages).contains(input.pdf.pageCount) else { return nil }
+                return "Describe each of \(input.pdf.pageCount) pages"
+            },
+            runAsync: { item in
+                guard let input = pdfInput(for: item),
+                      (1...Self.maxDescribablePages).contains(input.pdf.pageCount) else { return nil }
+                var lines: [String] = []
+                for i in 0..<input.pdf.pageCount {
+                    guard let page = input.pdf.page(at: i),
+                          let cgImage = PDFService.renderCGImage(page: page, scale: 1.5) else {
+                        lines.append("Page \(i + 1): [Couldn't render this page]")
+                        continue
+                    }
+                    let description = await AIService.describeImage(cgImage)
+                    lines.append("Page \(i + 1): \(description ?? "[Couldn't describe this page]")")
+                }
+                guard !lines.isEmpty else { return .status("Couldn't describe any pages.") }
+                return .text(lines.joined(separator: "\n\n"))
+            }
+        ),
     ]
+
+    /// Page-by-page AI description renders + runs the model once PER page —
+    /// linear cost that's fine for a handful of pages but would make a long
+    /// document take minutes. Hidden above this cap rather than silently slow.
+    private static let maxDescribablePages = 10
 
     private static func make(
         _ id: String,
@@ -83,6 +144,10 @@ enum PDFTools {
         case .file(let url) where url.pathExtension.lowercased() == "pdf":
             guard let pdf = PDFDocument(url: url) else { return nil }
             return (pdf, try? Data(contentsOf: url))
+        // One-element files-list of a PDF — same as a single .file capture.
+        case .files(let urls) where urls.count == 1 && urls[0].pathExtension.lowercased() == "pdf":
+            guard let pdf = PDFDocument(url: urls[0]) else { return nil }
+            return (pdf, try? Data(contentsOf: urls[0]))
         default:
             return nil
         }
@@ -185,6 +250,14 @@ enum PDFService {
     }
 
     private static func render(page: PDFPage, scale: CGFloat) -> Data? {
+        guard let cgImage = renderCGImage(page: page, scale: scale) else { return nil }
+        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+    }
+
+    /// Rendered directly as a CGImage (no PNG round-trip) — used by the AI
+    /// "Describe Each Page" tool, which hands the pixels straight to
+    /// Foundation Models instead of writing/reading a file.
+    static func renderCGImage(page: PDFPage, scale: CGFloat) -> CGImage? {
         let bounds = page.bounds(for: .mediaBox)
         let width = max(1, Int(bounds.width * scale))
         let height = max(1, Int(bounds.height * scale))
@@ -207,8 +280,7 @@ enum PDFService {
         page.draw(with: .mediaBox, to: context)
         context.restoreGState()
 
-        guard let cgImage = context.makeImage() else { return nil }
-        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+        return context.makeImage()
     }
 
     private static func optimizedOutputURL(fileExtension ext: String) throws -> URL {

@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import InputMethodKit
 import Sparkle
 
 @main
@@ -30,11 +29,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Sparkle auto-update controller — must be retained for the app lifetime.
     private var updaterController: SPUStandardUpdaterController?
-
-    /// IMK server for caret-position tracking (level 1 of the 4-level fallback).
-    /// Retained for the app lifetime. Connects to text clients when the user
-    /// has added "Clipen" to System Settings › Keyboard › Input Sources.
-    private var inputMethodServer: IMKServer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
@@ -73,11 +67,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.object(forKey: "SUAutomaticallyUpdate") == nil {
             updaterController?.updater.automaticallyDownloadsUpdates = true
         }
-
-        // Start the IMK server so text clients can report caret rects.
-        let imkName = Bundle.main.infoDictionary?["InputMethodConnectionName"] as? String
-                      ?? "ClipenInput"
-        inputMethodServer = IMKServer(name: imkName, bundleIdentifier: Bundle.main.bundleIdentifier)
 
         ClipboardManager.shared.startMonitoring()
 
@@ -141,28 +130,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Bring the main settings window to front, creating it if needed.
-    func openMainWindow() {
+    /// Retries briefly: on a slow first launch the SwiftUI Window scene may
+    /// not have materialised its NSWindow yet when this is called. (The old
+    /// fallback opened "clipen://open" — a URL scheme this app never
+    /// registered, so it silently did nothing.)
+    func openMainWindow(retriesLeft: Int = 6) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
             existing.makeKeyAndOrderFront(nil)
             return
         }
-        if let url = URL(string: "clipen://open") {
-            NSWorkspace.shared.open(url)
+        guard retriesLeft > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.openMainWindow(retriesLeft: retriesLeft - 1)
         }
     }
 }
 
-// MARK: - Sparkle gentle reminders
+// MARK: - Sparkle update presentation
 //
 // Clipen runs as `.accessory` (LSUIElement) — no dock icon, no Cmd-Tab
-// presence. Sparkle's default presentation can therefore pop an update
-// dialog while the user is in another app and they'd never notice.
+// presence, no menu bar item. `supportsGentleScheduledUpdateReminders = true`
+// used to tell Sparkle to DEFER showing automatic/scheduled-check results
+// until some later "opportune moment" instead of showing them right away —
+// but for an app with no persistent UI surface, that moment never reliably
+// arrives, so a background check finding an update was effectively invisible
+// forever; only a MANUAL "Check for Updates…" (which always shows
+// immediately) ever actually surfaced anything. False here makes an
+// automatic check behave exactly like a manual one: show the dialog the
+// moment an update is found, with standardUserDriverWillShowModalAlert
+// activating the app so it isn't hidden behind whatever you're using.
 
 extension AppDelegate: SPUStandardUserDriverDelegate {
 
-    var supportsGentleScheduledUpdateReminders: Bool { true }
+    var supportsGentleScheduledUpdateReminders: Bool { false }
 
     func standardUserDriverWillShowModalAlert() {
         NSApp.activate(ignoringOtherApps: true)

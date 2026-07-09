@@ -117,6 +117,108 @@ struct InlinePagePicker: View {
     }
 }
 
+// MARK: - Inline language picker view (rendered inside TransformPanel)
+
+/// Single entry point for "Translate": ONE tool row that, once activated,
+/// shows every supported language in one scrollable menu right here — type
+/// to filter, ↑/↓ to move the highlight, click or ↵ to translate-and-paste.
+/// Replaces an earlier version that listed all 20 languages as separate
+/// top-level transform rows — this is the corrected shape: one action, one
+/// picker, all choices inside it.
+struct InlineLanguagePicker: View {
+    @ObservedObject private var manager = ClipboardManager.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            queryRow
+            Divider()
+            list
+        }
+    }
+
+    private var queryRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11))
+                .foregroundColor(.accentColor)
+            HStack(spacing: 0) {
+                if manager.languagePickerQuery.isEmpty {
+                    BlinkingCursor()
+                        .foregroundColor(.accentColor)
+                    Text("Type to search a language…")
+                        .foregroundColor(.secondary.opacity(0.55))
+                } else {
+                    Text(manager.languagePickerQuery)
+                        .foregroundColor(.primary)
+                    BlinkingCursor()
+                        .foregroundColor(.accentColor)
+                }
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: 12, design: .monospaced))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .lineLimit(1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.accentColor.opacity(0.07))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.accentColor.opacity(0.4), lineWidth: 1)
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    private var list: some View {
+        let languages = manager.languagePickerFilteredLanguages
+        return ScrollViewReader { proxy in
+            ScrollView {
+                if languages.isEmpty {
+                    Text("No matching language")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 14)
+                } else {
+                    LazyVStack(spacing: 2) {
+                        ForEach(Array(languages.enumerated()), id: \.element.code) { idx, lang in
+                            let isSelected = idx == manager.languagePickerSelectedIndex
+                            Button {
+                                manager.languagePickerSelectedIndex = idx
+                                manager.commitLanguagePickerTranslation()
+                            } label: {
+                                HStack {
+                                    Text(lang.name)
+                                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                                        .foregroundColor(isSelected ? .white : .primary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                        .fill(isSelected ? Color.accentColor : Color.clear)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .id(idx)
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+            .frame(maxHeight: 200)
+            .onChange(of: manager.languagePickerSelectedIndex) { _, newIdx in
+                withAnimation(.easeOut(duration: 0.1)) { proxy.scrollTo(newIdx, anchor: .center) }
+            }
+        }
+    }
+}
+
 // MARK: - Blinking cursor (shared by all non-activating-panel inputs)
 
 /// Fake caret for places where a real `TextField` can't be used — the popup
