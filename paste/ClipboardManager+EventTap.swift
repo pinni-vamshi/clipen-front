@@ -277,7 +277,24 @@ extension ClipboardManager {
         // Excluding the popup's own window from the guard fixes that
         // without weakening it for genuinely other Clipen windows (main
         // window, reference panel, …), which must still fall through here.
-        if let keyWindow = NSApp.keyWindow, keyWindow !== previewWindow.window {
+        //
+        // ALSO gated on `NSApp.isActive`: `keyWindow` can survive stale on
+        // a window that isn't truly focused anymore in some AppKit/SwiftUI
+        // window-style configurations (seen after the main window adopted
+        // `.hiddenTitleBar`). Without the `isActive` check, simply leaving
+        // the Dashboard window open in the background — while a DIFFERENT
+        // app is actually focused — silently ate ⌘V everywhere, since this
+        // guard kept firing even though Clipen wasn't the active app at
+        // all. Only suppress the ring shortcut when Clipen is genuinely the
+        // active, frontmost application right now.
+        //
+        // `isTutorialPracticeActive` is a deliberate escape hatch: the "TRY
+        // IT HERE" box in the How-To-Use tutorial is a real Clipen text
+        // field, but its entire purpose is letting the user hold ⌘ and tap
+        // V there to see the REAL ring popup — so while it's focused, this
+        // guard steps aside instead of swallowing the demo.
+        if NSApp.isActive, let keyWindow = NSApp.keyWindow,
+           keyWindow !== previewWindow.window, !isTutorialPracticeActive {
             return Unmanaged.passUnretained(event)
         }
 

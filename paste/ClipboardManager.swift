@@ -500,6 +500,14 @@ class ClipboardManager: ObservableObject {
     /// wherever the popup's other session state resets (dismissPreview).
     @Published var popupPinnedOpen: Bool = false
 
+    /// True while the How-To-Use tutorial's "TRY IT HERE" practice box is
+    /// focused. That field's whole purpose is letting the user hold ⌘ and
+    /// tap V to see the real ring popup, so the global event tap's "a
+    /// Clipen window is key, this keystroke is meant for typing" guard
+    /// steps aside while this is true — see its doc comment in
+    /// ClipboardManager+EventTap.swift. Set/cleared by TutorialSheet.
+    @Published var isTutorialPracticeActive: Bool = false
+
     /// Same tap-vs-hold pattern as V, applied to X: a tap opens/cycles the
     /// transform panel, a hold dismisses it (closes just the transform panel,
     /// leaving the popup itself open). Longer threshold than V's because X is
