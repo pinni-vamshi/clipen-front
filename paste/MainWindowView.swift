@@ -133,50 +133,41 @@ struct MainWindowView: View {
 
     // MARK: - Top toolbar (CLIPEN wordmark · Dashboard|Settings · actions)
 
-    /// A genuine 3-column HStack (leading / center / trailing, each given
-    /// equal flexible width) — NOT a ZStack of independently-positioned
-    /// overlays. A ZStack overlay is only ever safe if the window can never
-    /// get narrower than the content needs; three equal flexible columns
-    /// guarantee the wordmark, switcher, and buttons can never collide or
-    /// visually stack, regardless of window width.
+    /// One leading cluster, Safari-toolbar style — CLIPEN, the Dashboard |
+    /// Settings switcher, and the two action buttons sit at a fixed distance
+    /// from each other and from the traffic lights, exactly like Safari's
+    /// back/sidebar/tabs cluster next to ITS traffic lights. A single
+    /// trailing Spacer() absorbs whatever width is left over, so the
+    /// cluster never drifts apart as the window gets wider — unlike the
+    /// previous 3-equal-flexible-columns layout, which stretched CLIPEN,
+    /// the switcher, and the buttons further apart the wider the window got.
     private var topToolbar: some View {
-        HStack(spacing: 8) {
-            HStack {
-                Text("CLIPEN")
-                    .font(.system(size: 13, weight: .heavy))
-                    .tracking(3)
-                    .foregroundStyle(LinearGradient(colors: [Color(hex: "#FFB088"), Color(hex: "#FF8A80")],
-                                                    startPoint: .leading, endPoint: .trailing))
-                Spacer(minLength: 0)
-            }
-            // Clear the traffic-light cluster (⌀ ~70pt from the window edge)
-            // now that the native title bar is hidden and this row shares
-            // the same strip as the window controls.
-            .padding(.leading, 62)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
+        HStack(spacing: 14) {
+            Text("CLIPEN")
+                .font(.system(size: 13, weight: .heavy))
+                .tracking(3)
+                .foregroundStyle(LinearGradient(colors: [Color(hex: "#FFB088"), Color(hex: "#FF8A80")],
+                                                startPoint: .leading, endPoint: .trailing))
+                // Clear the traffic-light cluster (⌀ ~70pt from the window
+                // edge) now that the native title bar is hidden and this
+                // row shares the same strip as the window controls.
+                .padding(.leading, 62)
 
-            // Center segmented Dashboard | Settings switcher — sized to its
-            // own content, centered within the middle column.
             HStack(spacing: 2) {
                 toolbarSegment("Dashboard", active: !showSettings) { showSettings = false }
                 toolbarSegment("Settings",  active: showSettings)  { showSettings = true }
             }
             .padding(3)
             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .fixedSize()
-            .frame(maxWidth: .infinity, alignment: .center)
 
-            HStack(spacing: 8) {
-                toolbarPill("Check for Updates", icon: "arrow.triangle.2.circlepath") {
-                    AppDelegate.shared?.checkForUpdates()
-                }
-                toolbarPill("How to Use", icon: "questionmark.circle") {
-                    showTutorial = true
-                }
+            toolbarPill("Check for Updates", icon: "arrow.triangle.2.circlepath") {
+                AppDelegate.shared?.checkForUpdates()
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .layoutPriority(1)
+            toolbarPill("How to Use", icon: "questionmark.circle") {
+                showTutorial = true
+            }
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .frame(height: 38)

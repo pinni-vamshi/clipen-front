@@ -914,6 +914,13 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader("01", "RING SIZE")
 
+            // The big counter — restored. Only the stepper box next to it
+            // was meant to go, not this.
+            Text("\(manager.maxItems)")
+                .font(.system(size: 64, weight: .black))
+                .foregroundColor(.textPri)
+                .contentTransition(.numericText())
+
             Text("Maximum items in ring")
                 .font(.system(size: 11)).foregroundColor(.textSec)
 
