@@ -61,12 +61,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         return anchorPanel.frame
     }
 
-    /// The popover's own backing NSWindow, if currently shown. Lets the
-    /// event tap tell "one of Clipen's OTHER windows (main window, reference
-    /// panel, …) is key" apart from "the ring popup itself happens to be
-    /// key" — only the former should suppress the popup's own key handling.
-    var window: NSWindow? { popover.contentViewController?.view.window }
-
     override init() {
         anchorPanel = NSPanel(
             contentRect: .zero,

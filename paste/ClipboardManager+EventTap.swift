@@ -256,48 +256,26 @@ extension ClipboardManager {
     /// and inline search. Returns nil to swallow the event, or passes it through
     /// when Clipen isn't interested.
     func handleKeyDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        // If one of CLIPEN'S OWN windows currently holds real keyboard focus
-        // (the main window's search/notes fields, the reference panel's
-        // notes editor, its table-cell editor, …), this keystroke is meant
-        // for THAT text field — typing, pasting, selecting — not a request
-        // to drive the global ring popup. Without this, ⌘V while typing a
-        // note inside Clipen's own UI got hijacked by the "open/cycle the
-        // ring" logic below instead of actually pasting into the field.
-        //
-        // Safe to gate on `NSApp.keyWindow != nil` alone in the common case:
-        // keyWindow is only ever a window owned by THIS process (Safari/
-        // Chrome/Finder windows can never be Clipen's keyWindow). The ring
-        // popup's inline search is deliberately driven through this very
-        // event tap rather than a real focused NSTextField (see
-        // `isSearchActive`'s doc comment) so it doesn't NEED to be key —
-        // but NSPopover can still occasionally end up key on its own (e.g.
-        // after certain focus-stealing interactions), and when that
-        // happened this guard silently swallowed Esc/every other popup key
-        // instead of routing it below, leaving the popup stuck open.
-        // Excluding the popup's own window from the guard fixes that
-        // without weakening it for genuinely other Clipen windows (main
-        // window, reference panel, …), which must still fall through here.
-        //
-        // ALSO gated on `NSApp.isActive`: `keyWindow` can survive stale on
-        // a window that isn't truly focused anymore in some AppKit/SwiftUI
-        // window-style configurations (seen after the main window adopted
-        // `.hiddenTitleBar`). Without the `isActive` check, simply leaving
-        // the Dashboard window open in the background — while a DIFFERENT
-        // app is actually focused — silently ate ⌘V everywhere, since this
-        // guard kept firing even though Clipen wasn't the active app at
-        // all. Only suppress the ring shortcut when Clipen is genuinely the
-        // active, frontmost application right now.
-        //
-        // `isTutorialPracticeActive` is a deliberate escape hatch: the "TRY
-        // IT HERE" box in the How-To-Use tutorial is a real Clipen text
-        // field, but its entire purpose is letting the user hold ⌘ and tap
-        // V there to see the REAL ring popup — so while it's focused, this
-        // guard steps aside instead of swallowing the demo.
-        if NSApp.isActive, let keyWindow = NSApp.keyWindow,
-           keyWindow !== previewWindow.window, !isTutorialPracticeActive {
-            return Unmanaged.passUnretained(event)
-        }
-
+        // No "a Clipen window is key, let this keystroke through" guard
+        // here on purpose — the ring shortcut (hold ⌘, tap V) is meant to
+        // work identically everywhere, including while typing in Clipen's
+        // own search bar or a notes editor (main window, reference panel).
+        // This is safe because every branch below is already scoped
+        // tightly enough on its own:
+        //   - Plain (non-⌘) keys never reach the popup-specific logic at
+        //     all (see the `guard cmd && !ctrl` a few lines down) — normal
+        //     typing, backspace, arrows, Enter, Tab are completely
+        //     unaffected regardless of what's focused.
+        //   - ⌘C/⌘X/etc. only get hijacked once `previewWindow.isVisible`
+        //     is already true (i.e. the user already opened the ring) —
+        //     otherwise they fall through untouched at the end of this
+        //     function, so system copy/cut in a text field is unaffected
+        //     until the user has deliberately invoked the ring.
+        //   - The committed paste itself (⌘ release) posts a SYNTHETIC ⌘V
+        //     guarded by `isSimulatingPaste` (see simulatePaste), which
+        //     independently lets that specific event bypass this handler
+        //     and land in whatever's really focused — including back into
+        //     the same Clipen text field the ring was opened from.
         let key   = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
         notePopupHintModifiers(cmd: flags.contains(.maskCommand),

@@ -91,7 +91,6 @@ struct TutorialSheet: View {
     @State private var tick: Int = 0
     @State private var tickTimer: Timer? = nil
     @State private var practiceText: String = ""
-    @FocusState private var practiceFocused: Bool
 
     private static let totalPages = 4
 
@@ -130,14 +129,7 @@ struct TutorialSheet: View {
         }
         .frame(width: 500).background(Color.surface).preferredColorScheme(.dark)
         .onAppear { baselineIDs = Set(manager.items.map(\.id)); startTick() }
-        .onDisappear {
-            stopTick()
-            // Never leave the event-tap bypass latched on after the sheet closes.
-            manager.isTutorialPracticeActive = false
-        }
-        .onChange(of: practiceFocused) { _, focused in
-            manager.isTutorialPracticeActive = focused
-        }
+        .onDisappear { stopTick() }
     }
 
     private var tutorialHeader: some View {
@@ -303,7 +295,6 @@ struct TutorialSheet: View {
                     .frame(height: 78).scrollContentBackground(.hidden)
                     .background(Color.surfaceHi, in: RoundedRectangle(cornerRadius: 8))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.border, lineWidth: 1))
-                    .focused($practiceFocused)
                 if practiceText.isEmpty {
                     Text(hint).font(.system(size: 11)).foregroundColor(.textDim)
                         .padding(.horizontal, 8).padding(.vertical, 9).allowsHitTesting(false)
