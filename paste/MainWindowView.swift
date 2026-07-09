@@ -137,7 +137,7 @@ struct MainWindowView: View {
         ZStack {
             HStack {
                 Text("CLIPEN")
-                    .font(.system(size: 14, weight: .heavy))
+                    .font(.system(size: 13, weight: .heavy))
                     .tracking(3)
                     .foregroundStyle(LinearGradient(colors: [Color(hex: "#FFB088"), Color(hex: "#FF8A80")],
                                                     startPoint: .leading, endPoint: .trailing))
@@ -151,6 +151,10 @@ struct MainWindowView: View {
                     }
                 }
             }
+            // Clear the traffic-light cluster (⌀ ~70pt from the window edge)
+            // now that the native title bar is hidden and this row shares
+            // the same strip as the window controls.
+            .padding(.leading, 62)
 
             // Center segmented Dashboard | Settings switcher.
             HStack(spacing: 2) {
@@ -158,10 +162,10 @@ struct MainWindowView: View {
                 toolbarSegment("Settings",  active: showSettings)  { showSettings = true }
             }
             .padding(3)
-            .background(Color.black.opacity(0.30), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.border, lineWidth: 1))
+            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .padding(.horizontal, 16).padding(.vertical, 9)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .frame(height: 38)
     }
 
     private func toolbarSegment(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {

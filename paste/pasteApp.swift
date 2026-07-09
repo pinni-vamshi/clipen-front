@@ -12,6 +12,11 @@ struct pasteApp: App {
         }
         .defaultSize(width: 820, height: 680)
         .windowResizability(.contentMinSize)
+        // No separate native title bar strip above our own toolbar — the
+        // CLIPEN wordmark, Dashboard|Settings switcher, and action buttons
+        // sit in the SAME row as the traffic lights instead of a second
+        // bar stacked underneath them.
+        .windowStyle(.hiddenTitleBar)
         .commands {
             // Only one main window — remove the default "New Window" entry.
             CommandGroup(replacing: .newItem) {}

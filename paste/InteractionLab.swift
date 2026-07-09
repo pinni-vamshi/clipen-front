@@ -161,6 +161,10 @@ final class InteractionLabController: ObservableObject {
         play()
     }
 
+    /// Runs the selected demo's script on a continuous loop — no manual
+    /// "Play" trigger needed; picking a row in the interactions list is
+    /// itself the trigger, and the animation keeps repeating until a
+    /// different row is picked or the stage disappears.
     func play() {
         task?.cancel()
         resetStage()
@@ -169,13 +173,16 @@ final class InteractionLabController: ObservableObject {
         isPlaying = true
         task = Task { [weak self] in
             guard let self else { return }
-            do {
-                try await self.run(demo)
-            } catch {
-                // Cancelled mid-script — resetStage already ran for the new play.
-            }
-            if !Task.isCancelled {
-                self.isPlaying = false
+            while !Task.isCancelled {
+                do {
+                    try await self.run(demo)
+                    try await self.pause(900)
+                } catch {
+                    return // cancelled mid-script — a new play()/stop() already took over
+                }
+                guard !Task.isCancelled else { return }
+                self.resetStage()
+                self.stageKeys = demo.heroKeys
             }
         }
     }
@@ -652,7 +659,9 @@ private struct LabSidePanel: View {
 }
 
 /// The whole INTERACTION PREVIEW stage: mock panel area, key caps row,
-/// title + caption + result, and the Play Animation button.
+/// caption + result. No manual play trigger and no duplicate title — the
+/// selected row in the interactions list already names the gesture, and
+/// the animation itself starts immediately and loops continuously.
 struct InteractionLabStage: View {
     @ObservedObject var lab: InteractionLabController
 
@@ -712,47 +721,49 @@ struct InteractionLabStage: View {
                 }
             }
 
-            // Title + caption
-            VStack(spacing: 8) {
-                Text(lab.selectedDemo.title)
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.textPri)
-                Text(lab.selectedDemo.caption)
-                    .font(.system(size: 11))
-                    .foregroundColor(.textSec)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            // Caption — the row already selected in the list on the left
+            // names the gesture, so this only needs to explain it.
+            Text(lab.selectedDemo.caption)
+                .font(.system(size: 11))
+                .foregroundColor(.textSec)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
             // Result line
             Text(lab.resultText.map { "→ \($0)" } ?? " ")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.green)
                 .opacity(lab.resultText == nil ? 0 : 1)
-
-            Button {
-                lab.play()
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "play.fill").font(.system(size: 10, weight: .bold))
-                    Text("Play Animation").font(.system(size: 12, weight: .semibold))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 22).padding(.vertical, 10)
-                .background(Color.accent, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
+        .onAppear {
+            guard !lab.isPlaying else { return }
+            lab.play()
+        }
+    }
+}
+
+/// Reports a view's natural height up to an enclosing row's PreferenceKey,
+/// so the row can stretch its shorter column/card to match — used to make
+/// the settings rows and the interactions/lab cards end on the same
+/// bottom line instead of drifting to whatever height their own content needs.
+private extension View {
+    func measured<K: PreferenceKey>(_ key: K.Type) -> some View where K.Value == CGFloat {
+        background(GeometryReader { geo in
+            Color.clear.preference(key: key, value: geo.size.height)
+        })
     }
 }
 
 // MARK: - Redesigned Settings screen
 
-/// Full Settings view, matching the numbered two-column mockup:
-///   left column:  01 RING SIZE · 02 APP SETTINGS · 04 INTERACTIONS
-///   right column: 03 MAIN BEHAVIOUR · 05 INTERACTION PREVIEW
+/// Full Settings view, matching the numbered mockup, laid out as two
+/// height-matched ROWS rather than two independent-height columns:
+///   row 1: (01 RING SIZE + 02 APP SETTINGS)  |  03 MAIN BEHAVIOUR
+///   row 2: 04 INTERACTIONS                   |  05 INTERACTION PREVIEW
+/// Both pairs end on the same bottom line — row 2 only ever starts once
+/// row 1 (settings) has fully finished, never interleaved with it.
 /// Footer: version + links + Reset to Defaults.
 struct ClipenSettingsView: View {
     @ObservedObject private var manager = ClipboardManager.shared
@@ -761,31 +772,50 @@ struct ClipenSettingsView: View {
 
     @Binding var showResetConfirm: Bool
 
+    @State private var row1Height: CGFloat = 0
+    @State private var row2Height: CGFloat = 0
+
+    private struct Row1HeightKey: PreferenceKey {
+        static var defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+    }
+    private struct Row2HeightKey: PreferenceKey {
+        static var defaultValue: CGFloat = 0
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
+            // No "SETTINGS" heading here — the Dashboard | Settings switcher
+            // in the top toolbar already shows Settings selected, so a
+            // second, bigger label repeating it was pure redundancy.
             VStack(alignment: .leading, spacing: 30) {
-                Text("SETTINGS")
-                    .font(.system(size: 20, weight: .bold))
-                    .tracking(6)
-                    .foregroundColor(.textPri)
-                    .padding(.top, 6)
-
+                // Row 1 — Ring Size + App Settings (left) vs Main Behaviour
+                // (right), stretched to a shared height so both end flush.
                 HStack(alignment: .top, spacing: 40) {
-                    // Left column
                     VStack(alignment: .leading, spacing: 34) {
                         ringSizeSection
                         appSettingsSection
-                        interactionsSection
                     }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, minHeight: row1Height, alignment: .topLeading)
+                    .measured(Row1HeightKey.self)
 
-                    // Right column
-                    VStack(alignment: .leading, spacing: 34) {
-                        mainBehaviourSection
-                        labSection
-                    }
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    mainBehaviourSection
+                        .frame(maxWidth: .infinity, minHeight: row1Height, alignment: .topLeading)
+                        .measured(Row1HeightKey.self)
                 }
+                .onPreferenceChange(Row1HeightKey.self) { row1Height = $0 }
+
+                // Row 2 — Interactions list vs Interaction Preview stage,
+                // only begins once row 1 is fully finished. Unlike row 1,
+                // both sides here have a visible bordered card, so the
+                // CARDS themselves (not just their outer frames) are
+                // stretched to match — see interactionsSection/labSection.
+                HStack(alignment: .top, spacing: 40) {
+                    interactionsSection.frame(maxWidth: .infinity, alignment: .topLeading)
+                    labSection.frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .onPreferenceChange(Row2HeightKey.self) { row2Height = $0 }
 
                 footer
             }
@@ -817,6 +847,20 @@ struct ClipenSettingsView: View {
             .frame(width: 18, alignment: .leading)
     }
 
+    /// One continuous bordered card wrapping several rows, divided by thin
+    /// hairlines — same treatment as the interactions list, instead of
+    /// every row being its own separately-boxed card.
+    private func rowCard<C: View>(@ViewBuilder content: () -> C) -> some View {
+        VStack(spacing: 0) { content() }
+            .background(Color.surfaceHi.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func rowDivider(leading: CGFloat = 44) -> some View {
+        Divider().background(Color.border).padding(.leading, leading)
+    }
+
     private func behaviourRow(_ n: Int, icon: String, _ label: String,
                               isOn: Binding<Bool>) -> some View {
         HStack(spacing: 10) {
@@ -827,8 +871,25 @@ struct ClipenSettingsView: View {
             Toggle("", isOn: isOn).toggleStyle(.switch).controlSize(.mini).tint(.accent)
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(Color.surfaceHi.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
+    }
+
+    /// A nested slider row that lives inside the same card as its parent
+    /// toggle (e.g. "Open delay" under "Popup on second tap") — dimmed and
+    /// indented, but no separate box of its own.
+    private func nestedSliderRow(icon: String, label: String, valueText: String,
+                                 disabled: Bool, slider: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon).font(.system(size: 10)).foregroundColor(.textDim).frame(width: 16)
+            Text(label).font(.system(size: 11)).foregroundColor(.textDim)
+            slider()
+            Text(valueText)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(.textDim)
+                .frame(width: 48, alignment: .trailing)
+        }
+        .padding(.leading, 28).padding(.trailing, 14).padding(.vertical, 9)
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 0.85)
     }
 
     // MARK: 01 — Ring size
@@ -843,28 +904,34 @@ struct ClipenSettingsView: View {
                     .foregroundColor(.textPri)
                     .contentTransition(.numericText())
 
-                // Vertical stepper — chevron up / value / chevron down.
-                VStack(spacing: 2) {
+                // Vertical stepper — one tight rectangle (chevron / value /
+                // chevron cells separated by hairlines), not three loosely
+                // stacked pieces.
+                VStack(spacing: 0) {
                     Button {
                         withAnimation { manager.setRingSize(manager.maxItems + 5) }
                     } label: {
-                        Image(systemName: "chevron.up").font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.textSec).frame(width: 34, height: 24)
+                        Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.textSec).frame(width: 32, height: 18)
                     }
                     .buttonStyle(.plain)
+                    Divider().background(Color.border)
                     Text("\(manager.maxItems)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundColor(.accent)
+                        .frame(width: 32, height: 17)
+                    Divider().background(Color.border)
                     Button {
                         withAnimation { manager.setRingSize(manager.maxItems - 5) }
                     } label: {
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.textSec).frame(width: 34, height: 24)
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.textSec).frame(width: 32, height: 18)
                     }
                     .buttonStyle(.plain)
                 }
-                .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.border, lineWidth: 1))
+                .background(Color.surfaceHi.opacity(0.6))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.border, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
 
                 Spacer()
             }
@@ -894,31 +961,31 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("02", "APP SETTINGS")
 
-            HStack(spacing: 10) {
-                Image(systemName: "power").font(.system(size: 11)).foregroundColor(.accent).frame(width: 16)
-                Text("Launch at Login").font(.system(size: 13)).foregroundColor(.textPri)
-                Spacer()
-                Toggle("", isOn: Binding(get: { manager.launchAtLogin },
-                                        set: { manager.launchAtLogin = $0 }))
-                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(Color.surfaceHi.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
+            rowCard {
+                HStack(spacing: 10) {
+                    Image(systemName: "power").font(.system(size: 11)).foregroundColor(.accent).frame(width: 16)
+                    Text("Launch at Login").font(.system(size: 13)).foregroundColor(.textPri)
+                    Spacer()
+                    Toggle("", isOn: Binding(get: { manager.launchAtLogin },
+                                            set: { manager.launchAtLogin = $0 }))
+                        .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
 
-            HStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11)).foregroundColor(.accent).frame(width: 16)
-                Text("Check for Updates").font(.system(size: 13)).foregroundColor(.textPri)
-                Spacer()
-                Button("Check now") { AppDelegate.shared?.checkForUpdates() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.accent)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                rowDivider(leading: 40)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11)).foregroundColor(.accent).frame(width: 16)
+                    Text("Check for Updates").font(.system(size: 13)).foregroundColor(.textPri)
+                    Spacer()
+                    Button("Check now") { AppDelegate.shared?.checkForUpdates() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold)).foregroundColor(.accent)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
             }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .background(Color.surfaceHi.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
         }
     }
 
@@ -928,68 +995,63 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("03", "MAIN BEHAVIOUR")
 
-            behaviourRow(1, icon: "hand.tap", "Popup on second tap",
-                         isOn: Binding(get: { manager.openOnSecondTap },
-                                       set: { manager.openOnSecondTap = $0 }))
+            rowCard {
+                behaviourRow(1, icon: "hand.tap", "Popup on second tap",
+                             isOn: Binding(get: { manager.openOnSecondTap },
+                                           set: { manager.openOnSecondTap = $0 }))
 
-            // Open delay — nested under 01, disabled while second-tap mode is on.
-            HStack(spacing: 10) {
-                Image(systemName: "hourglass").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
-                Text("Open delay").font(.system(size: 12)).foregroundColor(.textSec)
-                Slider(value: Binding(get: { manager.firstOpenDelay * 1000 },
-                                     set: { manager.firstOpenDelay = ($0 / 5).rounded() * 5 / 1000 }),
-                       in: 0...1000)
-                    .tint(.accent)
-                Text(manager.openOnSecondTap ? "—"
-                     : manager.firstOpenDelay == 0 ? "Off"
-                     : String(format: "%.0f ms", manager.firstOpenDelay * 1000))
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.textSec)
-                    .frame(width: 52, alignment: .trailing)
+                rowDivider()
+
+                // Open delay — nested under 01, disabled while second-tap mode is on.
+                nestedSliderRow(
+                    icon: "hourglass", label: "Open delay",
+                    valueText: manager.openOnSecondTap ? "—"
+                        : manager.firstOpenDelay == 0 ? "Off"
+                        : String(format: "%.0f ms", manager.firstOpenDelay * 1000),
+                    disabled: manager.openOnSecondTap
+                ) {
+                    Slider(value: Binding(get: { manager.firstOpenDelay * 1000 },
+                                         set: { manager.firstOpenDelay = ($0 / 5).rounded() * 5 / 1000 }),
+                           in: 0...1000)
+                        .tint(.accent)
+                }
+
+                rowDivider()
+                behaviourRow(2, icon: "arrow.right.to.line", "Advance after marking",
+                             isOn: Binding(get: { manager.advanceAfterMark },
+                                           set: { manager.advanceAfterMark = $0 }))
+                rowDivider()
+                behaviourRow(3, icon: "eye", "Always show preview",
+                             isOn: $manager.alwaysShowItemPreview)
+                rowDivider()
+                behaviourRow(4, icon: "clock.arrow.circlepath", "Remember last position",
+                             isOn: $manager.rememberLastSelection)
+                rowDivider()
+                behaviourRow(5, icon: "arrow.triangle.2.circlepath", "Auto updates",
+                             isOn: Binding(
+                                get: { AppDelegate.shared?.automaticallyChecksForUpdates ?? true },
+                                set: { value in
+                                    AppDelegate.shared?.automaticallyChecksForUpdates = value
+                                    if !value { AppDelegate.shared?.automaticallyDownloadsUpdates = false }
+                                }))
+                rowDivider()
+                behaviourRow(6, icon: "timer", "Auto-dismiss popup",
+                             isOn: $manager.autoDismissEnabled)
+
+                rowDivider()
+
+                // Auto-dismiss interval — nested under 06.
+                nestedSliderRow(
+                    icon: "hourglass.bottomhalf.filled", label: "Dismiss after",
+                    valueText: String(format: "%.0f s", manager.autoDismissSeconds),
+                    disabled: !manager.autoDismissEnabled
+                ) {
+                    Slider(value: Binding(get: { manager.autoDismissSeconds },
+                                         set: { manager.autoDismissSeconds = ($0 / 10).rounded() * 10 }),
+                           in: 10...600)
+                        .tint(.accent)
+                }
             }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(Color.surfaceHi.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border.opacity(0.6), lineWidth: 1))
-            .padding(.leading, 28)
-            .disabled(manager.openOnSecondTap)
-            .opacity(manager.openOnSecondTap ? 0.4 : 1)
-
-            behaviourRow(2, icon: "arrow.right.to.line", "Advance after marking",
-                         isOn: Binding(get: { manager.advanceAfterMark },
-                                       set: { manager.advanceAfterMark = $0 }))
-            behaviourRow(3, icon: "eye", "Always show preview",
-                         isOn: $manager.alwaysShowItemPreview)
-            behaviourRow(4, icon: "clock.arrow.circlepath", "Remember last position",
-                         isOn: $manager.rememberLastSelection)
-            behaviourRow(5, icon: "arrow.triangle.2.circlepath", "Auto updates",
-                         isOn: Binding(
-                            get: { AppDelegate.shared?.automaticallyChecksForUpdates ?? true },
-                            set: { value in
-                                AppDelegate.shared?.automaticallyChecksForUpdates = value
-                                if !value { AppDelegate.shared?.automaticallyDownloadsUpdates = false }
-                            }))
-            behaviourRow(6, icon: "timer", "Auto-dismiss popup",
-                         isOn: $manager.autoDismissEnabled)
-
-            // Auto-dismiss interval — nested under 06.
-            HStack(spacing: 10) {
-                Image(systemName: "hourglass.bottomhalf.filled").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
-                Text("Dismiss after").font(.system(size: 12)).foregroundColor(.textSec)
-                Slider(value: Binding(get: { manager.autoDismissSeconds },
-                                     set: { manager.autoDismissSeconds = ($0 / 10).rounded() * 10 }),
-                       in: 10...600)
-                    .tint(.accent)
-                Text(String(format: "%.0f s", manager.autoDismissSeconds))
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.textSec)
-                    .frame(width: 52, alignment: .trailing)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 10)
-            .background(Color.surfaceHi.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border.opacity(0.6), lineWidth: 1))
-            .padding(.leading, 28)
-            .disabled(!manager.autoDismissEnabled)
-            .opacity(manager.autoDismissEnabled ? 1 : 0.4)
         }
     }
 
@@ -1004,14 +1066,20 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("04", "INTERACTIONS")
 
+            // minHeight applied BEFORE background/clipShape so the card's
+            // own fill and border actually stretch to row2Height, instead
+            // of just leaving invisible blank space below a shorter box.
             VStack(spacing: 1) {
                 ForEach(Self.interactionDemos) { demo in
                     interactionRow(demo)
                 }
+                Spacer(minLength: 0)
             }
+            .frame(minHeight: row2Height, alignment: .top)
             .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .measured(Row2HeightKey.self)
         }
     }
 
@@ -1059,10 +1127,15 @@ struct ClipenSettingsView: View {
                 }
             }
 
+            // Same before-background minHeight trick as interactionsSection
+            // — this card's fill/border stretch to match the interactions
+            // list's card exactly, not just its outer frame.
             InteractionLabStage(lab: lab)
                 .padding(18)
+                .frame(minHeight: row2Height, alignment: .top)
                 .background(Color.surfaceHi.opacity(0.3), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.border, lineWidth: 1))
+                .measured(Row2HeightKey.self)
         }
     }
 
