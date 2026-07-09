@@ -870,7 +870,10 @@ struct ClipenSettingsView: View {
             Spacer()
             Toggle("", isOn: isOn).toggleStyle(.switch).controlSize(.mini).tint(.accent)
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        // More breathing room than the other cards — this list is read
+        // top-to-bottom far more often than app settings/interactions, and
+        // 12pt vertical made adjacent toggles feel cramped.
+        .padding(.horizontal, 14).padding(.vertical, 16)
     }
 
     /// A nested slider row that lives inside the same card as its parent
@@ -894,63 +897,51 @@ struct ClipenSettingsView: View {
 
     // MARK: 01 — Ring size
 
+    /// Square minus/plus stepper button flanking the ring-size slider —
+    /// replaces the old vertical chevron-stepper box entirely.
+    private func ringStepButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 12, weight: .bold))
+                .foregroundColor(.textSec)
+                .frame(width: 30, height: 30)
+                .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.border, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
     private var ringSizeSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader("01", "RING SIZE")
 
-            HStack(alignment: .center, spacing: 18) {
-                Text("\(manager.maxItems)")
-                    .font(.system(size: 64, weight: .bold))
-                    .foregroundColor(.textPri)
-                    .contentTransition(.numericText())
-
-                // Vertical stepper — one tight rectangle (chevron / value /
-                // chevron cells separated by hairlines), not three loosely
-                // stacked pieces.
-                VStack(spacing: 0) {
-                    Button {
-                        withAnimation { manager.setRingSize(manager.maxItems + 5) }
-                    } label: {
-                        Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.textSec).frame(width: 32, height: 18)
-                    }
-                    .buttonStyle(.plain)
-                    Divider().background(Color.border)
-                    Text("\(manager.maxItems)")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundColor(.accent)
-                        .frame(width: 32, height: 17)
-                    Divider().background(Color.border)
-                    Button {
-                        withAnimation { manager.setRingSize(manager.maxItems - 5) }
-                    } label: {
-                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.textSec).frame(width: 32, height: 18)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .background(Color.surfaceHi.opacity(0.6))
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.border, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-
-                Spacer()
-            }
-
             Text("Maximum items in ring")
                 .font(.system(size: 11)).foregroundColor(.textSec)
 
-            VStack(spacing: 5) {
+            // Minus / slider / plus, all one row — no separate stepper box.
+            HStack(spacing: 10) {
+                ringStepButton("minus") {
+                    withAnimation { manager.setRingSize(manager.maxItems - 5) }
+                }
                 Slider(value: Binding(get: { Double(manager.maxItems) },
                                       set: { manager.setRingSize(Int(($0 / 5).rounded() * 5)) }),
                        in: 10...500)
                     .tint(.accent)
-                HStack {
-                    Text("10").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
-                    Spacer()
-                    Text("\(manager.maxItems)").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.textSec)
-                    Spacer()
-                    Text("500").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
+                ringStepButton("plus") {
+                    withAnimation { manager.setRingSize(manager.maxItems + 5) }
                 }
+            }
+
+            // Min / current / max — current value centered in the
+            // horizontal space (not pinned to the left).
+            HStack {
+                Text("10").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
+                Spacer()
+                Text("\(manager.maxItems)")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                    .foregroundColor(.accent)
+                    .contentTransition(.numericText())
+                Spacer()
+                Text("500").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
             }
         }
     }
@@ -983,6 +974,25 @@ struct ClipenSettingsView: View {
                         .font(.system(size: 11, weight: .semibold)).foregroundColor(.accent)
                         .padding(.horizontal, 10).padding(.vertical, 5)
                         .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+
+                rowDivider(leading: 40)
+
+                // Auto updates lives here (App Settings), not in Main
+                // Behaviour — it's an app-level preference, not a popup
+                // interaction behaviour.
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                    Text("Auto updates").font(.system(size: 13)).foregroundColor(.textPri)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { AppDelegate.shared?.automaticallyChecksForUpdates ?? true },
+                        set: { value in
+                            AppDelegate.shared?.automaticallyChecksForUpdates = value
+                            if !value { AppDelegate.shared?.automaticallyDownloadsUpdates = false }
+                        }))
+                        .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
             }
@@ -1027,15 +1037,7 @@ struct ClipenSettingsView: View {
                 behaviourRow(4, icon: "clock.arrow.circlepath", "Remember last position",
                              isOn: $manager.rememberLastSelection)
                 rowDivider()
-                behaviourRow(5, icon: "arrow.triangle.2.circlepath", "Auto updates",
-                             isOn: Binding(
-                                get: { AppDelegate.shared?.automaticallyChecksForUpdates ?? true },
-                                set: { value in
-                                    AppDelegate.shared?.automaticallyChecksForUpdates = value
-                                    if !value { AppDelegate.shared?.automaticallyDownloadsUpdates = false }
-                                }))
-                rowDivider()
-                behaviourRow(6, icon: "timer", "Auto-dismiss popup",
+                behaviourRow(5, icon: "timer", "Auto-dismiss popup",
                              isOn: $manager.autoDismissEnabled)
 
                 rowDivider()

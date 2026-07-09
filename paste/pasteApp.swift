@@ -143,6 +143,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
+            // Belt-and-suspenders on top of MainWindowView's own
+            // `.frame(minWidth: 900, minHeight: 620)` — SwiftUI's
+            // `.windowResizability(.contentMinSize)` is supposed to derive
+            // this from that frame, but setting it directly on the real
+            // NSWindow guarantees the floor even if that derivation is ever
+            // unreliable, which is what let the toolbar get squeezed
+            // narrow enough to visually overlap/stack instead of sitting
+            // in one clean row.
+            existing.minSize = NSSize(width: 900, height: 620)
             existing.makeKeyAndOrderFront(nil)
             return
         }
