@@ -785,6 +785,19 @@ struct ClipenSettingsView: View {
     }
 
     var body: some View {
+        // Footer OUTSIDE the scroll view — pinned to the window bottom the
+        // same way the Dashboard pins its own footer bar; only the content
+        // above it scrolls/changes when switching tabs.
+        VStack(spacing: 0) {
+            settingsScrollContent
+            Divider().background(Color.border)
+            footer
+                .padding(.horizontal, 28).padding(.vertical, 12)
+        }
+        .onDisappear { lab.stop() }
+    }
+
+    private var settingsScrollContent: some View {
         ScrollView(.vertical, showsIndicators: true) {
             // No "SETTINGS" heading here — the Dashboard | Settings switcher
             // in the top toolbar already shows Settings selected, so a
@@ -816,13 +829,10 @@ struct ClipenSettingsView: View {
                     labSection.frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .onPreferenceChange(Row2HeightKey.self) { row2Height = $0 }
-
-                footer
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 22)
         }
-        .onDisappear { lab.stop() }
     }
 
     // MARK: Section chrome
@@ -874,6 +884,10 @@ struct ClipenSettingsView: View {
         // top-to-bottom far more often than app settings/interactions, and
         // 12pt vertical made adjacent toggles feel cramped.
         .padding(.horizontal, 14).padding(.vertical, 16)
+        // Flexible: when the card is stretched to the shared row height,
+        // every row grows by the SAME share, so the whole card fills evenly
+        // instead of the rows clustering at the top over a blank void.
+        .frame(maxHeight: .infinity)
     }
 
     /// A nested slider row that lives inside the same card as its parent
@@ -891,6 +905,8 @@ struct ClipenSettingsView: View {
                 .frame(width: 48, alignment: .trailing)
         }
         .padding(.leading, 28).padding(.trailing, 14).padding(.vertical, 9)
+        // Same equal-share stretching as behaviourRow — see its comment.
+        .frame(maxHeight: .infinity)
         .disabled(disabled)
         .opacity(disabled ? 0.4 : 0.85)
     }
@@ -962,6 +978,10 @@ struct ClipenSettingsView: View {
             sectionHeader("02", "APP SETTINGS")
 
             rowCard {
+                // Every row is maxHeight-flexible: when the card stretches
+                // to the shared row-1 height, the extra space distributes
+                // EQUALLY across the rows so the card fills edge to edge —
+                // no blank void pooling at the bottom.
                 HStack(spacing: 10) {
                     Image(systemName: "power").font(.system(size: 11)).foregroundColor(.accent).frame(width: 16)
                     Text("Launch at Login").font(.system(size: 13)).foregroundColor(.textPri)
@@ -971,6 +991,7 @@ struct ClipenSettingsView: View {
                         .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
+                .frame(maxHeight: .infinity)
 
                 rowDivider(leading: 40)
 
@@ -985,6 +1006,7 @@ struct ClipenSettingsView: View {
                         .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
+                .frame(maxHeight: .infinity)
 
                 rowDivider(leading: 40)
 
@@ -1004,12 +1026,7 @@ struct ClipenSettingsView: View {
                         .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
-
-                // Absorbs the column's row-height stretch so this card's
-                // visible bottom edge lands on the SAME line as Main
-                // Behaviour's card across the row — not a shorter box with
-                // invisible blank space under it.
-                Spacer(minLength: 0)
+                .frame(maxHeight: .infinity)
             }
         }
     }
@@ -1068,11 +1085,6 @@ struct ClipenSettingsView: View {
                            in: 10...600)
                         .tint(.accent)
                 }
-
-                // Same straight-bottom-line contract as App Settings' card:
-                // whichever of the two row-1 cards is shorter stretches to
-                // the shared row height, so both end flush.
-                Spacer(minLength: 0)
             }
         }
     }
@@ -1170,39 +1182,37 @@ struct ClipenSettingsView: View {
         return "v\(short) (\(build))"
     }
 
+    /// Pinned to the window bottom by `body` (divider + padding applied
+    /// there) — this is just the row content, like the Dashboard's footerBar.
     private var footer: some View {
-        VStack(spacing: 0) {
-            Divider().background(Color.border)
-            HStack(spacing: 18) {
-                Text("Clipen \(Self.appVersionString)  ·  Built by Vamshi Krishna Pinni")
-                    .font(.system(size: 11)).foregroundColor(.textDim)
-                Spacer()
-                footerLink("Website", "https://clipen.lovable.app")
-                footerLink("Privacy", "https://clipen.lovable.app/privacy.html")
-                footerLink("Support", "https://clipen.lovable.app/support.html")
-                Button {
-                    AppDelegate.shared?.checkForUpdates()
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Check updates")
-                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 9))
-                    }
-                    .font(.system(size: 11)).foregroundColor(.textSec)
+        HStack(spacing: 18) {
+            Text("Clipen \(Self.appVersionString)  ·  Built by Vamshi Krishna Pinni")
+                .font(.system(size: 11)).foregroundColor(.textDim)
+            Spacer()
+            footerLink("Website", "https://clipen.lovable.app")
+            footerLink("Privacy", "https://clipen.lovable.app/privacy.html")
+            footerLink("Support", "https://clipen.lovable.app/support.html")
+            Button {
+                AppDelegate.shared?.checkForUpdates()
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Check updates")
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 9))
                 }
-                .buttonStyle(.plain)
-                Button {
-                    showResetConfirm = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Reset to Defaults")
-                        Image(systemName: "arrow.counterclockwise").font(.system(size: 9))
-                    }
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Color(hex: "#FF5555"))
-                }
-                .buttonStyle(.plain)
+                .font(.system(size: 11)).foregroundColor(.textSec)
             }
-            .padding(.top, 16)
+            .buttonStyle(.plain)
+            Button {
+                showResetConfirm = true
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Reset to Defaults")
+                    Image(systemName: "arrow.counterclockwise").font(.system(size: 9))
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(Color(hex: "#FF5555"))
+            }
+            .buttonStyle(.plain)
         }
     }
 

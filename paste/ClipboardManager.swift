@@ -500,6 +500,15 @@ class ClipboardManager: ObservableObject {
     /// wherever the popup's other session state resets (dismissPreview).
     @Published var popupPinnedOpen: Bool = false
 
+    /// True only when loadHistory() successfully read the previous manifest
+    /// (or this is a genuine first launch with no manifest at all). While
+    /// false, saveHistory() keeps persisting new captures but the
+    /// orphan-blob purge and the rolling-backup refresh are both disabled —
+    /// a session that couldn't read the real history must not be allowed to
+    /// destroy its payloads or its last good backup. See
+    /// ClipboardManager+Persistence.loadHistory.
+    var historyLoadedCleanly = false
+
     /// Same tap-vs-hold pattern as V, applied to X: a tap opens/cycles the
     /// transform panel, a hold dismisses it (closes just the transform panel,
     /// leaving the popup itself open). Longer threshold than V's because X is

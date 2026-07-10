@@ -16,6 +16,22 @@ extension Color {
     static let textDim   = Color(hex: "#444444")
 }
 
+// MARK: - Window minimum-size configurator
+
+/// Enforces the window minimum size directly on the NSWindow so it applies
+/// from the very first launch, not only when openMainWindow() re-fronts it.
+private struct WindowMinSizeConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { ConfigView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class ConfigView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.minSize = NSSize(width: 900, height: 620)
+        }
+    }
+}
+
 // MARK: - Vibrancy background (whole-window frosted glass, Raycast-style)
 
 private struct VisualEffectBackground: NSViewRepresentable {
@@ -74,13 +90,13 @@ struct MainWindowView: View {
     var body: some View {
         ZStack(alignment: .top) {
             VisualEffectBackground().ignoresSafeArea()
+            WindowMinSizeConfigurator().frame(width: 0, height: 0)
 
             Group {
                 if !manager.hasAccessibilityPermission && !hasSkippedAccessibility && !showSettings {
                     accessibilityOnboarding
                 } else {
                     VStack(spacing: 0) {
-                        topToolbar
                         Divider().background(Color.border)
                         if showSettings {
                             settingsFullView
@@ -93,16 +109,6 @@ struct MainWindowView: View {
                                 }
                         }
                     }
-                    // The missing third piece of the same-row-as-traffic-lights
-                    // fix: .hiddenTitleBar (pasteApp) hides the title, and the
-                    // 62pt leading padding (topToolbar) clears the light
-                    // cluster — but SwiftUI still exposes the invisible
-                    // titlebar strip as a top safe-area inset, so without this
-                    // the whole toolbar row was laid out BELOW it, leaving the
-                    // traffic lights alone on an empty strip. Ignoring the top
-                    // inset lifts the row into that strip so CLIPEN, the
-                    // switcher, and the buttons share one line with the lights.
-                    .ignoresSafeArea(.container, edges: .top)
                 }
             }
             .onChange(of: manager.hasAccessibilityPermission) { _, granted in
@@ -126,6 +132,33 @@ struct MainWindowView: View {
         // Wider floor so the two-column Settings layout (04 INTERACTIONS +
         // 05 INTERACTION PREVIEW side by side) never collapses into overlap.
         .frame(minWidth: 900, minHeight: 620)
+        // The REAL window toolbar (not a fake row drawn in the content):
+        // macOS owns the strip height, draws the traffic lights vertically
+        // centered in it, and lays these items out on that same line —
+        // wordmark right after the lights, switcher dead center, action
+        // pills at the trailing end. The taller unified style is what
+        // provides the breathing room above and below the whole row.
+        .toolbar {
+            // On macOS 26+ every toolbar item gets wrapped in a Liquid
+            // Glass capsule by default — our items are fully self-styled,
+            // so that system glass is explicitly opted out of; older
+            // systems never drew it in the first place.
+            if #available(macOS 26.0, *) {
+                ToolbarItem(placement: .navigation) { toolbarWordmark }
+                    .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .principal) { toolbarSwitcher }
+                    .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .primaryAction) { toolbarActions }
+                    .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .navigation) { toolbarWordmark }
+                ToolbarItem(placement: .principal) { toolbarSwitcher }
+                ToolbarItem(placement: .primaryAction) { toolbarActions }
+            }
+        }
+        // No system material behind the toolbar — the window's own frosted
+        // background shows through, same look as the previous custom row.
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showTutorial) { TutorialSheet(isPresented: $showTutorial) }
         .alert("Heads up",
@@ -141,49 +174,34 @@ struct MainWindowView: View {
         }
     }
 
-    // MARK: - Top toolbar (CLIPEN wordmark · Dashboard|Settings · actions)
+    // MARK: - Toolbar item styles (used by the window .toolbar above)
 
-    /// Single title-bar row (the content stack ignores the top safe-area
-    /// inset, so this shares the strip with the traffic lights):
-    ///   · leading — CLIPEN, right after the traffic-light cluster
-    ///   · center  — the Dashboard | Settings switcher, true window center
-    ///   · trailing — Check for Updates + How to Use, pushed to the far end
-    /// The window's hard 900pt minimum width (NSWindow.minSize + frame
-    /// minWidth) is what keeps the centered switcher from ever colliding
-    /// with the leading/trailing groups.
-    private var topToolbar: some View {
-        ZStack {
-            HStack(spacing: 8) {
-                Text("CLIPEN")
-                    .font(.system(size: 13, weight: .heavy))
-                    .tracking(3)
-                    .foregroundStyle(LinearGradient(colors: [Color(hex: "#FFB088"), Color(hex: "#FF8A80")],
-                                                    startPoint: .leading, endPoint: .trailing))
-                    // Clear the traffic-light cluster (⌀ ~70pt from the
-                    // window edge) — this row shares their strip.
-                    .padding(.leading, 62)
+    private var toolbarWordmark: some View {
+        Text("CLIPEN")
+            .font(.system(size: 13, weight: .heavy))
+            .tracking(3)
+            .foregroundStyle(LinearGradient(colors: [Color(hex: "#FFB088"), Color(hex: "#FF8A80")],
+                                            startPoint: .leading, endPoint: .trailing))
+    }
 
-                Spacer(minLength: 0)
-
-                toolbarPill("Check for Updates", icon: "arrow.triangle.2.circlepath") {
-                    AppDelegate.shared?.checkForUpdates()
-                }
-                toolbarPill("How to Use", icon: "questionmark.circle") {
-                    showTutorial = true
-                }
-            }
-
-            // Centered Dashboard | Settings switcher.
-            HStack(spacing: 2) {
-                toolbarSegment("Dashboard", active: !showSettings) { showSettings = false }
-                toolbarSegment("Settings",  active: showSettings)  { showSettings = true }
-            }
-            .padding(3)
-            .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    private var toolbarSwitcher: some View {
+        HStack(spacing: 2) {
+            toolbarSegment("Dashboard", active: !showSettings) { showSettings = false }
+            toolbarSegment("Settings",  active: showSettings)  { showSettings = true }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
-        .frame(height: 38)
-        .fixedSize(horizontal: false, vertical: true)
+        .padding(3)
+        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var toolbarActions: some View {
+        HStack(spacing: 8) {
+            toolbarPill("Check for Updates", icon: "arrow.triangle.2.circlepath") {
+                AppDelegate.shared?.checkForUpdates()
+            }
+            toolbarPill("How to Use", icon: "questionmark.circle") {
+                showTutorial = true
+            }
+        }
     }
 
     private func toolbarSegment(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {

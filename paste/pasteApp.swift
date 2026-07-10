@@ -17,6 +17,10 @@ struct pasteApp: App {
         // sit in the SAME row as the traffic lights instead of a second
         // bar stacked underneath them.
         .windowStyle(.hiddenTitleBar)
+        // Taller unified toolbar strip (the window .toolbar in
+        // MainWindowView) — macOS centers the traffic lights and every
+        // toolbar item in it, giving the row breathing room above/below.
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             // Only one main window — remove the default "New Window" entry.
             CommandGroup(replacing: .newItem) {}
@@ -37,6 +41,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
+
+        // Single-instance guard: two Clipen processes (a second copy
+        // double-launched from a DMG, or a debug build running beside the
+        // installed one) share the same Application Support data directory
+        // and race each other's history.clip writes — which can and did
+        // destroy the entire clipboard history. If another instance is
+        // already running, hand over to it and bow out immediately, before
+        // any monitoring or persistence starts.
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.clipen.app"
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+        if let existing = others.first {
+            existing.activate(options: [])
+            NSApp.terminate(nil)
+            return
+        }
 
         // Pass `self` as the user-driver delegate so Sparkle uses the gentle
         // reminder pattern — without this, Sparkle warns at runtime that a

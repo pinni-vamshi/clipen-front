@@ -505,6 +505,13 @@ extension ClipboardManager {
         guard let plain = try? enc.encode(persisted),
               let cipher = HistoryCrypto.encrypt(plain) else { return }
         try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
+        // Keep the rolling backup current — but only from sessions that
+        // loaded the previous manifest successfully AND have something to
+        // save. A session recovering from a corrupt manifest must never
+        // overwrite the backup that may be the only surviving good copy.
+        if historyLoadedCleanly, !itemsToSave.isEmpty {
+            try? cipher.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
+        }
         // Embeddings live in their own dictionary file, rewritten only when
         // one actually changed — not on every manifest save.
         saveEmbeddingsIfDirty(snapshot: itemsToSave)
@@ -512,8 +519,10 @@ extension ClipboardManager {
         // when something could actually have been orphaned (removal,
         // eviction, content replacement). Runs after the manifest is on disk
         // so a crash in the middle can never leave the manifest pointing at
-        // a deleted blob.
-        if blobPurgeNeeded {
+        // a deleted blob. NEVER runs in a session whose load didn't verify
+        // cleanly: with an empty/partial ring loaded, every blob of the real
+        // history would look "orphaned" and get destroyed.
+        if blobPurgeNeeded && historyLoadedCleanly {
             purgeOrphanBlobs(referenced: referencedBlobs)
             blobPurgeNeeded = false
         }
@@ -582,31 +591,80 @@ extension ClipboardManager {
             }
     }
 
+    /// Rolling backup of the last known-good manifest. Written after every
+    /// successful load and every successful non-empty save, and used as the
+    /// fallback when the primary manifest turns out to be unreadable.
+    var historyBackupURL: URL {
+        historyDir.appendingPathComponent("history.clip.bak")
+    }
+
+    /// Read + decrypt + decode a manifest file, or nil if ANY step fails.
+    private func readManifest(at url: URL, dec: JSONDecoder) -> [PersistedItem]? {
+        guard let cipher    = try? Data(contentsOf: url),
+              let plain     = HistoryCrypto.decrypt(cipher),
+              let persisted = try? dec.decode([PersistedItem].self, from: plain) else { return nil }
+        return persisted
+    }
+
     func loadHistory() {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
 
-        // Prefer the encrypted file. If it's missing but a legacy plaintext
-        // history exists, migrate it once: re-encrypt under the user's key,
-        // then delete the plaintext copy so the secrets-on-disk window closes
-        // on the first launch after upgrade.
-        let plaintext: Data? = {
-            if let cipher = try? Data(contentsOf: historyFileURL),
-               let plain  = HistoryCrypto.decrypt(cipher) {
-                return plain
-            }
-            if let legacy = try? Data(contentsOf: legacyPlaintextHistoryURL) {
-                if let cipher = HistoryCrypto.encrypt(legacy) {
-                    try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
-                }
-                try? FileManager.default.removeItem(at: legacyPlaintextHistoryURL)
-                return legacy
-            }
-            return nil
-        }()
+        let primaryExisted = FileManager.default.fileExists(atPath: historyFileURL.path)
 
-        guard let data      = plaintext,
-              let persisted = try? dec.decode([PersistedItem].self, from: data) else { return }
+        // Prefer the encrypted primary manifest.
+        var persisted = readManifest(at: historyFileURL, dec: dec)
+
+        // If the primary is missing but a legacy plaintext history exists,
+        // migrate it once: re-encrypt under the user's key, then delete the
+        // plaintext copy so the secrets-on-disk window closes on the first
+        // launch after upgrade.
+        if persisted == nil, !primaryExisted,
+           let legacy = try? Data(contentsOf: legacyPlaintextHistoryURL) {
+            if let cipher = HistoryCrypto.encrypt(legacy) {
+                try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
+            }
+            try? FileManager.default.removeItem(at: legacyPlaintextHistoryURL)
+            persisted = try? dec.decode([PersistedItem].self, from: legacy)
+        }
+
+        // The primary EXISTS but can't be read (truncated write, decrypt or
+        // decode failure). This must NEVER silently become "fresh install":
+        // that exact path once let a fresh session overwrite the manifest
+        // and purge every blob it didn't know about, destroying the user's
+        // entire history. Quarantine the unreadable file for post-mortem,
+        // then fall back to the rolling backup.
+        if persisted == nil, primaryExisted {
+            let stamp = Int(Date().timeIntervalSince1970)
+            let quarantine = historyDir.appendingPathComponent("history.clip.corrupt-\(stamp)")
+            try? FileManager.default.moveItem(at: historyFileURL, to: quarantine)
+            NSLog("[Clipen] loadHistory: primary manifest unreadable — quarantined to \(quarantine.lastPathComponent), trying backup")
+            if let fromBackup = readManifest(at: historyBackupURL, dec: dec) {
+                persisted = fromBackup
+                // Reinstate the primary from the backup bytes so the next
+                // launch is back on the normal path.
+                if let bakBytes = try? Data(contentsOf: historyBackupURL) {
+                    try? bakBytes.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
+                }
+                NSLog("[Clipen] loadHistory: restored \(fromBackup.count) items from history.clip.bak")
+            }
+        }
+
+        guard let persisted else {
+            // Nothing readable anywhere. Only treat this as a CLEAN state on
+            // a true fresh install (no manifest ever existed) — if one
+            // existed and we couldn't read or recover it, stay in the
+            // suspect state: saves still persist new captures, but the
+            // orphan-blob purge stays disabled all session so surviving
+            // payloads of the lost history can't be swept away.
+            historyLoadedCleanly = !primaryExisted
+            return
+        }
+        historyLoadedCleanly = true
+        // Refresh the rolling backup from the now-verified primary.
+        if !persisted.isEmpty, let goodBytes = try? Data(contentsOf: historyFileURL) {
+            try? goodBytes.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
+        }
         // Blob paths seen while decoding — seeded into the save-side caches so
         // the FIRST debounced save after launch reuses these files instead of
         // re-encrypting every payload to fresh UUIDs.
