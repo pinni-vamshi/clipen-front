@@ -791,8 +791,11 @@ struct ClipenSettingsView: View {
         VStack(spacing: 0) {
             settingsScrollContent
             Divider().background(Color.border)
+            // Same paddings as the Dashboard's footerBar — the pinned
+            // footer must be the SAME height on both tabs, not jump when
+            // switching between them.
             footer
-                .padding(.horizontal, 28).padding(.vertical, 12)
+                .padding(.horizontal, 14).padding(.vertical, 8)
         }
         .onDisappear { lab.stop() }
     }
@@ -857,14 +860,15 @@ struct ClipenSettingsView: View {
             .frame(width: 18, alignment: .leading)
     }
 
-    /// One continuous bordered card wrapping several rows, divided by thin
-    /// hairlines — same treatment as the interactions list, instead of
-    /// every row being its own separately-boxed card.
+    /// One continuous card wrapping several rows, divided by thin
+    /// hairlines. Sharp corners, no surrounding border — only a single
+    /// left edge line marks the card.
     private func rowCard<C: View>(@ViewBuilder content: () -> C) -> some View {
         VStack(spacing: 0) { content() }
-            .background(Color.surfaceHi.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(Color.surfaceHi.opacity(0.4))
+            .overlay(alignment: .leading) {
+                Rectangle().fill(Color.border).frame(width: 2)
+            }
     }
 
     private func rowDivider(leading: CGFloat = 44) -> some View {
@@ -890,25 +894,32 @@ struct ClipenSettingsView: View {
         .frame(maxHeight: .infinity)
     }
 
-    /// A nested slider row that lives inside the same card as its parent
-    /// toggle (e.g. "Open delay" under "Popup on second tap") — dimmed and
-    /// indented, but no separate box of its own.
+    /// A nested slider row belonging to the toggle directly above it (e.g.
+    /// "Open delay" under "Popup on second tap") — same category, same
+    /// setting, so no divider separates them and the icon/label columns
+    /// line up exactly with the parent row's. Text reads white while the
+    /// control is enabled; dim only when disabled.
     private func nestedSliderRow(icon: String, label: String, valueText: String,
                                  disabled: Bool, slider: () -> some View) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: icon).font(.system(size: 10)).foregroundColor(.textDim).frame(width: 16)
-            Text(label).font(.system(size: 11)).foregroundColor(.textDim)
+            Image(systemName: icon).font(.system(size: 10))
+                .foregroundColor(disabled ? .textDim : .textSec).frame(width: 16)
+            Text(label).font(.system(size: 11))
+                .foregroundColor(disabled ? .textDim : .textPri)
             slider()
             Text(valueText)
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundColor(.textDim)
+                .foregroundColor(disabled ? .textDim : .textPri)
                 .frame(width: 48, alignment: .trailing)
         }
-        .padding(.leading, 28).padding(.trailing, 14).padding(.vertical, 9)
+        // 14 (card inset) + 18 (row number) + 10 (spacing) = 42 — puts this
+        // row's icon in the same column as the parent toggle's icon, and
+        // therefore its label exactly where the parent's label starts.
+        .padding(.leading, 42).padding(.trailing, 14).padding(.vertical, 9)
         // Same equal-share stretching as behaviourRow — see its comment.
         .frame(maxHeight: .infinity)
         .disabled(disabled)
-        .opacity(disabled ? 0.4 : 0.85)
+        .opacity(disabled ? 0.4 : 1)
     }
 
     // MARK: 01 — Ring size
@@ -1042,7 +1053,8 @@ struct ClipenSettingsView: View {
                              isOn: Binding(get: { manager.openOnSecondTap },
                                            set: { manager.openOnSecondTap = $0 }))
 
-                rowDivider()
+                // No divider before the nested slider — it belongs to the
+                // toggle above (same setting), not a separate row.
 
                 // Open delay — nested under 01, disabled while second-tap mode is on.
                 nestedSliderRow(
@@ -1072,9 +1084,8 @@ struct ClipenSettingsView: View {
                 behaviourRow(5, icon: "timer", "Auto-dismiss popup",
                              isOn: $manager.autoDismissEnabled)
 
-                rowDivider()
-
-                // Auto-dismiss interval — nested under 06.
+                // Same as Open delay: the interval slider is part of the
+                // Auto-dismiss setting itself — no divider between them.
                 nestedSliderRow(
                     icon: "hourglass.bottomhalf.filled", label: "Dismiss after",
                     valueText: String(format: "%.0f s", manager.autoDismissSeconds),
