@@ -152,6 +152,9 @@ final class InteractionLabController: ObservableObject {
 
     // Text under the stage
     @Published var resultText: String? = nil
+    /// The HTML reference's floating instruction label ("Release ⌘ to
+    /// paste", "Type to search", …) shown while a script runs.
+    @Published var instruction: String? = nil
 
     private var task: Task<Void, Never>? = nil
     private let tabNames = ["Recents", "Image", "URL"]
@@ -209,6 +212,12 @@ final class InteractionLabController: ObservableObject {
         activeTransform = nil
         transformLabels = ["Capitalize", "Small Case", "Base64"]
         resultText = nil
+        instruction = nil
+    }
+
+    /// Show/replace the floating instruction label (HTML instrLabel).
+    private func hint(_ text: String?) {
+        withAnimation(.easeOut(duration: 0.2)) { instruction = text }
     }
 
     // MARK: Script plumbing
@@ -266,6 +275,7 @@ final class InteractionLabController: ObservableObject {
         stageKeys = [.cmd, .v]
         press(.cmd)
         try await pause(400)
+        hint("Release ⌘ to paste")
         showPanel(true)
         try await tap(.v)
         try await pause(400)
@@ -279,6 +289,7 @@ final class InteractionLabController: ObservableObject {
         try await pause(300)
         release(.cmd)
         showPanel(false)
+        hint(nil)
         finish("Pasted “\(items[idx].title)”")
     }
 
@@ -286,25 +297,26 @@ final class InteractionLabController: ObservableObject {
         stageKeys = [.cmd, .v]
         press(.cmd)
         try await pause(400)
+        hint("Double tap to paste")
         showPanel(true)
         press(.v)
-        try await pause(650)
+        try await pause(600)
         withAnimation(.easeOut(duration: 0.2)) { showCloseButton = true }
-        try await pause(500)
+        try await pause(600)
         release(.v)
-        try await pause(700)
+        try await pause(1000)
         release(.cmd)
-        // Pinned: releasing ⌘ does NOT close the panel.
-        finish("Popup stays pinned — click ✕ to close")
+        // Pinned: releasing ⌘ does NOT close the panel — it stays open
+        // with the ✕ until the loop restarts, same as the HTML reference.
+        finish("Item marked and pinned to tray")
         try await pause(1600)
-        showPanel(false)
-        withAnimation(.easeOut(duration: 0.2)) { showCloseButton = false }
     }
 
     private func runMultiPaste() async throws {
         stageKeys = [.cmd, .v]
         press(.cmd)
         try await pause(400)
+        hint("Release ⌘ to paste")
         showPanel(true)
         try await tap(.v)
         try await pause(400)
@@ -325,10 +337,11 @@ final class InteractionLabController: ObservableObject {
         try await pause(600)
         release(.v)
         withAnimation(.easeOut(duration: 0.15)) { items[2].mark = 2 }
-        try await pause(800)
+        try await pause(1000)
         release(.cmd)
         showPanel(false)
-        finish("2 items pasted together, in mark order")
+        hint(nil)
+        finish("2 items pasted together")
     }
 
     private func runSearch() async throws {
@@ -338,13 +351,15 @@ final class InteractionLabController: ObservableObject {
         showPanel(true)
         try await tap(.v)
         try await pause(400)
+        hint("Type to search")
         try await tap(.f)
         withAnimation(.easeOut(duration: 0.15)) { searchActive = true }
-        try await pause(1400)
+        try await pause(1800)
         finish("Search active — type to filter")
-        try await pause(1100)
+        try await pause(1200)
         release(.cmd)
         showPanel(false)
+        hint(nil)
     }
 
     private func runCategory() async throws {
@@ -353,9 +368,10 @@ final class InteractionLabController: ObservableObject {
         try await pause(400)
         showPanel(true)
         try await tap(.v)
-        try await pause(300)
+        try await pause(400)
+        hint("Press 1–3 to switch category")
         withAnimation(.easeOut(duration: 0.2)) { showNumberRow = true }
-        try await pause(300)
+        try await pause(200)
         var last = 0
         for i in 0..<3 {
             withAnimation(.easeOut(duration: 0.1)) { pressedNumber = i + 1 }
@@ -373,9 +389,10 @@ final class InteractionLabController: ObservableObject {
             try await pause(600)
         }
         finish("Switched to “\(tabNames[last])” — first item auto-selected")
-        try await pause(900)
+        try await pause(1000)
         release(.cmd)
         showPanel(false)
+        hint(nil)
         withAnimation(.easeOut(duration: 0.2)) { showNumberRow = false }
     }
 
@@ -394,10 +411,10 @@ final class InteractionLabController: ObservableObject {
         try await pause(1100)
         try await tap(.space)
         withAnimation(.easeOut(duration: 0.25)) { previewVisible = false }
-        try await pause(450)
+        try await pause(500)
         release(.cmd)
         showPanel(false)
-        finish("Previewed “\(items[1].title)” — nothing pasted")
+        finish("Previewed “\(items[1].title)”, no paste")
     }
 
     private func runPinPreview() async throws {
@@ -417,13 +434,14 @@ final class InteractionLabController: ObservableObject {
         withAnimation(.easeOut(duration: 0.2)) { previewVisible = false }
         showPanel(false)
         release(.cmd)
-        finish("Pinned “\(items[1].title)” to the Reference panel")
+        finish("Pinned “\(items[1].title)” to tray")
     }
 
     private func runTransform() async throws {
         stageKeys = [.cmd, .v, .x]
         press(.cmd)
         try await pause(400)
+        hint("Release ⌘ to paste")
         showPanel(true)
         try await tap(.v)
         try await pause(350)
@@ -445,6 +463,7 @@ final class InteractionLabController: ObservableObject {
         try await pause(550)
         showPanel(false)
         withAnimation(.easeOut(duration: 0.25)) { transformVisible = false }
+        hint(nil)
         finish("\(applied) applied → pasted")
     }
 
@@ -673,7 +692,9 @@ struct InteractionLabStage: View {
         // and state change.
         VStack(spacing: 14) {
             // Slot 1 — mock popup stage (panel + side panels). Fixed
-            // height; the panel fades in/out in place.
+            // height; the panel fades in/out in place. The floating
+            // instruction label (HTML instrLabel) sits in a fixed spot at
+            // the top of this slot, fading with its own opacity.
             ZStack {
                 if lab.panelVisible {
                     HStack(spacing: 12) {
@@ -687,6 +708,14 @@ struct InteractionLabStage: View {
             }
             .frame(height: 190)
             .frame(maxWidth: .infinity)
+            .overlay(alignment: .top) {
+                Text(lab.instruction ?? " ")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .background(Color.white.opacity(0.16), in: Capsule())
+                    .opacity(lab.instruction == nil ? 0 : 1)
+            }
 
             // Slot 2 — helper text (changes per interaction, slot doesn't move).
             Text(lab.selectedDemo.caption)
@@ -854,14 +883,25 @@ struct ClipenSettingsView: View {
             .frame(width: 18, alignment: .leading)
     }
 
+    private enum RowCardBorder { case leadingLine, allSides }
+
     /// One continuous card wrapping several rows, divided by thin
-    /// hairlines. Sharp corners, no surrounding border — only a single
-    /// left edge line marks the card.
-    private func rowCard<C: View>(@ViewBuilder content: () -> C) -> some View {
+    /// hairlines. Sharp corners, NO fill of its own — the window
+    /// background shows through. Border style per card:
+    ///   .leadingLine — single left edge line (Main Behaviour)
+    ///   .allSides    — full rectangular border (App Settings)
+    private func rowCard<C: View>(border: RowCardBorder = .leadingLine,
+                                  @ViewBuilder content: () -> C) -> some View {
         VStack(spacing: 0) { content() }
-            .background(Color.surfaceHi.opacity(0.4))
+            .overlay {
+                if case .allSides = border {
+                    Rectangle().stroke(Color.border, lineWidth: 1)
+                }
+            }
             .overlay(alignment: .leading) {
-                Rectangle().fill(Color.border).frame(width: 2)
+                if case .leadingLine = border {
+                    Rectangle().fill(Color.border).frame(width: 2)
+                }
             }
     }
 
@@ -982,7 +1022,7 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("02", "APP SETTINGS")
 
-            rowCard {
+            rowCard(border: .allSides) {
                 // Every row is maxHeight-flexible: when the card stretches
                 // to the shared row-1 height, the extra space distributes
                 // EQUALLY across the rows so the card fills edge to edge —
@@ -1096,9 +1136,13 @@ struct ClipenSettingsView: View {
 
     // MARK: 04 — Interactions list (clickable — plays the lab animation)
 
-    private static let interactionDemos: [InteractionDemo] = [
-        .cycle, .pinnedOpen, .multiPaste, .search, .category,
-        .spacePreview, .pinPreview, .transform, .moveToFront, .delete, .reverseCycle
+    /// Interactions CLUSTERED by class, mirroring the cheat-sheet grouping:
+    /// panel open/pin · item navigation/marking · preview · tools.
+    private static let interactionGroups: [[InteractionDemo]] = [
+        [.cycle, .pinnedOpen],
+        [.reverseCycle, .multiPaste],
+        [.spacePreview, .pinPreview],
+        [.transform, .search, .category, .moveToFront, .delete],
     ]
 
     private var interactionsSection: some View {
@@ -1109,11 +1153,19 @@ struct ClipenSettingsView: View {
             // own fill and border actually stretch to row2Height, instead
             // of just leaving invisible blank space below a shorter box.
             VStack(spacing: 1) {
-                ForEach(Self.interactionDemos) { demo in
-                    interactionRow(demo)
+                ForEach(Array(Self.interactionGroups.enumerated()), id: \.offset) { groupIndex, group in
+                    // Blank-line style gap between clusters, like the
+                    // grouped shortcut sheet this list mirrors.
+                    if groupIndex > 0 {
+                        Spacer().frame(height: 16)
+                    }
+                    ForEach(group) { demo in
+                        interactionRow(demo)
+                    }
                 }
                 Spacer(minLength: 0)
             }
+            .padding(.vertical, 6)
             .frame(minHeight: row2Height, alignment: .top)
             .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
