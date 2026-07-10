@@ -597,23 +597,47 @@ private struct ItemDetailView: View {
         ClipboardManager.shared.updateUserNote(id: item.id, note: value)
     }
 
+    /// User-adjustable pinned-preview height — dragged via the splitter
+    /// under the preview, persisted across launches.
+    @AppStorage("detailPreviewHeight") private var previewHeight: Double = 290
+    @State private var dragStartHeight: Double? = nil
+
     var body: some View {
         VStack(spacing: 0) {
             // Pinned preview — fixed at the top of the pane, never scrolls
-            // away, on a darker backdrop so the content reads as "the
-            // preview" against the rest of the panel. Properties and notes
-            // scroll independently underneath.
+            // away, on a darker backdrop. No type header and no extra
+            // rounded boundary around the content: the type already shows
+            // in Properties below, and the darker region IS the frame.
             VStack(alignment: .leading, spacing: 14) {
-                header
                 pinnedContent
             }
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            // Trimmed from 360 — the preview was crowding out the
-            // properties/notes area scrolling underneath it.
-            .frame(height: 290, alignment: .top)
+            .frame(height: CGFloat(previewHeight), alignment: .top)
             .background(Color.black.opacity(0.25))
-            .overlay(alignment: .bottom) { Divider().background(Color.border) }
+            .clipped()
+
+            // Draggable splitter — resize the preview area to taste.
+            ZStack {
+                Divider().background(Color.border)
+                Capsule().fill(Color.border)
+                    .frame(width: 36, height: 4)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 11)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        let base = dragStartHeight ?? previewHeight
+                        dragStartHeight = base
+                        previewHeight = min(560, max(140, base + Double(value.translation.height)))
+                    }
+                    .onEnded { _ in dragStartHeight = nil }
+            )
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -638,27 +662,6 @@ private struct ItemDetailView: View {
             contentBlock
         default:
             ScrollView { contentBlock }
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: iconName).font(.system(size: 16, weight: .semibold)).foregroundColor(.accent)
-            Text(item.typeLabel).font(.system(size: 15, weight: .semibold)).foregroundColor(.textPri)
-            Spacer()
-            if item.isPinned {
-                Image(systemName: "pin.fill").font(.system(size: 12)).foregroundColor(.accent)
-            }
-        }
-    }
-
-    private var iconName: String {
-        switch item.content {
-        case .text, .richText, .html, .rtfd: return "doc.text"
-        case .image:                         return "photo"
-        case .file, .files:                  return "doc"
-        case .svg:                           return "square.on.circle"
-        case .blob:                          return "lock.doc"
         }
     }
 
@@ -690,9 +693,9 @@ private struct ItemDetailView: View {
                     ZoomableImagePreview(image: img, fullResData: data)
                 }
             }
+            // No boxed background/border — the darker pinned region already
+            // frames the preview.
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
         case .file(let url):
             // FilePreviewContent already exists in ItemPreviewPanel.swift and
             // renders the ACTUAL file — PDF pages, images, HTML, readable
@@ -704,9 +707,6 @@ private struct ItemDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 FilePreviewContent(url: url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
                 HStack(spacing: 10) {
                     Image(nsImage: ClipenIconCache.shared.fileIcon(for: url)).resizable().frame(width: 20, height: 20)
                     VStack(alignment: .leading, spacing: 1) {
@@ -764,12 +764,35 @@ private struct ItemDetailView: View {
         return nil
     }
 
-    /// Every destination app this item has ever been pasted into, joined —
+    /// Every destination app this item has ever been pasted into —
     /// pastedToAppNames accumulates ALL destinations (not just the last one).
-    private var pastedToNames: String? {
+    private var pastedToNames: [String] {
         var names = Array(Set(item.pastedToAppNames.values)).sorted()
         if names.isEmpty, let last = item.pastedToAppName { names = [last] }
-        return names.isEmpty ? nil : names.joined(separator: ", ")
+        return names
+    }
+
+    /// "Pasted to" row — the destinations as chips in a HORIZONTALLY
+    /// scrolling strip, so any number of apps fits and the user can scroll
+    /// sideways to reveal them all.
+    private var pastedToRow: some View {
+        HStack(spacing: 12) {
+            Text("Pasted to").font(.system(size: 12)).foregroundColor(.textSec)
+            Spacer(minLength: 8)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(pastedToNames, id: \.self) { name in
+                        Text(name)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(.textPri)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.white.opacity(0.08), in: Capsule())
+                    }
+                }
+            }
+            .frame(maxWidth: 280)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
     private var propertiesCard: some View {
@@ -783,9 +806,10 @@ private struct ItemDetailView: View {
                     propertyRow("Copied from", appName)
                     cardDivider()
                 }
-                if let destinations = pastedToNames {
-                    // Where it has been pasted TO (all destinations so far).
-                    propertyRow("Pasted to", destinations)
+                if !pastedToNames.isEmpty {
+                    // Where it has been pasted TO — every destination, in a
+                    // horizontally scrollable chip strip.
+                    pastedToRow
                     cardDivider()
                 }
                 propertyRow("Size", sizeString)
@@ -863,14 +887,14 @@ private struct ItemDetailView: View {
 private struct SelectableTextBlock: View {
     let text: String
     var body: some View {
+        // Plain text on the pinned region's own darker backdrop — no boxed
+        // background or rounded border of its own.
         Text(text)
             .font(.system(size: 14, design: .monospaced))
             .foregroundColor(.textPri)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(Color.surfaceHi.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
+            .padding(.vertical, 4)
     }
 }
 

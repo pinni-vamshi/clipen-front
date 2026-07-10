@@ -16,53 +16,55 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Short key label shown in the interactions list (left column).
+    /// Key label shown in the interactions list — spells out HOW the key is
+    /// pressed (tap vs hold), matching the app's real trigger exactly.
     var keyLabel: String {
         switch self {
-        case .cycle:        return "⌘ V"
-        case .pinnedOpen:   return "V"
-        case .multiPaste:   return "V ⌘V"
-        case .search:       return "F"
-        case .category:     return "1–9"
-        case .spacePreview: return "SPACE"
-        case .pinPreview:   return "SPACE ×2"
-        case .transform:    return "X"
-        case .moveToFront:  return "C"
-        case .delete:       return "⌫"
-        case .reverseCycle: return "⇧ + V"
+        case .cycle:        return "⌘ + tap V"
+        case .pinnedOpen:   return "⌘ + hold V"
+        case .multiPaste:   return "hold V"
+        case .search:       return "tap F"
+        case .category:     return "⌘ 1–9"
+        case .spacePreview: return "tap ␣"
+        case .pinPreview:   return "tap ␣ ×2"
+        case .transform:    return "tap X"
+        case .moveToFront:  return "tap C"
+        case .delete:       return "tap ⌫"
+        case .reverseCycle: return "⇧ + tap V"
         }
     }
 
     var title: String {
         switch self {
-        case .cycle:        return "Hold ⌘ + V"
-        case .pinnedOpen:   return "Hold V"
-        case .multiPaste:   return "Multi Paste"
+        case .cycle:        return "Open / Next Item"
+        case .pinnedOpen:   return "Open Pinned"
+        case .multiPaste:   return "Mark for Multi-Paste"
         case .search:       return "Search"
         case .category:     return "Category Switch"
         case .spacePreview: return "Preview"
-        case .pinPreview:   return "Pin Preview"
+        case .pinPreview:   return "Refer (Pin Preview)"
         case .transform:    return "Transform"
         case .moveToFront:  return "Move to Front"
         case .delete:       return "Delete"
-        case .reverseCycle: return "Reverse Cycle"
+        case .reverseCycle: return "Previous Item"
         }
     }
 
-    /// Two-line explanation under the stage (mirrors the mockup's copy).
+    /// Two-line explanation under the stage — written from the app's REAL
+    /// behavior (tap vs hold, what stays open, where the selection goes).
     var caption: String {
         switch self {
-        case .cycle:        return "Hold ⌘ and tap V to open the history popup.\nRelease ⌘ to paste the selected item."
-        case .pinnedOpen:   return "HOLD V on the first press — the popup opens pinned.\nReleasing ⌘ won't close it; click ✕ to dismiss."
-        case .multiPaste:   return "Hold V on an item to mark it, keep cycling and marking.\nRelease ⌘ to paste all marked items in order."
+        case .cycle:        return "Hold ⌘ and tap V to open the popup; each tap moves to the next item.\nRelease ⌘ to paste the highlighted item."
+        case .pinnedOpen:   return "HOLD V on the very first press — the popup opens pinned.\nReleasing ⌘ keeps it open; click ✕ or press Esc to close."
+        case .multiPaste:   return "With the popup open, HOLD V to mark the highlighted item.\nRelease ⌘ to paste every marked item, in marking order."
         case .search:       return "Tap F while the popup is open to enter search mode.\nType to filter the list by contents."
-        case .category:     return "Tap 1–9 while the popup is open.\nJumps straight to that category filter."
-        case .spacePreview: return "Tap Space to preview the highlighted item full-size.\nTap Space again to close the preview."
-        case .pinPreview:   return "Double-tap Space on the highlighted item.\nSends it to the floating Reference panel."
-        case .transform:    return "Tap X to open transforms, tap again to cycle them.\nRelease ⌘ to paste the transformed result."
-        case .moveToFront:  return "Tap C on the highlighted item.\nMoves it to the front of the ring."
-        case .delete:       return "Tap ⌫ on the highlighted item.\nRemoves it from the ring."
-        case .reverseCycle: return "Hold ⌘ and tap ⇧V.\nCycles to the previous item instead of the next."
+        case .category:     return "Hold ⌘ and tap 1–9 to jump to a category.\n⌘1 is Recents; ⌘2 onward are your categories."
+        case .spacePreview: return "Tap Space to preview the highlighted item full-size.\nTap Space again to close — nothing is pasted."
+        case .pinPreview:   return "Double-tap Space on the highlighted item.\nSends it to the Reference panel — the popup closes, the preview stays."
+        case .transform:    return "Tap X to open the tools, tap X again to cycle them.\n⇧X steps back · hold X closes · release ⌘ pastes the result."
+        case .moveToFront:  return "Tap C to move the highlighted item to the front of the ring.\nThe selection stays put — keep tapping C to promote a run of items."
+        case .delete:       return "Tap ⌫ to remove the highlighted item from the ring.\nThe next item slides into its place."
+        case .reverseCycle: return "Hold ⌘ and tap ⇧V.\nMoves to the previous item instead of the next."
         }
     }
 
@@ -164,7 +166,7 @@ final class InteractionLabController: ObservableObject {
     /// Reverse Cycle demo instead of the enum's static ⇧V wording.
     var currentCaption: String {
         if selectedDemo == .reverseCycle, ClipboardManager.shared.reverseCycleUsesB {
-            return "Hold ⌘ and tap B.\nCycles to the previous item instead of the next."
+            return "Hold ⌘ and tap B to move to the previous item.\nHOLD B to mark the item and step back in one go."
         }
         return selectedDemo.caption
     }
@@ -463,6 +465,10 @@ final class InteractionLabController: ObservableObject {
         try await pause(400)
         try await tap(.x)
         withAnimation(.easeOut(duration: 0.25)) { transformVisible = true }
+        // Breathe after the opening tap — without this the open-tap and the
+        // first cycle-tap ran back to back, which read as X being
+        // double-clicked very fast.
+        try await pause(500)
         var chosen = 0
         for i in 0..<3 {
             try await tap(.x)
@@ -494,12 +500,14 @@ final class InteractionLabController: ObservableObject {
         withAnimation(.easeOut(duration: 0.3)) {
             let moved = items.remove(at: 1)
             items.insert(moved, at: 0)
-            selectedIndex = 0
+            // Matches the real popup: ONLY the item moves — the selection
+            // does not follow it to the front, it lands on the next item.
+            selectedIndex = 2
         }
         try await pause(1000)
         release(.cmd)
         showPanel(false)
-        finish("“\(items[0].title)” moved to the front of the ring")
+        finish("“\(items[0].title)” moved to front — selection stays on the next item")
     }
 
     private func runDelete() async throws {
@@ -722,14 +730,18 @@ struct InteractionLabStage: View {
                 .opacity(lab.instruction == nil ? 0 : 1)
                 .frame(height: 20)
 
-            // Slot 1 — mock popup stage. The popup and the side panel each
-            // hold a FIXED offset in the slot and only fade in place —
-            // independently, so the preview panel can stay visible after
-            // the popup itself disappears (Pin Preview).
+            // Slot 1 — mock popup stage. The popup sits dead-center when
+            // it's alone; when a preview/transform side panel appears the
+            // popup slides aside to make room, and the side panel fades in
+            // at its fixed spot. The panels fade independently, so the
+            // preview can stay visible after the popup disappears
+            // (Pin Preview).
             ZStack {
                 LabMockPanel(lab: lab)
                     .opacity(lab.panelVisible ? 1 : 0)
-                    .offset(x: -66)
+                    .offset(x: (lab.previewVisible || lab.transformVisible) ? -66 : 0)
+                    .animation(.easeOut(duration: 0.25),
+                               value: lab.previewVisible || lab.transformVisible)
                 LabSidePanel(lab: lab)
                     .opacity((lab.previewVisible || lab.transformVisible) ? 1 : 0)
                     .offset(x: 101)
@@ -737,19 +749,20 @@ struct InteractionLabStage: View {
             .frame(height: 190)
             .frame(maxWidth: .infinity)
 
-            // Slot 2 — helper text (changes per interaction, slot doesn't move).
-            Text(lab.currentCaption)
-                .font(.system(size: 11))
-                .foregroundColor(.textSec)
-                .multilineTextAlignment(.center)
-                .frame(height: 30)
-
-            // Slot 3 — green result line (fades in/out in place).
+            // Slot 2 — green result line ON TOP (fades in/out in place)…
             Text(lab.resultText.map { "→ \($0)" } ?? " ")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.green)
                 .opacity(lab.resultText == nil ? 0 : 1)
                 .frame(height: 16)
+
+            // Slot 3 — …helper text BELOW it (changes per interaction,
+            // slot doesn't move).
+            Text(lab.currentCaption)
+                .font(.system(size: 11))
+                .foregroundColor(.textSec)
+                .multilineTextAlignment(.center)
+                .frame(height: 30)
 
             // Slot 4 — the key caps, bottom, one fixed home for every
             // interaction. The set of keys is constant for the selected
@@ -758,10 +771,10 @@ struct InteractionLabStage: View {
             VStack(spacing: 8) {
                 HStack(spacing: 10) {
                     ForEach(lab.stageKeys) { key in
-                        LabKeyCapView(key: key, pressed: lab.pressedKeys.contains(key), size: 44)
+                        LabKeyCapView(key: key, pressed: lab.pressedKeys.contains(key), size: 54)
                     }
                 }
-                .frame(height: 48)
+                .frame(height: 58)
                 // Number row keeps its space reserved even when hidden so
                 // the caps above never move when it appears.
                 HStack(spacing: 5) {
@@ -852,7 +865,10 @@ struct ClipenSettingsView: View {
             // No "SETTINGS" heading here — the Dashboard | Settings switcher
             // in the top toolbar already shows Settings selected, so a
             // second, bigger label repeating it was pure redundancy.
-            VStack(alignment: .leading, spacing: 30) {
+            // 44pt row gap: clear separation between the settings row
+            // (ring size / app settings / behaviour) and the interactions
+            // + lab row below it.
+            VStack(alignment: .leading, spacing: 44) {
                 // Row 1 — Ring Size + App Settings (left) vs Main Behaviour
                 // (right), stretched to a shared height so both end flush.
                 HStack(alignment: .top, spacing: 40) {
@@ -887,16 +903,14 @@ struct ClipenSettingsView: View {
 
     // MARK: Section chrome
 
+    /// Section heading — title only. (The `number` parameter is kept so the
+    /// call sites read stably, but it is deliberately NOT rendered: the
+    /// headings alone are enough, no 01/02/03 prefixes.)
     private func sectionHeader(_ number: String, _ title: String) -> some View {
-        HStack(spacing: 12) {
-            Text(number)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(.textDim)
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(3)
-                .foregroundColor(.textSec)
-        }
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(3)
+            .foregroundColor(.textSec)
     }
 
     /// Numbered row prefix, mockup-style ("01", "02", …).
@@ -1207,18 +1221,15 @@ struct ClipenSettingsView: View {
     private func interactionRow(_ demo: InteractionDemo) -> some View {
         let isActive = lab.selectedDemo == demo
         // Reverse Cycle's key label follows the user's selection.
-        let keyLabel = (demo == .reverseCycle && manager.reverseCycleUsesB) ? "B" : demo.keyLabel
+        let keyLabel = (demo == .reverseCycle && manager.reverseCycleUsesB) ? "tap B" : demo.keyLabel
         return Button {
             lab.select(demo)
         } label: {
             HStack(spacing: 12) {
-                Rectangle()
-                    .fill(isActive ? Color.accent : Color.clear)
-                    .frame(width: 3)
                 Text(keyLabel)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundColor(isActive ? .accent : .textSec)
-                    .frame(width: 74, alignment: .leading)
+                    .foregroundColor(isActive ? .textPri : .textSec)
+                    .frame(width: 90, alignment: .leading)
                 Text(demo.title)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
                     .foregroundColor(isActive ? .textPri : .textSec)
@@ -1239,8 +1250,10 @@ struct ClipenSettingsView: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.textDim)
             }
-            .padding(.trailing, 14).padding(.vertical, 10)
-            .background(isActive ? Color.accent.opacity(0.08) : Color.clear)
+            .padding(.leading, 14).padding(.trailing, 14).padding(.vertical, 10)
+            // Selected row reads as a soft light-grey wash — no blue tint,
+            // no accent bar on the left edge.
+            .background(isActive ? Color.white.opacity(0.08) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -1258,7 +1271,7 @@ struct ClipenSettingsView: View {
             reverseKeyChoice("B", usesB: true)
             Spacer()
         }
-        .padding(.leading, 89).padding(.trailing, 14).padding(.vertical, 8)
+        .padding(.leading, 116).padding(.trailing, 14).padding(.vertical, 8)
     }
 
     private func reverseKeyChoice(_ label: String, usesB: Bool) -> some View {

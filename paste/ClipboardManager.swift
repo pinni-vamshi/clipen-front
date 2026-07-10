@@ -493,6 +493,10 @@ class ClipboardManager: ObservableObject {
     /// snapped back, then got marked) because it acted before knowing which
     /// gesture it was.
     var vTapHoldTimer: Timer?
+    /// Same tap-vs-hold decision timer as `vTapHoldTimer`, for the B key
+    /// when it's the chosen reverse key: tap = step backward, hold = mark
+    /// (and auto-move BACKWARD when advance-after-marking is on).
+    var bTapHoldTimer: Timer?
     /// How long a plain V press must be held before it's treated as a hold
     /// (mark) instead of a tap (cycle). Short enough that a deliberate tap
     /// never feels delayed; long enough to reliably catch an intentional hold.

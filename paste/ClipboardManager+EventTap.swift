@@ -241,6 +241,22 @@ extension ClipboardManager {
                 }
             }
         }
+        // Releasing B before its hold timer fired means it was a TAP —
+        // step backward now (context-aware: transforms if that panel is
+        // open, otherwise the item ring). The hold path (mark + move back)
+        // already ran from the timer if it fired.
+        if key == 11, let timer = bTapHoldTimer {
+            timer.invalidate()
+            bTapHoldTimer = nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.inTransformStage {
+                    self.cycleTransformBackward()
+                } else {
+                    self.cyclePrevious()
+                }
+            }
+        }
         // Releasing Space ends the current physical press, independent of
         // whether the OS's autorepeat flag was reliable for this key event
         // stream (see spaceKeyIsDown in handleKeyDown).
@@ -595,19 +611,37 @@ extension ClipboardManager {
         }
 
         // B — context-aware "back", only when the user picked B as the
-        // reverse key in Settings: steps whichever panel is ACTIVE
-        // backward — previous transform while the transform panel is open,
-        // previous item otherwise. ⇧V and ⇧X keep working regardless.
+        // reverse key in Settings. Same tap-vs-hold decision shape as V:
+        //   tap  → step backward (previous transform while the transform
+        //          panel is open, previous item otherwise)
+        //   hold → mark/unmark the highlighted item, then auto-move
+        //          BACKWARD when advance-after-marking is on — V's
+        //          hold-to-mark mirrored, in the reverse direction.
+        // ⇧V and ⇧X keep working regardless.
         if key == 11 && previewWindow.isVisible && reverseCycleUsesB {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if self.inTransformStage {
-                    self.cycleTransformBackward()
-                } else {
-                    self.cyclePrevious()
+            let pendingID: UUID? = displayItems.indices.contains(selectedIndex)
+                ? displayItems[selectedIndex].id : nil
+            bTapHoldTimer?.invalidate()
+            let t = Timer(timeInterval: Self.vHoldThreshold, repeats: false) { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.bTapHoldTimer = nil
+                    self.popupHintVMark = true
+                    guard let id = pendingID,
+                          self.items.contains(where: { $0.id == id }) else { return }
+                    self.toggleMark(id: id)
+                    AuthManager.shared.registerActionUsage(actionID: "action.mark")
+                    if self.advanceAfterMark, self.previewWindow.isVisible,
+                       !self.displayItems.isEmpty {
+                        self.selectedIndex = (self.selectedIndex - 1 + self.displayItems.count) % self.displayItems.count
+                        self.syncItemPreviewWithSelection()
+                        self.syncTransformPanelWithSelection()
+                    }
                 }
             }
+            RunLoop.main.add(t, forMode: .common)
+            bTapHoldTimer = t
             return nil
         }
 

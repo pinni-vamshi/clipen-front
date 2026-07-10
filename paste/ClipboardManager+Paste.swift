@@ -169,10 +169,12 @@ extension ClipboardManager {
     }
 
     func commitPaste() {
-        // A V tap/hold decision in flight when ⌘ is released must not fire
-        // later against a stale target in a popup that's about to close.
+        // A V/B/X tap/hold decision in flight when ⌘ is released must not
+        // fire later against a stale target in a popup that's about to close.
         vTapHoldTimer?.invalidate()
         vTapHoldTimer = nil
+        bTapHoldTimer?.invalidate()
+        bTapHoldTimer = nil
         xTapHoldTimer?.invalidate()
         xTapHoldTimer = nil
         // Enter commits out of search mode too (handleFlagsChanged suppresses

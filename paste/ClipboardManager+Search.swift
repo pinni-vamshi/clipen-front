@@ -138,16 +138,24 @@ extension ClipboardManager {
         }
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
         let target = displayItems[selectedIndex]
+        // Remember what was NEXT in the visible list before the move — the
+        // selection lands there, not on the moved item.
+        let nextID: UUID? = displayItems.indices.contains(selectedIndex + 1)
+            ? displayItems[selectedIndex + 1].id
+            : nil
         guard let realIndex = items.firstIndex(where: { $0.id == target.id }) else { return }
-        guard realIndex != 0 else { selectedIndex = 0; return }
+        guard realIndex != 0 else { return }
         let moved = items.remove(at: realIndex)
         items.insert(moved, at: 0)
         // displayItems is synchronously rebuilt by items.didSet; the moved item
-        // is now first in the unfiltered ring.
-        if let newIdx = displayItems.firstIndex(where: { $0.id == target.id }) {
-            selectedIndex = newIdx
+        // is now first in the unfiltered ring. ONLY the item moves — the
+        // selection does NOT follow it to the front: it advances to the
+        // element that was next, so the user can keep working down the
+        // list (C, C, C… promotes a run of items without re-navigating).
+        if let nextID, let idx = displayItems.firstIndex(where: { $0.id == nextID }) {
+            selectedIndex = idx
         } else {
-            selectedIndex = 0
+            clampSelectedIndexToDisplay()
         }
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
@@ -188,10 +196,12 @@ extension ClipboardManager {
         transformPanel.hide()
         itemPreviewPanel.hide()
         cancelPendingFirstOpen()
-        // A V tap/hold decision in flight when the popup closes must not
+        // A V/B tap/hold decision in flight when the popup closes must not
         // fire later against a stale target (or a ring that's shrunk since).
         vTapHoldTimer?.invalidate()
         vTapHoldTimer = nil
+        bTapHoldTimer?.invalidate()
+        bTapHoldTimer = nil
         firstOpenHoldTimer?.invalidate()
         firstOpenHoldTimer = nil
         popupPinnedOpen = false
