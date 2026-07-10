@@ -666,8 +666,14 @@ struct InteractionLabStage: View {
     @ObservedObject var lab: InteractionLabController
 
     var body: some View {
-        VStack(spacing: 16) {
-            // Stage area — mock panel while playing, hero key caps while idle.
+        // FIXED-SLOT layout: every element owns one permanent position —
+        // the mock popup area, the helper text, the green result line, and
+        // the key caps at the bottom. Nothing shifts when the panel opens
+        // or a different interaction is picked; only each slot's CONTENT
+        // and state change.
+        VStack(spacing: 14) {
+            // Slot 1 — mock popup stage (panel + side panels). Fixed
+            // height; the panel fades in/out in place.
             ZStack {
                 if lab.panelVisible {
                     HStack(spacing: 12) {
@@ -677,63 +683,51 @@ struct InteractionLabStage: View {
                         }
                     }
                     .transition(.opacity)
-                } else {
-                    HStack(spacing: 14) {
-                        ForEach(Array(lab.selectedDemo.heroKeys.enumerated()), id: \.offset) { i, key in
-                            if i > 0 {
-                                Text("+").font(.system(size: 20, weight: .medium)).foregroundColor(.textSec)
-                            }
-                            LabKeyCapView(key: key,
-                                          pressed: lab.pressedKeys.contains(key),
-                                          size: 60)
-                        }
-                    }
-                    .transition(.opacity)
                 }
             }
-            .frame(height: 180)
+            .frame(height: 190)
             .frame(maxWidth: .infinity)
 
-            // Animated key row — only while a script is running with the
-            // panel up (idle state already shows the hero caps above).
-            if lab.panelVisible {
-                VStack(spacing: 6) {
-                    HStack(spacing: 8) {
-                        ForEach(lab.stageKeys) { key in
-                            LabKeyCapView(key: key, pressed: lab.pressedKeys.contains(key), size: 32)
-                        }
-                    }
-                    if lab.showNumberRow {
-                        HStack(spacing: 5) {
-                            ForEach(1...9, id: \.self) { n in
-                                Text("\(n)")
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(lab.pressedNumber == n ? .white : (n <= 3 ? .textSec : .textDim))
-                                    .frame(width: 20, height: 20)
-                                    .background(lab.pressedNumber == n ? Color.accent : Color.surfaceHi,
-                                                in: RoundedRectangle(cornerRadius: 5))
-                                    .opacity(n <= 3 ? 1 : 0.4)
-                                    .offset(y: lab.pressedNumber == n ? 2 : 0)
-                            }
-                        }
-                        .transition(.opacity)
-                    }
-                }
-            }
-
-            // Caption — the row already selected in the list on the left
-            // names the gesture, so this only needs to explain it.
+            // Slot 2 — helper text (changes per interaction, slot doesn't move).
             Text(lab.selectedDemo.caption)
                 .font(.system(size: 11))
                 .foregroundColor(.textSec)
                 .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                .frame(height: 30)
 
-            // Result line
+            // Slot 3 — green result line (fades in/out in place).
             Text(lab.resultText.map { "→ \($0)" } ?? " ")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.green)
                 .opacity(lab.resultText == nil ? 0 : 1)
+                .frame(height: 16)
+
+            // Slot 4 — the key caps, bottom, one fixed home for every
+            // interaction. The set of keys is constant for the selected
+            // demo; presses animate in place, never repositioning the row.
+            VStack(spacing: 8) {
+                HStack(spacing: 10) {
+                    ForEach(lab.stageKeys) { key in
+                        LabKeyCapView(key: key, pressed: lab.pressedKeys.contains(key), size: 44)
+                    }
+                }
+                .frame(height: 48)
+                // Number row keeps its space reserved even when hidden so
+                // the caps above never move when it appears.
+                HStack(spacing: 5) {
+                    ForEach(1...9, id: \.self) { n in
+                        Text("\(n)")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(lab.pressedNumber == n ? .white : (n <= 3 ? .textSec : .textDim))
+                            .frame(width: 20, height: 20)
+                            .background(lab.pressedNumber == n ? Color.accent : Color.surfaceHi,
+                                        in: RoundedRectangle(cornerRadius: 5))
+                            .opacity(n <= 3 ? 1 : 0.4)
+                            .offset(y: lab.pressedNumber == n ? 2 : 0)
+                    }
+                }
+                .opacity(lab.showNumberRow ? 1 : 0)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
