@@ -278,7 +278,8 @@ struct PopoverPreviewView: View {
             // pinned mode strips the header down to only what still works:
             // the close button above, plus click/double-click below.
             if !manager.popupPinnedOpen {
-                FlatHint(key: "⇧V", label: "Prev", isActive: manager.popupHintShiftV)
+                FlatHint(key: manager.reverseCycleUsesB ? "B" : "⇧V",
+                         label: "Prev", isActive: manager.popupHintShiftV)
 
                 FlatHint(key: "hold V", label: "Mark", isActive: manager.popupHintVMark)
 

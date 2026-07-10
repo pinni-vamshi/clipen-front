@@ -87,7 +87,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
 // MARK: - Key caps
 
 enum LabKey: String, Identifiable, Hashable {
-    case cmd, v, x, f, c, shift, space, backspace, one
+    case cmd, v, x, f, c, b, shift, space, backspace, one
 
     var id: String { rawValue }
 
@@ -98,6 +98,7 @@ enum LabKey: String, Identifiable, Hashable {
         case .x:         return "X"
         case .f:         return "F"
         case .c:         return "C"
+        case .b:         return "B"
         case .shift:     return "⇧"
         case .space:     return "SPACE"
         case .backspace: return "⌫"
@@ -158,6 +159,15 @@ final class InteractionLabController: ObservableObject {
 
     private var task: Task<Void, Never>? = nil
     private let tabNames = ["Recents", "Image", "URL"]
+
+    /// Stage caption — follows the user's reverse-key selection for the
+    /// Reverse Cycle demo instead of the enum's static ⇧V wording.
+    var currentCaption: String {
+        if selectedDemo == .reverseCycle, ClipboardManager.shared.reverseCycleUsesB {
+            return "Hold ⌘ and tap B.\nCycles to the previous item instead of the next."
+        }
+        return selectedDemo.caption
+    }
 
     func select(_ demo: InteractionDemo) {
         selectedDemo = demo
@@ -515,22 +525,29 @@ final class InteractionLabController: ObservableObject {
     }
 
     private func runReverseCycle() async throws {
-        stageKeys = [.cmd, .shift, .v]
+        // The animation follows the user's chosen reverse key (Settings →
+        // Interactions → Reverse Cycle edit): ⇧+V taps, or plain B taps.
+        let usesB = ClipboardManager.shared.reverseCycleUsesB
+        stageKeys = usesB ? [.cmd, .v, .b] : [.cmd, .shift, .v]
         press(.cmd)
         try await pause(400)
         showPanel(true)
         try await tap(.v)
         try await pause(400)
-        press(.shift)
-        try await pause(200)
+        if !usesB {
+            press(.shift)
+            try await pause(200)
+        }
         var idx = 0
         for _ in 0..<2 {
-            try await tap(.v)
+            try await tap(usesB ? .b : .v)
             idx = (idx - 1 + items.count) % items.count
             selectItem(idx)
             try await pause(450)
         }
-        release(.shift)
+        if !usesB {
+            release(.shift)
+        }
         try await pause(300)
         release(.cmd)
         showPanel(false)
@@ -721,7 +738,7 @@ struct InteractionLabStage: View {
             .frame(maxWidth: .infinity)
 
             // Slot 2 — helper text (changes per interaction, slot doesn't move).
-            Text(lab.selectedDemo.caption)
+            Text(lab.currentCaption)
                 .font(.system(size: 11))
                 .foregroundColor(.textSec)
                 .multilineTextAlignment(.center)
@@ -802,6 +819,8 @@ struct ClipenSettingsView: View {
 
     @State private var row1Height: CGFloat = 0
     @State private var row2Height: CGFloat = 0
+    /// Inline editor under the Reverse Cycle row (⇧V vs B picker).
+    @State private var showReverseKeyEditor = false
 
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
@@ -1168,6 +1187,10 @@ struct ClipenSettingsView: View {
                     }
                     ForEach(group) { demo in
                         interactionRow(demo)
+                        // Inline editor: pick which key means "back".
+                        if demo == .reverseCycle && showReverseKeyEditor {
+                            reverseKeyPicker
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -1183,6 +1206,8 @@ struct ClipenSettingsView: View {
 
     private func interactionRow(_ demo: InteractionDemo) -> some View {
         let isActive = lab.selectedDemo == demo
+        // Reverse Cycle's key label follows the user's selection.
+        let keyLabel = (demo == .reverseCycle && manager.reverseCycleUsesB) ? "B" : demo.keyLabel
         return Button {
             lab.select(demo)
         } label: {
@@ -1190,7 +1215,7 @@ struct ClipenSettingsView: View {
                 Rectangle()
                     .fill(isActive ? Color.accent : Color.clear)
                     .frame(width: 3)
-                Text(demo.keyLabel)
+                Text(keyLabel)
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(isActive ? .accent : .textSec)
                     .frame(width: 74, alignment: .leading)
@@ -1198,6 +1223,18 @@ struct ClipenSettingsView: View {
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
                     .foregroundColor(isActive ? .textPri : .textSec)
                 Spacer()
+                if demo == .reverseCycle {
+                    // Edit — opens the ⇧V / B key picker below this row.
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { showReverseKeyEditor.toggle() }
+                    } label: {
+                        Image(systemName: showReverseKeyEditor ? "pencil.circle.fill" : "pencil.circle")
+                            .font(.system(size: 13))
+                            .foregroundColor(showReverseKeyEditor ? .accent : .textSec)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Choose the reverse key")
+                }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.textDim)
@@ -1205,6 +1242,37 @@ struct ClipenSettingsView: View {
             .padding(.trailing, 14).padding(.vertical, 10)
             .background(isActive ? Color.accent.opacity(0.08) : Color.clear)
             .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// ⇧V vs B choice for the Reverse Cycle gesture. Selecting an option
+    /// applies everywhere at once: the real popup shortcut, the popup's
+    /// hint legend, this row's key label, and the lab animation (replayed
+    /// immediately so the change is visible).
+    private var reverseKeyPicker: some View {
+        HStack(spacing: 8) {
+            Text("Reverse key")
+                .font(.system(size: 10)).foregroundColor(.textDim)
+            reverseKeyChoice("⇧ + V", usesB: false)
+            reverseKeyChoice("B", usesB: true)
+            Spacer()
+        }
+        .padding(.leading, 89).padding(.trailing, 14).padding(.vertical, 8)
+    }
+
+    private func reverseKeyChoice(_ label: String, usesB: Bool) -> some View {
+        let selected = manager.reverseCycleUsesB == usesB
+        return Button {
+            manager.reverseCycleUsesB = usesB
+            lab.select(.reverseCycle)
+        } label: {
+            Text(label)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(selected ? .white : .textSec)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(selected ? Color.accent : Color.surfaceHi,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
     }

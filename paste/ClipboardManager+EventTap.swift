@@ -594,6 +594,23 @@ extension ClipboardManager {
             return nil
         }
 
+        // B — context-aware "back", only when the user picked B as the
+        // reverse key in Settings: steps whichever panel is ACTIVE
+        // backward — previous transform while the transform panel is open,
+        // previous item otherwise. ⇧V and ⇧X keep working regardless.
+        if key == 11 && previewWindow.isVisible && reverseCycleUsesB {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.inTransformStage {
+                    self.cycleTransformBackward()
+                } else {
+                    self.cyclePrevious()
+                }
+            }
+            return nil
+        }
+
         // ⌘1 … ⌘9 — switch the CATEGORY filter (was: jump to row N).
         // ⌘1 = Recents (no filter), ⌘2 = first available category, ⌘3 =
         // second, …  Numbers are advertised by the "1.", "2." prefixes on
@@ -720,6 +737,7 @@ extension ClipboardManager {
         case 9 where cmd:  hintKeyVDown = true
         case 7 where cmd:  hintKeyXDown = true
         case 8 where cmd:  hintKeyCDown = true
+        case 11 where cmd: hintKeyBDown = true
         case 49:          hintKeySpaceDown = true
         default: break
         }
@@ -732,6 +750,7 @@ extension ClipboardManager {
         case 9:  hintKeyVDown = false
         case 7:  hintKeyXDown = false
         case 8:  hintKeyCDown = false
+        case 11: hintKeyBDown = false
         case 49: hintKeySpaceDown = false
         default: break
         }
@@ -757,6 +776,11 @@ extension ClipboardManager {
         } else {
             popupHintV = false
             popupHintShiftV = false
+        }
+        // With B as the chosen reverse key, the "Prev" hint (relabelled
+        // "B" in the legend) lights up on ⌘B too.
+        if reverseCycleUsesB, hintKeyBDown, hintCmdHeld, previewWindow.isVisible {
+            popupHintShiftV = true
         }
         if hintKeyXDown && hintCmdHeld && previewWindow.isVisible {
             popupHintX = !hintShiftHeld

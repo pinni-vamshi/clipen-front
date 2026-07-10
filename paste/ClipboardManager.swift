@@ -347,9 +347,20 @@ class ClipboardManager: ObservableObject {
     var hintKeyVDown = false
     var hintKeyXDown = false
     var hintKeyCDown = false
+    var hintKeyBDown = false
     var hintKeySpaceDown = false
     var hintCmdHeld = false
     var hintShiftHeld = false
+
+    /// User-selected reverse-cycle key: false = ⇧V (default), true = B.
+    /// With B selected, B acts as a context-aware "back" — it steps the
+    /// ACTIVE panel backward (transform panel open → previous transform,
+    /// otherwise → previous item). ⇧V/⇧X keep working in both modes.
+    /// Editable from the Interactions list in Settings; the popup's hint
+    /// legend and the Interaction Lab animation follow the selection.
+    @Published var reverseCycleUsesB: Bool = UserDefaults.standard.bool(forKey: "reverseCycleUsesB") {
+        didSet { UserDefaults.standard.set(reverseCycleUsesB, forKey: "reverseCycleUsesB") }
+    }
 
     /// Fires once on the user's first ⌘V cycle — preview overlay shows ⌘X transform tip.
     @Published var showFirstCycleHint: Bool = false
