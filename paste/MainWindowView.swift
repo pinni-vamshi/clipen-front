@@ -93,6 +93,16 @@ struct MainWindowView: View {
                                 }
                         }
                     }
+                    // The missing third piece of the same-row-as-traffic-lights
+                    // fix: .hiddenTitleBar (pasteApp) hides the title, and the
+                    // 62pt leading padding (topToolbar) clears the light
+                    // cluster — but SwiftUI still exposes the invisible
+                    // titlebar strip as a top safe-area inset, so without this
+                    // the whole toolbar row was laid out BELOW it, leaving the
+                    // traffic lights alone on an empty strip. Ignoring the top
+                    // inset lifts the row into that strip so CLIPEN, the
+                    // switcher, and the buttons share one line with the lights.
+                    .ignoresSafeArea(.container, edges: .top)
                 }
             }
             .onChange(of: manager.hasAccessibilityPermission) { _, granted in
