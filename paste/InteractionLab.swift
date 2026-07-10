@@ -431,10 +431,13 @@ final class InteractionLabController: ObservableObject {
         withAnimation(.easeOut(duration: 0.2)) { previewVisible = true }
         try await pause(140)
         try await tap(.space, hold: 140)
-        withAnimation(.easeOut(duration: 0.2)) { previewVisible = false }
+        // The pin: ONLY the popup disappears — the preview panel stays
+        // pinned on screen (that's the whole point of the gesture), until
+        // the loop restarts the demo.
         showPanel(false)
         release(.cmd)
         finish("Pinned “\(items[1].title)” to tray")
+        try await pause(1400)
     }
 
     private func runTransform() async throws {
@@ -691,31 +694,31 @@ struct InteractionLabStage: View {
         // or a different interaction is picked; only each slot's CONTENT
         // and state change.
         VStack(spacing: 14) {
-            // Slot 1 — mock popup stage (panel + side panels). Fixed
-            // height; the panel fades in/out in place. The floating
-            // instruction label (HTML instrLabel) sits in a fixed spot at
-            // the top of this slot, fading with its own opacity.
+            // Slot 0 — floating instruction label (HTML instrLabel) in its
+            // OWN fixed slot above the popup area, so it can never overlap
+            // the mock panel.
+            Text(lab.instruction ?? " ")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(Color.white.opacity(0.16), in: Capsule())
+                .opacity(lab.instruction == nil ? 0 : 1)
+                .frame(height: 20)
+
+            // Slot 1 — mock popup stage. The popup and the side panel each
+            // hold a FIXED offset in the slot and only fade in place —
+            // independently, so the preview panel can stay visible after
+            // the popup itself disappears (Pin Preview).
             ZStack {
-                if lab.panelVisible {
-                    HStack(spacing: 12) {
-                        LabMockPanel(lab: lab)
-                        if lab.previewVisible || lab.transformVisible {
-                            LabSidePanel(lab: lab)
-                        }
-                    }
-                    .transition(.opacity)
-                }
+                LabMockPanel(lab: lab)
+                    .opacity(lab.panelVisible ? 1 : 0)
+                    .offset(x: -66)
+                LabSidePanel(lab: lab)
+                    .opacity((lab.previewVisible || lab.transformVisible) ? 1 : 0)
+                    .offset(x: 101)
             }
             .frame(height: 190)
             .frame(maxWidth: .infinity)
-            .overlay(alignment: .top) {
-                Text(lab.instruction ?? " ")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 9).padding(.vertical, 4)
-                    .background(Color.white.opacity(0.16), in: Capsule())
-                    .opacity(lab.instruction == nil ? 0 : 1)
-            }
 
             // Slot 2 — helper text (changes per interaction, slot doesn't move).
             Text(lab.selectedDemo.caption)
@@ -734,6 +737,7 @@ struct InteractionLabStage: View {
             // Slot 4 — the key caps, bottom, one fixed home for every
             // interaction. The set of keys is constant for the selected
             // demo; presses animate in place, never repositioning the row.
+            // Nudged further down, clear of the text above.
             VStack(spacing: 8) {
                 HStack(spacing: 10) {
                     ForEach(lab.stageKeys) { key in
@@ -757,6 +761,7 @@ struct InteractionLabStage: View {
                 }
                 .opacity(lab.showNumberRow ? 1 : 0)
             }
+            .padding(.top, 14)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -1154,10 +1159,12 @@ struct ClipenSettingsView: View {
             // of just leaving invisible blank space below a shorter box.
             VStack(spacing: 1) {
                 ForEach(Array(Self.interactionGroups.enumerated()), id: \.offset) { groupIndex, group in
-                    // Blank-line style gap between clusters, like the
-                    // grouped shortcut sheet this list mirrors.
+                    // Divider between interaction classes, breathing room
+                    // on both sides — the clusters read as distinct groups.
                     if groupIndex > 0 {
-                        Spacer().frame(height: 16)
+                        Divider().background(Color.border)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
                     }
                     ForEach(group) { demo in
                         interactionRow(demo)
