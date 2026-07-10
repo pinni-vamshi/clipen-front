@@ -100,6 +100,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.checkForUpdatesInBackgroundIfAllowed()
         }
 
+        // Evaluate the first-ever-session flag BEFORE hasLaunchedBefore
+        // flips below — the flag uses hasLaunchedBefore to tell a genuine
+        // fresh install apart from an upgrade, so touching it after the set
+        // would misclassify every fresh install.
+        _ = AuthManager.isFirstSessionEver
+
         // Open the main window on first launch for onboarding.
         if !UserDefaults.standard.bool(forKey: "hasLaunchedBefore") {
             UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")

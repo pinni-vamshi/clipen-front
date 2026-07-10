@@ -189,6 +189,18 @@ extension ClipboardManager {
     }
 
     func dismissPreview() {
+        // Analytics: closing without having pasted anything this session is
+        // the abandonment signal; duration is summed either way.
+        if previewWindow.isVisible {
+            if let openedAt = popupOpenedAt {
+                let ms = max(0, Int(Date().timeIntervalSince(openedAt) * 1000))
+                AuthManager.shared.registerActionUsage(actionID: "popup.dur_ms", count: ms)
+            }
+            if !popupSessionPasted {
+                AuthManager.shared.registerActionUsage(actionID: "popup.abandon")
+            }
+        }
+        popupOpenedAt = nil
         captureRememberedSelection()
         clearPopupHintHighlights()
         stopAutoDismissTimer()

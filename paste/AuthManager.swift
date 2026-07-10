@@ -179,12 +179,91 @@ final class AuthManager: ObservableObject {
     /// fired several identical requests for the same pending date at once.
     private var usageSendsInFlight: Set<String> = []
 
+    // MARK: - First-ever-session paste record (sent once, backend write-once)
+
+    /// True only for the very first app session on this machine. Evaluated
+    /// once per process; the stamp persists so later sessions are never
+    /// mislabelled. Installs that existed before this feature shipped
+    /// (hasLaunchedBefore already true) are disqualified — their first
+    /// session is long gone and unknowable.
+    static let isFirstSessionEver: Bool = {
+        let d = UserDefaults.standard
+        let alreadyStamped = d.object(forKey: "firstSessionStamp") != nil
+        let isUpgradeInstall = d.bool(forKey: "hasLaunchedBefore")
+        if !alreadyStamped {
+            d.set(Date().timeIntervalSince1970, forKey: "firstSessionStamp")
+        }
+        return !alreadyStamped && !isUpgradeInstall
+    }()
+
+    /// Record a history paste (row index) during the first session ever.
+    /// Stored locally forever; included in every usage payload — the
+    /// backend only writes it once and ignores subsequent copies.
+    func noteFirstSessionHistoryPaste(index: Int) {
+        guard Self.isFirstSessionEver else { return }
+        var record = UserDefaults.standard.dictionary(forKey: "firstSessionPastes") ?? [:]
+        var indices = record["indices"] as? [Int] ?? []
+        var ts      = record["ts"] as? [Double] ?? []
+        let pastes  = (record["pastes"] as? Int ?? 0) + 1
+        if indices.count < 20 {
+            indices.append(index)
+            ts.append(Date().timeIntervalSince1970)
+        }
+        record = ["pastes": pastes, "indices": indices, "ts": ts]
+        UserDefaults.standard.set(record, forKey: "firstSessionPastes")
+    }
+
+    // MARK: - v2 payload assembly
+
+    /// Split the flat "prefix.name" counters accumulated all day into the
+    /// deep groups the backend stores under daily_counts.<date>. Anything
+    /// unprefixed (real tool IDs + legacy action.* IDs) stays in
+    /// tool_usage_counts exactly as v1 clients send it.
+    private static let metricPrefixToGroup: [String: String] = [
+        "popup.":   "popup",
+        "capture.": "captures",
+        "ref.":     "reference",
+        "pidx.":    "paste_index_buckets",
+        "page.":    "paste_age_buckets",
+        "setting.": "settings_changes",
+        "fail.":    "failures",
+    ]
+
+    /// Nicer stored names for popup/reference counter suffixes (sums keep
+    /// an explicit _sum so nobody mistakes them for averages).
+    private static let metricKeyRenames: [String: String] = [
+        "popup.open": "opens", "popup.abandon": "abandons",
+        "popup.dur_ms": "duration_ms_sum", "popup.nav": "items_navigated_sum",
+        "ref.pin": "pins", "ref.open": "opens", "ref.badge_click": "badge_clicks",
+        "ref.auto_surface": "auto_surfaces", "ref.auto_collapse": "auto_collapses",
+        "ref.note_edit": "note_edits", "ref.view_ms": "view_ms_sum",
+    ]
+
     private func sendDailyUsage(date: String, counts: [String: Int]) {
         guard !usageSendsInFlight.contains(date) else { return }
         usageSendsInFlight.insert(date)
 
         var toolCounts = counts
         let cmdVCount = toolCounts.removeValue(forKey: Self.cmdVBucketToolID) ?? 0
+
+        // Route the deep-metric counters out of the tools dict into their
+        // groups. Unrecognized IDs stay in tools — same as always.
+        var groups: [String: [String: Int]] = [:]
+        for (id, value) in toolCounts {
+            guard let prefix = Self.metricPrefixToGroup.keys.first(where: { id.hasPrefix($0) }),
+                  let group = Self.metricPrefixToGroup[prefix] else { continue }
+            toolCounts.removeValue(forKey: id)
+            let key = Self.metricKeyRenames[id] ?? String(id.dropFirst(prefix.count))
+            groups[group, default: [:]][key, default: 0] += value
+        }
+        // Fold selected pre-existing action counters into their natural
+        // group as well — they ALSO stay in tools for dashboard continuity.
+        if let searches = toolCounts["action.popup-search"] {
+            groups["popup", default: [:]]["searches", default: 0] += searches
+        }
+        if let pins = toolCounts["action.reference-pin"] {
+            groups["reference", default: [:]]["pins", default: 0] += pins
+        }
 
         // 90s timeout, not 8: the backend runs on Render's free tier, which
         // spins the service down when idle — a cold start takes 30-60s before
@@ -195,14 +274,42 @@ final class AuthManager: ObservableObject {
                                   timeoutInterval: 90)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "install_key": DeviceIdentity.installKey,
             "date": date,
             "cmd_v_count": cmdVCount,
             "tool_usage_counts": toolCounts,
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
             "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
+            "schema_version": 2,
         ]
+        // Deep per-day groups (only the non-empty ones).
+        for (group, dict) in groups where !dict.isEmpty {
+            body[group] = dict
+        }
+        // Point-in-time state — the backend keeps the latest copy at the
+        // document level (not per day).
+        let m = ClipboardManager.shared
+        body["snapshot"] = [
+            "history_size":       m.items.count,
+            "pinned_items":       m.items.filter(\.isPinned).count,
+            "ring_size":          m.maxItems,
+            "second_tap":         m.openOnSecondTap,
+            "always_preview":     m.alwaysShowItemPreview,
+            "advance_after_mark": m.advanceAfterMark,
+            "remember_last":      m.rememberLastSelection,
+            "auto_dismiss":       m.autoDismissEnabled,
+            "auto_dismiss_s":     Int(m.autoDismissSeconds),
+            "open_delay_ms":      Int(m.firstOpenDelay * 1000),
+            "reverse_key":        m.reverseCycleUsesB ? "B" : "shiftV",
+            "capture_rich":       m.captureRichText,
+            "capture_files":      m.captureFiles,
+        ] as [String: Any]
+        // First-ever-session paste record, if this install has one — the
+        // backend writes it once and ignores every later copy.
+        if let firstSession = UserDefaults.standard.dictionary(forKey: "firstSessionPastes") {
+            body["first_session"] = firstSession
+        }
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self else { return }

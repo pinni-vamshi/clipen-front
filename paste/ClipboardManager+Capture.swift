@@ -222,6 +222,10 @@ extension ClipboardManager {
                     fetchURLTitle(for: item.id, url: url)
                 }
             }
+        } else {
+            // Analytics: a pasteboard change we couldn't turn into ANY item
+            // — the capture was effectively dropped.
+            AuthManager.shared.registerActionUsage(actionID: "fail.capture")
         }
     }
 
@@ -294,6 +298,9 @@ extension ClipboardManager {
     func addCaptured(_ item: ClipboardItem, sidecar: [String: Data]) {
         var enriched = item
         enriched.sidecarTypes = Self.prunedSidecar(sidecar, for: item.content)
+        // Analytics: captures per content type (image/text/url/pdf/…),
+        // using the same tag names the blobs directory uses.
+        AuthManager.shared.registerActionUsage(actionID: "capture.\(item.primaryTag.folderName)")
         addItem(enriched)
     }
 

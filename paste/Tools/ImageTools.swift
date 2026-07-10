@@ -83,6 +83,10 @@ enum ImageTools {
             runAsync: { item in
                 guard let input = ImageService.imageInput(for: item) else { return nil }
                 guard let text = await OCRService.extractText(from: input.image) else {
+                    // Analytics: OCR produced nothing for a real image.
+                    await MainActor.run {
+                        AuthManager.shared.registerActionUsage(actionID: "fail.ocr")
+                    }
                     return .status("No text found in image.")
                 }
                 return .text(text)

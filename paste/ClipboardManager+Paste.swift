@@ -177,6 +177,13 @@ extension ClipboardManager {
         bTapHoldTimer = nil
         xTapHoldTimer?.invalidate()
         xTapHoldTimer = nil
+        // Analytics: the paste path closes the popup without going through
+        // dismissPreview — sum this session's duration here.
+        if previewWindow.isVisible, let openedAt = popupOpenedAt {
+            let ms = max(0, Int(Date().timeIntervalSince(openedAt) * 1000))
+            AuthManager.shared.registerActionUsage(actionID: "popup.dur_ms", count: ms)
+            popupOpenedAt = nil
+        }
         // Enter commits out of search mode too (handleFlagsChanged suppresses
         // the normal ⌘-release commit while this is true, so clear it here).
         isSearchActive = false
@@ -351,6 +358,9 @@ extension ClipboardManager {
             return
         }
         pendingPasteItemID = nil
+        // Analytics: which visible row this paste came from + item age.
+        recordPasteAnalytics(item: item,
+                             displayIndex: displayItems.firstIndex(where: { $0.id == item.id }))
         // Use the app captured at popup-open time (and reactivate it if
         // needed) rather than trusting frontmostApplication fresh here — see
         // capturedPasteTarget's doc comment.
@@ -367,8 +377,32 @@ extension ClipboardManager {
     /// commitPaste's tail so the double-click-to-paste path — which must NOT
     /// close the popup or reset selection — can reuse the exact same,
     /// already-hardened paste mechanics instead of a second implementation.
+    /// Analytics for a history paste: which row was pasted (bucketed) and
+    /// how old the item was at paste time (bucketed). Also feeds the
+    /// first-ever-session record.
+    func recordPasteAnalytics(item: ClipboardItem, displayIndex: Int?) {
+        if let idx = displayIndex, idx >= 0 {
+            let bucket: String
+            switch idx {
+            case 0...4:   bucket = "\(idx)"
+            case 5...10:  bucket = "5_10"
+            case 11...50: bucket = "11_50"
+            default:      bucket = "50p"
+            }
+            AuthManager.shared.registerActionUsage(actionID: "pidx.\(bucket)")
+            AuthManager.shared.noteFirstSessionHistoryPaste(index: idx)
+        }
+        let age = Date().timeIntervalSince(item.timestamp)
+        let ageBucket: String = age < 3_600 ? "lt_1h"
+            : age < 86_400 ? "1_24h"
+            : age < 604_800 ? "1_7d"
+            : "7dp"
+        AuthManager.shared.registerActionUsage(actionID: "page.\(ageBucket)")
+    }
+
     func simulatePaste(_ item: ClipboardItem, target: NSRunningApplication?,
                               completion: (() -> Void)? = nil) {
+        popupSessionPasted = true
         recordPasteDestination(for: item.id, app: target)
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -408,6 +442,8 @@ extension ClipboardManager {
     /// is a different index space than `items`).
     func pasteItemKeepingPopupOpen(id: UUID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
+        recordPasteAnalytics(item: item,
+                             displayIndex: displayItems.firstIndex(where: { $0.id == id }))
         simulatePaste(item, target: resolvedPasteTarget())
     }
 
@@ -423,6 +459,10 @@ extension ClipboardManager {
             selectedIndex = 0; cycleCount = 0
             return
         }
+        popupSessionPasted = true
+        // Age analytics per pasted item (row index isn't meaningful for a
+        // marked set, so only the age bucket is recorded).
+        recordPasteAnalytics(item: itemList[0], displayIndex: nil)
         let item      = itemList[0]
         let remaining = Array(itemList.dropFirst())
 

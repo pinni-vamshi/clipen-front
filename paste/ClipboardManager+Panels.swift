@@ -368,6 +368,7 @@ extension ClipboardManager {
         // numbers like every other paste path (the single/multi/page-picker
         // paths all register; this one didn't, undercounting transform users).
         AuthManager.shared.registerCommandVAction()
+        popupSessionPasted = true
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()
@@ -456,6 +457,7 @@ extension ClipboardManager {
         }
 
         cycleCount += 1
+        AuthManager.shared.registerActionUsage(actionID: "popup.nav")
 
         if popupCoachStep == 0 && cycleCount >= 3 { popupCoachStep = 1 }
 
@@ -482,6 +484,7 @@ extension ClipboardManager {
         }
 
         cycleCount += 1
+        AuthManager.shared.registerActionUsage(actionID: "popup.nav")
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
     }
@@ -553,6 +556,7 @@ extension ClipboardManager {
         }
 
         cycleCount += 1
+        AuthManager.shared.registerActionUsage(actionID: "popup.nav")
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
     }
@@ -590,6 +594,10 @@ extension ClipboardManager {
         capturedPasteTarget = NSWorkspace.shared.frontmostApplication
         previewWindow.show()
         popupOpenGeneration += 1
+        // Analytics: one popup session begins.
+        AuthManager.shared.registerActionUsage(actionID: "popup.open")
+        popupOpenedAt = Date()
+        popupSessionPasted = false
         startAutoDismissTimer()
         syncItemPreviewWithSelection()
     }
@@ -1040,6 +1048,7 @@ extension ClipboardManager {
     /// to the original app BEFORE calling this.
     func simulateCommandV() {
         isSimulatingPaste = true
+        popupSessionPasted = true
         let src  = CGEventSource(stateID: .combinedSessionState)
         let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
         let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)

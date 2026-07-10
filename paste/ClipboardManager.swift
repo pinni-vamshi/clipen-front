@@ -178,16 +178,23 @@ class ClipboardManager: ObservableObject {
     /// Also persists the user's chosen size so it survives app launches.
     func setRingSize(_ size: Int) {
         let clamped = min(max(size, 1), AuthManager.shared.ringLimit)
+        if clamped != maxItems { AuthManager.shared.registerActionUsage(actionID: "setting.ring_size") }
         maxItems = clamped
         UserDefaults.standard.set(clamped, forKey: "preferredRingSize")
     }
 
     @Published var captureRichText: Bool = UserDefaults.standard.object(forKey: "captureRichText") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(captureRichText, forKey: "captureRichText") }
+        didSet {
+            UserDefaults.standard.set(captureRichText, forKey: "captureRichText")
+            if oldValue != captureRichText { AuthManager.shared.registerActionUsage(actionID: "setting.capture_rich") }
+        }
     }
 
     @Published var captureFiles: Bool = UserDefaults.standard.object(forKey: "captureFiles") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(captureFiles, forKey: "captureFiles") }
+        didSet {
+            UserDefaults.standard.set(captureFiles, forKey: "captureFiles")
+            if oldValue != captureFiles { AuthManager.shared.registerActionUsage(actionID: "setting.capture_files") }
+        }
     }
 
     @Published var fetchURLTitles: Bool = UserDefaults.standard.object(forKey: "fetchURLTitles") as? Bool ?? true {
@@ -359,7 +366,10 @@ class ClipboardManager: ObservableObject {
     /// Editable from the Interactions list in Settings; the popup's hint
     /// legend and the Interaction Lab animation follow the selection.
     @Published var reverseCycleUsesB: Bool = UserDefaults.standard.bool(forKey: "reverseCycleUsesB") {
-        didSet { UserDefaults.standard.set(reverseCycleUsesB, forKey: "reverseCycleUsesB") }
+        didSet {
+            UserDefaults.standard.set(reverseCycleUsesB, forKey: "reverseCycleUsesB")
+            if oldValue != reverseCycleUsesB { AuthManager.shared.registerActionUsage(actionID: "setting.reverse_key") }
+        }
     }
 
     /// Fires once on the user's first ⌘V cycle — preview overlay shows ⌘X transform tip.
@@ -404,13 +414,17 @@ class ClipboardManager: ObservableObject {
                 return
             }
             UserDefaults.standard.set(clamped, forKey: "firstOpenDelay")
+            if oldValue != firstOpenDelay { AuthManager.shared.registerActionUsage(actionID: "setting.open_delay") }
         }
     }
 
     /// When true, the popup auto-dismisses itself after `autoDismissSeconds`
     /// of inactivity. User-tunable in Settings; default on.
     @Published var autoDismissEnabled: Bool = UserDefaults.standard.object(forKey: "autoDismissEnabled") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(autoDismissEnabled, forKey: "autoDismissEnabled") }
+        didSet {
+            UserDefaults.standard.set(autoDismissEnabled, forKey: "autoDismissEnabled")
+            if oldValue != autoDismissEnabled { AuthManager.shared.registerActionUsage(actionID: "setting.auto_dismiss") }
+        }
     }
     /// Seconds of inactivity before the popup auto-dismisses (see
     /// `autoDismissEnabled`). Default 180s (3 min). Clamped to a sane range
@@ -428,6 +442,7 @@ class ClipboardManager: ObservableObject {
                 return
             }
             UserDefaults.standard.set(clamped, forKey: "autoDismissSeconds")
+            if oldValue != autoDismissSeconds { AuthManager.shared.registerActionUsage(actionID: "setting.auto_dismiss_s") }
         }
     }
     /// Backing timer for the auto-dismiss countdown. Not @Published — it's
@@ -446,7 +461,10 @@ class ClipboardManager: ObservableObject {
         didSet { UserDefaults.standard.set(referenceAppAffinityEnabled, forKey: "referenceAppAffinityEnabled") }
     }
     @Published var advanceAfterMark: Bool = UserDefaults.standard.object(forKey: "advanceAfterMark") as? Bool ?? false {
-        didSet { UserDefaults.standard.set(advanceAfterMark, forKey: "advanceAfterMark") }
+        didSet {
+            UserDefaults.standard.set(advanceAfterMark, forKey: "advanceAfterMark")
+            if oldValue != advanceAfterMark { AuthManager.shared.registerActionUsage(actionID: "setting.advance_after_mark") }
+        }
     }
     /// When true, the popup NEVER opens from a single held ⌘V — the first
     /// tap always fast-pastes the front item on ⌘ release, and the popup
@@ -455,13 +473,17 @@ class ClipboardManager: ObservableObject {
     /// the delay slider is ignored (and disabled in Settings) while this is
     /// on. Default off — the timer behavior stays the default.
     @Published var openOnSecondTap: Bool = UserDefaults.standard.object(forKey: "openOnSecondTap") as? Bool ?? false {
-        didSet { UserDefaults.standard.set(openOnSecondTap, forKey: "openOnSecondTap") }
+        didSet {
+            UserDefaults.standard.set(openOnSecondTap, forKey: "openOnSecondTap")
+            if oldValue != openOnSecondTap { AuthManager.shared.registerActionUsage(actionID: "setting.second_tap") }
+        }
     }
     /// When true, the Space-style item preview panel follows the highlighted
     /// row while cycling. When false, Space toggles preview on/off (default).
     @Published var alwaysShowItemPreview: Bool = UserDefaults.standard.object(forKey: "alwaysShowItemPreview") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(alwaysShowItemPreview, forKey: "alwaysShowItemPreview")
+            if oldValue != alwaysShowItemPreview { AuthManager.shared.registerActionUsage(actionID: "setting.always_preview") }
             applyAlwaysShowItemPreviewPolicy()
         }
     }
@@ -469,7 +491,10 @@ class ClipboardManager: ObservableObject {
     /// instead of resetting to the top. Off by default (classic "always start
     /// at the most-recent item" behavior).
     @Published var rememberLastSelection: Bool = UserDefaults.standard.object(forKey: "rememberLastSelection") as? Bool ?? false {
-        didSet { UserDefaults.standard.set(rememberLastSelection, forKey: "rememberLastSelection") }
+        didSet {
+            UserDefaults.standard.set(rememberLastSelection, forKey: "rememberLastSelection")
+            if oldValue != rememberLastSelection { AuthManager.shared.registerActionUsage(actionID: "setting.remember_last") }
+        }
     }
     /// The row index to restore when `rememberLastSelection` is on. Captured
     /// whenever the popup closes (paste or dismiss) so the next open lands on
@@ -514,6 +539,12 @@ class ClipboardManager: ObservableObject {
     /// True once a hold-opened popup should ignore ⌘-release. Cleared
     /// wherever the popup's other session state resets (dismissPreview).
     @Published var popupPinnedOpen: Bool = false
+
+    /// Analytics: when the current popup session opened, and whether any
+    /// paste happened during it. Together they produce popup duration and
+    /// the abandonment signal (closed without pasting anything).
+    var popupOpenedAt: Date? = nil
+    var popupSessionPasted = false
 
     /// True only when loadHistory() successfully read the previous manifest
     /// (or this is a genuine first launch with no manifest at all). While
@@ -757,6 +788,10 @@ class ClipboardManager: ObservableObject {
 
         for panel in quickClipPanels {
             if panel === matched {
+                // Analytics: Smart Reference matched this app and surfaced
+                // the panel automatically — the "guessed right" half of the
+                // auto-surface accuracy signal.
+                AuthManager.shared.registerActionUsage(actionID: "ref.auto_surface")
                 // NOT panel.expand() — that's reserved for the user
                 // manually clicking the collapsed badge (which also links
                 // whatever app they clicked it from). This is an automatic,

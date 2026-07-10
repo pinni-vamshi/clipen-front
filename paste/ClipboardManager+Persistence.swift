@@ -67,6 +67,12 @@ extension ClipboardManager {
     /// Triggers the normal debounced save via the $items publisher.
     func updateUserNote(id: UUID, note: String) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        // Analytics: distinguish creating a note from editing an existing one.
+        if items[idx].userNote == nil && !note.isEmpty {
+            AuthManager.shared.registerActionUsage(actionID: "ref.note_new")
+        } else if items[idx].userNote != nil {
+            AuthManager.shared.registerActionUsage(actionID: "ref.note_edit")
+        }
         items[idx].userNote = note.isEmpty ? nil : note
         // Notes feed the semantic embedding now (richEmbeddingText), so an
         // edited note means a stale vector — wipe it and let the background

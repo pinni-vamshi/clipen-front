@@ -413,6 +413,12 @@ class QuickClipPanel: NSPanel {
     /// visible, just out of the way, so the user is reminded the panel
     /// exists and can bring it back with one click.
     func collapseToCorner(activeApp bundleID: String, activeContext: String? = nil) {
+        // Analytics: Smart Reference found NO match for this app and
+        // collapsed to the badge — the "guessed wrong / nothing relevant"
+        // half of the auto-surface accuracy signal.
+        if !carousel.isCollapsed {
+            AuthManager.shared.registerActionUsage(actionID: "ref.auto_collapse")
+        }
         // Always update which app a manual badge-click would link to — even
         // if already collapsed. The old order (only inside the "not yet
         // collapsed" guard) froze this at whichever app FIRST triggered the
@@ -489,6 +495,9 @@ class QuickClipPanel: NSPanel {
     /// so this is a no-op linking-wise and just restores the frame.
     func expand() {
         guard carousel.isCollapsed else { return }
+        // Analytics: the user clicked the collapsed badge back open —
+        // the click-through signal for Smart Reference's auto-collapse.
+        AuthManager.shared.registerActionUsage(actionID: "ref.badge_click")
         if let app = pendingLinkAppBundleID {
             carousel.linkCurrentPage(toApp: app, context: pendingLinkAppContext)
         }
