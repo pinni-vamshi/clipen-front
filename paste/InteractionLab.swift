@@ -914,15 +914,17 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader("01", "RING SIZE")
 
-            // The big counter — restored. Only the stepper box next to it
-            // was meant to go, not this.
+            // The big counter — horizontally CENTERED in the section's own
+            // stack (not pinned to the left edge), caption centered with it.
             Text("\(manager.maxItems)")
                 .font(.system(size: 64, weight: .black))
                 .foregroundColor(.textPri)
                 .contentTransition(.numericText())
+                .frame(maxWidth: .infinity, alignment: .center)
 
             Text("Maximum items in ring")
                 .font(.system(size: 11)).foregroundColor(.textSec)
+                .frame(maxWidth: .infinity, alignment: .center)
 
             // Minus / slider / plus, all one row — no separate stepper box.
             HStack(spacing: 10) {
@@ -1002,6 +1004,12 @@ struct ClipenSettingsView: View {
                         .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
+
+                // Absorbs the column's row-height stretch so this card's
+                // visible bottom edge lands on the SAME line as Main
+                // Behaviour's card across the row — not a shorter box with
+                // invisible blank space under it.
+                Spacer(minLength: 0)
             }
         }
     }
@@ -1060,6 +1068,11 @@ struct ClipenSettingsView: View {
                            in: 10...600)
                         .tint(.accent)
                 }
+
+                // Same straight-bottom-line contract as App Settings' card:
+                // whichever of the two row-1 cards is shorter stretches to
+                // the shared row height, so both end flush.
+                Spacer(minLength: 0)
             }
         }
     }

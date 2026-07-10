@@ -589,9 +589,11 @@ private struct ItemDetailView: View {
                 header
                 pinnedContent
             }
-            .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 16)
+            .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .frame(height: 360, alignment: .top)
+            // Trimmed from 360 — the preview was crowding out the
+            // properties/notes area scrolling underneath it.
+            .frame(height: 290, alignment: .top)
             .background(Color.black.opacity(0.25))
             .overlay(alignment: .bottom) { Divider().background(Color.border) }
 
@@ -744,6 +746,14 @@ private struct ItemDetailView: View {
         return nil
     }
 
+    /// Every destination app this item has ever been pasted into, joined —
+    /// pastedToAppNames accumulates ALL destinations (not just the last one).
+    private var pastedToNames: String? {
+        var names = Array(Set(item.pastedToAppNames.values)).sorted()
+        if names.isEmpty, let last = item.pastedToAppName { names = [last] }
+        return names.isEmpty ? nil : names.joined(separator: ", ")
+    }
+
     private var propertiesCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("PROPERTIES").font(.system(size: 9, weight: .semibold)).foregroundColor(.textDim).tracking(1.8)
@@ -751,7 +761,13 @@ private struct ItemDetailView: View {
                 propertyRow("Type", item.typeLabel)
                 cardDivider()
                 if let appName = item.sourceAppName {
-                    propertyRow("Source", appName)
+                    // Where it was copied FROM.
+                    propertyRow("Copied from", appName)
+                    cardDivider()
+                }
+                if let destinations = pastedToNames {
+                    // Where it has been pasted TO (all destinations so far).
+                    propertyRow("Pasted to", destinations)
                     cardDivider()
                 }
                 propertyRow("Size", sizeString)
@@ -761,6 +777,16 @@ private struct ItemDetailView: View {
                 }
                 cardDivider()
                 propertyRow("Copied", item.timestamp.formatted(date: .abbreviated, time: .shortened))
+                if let lastPasted = item.lastPastedAt {
+                    cardDivider()
+                    propertyRow("Last pasted", lastPasted.formatted(date: .abbreviated, time: .shortened))
+                }
+                if !item.tags.isEmpty {
+                    cardDivider()
+                    // Detected tags / categories, same labels the Reference
+                    // panel and category chips use.
+                    propertyRow("Tags", item.tags.map(\.label).joined(separator: ", "))
+                }
             }
             .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
