@@ -58,6 +58,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Analytics: mark today as an active day, unconditionally — every
+        // other action-based metric only sends a signal if the user does
+        // something specific (open the popup, capture something, flip a
+        // setting). A day where the app was open but nothing else happened
+        // produced ZERO bytes of telemetry, making "active days," "sessions
+        // per day," and retention (Day 1/7/30) impossible to compute even
+        // server-side, since silence is indistinguishable from "app wasn't
+        // running." This fires once per real launch (after the single-
+        // instance guard above, so a second-instance handoff doesn't double
+        // count) and also gives an honest per-day launch count for free.
+        AuthManager.shared.registerActionUsage(actionID: "session.open")
+
         // Pass `self` as the user-driver delegate so Sparkle uses the gentle
         // reminder pattern — without this, Sparkle warns at runtime that a
         // background (LSUIElement) app may pop update dialogs the user never sees.

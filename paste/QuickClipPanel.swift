@@ -677,10 +677,6 @@ private struct QuickClipPanelContentView: View {
         }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.primary.opacity(0.15), lineWidth: 1)
-        )
         .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
         // Dismissing the similar-item preview on outside clicks is handled
         // globally now (ClipboardManager.handleMouseDown, keyed on
@@ -808,10 +804,6 @@ private struct CollapsedReferenceBadge: View {
         .buttonStyle(.plain)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.primary.opacity(0.15), lineWidth: 1)
-        )
         .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
         .help("No pinned reference belongs to the active app. Click to reopen — this will also link the reference to this app.")
     }

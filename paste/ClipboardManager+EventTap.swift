@@ -414,7 +414,7 @@ extension ClipboardManager {
             // printable-character catch-all below instead.
             if previewWindow.isVisible && !isSearchActive {
                 if isAutorepeat { return nil }
-                let isDoubleTap = Date().timeIntervalSince(lastSpaceKeyTime) < 0.35
+                let isDoubleTap = Date().timeIntervalSince(lastSpaceKeyTime) < spaceDoubleTapWindow
                 lastSpaceKeyTime = isDoubleTap ? .distantPast : Date()
                 if isDoubleTap {
                     DispatchQueue.main.async { [weak self] in
@@ -504,7 +504,7 @@ extension ClipboardManager {
                     let pendingID: UUID? = displayItems.indices.contains(selectedIndex)
                         ? displayItems[selectedIndex].id : nil
                     vTapHoldTimer?.invalidate()
-                    let t = Timer(timeInterval: Self.vHoldThreshold, repeats: false) { [weak self] _ in
+                    let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
                         DispatchQueue.main.async { [weak self] in
                             guard let self else { return }
                             self.vTapHoldTimer = nil
@@ -556,7 +556,7 @@ extension ClipboardManager {
             // becomes PINNED — handled by firstOpenHoldTimer below.
             if !isAutorepeat {
                 firstOpenHoldTimer?.invalidate()
-                let t = Timer(timeInterval: Self.vHoldThreshold, repeats: false) { [weak self] _ in
+                let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
                         self.firstOpenHoldTimer = nil
@@ -623,7 +623,7 @@ extension ClipboardManager {
             let pendingID: UUID? = displayItems.indices.contains(selectedIndex)
                 ? displayItems[selectedIndex].id : nil
             bTapHoldTimer?.invalidate()
-            let t = Timer(timeInterval: Self.vHoldThreshold, repeats: false) { [weak self] _ in
+            let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.bTapHoldTimer = nil

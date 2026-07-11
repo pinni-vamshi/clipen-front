@@ -177,6 +177,50 @@ enum FileKindDetector {
             ?? String(data: data, encoding: .isoLatin1)
     }
 
+    /// Preview-only variant of `readableText`: reads at most `maxPreviewBytes`
+    /// from the START of the file via FileHandle, instead of the whole file —
+    /// so a preview of a huge file loads in bounded time regardless of the
+    /// file's actual size, rather than reading (and decoding) everything and
+    /// only THEN truncating what's displayed. `readableText` itself is left
+    /// untouched since its callers (paste, embeddings) need the real content,
+    /// not a fast approximation.
+    nonisolated static func readableTextPreview(
+        from url: URL, maxPreviewBytes: Int = 300_000
+    ) -> (text: String, isTruncated: Bool)? {
+        guard isTextFile(url),
+              let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue,
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        let isTruncated = size > maxPreviewBytes
+        let data = isTruncated ? handle.readData(ofLength: maxPreviewBytes) : handle.readDataToEndOfFile()
+
+        // Preview-only: drop leading blank lines/whitespace so a file that
+        // happens to start with empty space doesn't open on a blank screen.
+        // Applied here (not in readableText) since paste/embeddings must stay
+        // byte-faithful to the actual file — only what's DISPLAYED is trimmed.
+        func decode(_ d: Data) -> String? {
+            guard let s = String(data: d, encoding: .utf8)
+                ?? String(data: d, encoding: .utf16)
+                ?? String(data: d, encoding: .isoLatin1) else { return nil }
+            return String(s.drop(while: \.isWhitespace))
+        }
+        guard isTruncated else {
+            guard let text = decode(data) else { return nil }
+            return (text, false)
+        }
+        // A byte-bounded read can stop mid multi-byte UTF-8 sequence — back
+        // off a few bytes at a time until it decodes cleanly, rather than
+        // showing a garbled trailing character.
+        var trimmed = data
+        for _ in 0..<4 {
+            if let text = decode(trimmed) { return (text, true) }
+            guard !trimmed.isEmpty else { break }
+            trimmed.removeLast()
+        }
+        return nil
+    }
+
     /// Extract readable text from document files (PDF, DOCX, RTF, Pages, etc.).
     /// Returns nil for unsupported formats or if no readable text is found.
     /// - Parameter maxChars: Maximum characters to return (default 5 000 — enough for preview + paste context)

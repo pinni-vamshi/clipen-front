@@ -84,15 +84,29 @@ struct OnboardingView: View {
 
 struct TutorialSheet: View {
     @Binding var isPresented: Bool
+    /// Invoked when the user taps "See more" on the last page — takes them
+    /// to the full Interaction Lab in Settings, which has every gesture
+    /// (this tutorial only walks through three: cycle, preview, transform).
+    var onSeeMore: () -> Void = {}
     @ObservedObject private var manager = ClipboardManager.shared
+    // Drives the SAME animated stage Settings' "INTERACTION PREVIEW" uses —
+    // previously this sheet hand-rolled its own separate mini-animations
+    // (cycleAnimation/transformAnimation/deleteAnimation and their key-cap/
+    // row-drawing helpers) that duplicated, and could silently drift from,
+    // the real interaction lab. One engine now; the tutorial just points it
+    // at the demo the current page is teaching.
+    @StateObject private var lab = InteractionLabController()
 
     @State private var page: Int = 0
     @State private var baselineIDs: Set<UUID> = []
-    @State private var tick: Int = 0
-    @State private var tickTimer: Timer? = nil
     @State private var practiceText: String = ""
 
     private static let totalPages = 4
+    /// Which InteractionLab demo each animated page teaches, in the order
+    /// the user asked for: ⌘V cycle, Space preview, X transform.
+    private static let demoForPage: [Int: InteractionDemo] = [
+        1: .cycle, 2: .spacePreview, 3: .transform,
+    ]
 
     private static let copyTargets: [String] = [
         "Hello from Clipen",
@@ -119,8 +133,8 @@ struct TutorialSheet: View {
                 switch page {
                 case 0:  copyGatePage
                 case 1:  cyclePage
-                case 2:  transformPage
-                default: deletePage
+                case 2:  spacePreviewPage
+                default: transformPage
                 }
             }
             .frame(minHeight: 420)
@@ -128,8 +142,18 @@ struct TutorialSheet: View {
             tutorialFooter
         }
         .frame(width: 500).background(Color.surface).preferredColorScheme(.dark)
-        .onAppear { baselineIDs = Set(manager.items.map(\.id)); startTick() }
-        .onDisappear { stopTick() }
+        .onAppear {
+            baselineIDs = Set(manager.items.map(\.id))
+            if let demo = Self.demoForPage[page] { lab.select(demo) }
+        }
+        .onDisappear { lab.stop() }
+        .onChange(of: page) { _, newPage in
+            if let demo = Self.demoForPage[newPage] {
+                lab.select(demo)
+            } else {
+                lab.stop()
+            }
+        }
     }
 
     private var tutorialHeader: some View {
@@ -166,6 +190,20 @@ struct TutorialSheet: View {
             }
             let isLast = page == Self.totalPages - 1
             let enabled = page == 0 ? canAdvance : true
+            // Only three gestures are walked through here — "See more" hands
+            // off to the full Interaction Lab in Settings (every gesture:
+            // marking, search, category jump, pin preview, delete, reverse
+            // cycle…) instead of the tutorial trying to teach all of it.
+            if isLast {
+                Button {
+                    isPresented = false
+                    onSeeMore()
+                } label: {
+                    Text("See more").font(.system(size: 12, weight: .medium)).foregroundColor(.textSec)
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                }
+                .buttonStyle(.plain)
+            }
             Button {
                 if isLast { isPresented = false } else { withAnimation { page += 1 } }
             } label: {
@@ -236,14 +274,23 @@ struct TutorialSheet: View {
         }
     }
 
-    // MARK: Pages 2-4
+    // MARK: Pages 2-4 — each embeds the REAL Interaction Lab stage (same
+    // engine as Settings' "INTERACTION PREVIEW"), pointed at one demo.
 
     private var cyclePage: some View {
         animatedPage(
             title: "Hold ⌘ and tap V to cycle",
             detail: "Hold ⌘ to open your clipboard ring. Each tap of V moves to the next item; ⌘⌥V leaps 5 forward. Release ⌘ to paste the highlighted item.",
             hint:   "Click below, then hold ⌘ · tap V to cycle · release ⌘ to paste."
-        ) { cycleAnimation(active: tick % 5) }
+        ) { InteractionLabStage(lab: lab) }
+    }
+
+    private var spacePreviewPage: some View {
+        animatedPage(
+            title: "Tap Space to preview",
+            detail: "With an item highlighted, tap Space to see it full-size. Tap Space again to close it — nothing is pasted, it's just a look.",
+            hint:   "Click below, hold ⌘, tap V to pick an item, then tap Space to preview it."
+        ) { InteractionLabStage(lab: lab) }
     }
 
     private var transformPage: some View {
@@ -251,15 +298,7 @@ struct TutorialSheet: View {
             title: "Pick with V, then transform with X",
             detail: "First hold ⌘ and tap V to land on the item you want to change. Then tap X to apply a transform — UPPERCASE, lowercase, Base64, JSON pretty-print and more. Tap X again to cycle. Release ⌘ to paste.",
             hint:   "Click below, hold ⌘, tap V to pick an item, then tap X to transform it."
-        ) { transformAnimation(active: tick % 10) }
-    }
-
-    private var deletePage: some View {
-        animatedPage(
-            title: "Pick with V, then delete with ⌫",
-            detail: "First hold ⌘ and tap V to land on the item you want to remove. Then tap ⌫ while the popup is still open.",
-            hint:   "Click below, hold ⌘, tap V to pick an item, then tap ⌫ to remove it."
-        ) { deleteAnimation(active: tick % 6) }
+        ) { InteractionLabStage(lab: lab) }
     }
 
     private func animatedPage<A: View>(title: String, detail: String, hint: String,
@@ -303,224 +342,5 @@ struct TutorialSheet: View {
         }
     }
 
-    // MARK: Animations
-
-    private let snippets = ["Hello from Clipen", "https://clipen.app", "Made with care on macOS"]
-    private let vTaps = 2
-    private var pickFrames: Int { vTaps * 2 }
-
-    private func cycleAnimation(active: Int) -> some View {
-        let phase = active % (pickFrames + 1)
-        let cmdHeld = phase < pickFrames
-        return animCard {
-            HStack(spacing: 12) {
-                keyCluster(cmdHeld: cmdHeld, vTap: cmdHeld && (phase % 2 == 0),
-                           showRelease: phase == pickFrames)
-                Spacer()
-                if cmdHeld {
-                    ringList(snippets: snippets, selected: min(phase / 2, vTaps - 1))
-                } else {
-                    pasteLabel()
-                }
-            }
-        }
-        .animation(.easeInOut(duration: 0.35), value: phase)
-    }
-
-    private func transformAnimation(active: Int) -> some View {
-        let transforms: [(String, String)] = [("UPPER","HTTPS://CLIPEN.APP"),("lower","https://clipen.app"),("Base64","aHR0cHM6Ly9jbGlwZW4uYXBw")]
-        let phase = active % (pickFrames + 6)
-        let inPick = phase < pickFrames
-        let pickIdx = inPick ? min(phase / 2, vTaps - 1) : vTaps - 1
-        let xPhase = phase - pickFrames
-        let xIdx = inPick ? 0 : min(xPhase / 2, transforms.count - 1)
-        return animCard {
-            HStack(spacing: 10) {
-                keyCluster(cmdHeld: true, vTap: inPick && phase % 2 == 0, showV: inPick,
-                           xTap: !inPick && xPhase % 2 == 0, showX: !inPick)
-                Spacer()
-                transformRow(pickIdx: inPick ? pickIdx : vTaps - 1,
-                             text: inPick ? snippets[pickIdx] : transforms[xIdx].1,
-                             label: inPick ? nil : transforms[xIdx].0)
-            }
-        }
-        .animation(.easeInOut(duration: 0.35), value: phase)
-    }
-
-    private func deleteAnimation(active: Int) -> some View {
-        let phase = active % (pickFrames + 2)
-        let inPick = phase < pickFrames
-        let del = phase == pickFrames
-        let removed = phase == pickFrames + 1
-        return animCard {
-            HStack(spacing: 10) {
-                keyCluster(cmdHeld: phase < pickFrames + 1, vTap: inPick && phase % 2 == 0,
-                           showV: inPick, delTap: del, showDel: !inPick)
-                Spacer()
-                deleteRow(snippets: snippets, pickIdx: inPick ? min(phase/2, vTaps-1) : vTaps-1,
-                          deleteIdx: vTaps-1, marking: del, removed: removed)
-            }
-        }
-        .animation(.easeInOut(duration: 0.35), value: phase)
-    }
-
-    private func animCard<C: View>(@ViewBuilder content: () -> C) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 12).fill(Color.surfaceHi)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.border, lineWidth: 1))
-            content().padding(.horizontal, 18)
-        }
-        .frame(height: 140)
-    }
-
-    private func keyCluster(cmdHeld: Bool, vTap: Bool = false, showV: Bool = true,
-                             xTap: Bool = false, showX: Bool = false,
-                             delTap: Bool = false, showDel: Bool = false,
-                             showRelease: Bool = false) -> some View {
-        HStack(spacing: 6) {
-            animKey("⌘", pressed: cmdHeld, caption: cmdHeld ? "hold" : "release")
-            if !showRelease {
-                if showV {
-                    Text("+").font(.system(size: 14, weight: .bold)).foregroundColor(.textDim)
-                    animKey("V", pressed: vTap, caption: vTap ? "tap" : nil)
-                }
-                if showX {
-                    Text("→").font(.system(size: 14, weight: .bold)).foregroundColor(.textDim)
-                    animKey("X", pressed: xTap, caption: xTap ? "tap" : nil)
-                }
-                if showDel {
-                    Text("→").font(.system(size: 14, weight: .bold)).foregroundColor(.textDim)
-                    animKey("⌫", pressed: delTap, caption: delTap ? "tap" : nil)
-                }
-            }
-        }
-    }
-
-    private func animKey(_ label: String, pressed: Bool, caption: String?) -> some View {
-        VStack(spacing: 3) {
-            Text(label).font(.system(size: 22, weight: .bold, design: .rounded))
-                .foregroundColor(pressed ? .white : .textPri).frame(width: 56, height: 56)
-                .background(RoundedRectangle(cornerRadius: 10).fill(pressed ? Color.accent : Color.surface))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(pressed ? Color.accent : Color.border, lineWidth: 1.5))
-                .shadow(color: pressed ? Color.accent.opacity(0.4) : .clear, radius: 8, y: 2)
-                .offset(y: pressed ? 2 : 0).animation(.easeOut(duration: 0.2), value: pressed)
-            Text(caption ?? " ").font(.system(size: 8, weight: .semibold, design: .monospaced))
-                .foregroundColor(pressed ? .accent : .textDim).opacity(caption == nil ? 0 : 1).frame(height: 10)
-        }
-    }
-
-    private func ringList(snippets: [String], selected: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(0..<snippets.count, id: \.self) { i in
-                let sel = i == selected
-                HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 3).fill(sel ? Color.accent : Color.textDim.opacity(0.4)).frame(width: 12, height: 5)
-                    Text(snippets[i]).font(.system(size: 9, weight: sel ? .semibold : .regular, design: .monospaced))
-                        .foregroundColor(sel ? .textPri : .textSec).lineLimit(1).truncationMode(.tail).frame(maxWidth: 150, alignment: .leading)
-                }
-                .padding(.horizontal, 5).padding(.vertical, 3)
-                .background(sel ? Color.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 4))
-            }
-        }
-        .padding(10).background(Color.bg, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.border, lineWidth: 1))
-        .animation(.easeInOut(duration: 0.3), value: selected)
-    }
-
-    private func pasteLabel() -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "arrow.down").font(.system(size: 14, weight: .bold)).foregroundColor(.accent)
-            Text("Pasted!").font(.system(size: 13, weight: .bold)).foregroundColor(.accent)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 8))
-        .transition(.scale.combined(with: .opacity))
-    }
-
-    private func transformRow(pickIdx: Int, text: String, label: String?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(0..<3) { i in
-                let picked = i == pickIdx
-                HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 3).fill(picked ? Color.accent : Color.textDim.opacity(0.4)).frame(width: 12, height: 5)
-                    if picked {
-                        Text(text).font(.system(size: 9, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.textPri).lineLimit(1).truncationMode(.tail).frame(maxWidth: 130, alignment: .leading)
-                            .animation(.easeInOut(duration: 0.25), value: text)
-                    } else {
-                        RoundedRectangle(cornerRadius: 2).fill(Color.textDim.opacity(0.3)).frame(width: 90, height: 5)
-                    }
-                }
-                .padding(.horizontal, 5).padding(.vertical, 3)
-                .background(picked ? Color.accentDim : Color.clear, in: RoundedRectangle(cornerRadius: 4))
-            }
-            if let lbl = label {
-                HStack(spacing: 4) {
-                    Image(systemName: "wand.and.stars").font(.system(size: 8, weight: .semibold)).foregroundColor(.accent)
-                    Text(lbl).font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.accent)
-                }
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(Color.accentDim, in: Capsule())
-                .overlay(Capsule().stroke(Color.accent.opacity(0.4), lineWidth: 1))
-                .transition(.opacity.combined(with: .scale))
-                .animation(.easeInOut(duration: 0.25), value: lbl)
-            }
-        }
-        .padding(10).background(Color.bg, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.border, lineWidth: 1))
-    }
-
-    private func deleteRow(snippets: [String], pickIdx: Int, deleteIdx: Int,
-                           marking: Bool, removed: Bool) -> some View {
-        let visible = removed ? snippets.indices.filter { $0 != deleteIdx } : Array(snippets.indices)
-        return VStack(alignment: .leading, spacing: 4) {
-            ForEach(visible, id: \.self) { i in
-                let picked   = !removed && i == pickIdx
-                let deleting = !removed && marking && i == deleteIdx
-                HStack(spacing: 6) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(deleting ? Color.red.opacity(0.9) : (picked ? Color.accent : Color.textDim.opacity(0.4)))
-                        .frame(width: 12, height: 5)
-                    if picked || removed {
-                        Text(snippets[i]).font(.system(size: 9, weight: .semibold, design: .monospaced))
-                            .foregroundColor(deleting ? .red.opacity(0.85) : .textPri)
-                            .lineLimit(1).truncationMode(.tail).frame(maxWidth: 130, alignment: .leading)
-                    } else {
-                        RoundedRectangle(cornerRadius: 2).fill(Color.textDim.opacity(0.3)).frame(width: 90, height: 5)
-                    }
-                    if deleting { Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundColor(.red) }
-                }
-                .padding(.horizontal, 5).padding(.vertical, 3)
-                .background(deleting ? Color.red.opacity(0.15) : (picked ? Color.accentDim : Color.clear),
-                            in: RoundedRectangle(cornerRadius: 4))
-                .opacity(deleting ? 0.7 : 1).scaleEffect(deleting ? 0.96 : 1)
-            }
-            if removed {
-                HStack(spacing: 4) {
-                    Image(systemName: "trash").font(.system(size: 8, weight: .semibold)).foregroundColor(.red.opacity(0.9))
-                    Text("Deleted").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundColor(.red.opacity(0.9))
-                }
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(Color.red.opacity(0.12), in: Capsule())
-                .overlay(Capsule().stroke(Color.red.opacity(0.35), lineWidth: 1))
-                .transition(.opacity.combined(with: .scale))
-            }
-        }
-        .padding(10).background(Color.bg, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.border, lineWidth: 1))
-        .animation(.easeInOut(duration: 0.3), value: pickIdx)
-        .animation(.easeInOut(duration: 0.3), value: marking)
-        .animation(.easeInOut(duration: 0.3), value: removed)
-    }
-
-    // MARK: Tick
-
-    private func startTick() {
-        tickTimer?.invalidate()
-        tickTimer = Timer.scheduledTimer(withTimeInterval: 0.85, repeats: true) { _ in tick &+= 1 }
-        RunLoop.main.add(tickTimer!, forMode: .common)
-    }
-
-    private func stopTick() { tickTimer?.invalidate(); tickTimer = nil }
 }
 

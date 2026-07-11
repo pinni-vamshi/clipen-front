@@ -685,7 +685,10 @@ struct PopoverRow: View, Equatable {
     @ViewBuilder
     private var rowContent: some View {
         switch item.content {
-        case .text(let str):
+        case .text(let rawStr):
+            // Trimmed for DISPLAY only — so a copy that happens to start
+            // with blank lines doesn't show an empty-looking row.
+            let str = rawStr.displayTrimmedLeading
             if item.tags.contains(.table) {
                 PopoverMiniTable(text: str)
             } else if let title = item.urlTitle {
@@ -709,21 +712,31 @@ struct PopoverRow: View, Equatable {
         // NSTextTable blocks; browser/Excel tables as HTML <tr>/<td>), render
         // a real mini table grid in the row — same visual promise the preview
         // panel keeps — instead of two lines of flattened text.
-        case .richText(_, plain: let plain), .rtfd(_, plain: let plain):
-            if let cells = TableCellExtractor.cells(for: item) {
-                MiniTablePreview(cells: cells)
+        case .richText(_, plain: let rawPlain), .rtfd(_, plain: let rawPlain):
+            // Previously: finding an embedded table replaced the row's text
+            // entirely, so a doc/file that STARTS with normal content and
+            // has a table further down showed only the table — not even the
+            // start of the file. Always show a text snippet (truncated to
+            // fit the row); the compact table glimpse is additive, not a
+            // replacement.
+            let plain = rawPlain.displayTrimmedLeading
+            VStack(alignment: .leading, spacing: 2) {
+                Text(plain).font(.system(size: 12)).lineLimit(1).foregroundColor(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let cells = TableCellExtractor.cells(for: item) {
+                    MiniTablePreview(cells: cells)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-        case .html(_, let plain):
-            if let cells = TableCellExtractor.cells(for: item) {
-                MiniTablePreview(cells: cells)
+        case .html(_, let rawPlain):
+            let plain = rawPlain.displayTrimmedLeading
+            VStack(alignment: .leading, spacing: 2) {
+                Text(plain).font(.system(size: 12)).lineLimit(1).foregroundColor(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Text(plain).font(.system(size: 12)).lineLimit(2).foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let cells = TableCellExtractor.cells(for: item) {
+                    MiniTablePreview(cells: cells)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         case .file(let url):
             HStack(spacing: 6) {

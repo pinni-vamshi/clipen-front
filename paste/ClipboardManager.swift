@@ -522,10 +522,37 @@ class ClipboardManager: ObservableObject {
     /// when it's the chosen reverse key: tap = step backward, hold = mark
     /// (and auto-move BACKWARD when advance-after-marking is on).
     var bTapHoldTimer: Timer?
-    /// How long a plain V press must be held before it's treated as a hold
+    /// User-facing Fast/Medium/Slow presets for the two hold/double-tap
+    /// timing windows below — hides raw millisecond numbers behind a
+    /// feel-based choice instead of a slider showing exact ms values.
+    @Published var markHoldSpeed: GestureSpeed =
+        GestureSpeed(rawValue: UserDefaults.standard.string(forKey: "markHoldSpeed") ?? "") ?? .medium {
+        didSet {
+            UserDefaults.standard.set(markHoldSpeed.rawValue, forKey: "markHoldSpeed")
+            if oldValue != markHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.mark_hold_speed") }
+        }
+    }
+    /// How long a plain V/B press must be held before it's treated as a hold
     /// (mark) instead of a tap (cycle). Short enough that a deliberate tap
-    /// never feels delayed; long enough to reliably catch an intentional hold.
-    static let vHoldThreshold: TimeInterval = 0.2
+    /// never feels delayed; long enough to reliably catch an intentional
+    /// hold. Derived from `markHoldSpeed`; `.medium` matches the value this
+    /// was hardcoded to before it became a setting, so existing installs see
+    /// no behavior change unless they touch the new preference.
+    var vHoldThreshold: TimeInterval { markHoldSpeed.holdSeconds }
+
+    /// Same Fast/Medium/Slow choice for the Space-key double-tap window
+    /// (tap twice quickly to pin the current preview into a reference panel).
+    @Published var spaceDoubleTapSpeed: GestureSpeed =
+        GestureSpeed(rawValue: UserDefaults.standard.string(forKey: "spaceDoubleTapSpeed") ?? "") ?? .medium {
+        didSet {
+            UserDefaults.standard.set(spaceDoubleTapSpeed.rawValue, forKey: "spaceDoubleTapSpeed")
+            if oldValue != spaceDoubleTapSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.space_doubletap_speed") }
+        }
+    }
+    /// Max seconds between two Space taps to count as a double-tap (pin
+    /// preview) rather than two independent single taps (toggle preview
+    /// twice). `.medium` matches the previous hardcoded 0.35s default.
+    var spaceDoubleTapWindow: TimeInterval { spaceDoubleTapSpeed.doubleTapSeconds }
 
     /// Same tap-vs-hold disambiguation as `vTapHoldTimer`, but for the very
     /// FIRST V press that opens the popup (before `previewWindow.isVisible`).
@@ -1403,7 +1430,55 @@ enum ClipboardContent {
     }
 }
 
+/// Fast/Medium/Slow presets for the app's two tunable gesture-timing
+/// windows (hold-to-mark, Space double-tap). Presented in Settings as a
+/// feel-based choice rather than a raw-millisecond slider — the exact
+/// second values below are what each label maps to for each specific gesture.
+enum GestureSpeed: String, CaseIterable, Identifiable {
+    case fast, medium, slow
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .fast:   return "Fast"
+        case .medium: return "Medium"
+        case .slow:   return "Slow"
+        }
+    }
+    /// Seconds a plain V/B press must be held before it counts as a hold
+    /// (mark) instead of a tap (cycle). `.medium` (0.2s) is the value this
+    /// was hardcoded to before becoming a setting.
+    var holdSeconds: TimeInterval {
+        switch self {
+        case .fast:   return 0.15
+        case .medium: return 0.2
+        case .slow:   return 0.35
+        }
+    }
+    /// Seconds between two Space taps to count as a double-tap (pin
+    /// preview). `.medium` (0.35s) is the value this was hardcoded to
+    /// before becoming a setting.
+    var doubleTapSeconds: TimeInterval {
+        switch self {
+        case .fast:   return 0.25
+        case .medium: return 0.35
+        case .slow:   return 0.5
+        }
+    }
+}
+
 // MARK: - Extensions
+
+extension String {
+    /// Leading blank lines/whitespace removed — a DISPLAY-ONLY helper for
+    /// popup rows, the main window, and the item/reference previews, so
+    /// copied content that happens to start with empty space doesn't open on
+    /// a blank-looking row/preview. Never applied to what's actually pasted
+    /// or embedded (readableText, search haystacks) — those stay byte-
+    /// faithful to the real content; only what's RENDERED is trimmed.
+    var displayTrimmedLeading: String {
+        String(drop(while: \.isWhitespace))
+    }
+}
 
 extension NSImage {
     func pngData() -> Data? {

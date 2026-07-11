@@ -994,6 +994,29 @@ struct ClipenSettingsView: View {
         .opacity(disabled ? 0.4 : 1)
     }
 
+    /// Same top-level chrome as behaviourRow, but for a Fast/Medium/Slow
+    /// gesture-timing choice instead of an on/off toggle — presented as a
+    /// feel-based segmented picker rather than a raw-millisecond slider.
+    private func speedPickerRow(_ n: Int, icon: String, _ label: String,
+                                selection: Binding<GestureSpeed>) -> some View {
+        HStack(spacing: 10) {
+            rowNumber(n)
+            Image(systemName: icon).font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+            Text(label).font(.system(size: 13)).foregroundColor(.textPri)
+            Spacer()
+            Picker("", selection: selection) {
+                ForEach(GestureSpeed.allCases) { speed in
+                    Text(speed.label).tag(speed)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 190)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 16)
+        .frame(maxHeight: .infinity)
+    }
+
     // MARK: 01 — Ring size
 
     /// Square minus/plus stepper button flanking the ring-size slider —
@@ -1168,6 +1191,13 @@ struct ClipenSettingsView: View {
                            in: 10...600)
                         .tint(.accent)
                 }
+
+                rowDivider()
+                speedPickerRow(6, icon: "hand.point.up.left", "Mark hold speed",
+                               selection: $manager.markHoldSpeed)
+                rowDivider()
+                speedPickerRow(7, icon: "hand.tap", "Space double-tap speed",
+                               selection: $manager.spaceDoubleTapSpeed)
             }
         }
     }

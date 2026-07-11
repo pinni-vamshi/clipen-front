@@ -222,6 +222,10 @@ final class AuthManager: ObservableObject {
         "page.":    "paste_age_buckets",
         "setting.": "settings_changes",
         "fail.":    "failures",
+        // Active-day/session marker — see registerActionUsage("session.open")
+        // in pasteApp.swift. Its own group so "was the app used at all today"
+        // is never confused with a specific in-app action.
+        "session.": "session",
     ]
 
     /// Nicer stored names for popup/reference counter suffixes (sums keep
@@ -232,6 +236,9 @@ final class AuthManager: ObservableObject {
         "ref.pin": "pins", "ref.open": "opens", "ref.badge_click": "badge_clicks",
         "ref.auto_surface": "auto_surfaces", "ref.auto_collapse": "auto_collapses",
         "ref.note_edit": "note_edits", "ref.view_ms": "view_ms_sum",
+        // "opens" here means launches, i.e. sessions — this is what makes
+        // active-days/sessions-per-day/retention computable server-side.
+        "session.open": "opens",
     ]
 
     private func sendDailyUsage(date: String, counts: [String: Int]) {

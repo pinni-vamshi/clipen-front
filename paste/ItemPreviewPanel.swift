@@ -301,6 +301,9 @@ struct ContentPreviewView: View {
     let chrome: Chrome
 
     private var plainFontSize: CGFloat { chrome == .panel ? 13 : 12 }
+    /// The one file currently shown full-size, when the user tapped a
+    /// thumbnail in the multi-file strip below. Non-nil shows the overlay.
+    @State private var selectedFileForFullPreview: URL? = nil
 
     @ViewBuilder
     var body: some View {
@@ -333,7 +336,7 @@ struct ContentPreviewView: View {
         case .file(let url):
             FilePreviewContent(url: url)
         case .files(let urls):
-            fileListPreview(urls)
+            filesPreview(urls)
         case .svg(let src):
             textPreview(src, monospaced: true)
         case .blob(let typeMap):
@@ -377,7 +380,7 @@ struct ContentPreviewView: View {
 
     private func textPreview(_ text: String, monospaced: Bool) -> some View {
         ScrollView {
-            Text(text)
+            Text(text.displayTrimmedLeading)
                 .font(.system(size: plainFontSize, design: monospaced ? .monospaced : .default))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -426,6 +429,109 @@ struct ContentPreviewView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Full `.files` preview: the existing name/icon list, plus — when the
+    /// set has any non-text element (image, video, PDF, or any other binary
+    /// file) — a horizontal thumbnail strip pinned to the bottom. Tapping a
+    /// thumbnail opens that ONE element full-size in an overlay, from which
+    /// it can be pasted on its own (see ClipboardManager.pasteSingleFile).
+    @ViewBuilder
+    private func filesPreview(_ urls: [URL]) -> some View {
+        ZStack {
+            VStack(spacing: 0) {
+                fileListPreview(urls)
+                let visualURLs = urls.filter { !FileKindDetector.isTextFile($0) }
+                if !visualURLs.isEmpty {
+                    Divider()
+                    elementThumbnailStrip(visualURLs)
+                }
+            }
+            if let selected = selectedFileForFullPreview {
+                singleElementOverlay(url: selected)
+            }
+        }
+    }
+
+    private func elementThumbnailStrip(_ urls: [URL]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(urls, id: \.path) { url in
+                    Button {
+                        selectedFileForFullPreview = url
+                    } label: {
+                        elementThumbnail(url)
+                    }
+                    .buttonStyle(.plain)
+                    .help(url.lastPathComponent)
+                }
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+        }
+        .frame(height: 76)
+    }
+
+    @ViewBuilder
+    private func elementThumbnail(_ url: URL) -> some View {
+        Group {
+            if FileKindDetector.isImageFile(url), let img = NSImage(contentsOf: url) {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
+                    .resizable().aspectRatio(contentMode: .fit).padding(14)
+            }
+        }
+        .frame(width: 60, height: 60)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 1))
+    }
+
+    /// One element blown up full-size with a close button and a "Paste"
+    /// action that pastes ONLY this file — independent of the multi-file
+    /// item it came from. Reuses FilePreviewContent, so images zoom/pan,
+    /// PDFs/video/3D models are all already interactive exactly as they are
+    /// everywhere else in the app.
+    private func singleElementOverlay(url: URL) -> some View {
+        ZStack {
+            Color.black.opacity(0.55)
+                .onTapGesture { selectedFileForFullPreview = nil }
+            VStack(spacing: 0) {
+                HStack {
+                    Text(url.lastPathComponent)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer()
+                    Button {
+                        selectedFileForFullPreview = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+                .padding(10)
+                FilePreviewContent(url: url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 10)
+                Button {
+                    ClipboardManager.shared.pasteSingleFile(url)
+                    selectedFileForFullPreview = nil
+                } label: {
+                    Text("Paste").font(.system(size: 12, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.white)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
+                .padding(10)
+            }
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .padding(20)
         }
     }
 
@@ -565,11 +671,30 @@ struct RichTextContentPreview: View {
     let detectedType: ClipboardContentType
 
     var body: some View {
+        // Trimmed once here so every sub-case below (markdown/table/code/
+        // plain) benefits — a copy that happens to start with blank lines
+        // no longer opens the preview on empty space.
+        let text = text.displayTrimmedLeading
         switch detectedType {
         case .markdown:
             MarkdownTextPreview(text: text)
         case .table:
-            DelimitedTablePreview(text: text)
+            // Detection picks ONE type for the whole item — a code file or
+            // markdown doc that happens to contain a delimited-looking block
+            // could get classified as .table overall, and this used to
+            // render ONLY the parsed grid, discarding the rest of the text.
+            // Show both: the real content stays visible, with the table
+            // rendered as a grid underneath for a quick structured view.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(text)
+                        .font(.system(size: 13, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    DelimitedTablePreview(text: text)
+                        .frame(maxHeight: 320)
+                }
+            }
         case .code(let language):
             CodeSyntaxPreview(text: text, language: language)
         default:
@@ -857,6 +982,72 @@ struct CodeSyntaxPreview: View {
     }
 }
 
+/// Loads a text file's contents off the main thread and shows a spinner
+/// meanwhile, instead of FilePreviewContent's old behavior of reading (and
+/// decoding — up to 3 encoding attempts) the whole file synchronously inside
+/// `body`, which blocked the entire view update — including switching the
+/// selection to a DIFFERENT item — until a large file finished loading.
+/// `.task(id: url)` automatically cancels the in-flight load the instant
+/// `url` changes, so navigating away never waits for a stale read to finish.
+struct AsyncTextFilePreview: View {
+    let url: URL
+    @State private var text: String?
+    @State private var isTruncated = false
+    @State private var loadFailed = false
+
+    var body: some View {
+        Group {
+            if let text {
+                VStack(alignment: .leading, spacing: 0) {
+                    if isTruncated {
+                        Text("Showing the first part of a large file")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.primary.opacity(0.06))
+                    }
+                    ScrollView {
+                        Text(text)
+                            .font(.system(size: 13, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, isTruncated ? 8 : 0)
+                    }
+                }
+            } else if loadFailed {
+                // Extension said "text," but the read failed (oversized,
+                // undecodable) — fall back to the same generic icon view
+                // FilePreviewContent's own last-resort branch uses.
+                QuickLookFilePreview(url: url)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: url) {
+            text = nil
+            isTruncated = false
+            loadFailed = false
+            // Bounded-prefix read (readableTextPreview), not the full file —
+            // a preview should load fast regardless of how large the file
+            // actually is. The full content is still what gets pasted/
+            // embedded elsewhere (readableText, untouched); this is a
+            // fast, honest glance, not the source of truth.
+            let loaded = await Task.detached(priority: .userInitiated) {
+                FileKindDetector.readableTextPreview(from: url)
+            }.value
+            guard !Task.isCancelled else { return }
+            if let loaded {
+                text = loaded.text
+                isTruncated = loaded.isTruncated
+            } else {
+                loadFailed = true
+            }
+        }
+    }
+}
+
 /// Full per-type file preview dispatch (PDF, image, GIF, HTML, plain text,
 /// media, 3D model, QuickLook fallback, or a generic icon+name+path as a last
 /// resort). Shared between ItemPreviewPanel's own preview and QuickClipPanel
@@ -881,13 +1072,16 @@ struct FilePreviewContent: View {
                     .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             } else if FileKindDetector.isHTMLFile(url) {
                 HTMLFilePreview(url: url)
-            } else if let text = FileKindDetector.readableText(from: url) {
-                ScrollView {
-                    Text(text)
-                        .font(.system(size: 13, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            } else if FileKindDetector.isTextFile(url) {
+                // isTextFile is a cheap extension check — the actual file
+                // read (readableText, up to 200 MB, tries 3 encodings) now
+                // happens off-main inside AsyncTextFilePreview instead of
+                // synchronously here in body. That synchronous read used to
+                // block the ENTIRE view update — including moving the
+                // selection to a different item — until a large file
+                // finished loading. Now navigation is instant; the preview
+                // itself shows a spinner until its text is ready.
+                AsyncTextFilePreview(url: url)
             } else if FileKindDetector.isMediaFile(url) {
                 AVMediaPreview(url: url)
             } else if FileKindDetector.is3DModelFile(url) {

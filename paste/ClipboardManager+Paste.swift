@@ -170,6 +170,26 @@ extension ClipboardManager {
         return target
     }
 
+    /// Paste ONE file out of a multi-file (`.files`) clipboard item — used by
+    /// the per-element preview overlay in the reference/item-preview panels'
+    /// file strip, so a single image/video/etc. from a multi-file set can be
+    /// pasted on its own instead of always pasting the whole set together.
+    /// Mirrors the page-picker's write-then-paste pattern: write just this
+    /// one file, mark the write as our own (so the poll doesn't re-capture
+    /// it as a brand-new ring item), restore focus to the real paste target
+    /// (needed since this can be triggered from the reference panel, which —
+    /// unlike the ring popup — CAN become key and steal focus), then simulate ⌘V.
+    func pasteSingleFile(_ url: URL) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects([makeFilePasteboardItem(for: url)])
+        markPasteboardWriteAsOwn()
+        _ = resolvedPasteTarget()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.simulateCommandV()
+        }
+    }
+
     func commitPaste() {
         // A V/B/X tap/hold decision in flight when ⌘ is released must not
         // fire later against a stale target in a popup that's about to close.

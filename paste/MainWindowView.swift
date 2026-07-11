@@ -160,7 +160,9 @@ struct MainWindowView: View {
         // background shows through, same look as the previous custom row.
         .toolbarBackground(.hidden, for: .windowToolbar)
         .preferredColorScheme(.dark)
-        .sheet(isPresented: $showTutorial) { TutorialSheet(isPresented: $showTutorial) }
+        .sheet(isPresented: $showTutorial) {
+            TutorialSheet(isPresented: $showTutorial, onSeeMore: { showSettings = true })
+        }
         .alert("Heads up",
                isPresented: Binding(get: { auth.lastError != nil },
                                     set: { if !$0 { auth.clearError() } })) {
@@ -608,6 +610,16 @@ private struct ItemDetailView: View {
     /// under the preview, persisted across launches.
     @AppStorage("detailPreviewHeight") private var previewHeight: Double = 290
     @State private var dragStartHeight: Double? = nil
+    /// Live height while actively dragging. Reading/writing `previewHeight`
+    /// (an @AppStorage) on every pixel of drag movement did two expensive
+    /// things per pixel: a synchronous UserDefaults write, and a full
+    /// re-layout of the pinned preview above (which can be a large image/PDF/
+    /// zoomable view) — the main thread couldn't keep up on a fast or long
+    /// drag, so the visible height fell behind and snapped erratically
+    /// ("vibrating"). This tracks the drag with a plain, cheap @State instead;
+    /// `previewHeight` itself is only written once, when the drag ends.
+    @State private var liveDragHeight: Double? = nil
+    private var effectiveHeight: Double { liveDragHeight ?? previewHeight }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -620,7 +632,7 @@ private struct ItemDetailView: View {
             }
             .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 14)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .frame(height: CGFloat(previewHeight), alignment: .top)
+            .frame(height: CGFloat(effectiveHeight), alignment: .top)
             .background(Color.black.opacity(0.25))
             .clipped()
 
@@ -641,9 +653,17 @@ private struct ItemDetailView: View {
                     .onChanged { value in
                         let base = dragStartHeight ?? previewHeight
                         dragStartHeight = base
-                        previewHeight = min(560, max(140, base + Double(value.translation.height)))
+                        liveDragHeight = min(560, max(140, base + Double(value.translation.height)))
                     }
-                    .onEnded { _ in dragStartHeight = nil }
+                    .onEnded { _ in
+                        // Commit to @AppStorage exactly once, on release —
+                        // not per pixel — so the drag itself never pays for
+                        // a UserDefaults write or the persisted-value's own
+                        // observers re-running mid-gesture.
+                        if let final = liveDragHeight { previewHeight = final }
+                        liveDragHeight = nil
+                        dragStartHeight = nil
+                    }
             )
 
             ScrollView {
@@ -676,12 +696,21 @@ private struct ItemDetailView: View {
     private var contentBlock: some View {
         switch item.content {
         case .text(let s):
-            SelectableTextBlock(text: s)
-        case .richText(_, plain: let p), .html(_, plain: let p), .rtfd(_, plain: let p):
-            if let cells = TableCellExtractor.cells(for: item) {
-                MiniTablePreview(cells: cells).frame(maxWidth: .infinity, alignment: .leading)
-            } else {
+            SelectableTextBlock(text: s.displayTrimmedLeading)
+        case .richText(_, plain: let rawP), .html(_, plain: let rawP), .rtfd(_, plain: let rawP):
+            let p = rawP.displayTrimmedLeading
+            // Previously: a document with an embedded table (e.g. a markdown
+            // file or Notes/Word doc that has a table alongside other text
+            // or code) showed ONLY the extracted table grid, silently
+            // discarding every other line — the extractor finding a table
+            // ANYWHERE replaced the WHOLE preview instead of supplementing
+            // it. Always show the full content; add the table grid as well
+            // when one was found, rather than instead.
+            VStack(alignment: .leading, spacing: 14) {
                 SelectableTextBlock(text: p)
+                if let cells = TableCellExtractor.cells(for: item) {
+                    MiniTablePreview(cells: cells).frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         case .image(let img, let data, let dataType):
             // Same zoom/pan dispatch as ItemPreviewPanel and the reference
