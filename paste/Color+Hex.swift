@@ -80,6 +80,25 @@ final class ItemThumbnailCache {
         cache.setObject(image, forKey: "file:\(url.path)" as NSString)
     }
 
+    /// Cache-only lookup / store for an in-memory image's thumbnail — the
+    /// async counterpart to `thumbnail(forData:)` so list rows can decode a
+    /// pasted image OFF the main thread (a synchronous decode per image row
+    /// on the first scroll-through is what made the list stutter).
+    func cachedDataThumbnail(key: String) -> NSImage? {
+        cache.object(forKey: "data:\(key)" as NSString)
+    }
+
+    func storeDataThumbnail(_ image: NSImage, key: String) {
+        cache.setObject(image, forKey: "data:\(key)" as NSString)
+    }
+
+    /// Pure decode of in-memory image data, safe on a background task.
+    nonisolated static func decodeDataThumbnail(data: Data, maxPixel: CGFloat = 360) -> NSImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let cg  = makeThumb(src, maxPixel) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+
     /// Pure decode, safe to run on a background task — touches no shared state.
     nonisolated static func decodeFileThumbnail(url: URL, maxPixel: CGFloat = 360) -> NSImage? {
         guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -127,6 +146,43 @@ struct CachedFileThumbnail: View {
             }.value
             if let decoded {
                 ItemThumbnailCache.shared.storeFileThumbnail(decoded, for: url)
+                image = decoded
+            }
+        }
+    }
+}
+
+/// Async, cached, downsampled thumbnail for an IN-MEMORY pasted image in list
+/// rows — same pattern as `CachedFileThumbnail`, decoding off the main thread
+/// so a fast scroll through image-heavy history never blocks on per-row
+/// CGImageSource decodes. Cache hits show instantly.
+struct CachedDataThumbnail: View {
+    let data: Data
+    let key:  String
+    let size: CGFloat
+    @State private var image: NSImage? = nil
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: size, height: size)
+            }
+        }
+        .task(id: key) {
+            if let hit = ItemThumbnailCache.shared.cachedDataThumbnail(key: key) {
+                image = hit
+                return
+            }
+            let decoded = await Task.detached(priority: .utility) {
+                ItemThumbnailCache.decodeDataThumbnail(data: data)
+            }.value
+            if let decoded {
+                ItemThumbnailCache.shared.storeDataThumbnail(decoded, key: key)
                 image = decoded
             }
         }

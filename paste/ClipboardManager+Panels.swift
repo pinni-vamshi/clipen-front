@@ -103,16 +103,19 @@ extension ClipboardManager {
         return [displayItems[selectedIndex]]
     }
 
-    /// Sharing-Service-compatible representation(s) for an item — always as
-    /// FILE URLs. This is the key to AirDrop reliably appearing: AirDrop (and
-    /// several other services) can't accept a raw NSString or NSImage, so a
-    /// plain-text / code / log item shared as a bare String silently dropped
-    /// AirDrop from the destination list ("sometimes I can't see AirDrop").
-    /// Writing text/image/svg to a small temp file and sharing the URL makes
-    /// EVERY item AirDrop-able, and every other service (Mail, Messages,
-    /// Notes…) still handles a file attachment fine. Real files/URLs pass
-    /// through untouched.
-    private func shareRepresentations(for item: ClipboardItem) -> [URL] {
+    /// Sharing-Service-compatible representation(s) for an item, chosen so
+    /// each kind reaches the RIGHT destinations (not everything funneled into
+    /// Notes as a .txt, which an earlier over-broad AirDrop fix did):
+    ///   • real files / images / SVG → a FILE URL (so AirDrop, Photos, and
+    ///     media-aware apps all accept them — AirDrop needs a file, which is
+    ///     why images shared as a bare NSImage used to drop AirDrop).
+    ///   • a web LINK → the URL itself, so it opens in Safari / a browser /
+    ///     the matching app (YouTube etc.) and AirDrops as a link, instead of
+    ///     a text file.
+    ///   • plain text → an NSString, so it lands as text in Notes / Messages
+    ///     / Mail. (Raw text has no AirDrop target by design — you AirDrop
+    ///     files, not loose strings.)
+    private func shareRepresentations(for item: ClipboardItem) -> [Any] {
         switch item.content {
         case .file(let url) where FileManager.default.fileExists(atPath: url.path):
             return [url]
@@ -127,7 +130,15 @@ extension ClipboardManager {
             return Self.shareTempFile(Data(src.utf8), ext: "svg", id: item.id).map { [$0] } ?? []
         default:
             guard let text = item.content.plainText, !text.isEmpty else { return [] }
-            return Self.shareTempFile(Data(text.utf8), ext: "txt", id: item.id).map { [$0] } ?? []
+            // A web URL shares AS a link so it opens in the right app; anything
+            // else shares as plain text.
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.contains(" "), !trimmed.contains("\n"),
+               let url = URL(string: trimmed),
+               let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+                return [url]
+            }
+            return [text as NSString]
         }
     }
 
@@ -210,6 +221,39 @@ extension ClipboardManager {
         sharePanel.show(services: shareServices, selectedIndex: shareIndex,
                         itemCount: shareTargetItems.count,
                         near: previewWindow.frame, anchorPoint: anchor)
+    }
+
+    /// Keeps the share panel in step with the highlighted row while the user
+    /// cycles with V — same contract as `syncTransformPanelWithSelection`.
+    /// The panel's arrow re-anchors to the new row, and for a single-item
+    /// share it re-targets to whatever's now selected (recomputing that
+    /// item's destinations). A marked-set share describes the mark queue, not
+    /// the row, so it only re-anchors.
+    func syncShareStageWithSelection() {
+        guard inShareStage, previewWindow.isVisible,
+              !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        if !markedItemIDs.isEmpty {
+            updateSharePanel()
+            return
+        }
+        let newTarget = displayItems[selectedIndex]
+        // Same item — just re-anchor (avoids recomputing services on a no-op).
+        if shareTargetItems.count == 1, shareTargetItems.first?.id == newTarget.id {
+            updateSharePanel()
+            return
+        }
+        let items = shareRepresentations(for: newTarget)
+        let services = NSSharingService.sharingServices(forItems: items)
+        guard !services.isEmpty else {
+            // Nothing can share this item — retire the share stage rather than
+            // leave a stale destination list up.
+            exitShareStage()
+            return
+        }
+        shareTargetItems = [newTarget]
+        shareServices = Self.rankedShareServices(services)
+        shareIndex = 0
+        updateSharePanel()
     }
 
     func exitShareStage() {
@@ -654,6 +698,7 @@ extension ClipboardManager {
 
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
+        syncShareStageWithSelection()
     }
 
     /// ⌘⇧V — step one item BACKWARD in the current category.  Mirrors
@@ -678,6 +723,7 @@ extension ClipboardManager {
         AuthManager.shared.registerActionUsage(actionID: "popup.nav")
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
+        syncShareStageWithSelection()
     }
 
     /// P — step through PINNED items only, one per tap, wrapping from the
@@ -700,6 +746,7 @@ extension ClipboardManager {
         AuthManager.shared.registerActionUsage(actionID: "action.cycle_pinned")
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
+        syncShareStageWithSelection()
     }
 
     /// Top-row number keycodes (kVK_ANSI_1 … kVK_ANSI_9) mapped to the
@@ -746,6 +793,7 @@ extension ClipboardManager {
         cycleCount += 1
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
+        syncShareStageWithSelection()
     }
 
     /// Jump `step` items forward through the ring (default 5). Bound to
@@ -772,6 +820,7 @@ extension ClipboardManager {
         AuthManager.shared.registerActionUsage(actionID: "popup.nav")
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
+        syncShareStageWithSelection()
     }
 
     /// Fired by the delay timer when the user kept ⌘ held past
@@ -1296,6 +1345,7 @@ extension ClipboardManager {
         resetAutoDismissTimer()
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
+        syncShareStageWithSelection()
     }
 
     /// ⌘-click a row: Finder-style toggle of that single row into/out of the
@@ -1310,6 +1360,7 @@ extension ClipboardManager {
         toggleMark(id: displayItems[absoluteIndex].id)
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
+        syncShareStageWithSelection()
     }
 
     /// ⇧-click a row: Finder-style contiguous range select from the anchor
@@ -1329,6 +1380,7 @@ extension ClipboardManager {
         markedItemIDs = range.map { displayItems[$0].id }
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
+        syncShareStageWithSelection()
     }
 
     func uiSelectTransform(at index: Int) {

@@ -367,6 +367,11 @@ class ClipboardManager: ObservableObject {
     var hintKeySpaceDown = false
     var hintCmdHeld = false
     var hintShiftHeld = false
+    /// True while a hint-highlight recompute is already queued on the main
+    /// queue — a single key event calls multiple note… functions (modifiers +
+    /// keycode), each of which used to dispatch its OWN sync, re-rendering the
+    /// whole popup several times per keystroke. This collapses them to one.
+    var hintSyncScheduled = false
 
     /// User-selected reverse-cycle key: false = ⇧V (default), true = B.
     /// With B selected, B acts as a context-aware "back" — it steps the

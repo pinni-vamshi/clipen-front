@@ -358,8 +358,12 @@ struct MainWindowView: View {
     // MARK: Left list pane (minimal rows — icon + one line)
 
     private var listPane: some View {
-        Group {
-            if filtered.isEmpty {
+        // Compute the filtered list ONCE per render — it was evaluated twice
+        // (`.isEmpty` + the ForEach), which re-ran hybridSearch twice on every
+        // update while searching.
+        let rows = filtered
+        return Group {
+            if rows.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 28, weight: .thin)).foregroundColor(.textDim)
@@ -369,7 +373,7 @@ struct MainWindowView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 1) {
-                        ForEach(filtered) { item in
+                        ForEach(rows) { item in
                             CompactItemRow(item: item, isSelected: mainSelectedID == item.id,
                                           onDelete: {
                                               if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
@@ -1095,11 +1099,8 @@ private struct CompactItemRow: View, Equatable {
     @ViewBuilder
     private var leadingIcon: some View {
         switch item.content {
-        case .image(let img, let rawData, _):
-            Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: rawData, key: item.id.uuidString) ?? img)
-                .resizable().scaledToFill()
-                .frame(width: 18, height: 18)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+        case .image(_, let rawData, _):
+            CachedDataThumbnail(data: rawData, key: item.id.uuidString, size: 18)
         case .file(let url):
             Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
                 .resizable().frame(width: 16, height: 16)

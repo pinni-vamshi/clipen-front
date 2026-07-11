@@ -830,8 +830,7 @@ extension ClipboardManager {
         // otherwise — this callback fires on EVERY keystroke system-wide, so
         // dispatching when nothing is visible was pure battery waste. The
         // highlights are cleared on popup close via clearPopupHintHighlights().
-        guard popupHintSessionActive else { return }
-        DispatchQueue.main.async { [weak self] in self?.syncPopupHintHighlights() }
+        scheduleHintSync()
     }
 
     func notePopupHintKeyDown(keycode: Int, cmd: Bool) {
@@ -843,8 +842,7 @@ extension ClipboardManager {
         case 49:          hintKeySpaceDown = true
         default: break
         }
-        guard popupHintSessionActive else { return }
-        DispatchQueue.main.async { [weak self] in self?.syncPopupHintHighlights() }
+        scheduleHintSync()
     }
 
     func notePopupHintKeyUp(keycode: Int) {
@@ -862,8 +860,20 @@ extension ClipboardManager {
         // press of the same key.
         if keycode == 9 { popupHintVMark = false }
         if keycode == 7 { popupHintXHold = false }
-        guard popupHintSessionActive else { return }
-        DispatchQueue.main.async { [weak self] in self?.syncPopupHintHighlights() }
+        scheduleHintSync()
+    }
+
+    /// Coalesced entry point for the note… callbacks — schedules at most ONE
+    /// hint recompute per main-queue turn no matter how many key callbacks
+    /// fired, and no-ops entirely while the popup isn't on screen.
+    func scheduleHintSync() {
+        guard popupHintSessionActive, !hintSyncScheduled else { return }
+        hintSyncScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.hintSyncScheduled = false
+            self.syncPopupHintHighlights()
+        }
     }
 
     func syncPopupHintHighlights() {
@@ -871,28 +881,37 @@ extension ClipboardManager {
             clearPopupHintHighlights()
             return
         }
-        popupHintCmd = hintCmdHeld
-        if hintKeyVDown && hintCmdHeld {
-            popupHintV = !hintShiftHeld
-            popupHintShiftV = hintShiftHeld
-        } else {
-            popupHintV = false
-            popupHintShiftV = false
+        let visible = previewWindow.isVisible
+        let cmd = hintCmdHeld
+
+        var v = false, shiftV = false
+        if hintKeyVDown && cmd {
+            v = !hintShiftHeld
+            shiftV = hintShiftHeld
         }
-        // With B as the chosen reverse key, the "Prev" hint (relabelled
-        // "B" in the legend) lights up on ⌘B too.
-        if reverseCycleUsesB, hintKeyBDown, hintCmdHeld, previewWindow.isVisible {
-            popupHintShiftV = true
+        // With B as the chosen reverse key, the "Prev" hint (relabelled "B"
+        // in the legend) lights up on ⌘B too.
+        if reverseCycleUsesB, hintKeyBDown, cmd, visible { shiftV = true }
+
+        var x = false, shiftX = false
+        if hintKeyXDown && cmd && visible {
+            x = !hintShiftHeld
+            shiftX = hintShiftHeld
         }
-        if hintKeyXDown && hintCmdHeld && previewWindow.isVisible {
-            popupHintX = !hintShiftHeld
-            popupHintShiftX = hintShiftHeld
-        } else {
-            popupHintX = false
-            popupHintShiftX = false
-        }
-        popupHintC = hintKeyCDown && hintCmdHeld && previewWindow.isVisible
-        popupHintSpace = hintKeySpaceDown && previewWindow.isVisible
+        let c = hintKeyCDown && cmd && visible
+        let space = hintKeySpaceDown && visible
+
+        // Assign ONLY what changed. @Published fires objectWillChange on every
+        // set — even to the same value — and each fire re-renders the entire
+        // popup, so a keystroke that changes no highlight must produce zero
+        // re-renders, not seven.
+        if popupHintCmd    != cmd    { popupHintCmd = cmd }
+        if popupHintV      != v      { popupHintV = v }
+        if popupHintShiftV != shiftV { popupHintShiftV = shiftV }
+        if popupHintX      != x      { popupHintX = x }
+        if popupHintShiftX != shiftX { popupHintShiftX = shiftX }
+        if popupHintC      != c      { popupHintC = c }
+        if popupHintSpace  != space  { popupHintSpace = space }
     }
 
 

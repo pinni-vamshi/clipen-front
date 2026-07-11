@@ -915,6 +915,57 @@ private extension View {
     }
 }
 
+/// Shared height key for the second settings row (interactions list vs the
+/// live-preview card). File-scoped so the isolated `InteractionPreviewCard`
+/// can emit it and `ClipenSettingsView` can read it.
+struct SettingsRow2HeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// Owns the continuously-running interaction animation in ISOLATION. The lab
+/// controller mutates @Published state every animation frame; keeping it here
+/// (its own @StateObject) means those ticks invalidate only this card — not
+/// the entire settings ScrollView, which is what made scrolling stutter when
+/// the lab lived on `ClipenSettingsView` directly. The parent drives it with
+/// a plain `selectedDemo` value plus a `replayToken` that's bumped to re-run
+/// the current demo (e.g. after a speed change), so the parent itself never
+/// subscribes to the per-frame animation.
+struct InteractionPreviewCard: View {
+    let selectedDemo: InteractionDemo
+    let replayToken: Int
+    let minHeight: CGFloat
+
+    @StateObject private var lab = InteractionLabController()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                HStack(spacing: 8) {
+                    Text("05").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.accent)
+                    Text("INTERACTION PREVIEW").font(.system(size: 11, weight: .semibold)).tracking(1.5).foregroundColor(.textSec)
+                }
+                Spacer()
+                HStack(spacing: 5) {
+                    Circle().fill(Color.accent).frame(width: 6, height: 6)
+                    Text("LIVE PREVIEW")
+                        .font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundColor(.textSec)
+                }
+            }
+
+            InteractionLabStage(lab: lab)
+                .padding(18)
+                .frame(minHeight: minHeight, alignment: .center)
+                .background(Color.surfaceHi.opacity(0.3), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.border, lineWidth: 1))
+                .measured(SettingsRow2HeightKey.self)
+        }
+        .onAppear { lab.select(selectedDemo) }
+        .onChange(of: replayToken) { _, _ in lab.select(selectedDemo) }
+        .onDisappear { lab.stop() }
+    }
+}
+
 // MARK: - Redesigned Settings screen
 
 /// Full Settings view, matching the numbered mockup, laid out as two
@@ -927,7 +978,14 @@ private extension View {
 struct ClipenSettingsView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
-    @StateObject private var lab        = InteractionLabController()
+
+    /// The interaction the preview card is playing. Plain value state (not the
+    /// lab object) so the per-frame animation — which lives isolated inside
+    /// `InteractionPreviewCard` — never re-renders this scroll view.
+    @State private var selectedDemo: InteractionDemo = .cycle
+    /// Bumped to replay the CURRENT demo (e.g. after changing a gesture speed),
+    /// since re-selecting the same demo isn't a value change on its own.
+    @State private var labReplayToken = 0
 
     @Binding var showResetConfirm: Bool
 
@@ -951,10 +1009,6 @@ struct ClipenSettingsView: View {
         static var defaultValue: CGFloat = 0
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
     }
-    private struct Row2HeightKey: PreferenceKey {
-        static var defaultValue: CGFloat = 0
-        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
-    }
 
     var body: some View {
         // Footer OUTSIDE the scroll view — pinned to the window bottom the
@@ -969,7 +1023,6 @@ struct ClipenSettingsView: View {
             footer
                 .padding(.horizontal, 14).padding(.vertical, 8)
         }
-        .onDisappear { lab.stop() }
     }
 
     private var settingsScrollContent: some View {
@@ -1004,9 +1057,12 @@ struct ClipenSettingsView: View {
                 // stretched to match — see interactionsSection/labSection.
                 HStack(alignment: .top, spacing: 40) {
                     interactionsSection.frame(maxWidth: .infinity, alignment: .topLeading)
-                    labSection.frame(maxWidth: .infinity, alignment: .topLeading)
+                    InteractionPreviewCard(selectedDemo: selectedDemo,
+                                           replayToken: labReplayToken,
+                                           minHeight: row2Height)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .onPreferenceChange(Row2HeightKey.self) { row2Height = $0 }
+                .onPreferenceChange(SettingsRow2HeightKey.self) { row2Height = $0 }
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 22)
@@ -1652,22 +1708,22 @@ struct ClipenSettingsView: View {
                         }
                         if demo == .multiPaste && showMarkSpeedEditor {
                             speedPicker(label: "Hold speed", selection: $manager.markHoldSpeed) {
-                                lab.select(.multiPaste)
+                                playDemo(.multiPaste)
                             }
                         }
                         if demo == .pinPreview && showReferSpeedEditor {
                             speedPicker(label: "Double-tap speed", selection: $manager.spaceDoubleTapSpeed) {
-                                lab.select(.pinPreview)
+                                playDemo(.pinPreview)
                             }
                         }
                         if demo == .pinnedOpen && showPinnedOpenSpeedEditor {
                             speedPicker(label: "Hold speed", selection: $manager.pinnedOpenHoldSpeed) {
-                                lab.select(.pinnedOpen)
+                                playDemo(.pinnedOpen)
                             }
                         }
                         if demo == .pinItem && showPinHoldSpeedEditor {
                             speedPicker(label: "Hold speed", selection: $manager.pinHoldSpeed) {
-                                lab.select(.pinItem)
+                                playDemo(.pinItem)
                             }
                         }
                     }
@@ -1679,16 +1735,24 @@ struct ClipenSettingsView: View {
             .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .measured(Row2HeightKey.self)
+            .measured(SettingsRow2HeightKey.self)
         }
     }
 
+    /// Plays (or replays) a demo in the isolated preview card. Setting the
+    /// demo value updates the highlight; bumping the token forces the card to
+    /// re-run it even if the same demo was already selected.
+    private func playDemo(_ demo: InteractionDemo) {
+        selectedDemo = demo
+        labReplayToken += 1
+    }
+
     private func interactionRow(_ demo: InteractionDemo) -> some View {
-        let isActive = lab.selectedDemo == demo
+        let isActive = selectedDemo == demo
         // Reverse Cycle's key label follows the user's selection.
         let keyLabel = (demo == .reverseCycle && manager.reverseCycleUsesB) ? "tap B" : demo.keyLabel
         return Button {
-            lab.select(demo)
+            playDemo(demo)
         } label: {
             HStack(spacing: 12) {
                 Text(keyLabel)
@@ -1790,7 +1854,7 @@ struct ClipenSettingsView: View {
         let selected = manager.reverseCycleUsesB == usesB
         return Button {
             manager.reverseCycleUsesB = usesB
-            lab.select(.reverseCycle)
+            playDemo(.reverseCycle)
         } label: {
             Text(label)
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
@@ -1836,36 +1900,9 @@ struct ClipenSettingsView: View {
     }
 
     // MARK: 05 — Interaction preview (the lab)
-
-    private var labSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                sectionHeader("05", "INTERACTION PREVIEW")
-                Spacer()
-                HStack(spacing: 5) {
-                    Circle().fill(Color.accent).frame(width: 6, height: 6)
-                    Text("LIVE PREVIEW")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(1.5)
-                        .foregroundColor(.textSec)
-                }
-            }
-
-            // Same before-background minHeight trick as interactionsSection
-            // — this card's fill/border stretch to match the interactions
-            // list's card exactly, not just its outer frame.
-            InteractionLabStage(lab: lab)
-                .padding(18)
-                // Center the animation vertically in the card instead of
-                // pinning it to the top — the card is stretched to match the
-                // interactions list's height, so top-alignment left the whole
-                // animation clustered up top with dead space below it.
-                .frame(minHeight: row2Height, alignment: .center)
-                .background(Color.surfaceHi.opacity(0.3), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.border, lineWidth: 1))
-                .measured(Row2HeightKey.self)
-        }
-    }
+    // The live-preview card is now `InteractionPreviewCard` (file scope), which
+    // owns the animation in isolation so its per-frame updates don't re-render
+    // this whole scroll view. See its doc comment.
 
     // MARK: Footer
 
