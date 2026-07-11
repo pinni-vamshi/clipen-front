@@ -463,7 +463,9 @@ struct PopoverPreviewView: View {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                                 PopoverRow(item: item, index: idx,
                                            isSelected: idx == selectedIndex,
-                                           markOrder: manager.markOrder(for: item.id))
+                                           markOrder: manager.markOrder(for: item.id),
+                                           showColorSwatches: manager.showColorSwatches)
+                                    .equatable()
                                     .id(item.id)
                                     .contentShape(Rectangle())
                                     .onTapGesture(count: 2) {
@@ -586,12 +588,35 @@ private struct PopoverDragPreview: View {
 
 // MARK: - Row
 
-struct PopoverRow: View {
+struct PopoverRow: View, Equatable {
     let item:       ClipboardItem
     let index:      Int
     let isSelected: Bool
     /// 1-based position in the multi-paste mark queue, or nil if unmarked.
     let markOrder:  Int?
+    /// Passed in (not read from the singleton) so the row stays a pure function
+    /// of its inputs — that's what lets `.equatable()` below safely skip it.
+    let showColorSwatches: Bool
+
+    /// Skip re-rendering rows whose visible inputs are unchanged. The popup's
+    /// parent re-evaluates on EVERY keystroke (hint flags, selection) and on
+    /// every async enrichment (a full `items` re-publish), which used to
+    /// re-run every visible row's body each time. Comparing exactly the fields
+    /// the body reads — identity, selection, mark order, the async-mutable
+    /// enrichment fields, and the one setting it uses — means cycling and
+    /// scrolling only touch rows that actually changed. Content itself is an
+    /// immutable enum, so id + these covers everything the body can render.
+    static func == (l: PopoverRow, r: PopoverRow) -> Bool {
+        l.item.id == r.item.id &&
+        l.index == r.index &&
+        l.isSelected == r.isSelected &&
+        l.markOrder == r.markOrder &&
+        l.showColorSwatches == r.showColorSwatches &&
+        l.item.urlTitle == r.item.urlTitle &&
+        l.item.diffBadge == r.item.diffBadge &&
+        l.item.userNote == r.item.userNote &&
+        l.item.metadataSummary == r.item.metadataSummary
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -671,7 +696,7 @@ struct PopoverRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 HStack(spacing: 6) {
-                    if ClipboardManager.shared.showColorSwatches, let c = item.detectedColor {
+                    if showColorSwatches, let c = item.detectedColor {
                         Circle().fill(Color(nsColor: c)).frame(width: 12, height: 12)
                             .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 1))
                     }
@@ -724,18 +749,17 @@ struct PopoverRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        case .image(let img, let data, let dataType):
+        case .image(let img, let data, _):
             VStack(alignment: .leading, spacing: 2) {
-                if dataType.rawValue.contains("gif") {
-                    AnimatedImageView(data: data)
-                        .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
-                } else {
-                    // Downsampled thumbnail — same scroll-perf fix as the main
-                    // window's rows (full-res bitmaps rescaled per frame).
-                    Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
-                        .resizable().aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
-                }
+                // Static downsampled first-frame thumbnail for EVERY image,
+                // including GIFs. A live AnimatedImageView per GIF row ran its
+                // own frame-loop continuously for as long as the popup was open
+                // — ongoing CPU/GPU cost just for being scrolled into view, with
+                // several GIFs animating at once. Live playback stays in the
+                // dedicated Space-preview, where only one item is shown.
+                Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
+                    .resizable().aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
                 if let summary = item.metadataSummary {
                     Text(summary).font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
                 }

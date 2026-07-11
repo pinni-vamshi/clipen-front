@@ -686,18 +686,12 @@ extension ClipboardManager {
             return nil
         case 36, 76: // Return / Enter — commit paste
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let n = self.pageRangeEffectiveSelection.count
-                NSLog("[Clipen] page-picker Enter pressed; selection=\(n) pages")
-                self.commitPageRangePaste()
+                self?.commitPageRangePaste()
             }
             return nil
         case 49: // Space — toggle inline preview of would-be-pasted text
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let n = self.pageRangeEffectiveSelection.count
-                NSLog("[Clipen] page-picker Space pressed; selection=\(n) pages; previewVisible=\(self.itemPreviewPanel.isVisible)")
-                self.showPageRangePreview()
+                self?.showPageRangePreview()
             }
             return nil
         default:

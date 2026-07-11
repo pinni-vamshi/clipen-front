@@ -100,28 +100,28 @@ enum TextTools {
             )
         },
         makeAI("ai.proofread", icon: "checkmark.seal", label: "Proofread & Fix Grammar", group: "AI",
-               minLength: 1) { text in
+               minLength: 4) { text in
             await AIService.transform(
                 instructions: "You are a careful proofreader. Fix spelling, grammar, and punctuation in the given text WITHOUT changing its meaning, tone, or structure. This is a CORRECTION task: produce a corrected version of the SAME text, not a response, reply, or answer to it. Output ONLY the corrected text, no preamble.",
                 text: text
             )
         },
         makeAI("ai.rewrite-professional", icon: "briefcase", label: "Rewrite Professionally", group: "AI",
-               minLength: 1) { text in
+               minLength: 4) { text in
             await AIService.transform(
                 instructions: "Rewrite the given text in a clear, professional tone suitable for work communication, keeping the same meaning and roughly the same length. This is a REWRITE task: produce a new version of the SAME text, not a response, reply, or answer to it. Output ONLY the rewritten text, no preamble.",
                 text: text
             )
         },
         makeAI("ai.rewrite-friendly", icon: "face.smiling", label: "Rewrite Casually", group: "AI",
-               minLength: 1) { text in
+               minLength: 4) { text in
             await AIService.transform(
                 instructions: "Rewrite the given text in a warm, casual, friendly tone, keeping the same meaning and roughly the same length. This is a REWRITE task: produce a new version of the SAME text, not a response, reply, or answer to it. Output ONLY the rewritten text, no preamble.",
                 text: text
             )
         },
         makeAI("ai.explain", icon: "questionmark.bubble", label: "Explain This", group: "AI",
-               minLength: 1) { text in
+               minLength: 4) { text in
             await AIService.transform(
                 instructions: "Explain the given text simply and clearly, as if to someone unfamiliar with the topic. Keep it under 5 sentences. Output ONLY the explanation, no preamble.",
                 text: text
@@ -272,6 +272,10 @@ enum TextTools {
         // representation as richText — omitting it here silently gave RTFD
         // items ZERO text tools (no case/JSON/trim…), only the Edit tool.
         case .rtfd(_, plain: let s):     return s
+        // SVG is text-editable markup — ToolRegistry routes .svg to TextTools,
+        // so the tools' input extractor must handle it or every preview() is nil
+        // and SVG items silently get zero tools.
+        case .svg(let s):                return s
         case .file(let url) where url.pathExtension.lowercased() != "pdf":
             return FileKindDetector.readableText(from: url)
         default:

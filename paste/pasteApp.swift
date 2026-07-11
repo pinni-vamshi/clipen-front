@@ -229,5 +229,12 @@ extension AppDelegate: SPUUpdaterDelegate {
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) { }
-    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) { }
+
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        // Surface silent update-delivery failures (broken appcast, bad EdDSA
+        // signature, network abort) via the app's existing fail.* analytics
+        // convention — otherwise a whole cohort silently stops getting updates
+        // with no signal to the developer.
+        AuthManager.shared.registerActionUsage(actionID: "fail.sparkle_check")
+    }
 }

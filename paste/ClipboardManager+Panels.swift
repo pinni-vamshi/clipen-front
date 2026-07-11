@@ -374,7 +374,7 @@ extension ClipboardManager {
         itemPreviewPanel.hide()
         if let message { flashStatus(message) }
 
-        isSimulatingPaste = true
+        let token = beginPasteSimulation()
 
         // Restore helper — puts the original item back on the pasteboard so
         // pollClipboard() cannot capture the transformed payload into the ring.
@@ -393,7 +393,7 @@ extension ClipboardManager {
            shouldInjectCharacters(to: pasteTarget) {
             injectCharacters(text) { [weak self] in
                 restoreSource()
-                self?.isSimulatingPaste = false
+                self?.endPasteSimulation(token: token)
                 self?.selectedIndex = 0
             }
             return
@@ -410,7 +410,7 @@ extension ClipboardManager {
             // Restore the original item BEFORE clearing isSimulatingPaste so
             // pollClipboard() cannot capture the transformed payload into the ring.
             restoreSource()
-            self.isSimulatingPaste = false
+            self.endPasteSimulation(token: token)
             self.selectedIndex = 0
         }
     }
@@ -1047,7 +1047,7 @@ extension ClipboardManager {
     /// path for external panels.  Caller is responsible for restoring focus
     /// to the original app BEFORE calling this.
     func simulateCommandV() {
-        isSimulatingPaste = true
+        let token = beginPasteSimulation()
         popupSessionPasted = true
         let src  = CGEventSource(stateID: .combinedSessionState)
         let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
@@ -1056,7 +1056,7 @@ extension ClipboardManager {
         down?.post(tap: .cgAnnotatedSessionEventTap)
         up?.post(tap: .cgAnnotatedSessionEventTap)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.isSimulatingPaste = false
+            self?.endPasteSimulation(token: token)
         }
         AuthManager.shared.registerCommandVAction()
     }

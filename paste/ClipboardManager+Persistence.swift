@@ -605,6 +605,24 @@ extension ClipboardManager {
     }
 
     /// Read + decrypt + decode a manifest file, or nil if ANY step fails.
+    /// Keep only the most recent `keep` `history.clip.corrupt-*` quarantine
+    /// files. Without this, a machine that repeatedly hits the corruption path
+    /// (recurring disk issues, crashes mid-write) accumulates them forever.
+    private func pruneQuarantineFiles(in dir: URL, keeping keep: Int) {
+        guard let all = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let quarantines = all
+            .filter { $0.lastPathComponent.hasPrefix("history.clip.corrupt-") }
+            .sorted { a, b in
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return da > db   // newest first
+            }
+        for stale in quarantines.dropFirst(keep) {
+            try? FileManager.default.removeItem(at: stale)
+        }
+    }
+
     private func readManifest(at url: URL, dec: JSONDecoder) -> [PersistedItem]? {
         guard let cipher    = try? Data(contentsOf: url),
               let plain     = HistoryCrypto.decrypt(cipher),
@@ -644,6 +662,7 @@ extension ClipboardManager {
             let stamp = Int(Date().timeIntervalSince1970)
             let quarantine = historyDir.appendingPathComponent("history.clip.corrupt-\(stamp)")
             try? FileManager.default.moveItem(at: historyFileURL, to: quarantine)
+            pruneQuarantineFiles(in: historyDir, keeping: 3)
             NSLog("[Clipen] loadHistory: primary manifest unreadable — quarantined to \(quarantine.lastPathComponent), trying backup")
             if let fromBackup = readManifest(at: historyBackupURL, dec: dec) {
                 persisted = fromBackup

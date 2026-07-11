@@ -277,8 +277,33 @@ private struct ItemPreviewView: View {
         }
     }
 
-    @ViewBuilder
+    // Shared across the item-preview panel, the reference panel, and (soon)
+    // any other full-content surface — one dispatch, parameterized only by the
+    // per-surface chrome (font size, image framing, file-row density).
     private var content: some View {
+        ContentPreviewView(item: item, chrome: .panel)
+    }
+}
+
+/// The single source of truth for "render a ClipboardItem's full content."
+/// Previously this switch existed three times (item-preview panel, reference
+/// panel, main-window detail) and drifted; the two panel surfaces now share
+/// this one, differing only via `chrome`. (The main-window detail pane keeps
+/// its own distinct, table-extraction-first design on purpose.)
+struct ContentPreviewView: View {
+    enum Chrome {
+        /// Item-preview panel: 13pt text, boxed images (cr10), rich file rows.
+        case panel
+        /// Reference (Quick Clip) panel: 12pt text, rounded images (cr8), dense file rows.
+        case reference
+    }
+    let item: ClipboardItem
+    let chrome: Chrome
+
+    private var plainFontSize: CGFloat { chrome == .panel ? 13 : 12 }
+
+    @ViewBuilder
+    var body: some View {
         switch item.content {
         case .text(let text):
             if let url = Self.validWebURL(text) {
@@ -289,13 +314,9 @@ private struct ItemPreviewView: View {
         case .richText(let attrStr, _):
             AttributedTextPreview(attributedString: attrStr.adjustingColorsForCurrentAppearance())
         case .html(let html, let plain):
-            // .html items only ever exist when the HTML carries real
-            // formatting (structure the plain-text extraction couldn't
-            // represent — see ClipboardManager+Capture's htmlMustSurvive /
-            // pasteboardPlain==plain check), so it's always worth rendering
-            // properly rather than gating on "does it contain a <table>".
-            // Fall back to flattened plain text only if there's truly
-            // nothing to render.
+            // .html items only ever exist when the HTML carries real formatting
+            // (see ClipboardManager+Capture's htmlMustSurvive check), so render
+            // it properly; fall back to flattened plain text only if empty.
             if plain.isEmpty && html.isEmpty {
                 textPreview(plain, monospaced: false)
             } else {
@@ -308,23 +329,9 @@ private struct ItemPreviewView: View {
                 textPreview(plain, monospaced: false)
             }
         case .image(let image, let data, let dataType):
-            if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
-                PDFPreview(document: pdf)
-            } else if dataType.rawValue.contains("gif") {
-                ZoomableImagePreview(image: image, animatedData: data)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            } else {
-                // Full-res via fullResData — decoded ONCE inside the view
-                // (never here in body, which re-evaluates per render pass).
-                // The stored image is a ring thumbnail and this panel zooms
-                // to 8×.
-                ZoomableImagePreview(image: image, fullResData: data)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            }
+            imagePreview(image: image, data: data, dataType: dataType)
         case .file(let url):
-            filePreview(url)
+            FilePreviewContent(url: url)
         case .files(let urls):
             fileListPreview(urls)
         case .svg(let src):
@@ -335,59 +342,100 @@ private struct ItemPreviewView: View {
         }
     }
 
-    private static func validWebURL(_ text: String) -> URL? {
+    @ViewBuilder
+    private func imagePreview(image: NSImage, data: Data, dataType: NSPasteboard.PasteboardType) -> some View {
+        // PDFs captured as image-typed pasteboard data get a real, zoomable PDF
+        // view; GIFs get the animated variant; everything else decodes full-res
+        // ONCE inside the view (never in body — that inline decode was the
+        // v1.0.144 CPU/memory churn regression).
+        switch chrome {
+        case .panel:
+            if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
+                PDFPreview(document: pdf)
+            } else if dataType.rawValue.contains("gif") {
+                ZoomableImagePreview(image: image, animatedData: data)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            } else {
+                ZoomableImagePreview(image: image, fullResData: data)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            }
+        case .reference:
+            if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
+                PDFPreview(document: pdf)
+                    .cornerRadius(8)
+            } else if dataType.rawValue.contains("gif") {
+                ZoomableImagePreview(image: image, animatedData: data)
+                    .cornerRadius(8)
+            } else {
+                ZoomableImagePreview(image: image, fullResData: data)
+                    .cornerRadius(8)
+            }
+        }
+    }
+
+    private func textPreview(_ text: String, monospaced: Bool) -> some View {
+        ScrollView {
+            Text(text)
+                .font(.system(size: plainFontSize, design: monospaced ? .monospaced : .default))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func fileListPreview(_ urls: [URL]) -> some View {
+        switch chrome {
+        case .panel:
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(urls, id: \.path) { url in
+                        HStack(spacing: 10) {
+                            Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
+                                .resizable()
+                                .frame(width: 22, height: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(url.lastPathComponent)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .lineLimit(1)
+                                Text(url.deletingLastPathComponent().path)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                }
+            }
+        case .reference:
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(urls, id: \.path) { url in
+                        HStack(spacing: 6) {
+                            Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
+                                .resizable()
+                                .frame(width: 16, height: 16)
+                            Text(url.lastPathComponent)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    static func validWebURL(_ text: String) -> URL? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.contains("\n"), !t.contains("\r"),
               let url = URL(string: t),
               url.scheme == "http" || url.scheme == "https",
               url.host != nil else { return nil }
         return url
-    }
-
-    private func textPreview(_ text: String, monospaced: Bool) -> some View {
-        ScrollView {
-            Text(text)
-                .font(.system(size: 13, design: monospaced ? .monospaced : .default))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func imagePreview(_ image: NSImage) -> some View {
-        ZoomableImagePreview(image: image)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    @ViewBuilder
-    private func filePreview(_ url: URL) -> some View {
-        FilePreviewContent(url: url)
-    }
-
-    private func fileListPreview(_ urls: [URL]) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(urls, id: \.path) { url in
-                    HStack(spacing: 10) {
-                        Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
-                            .resizable()
-                            .frame(width: 22, height: 22)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(url.lastPathComponent)
-                                .font(.system(size: 12, weight: .medium))
-                                .lineLimit(1)
-                            Text(url.deletingLastPathComponent().path)
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                }
-            }
-        }
     }
 }
 
@@ -400,7 +448,14 @@ private struct ItemPreviewView: View {
 /// Results are NSCache'd per item ID — extraction walks the whole attributed
 /// string, far too heavy to redo on every scroll-frame row render.
 enum TableCellExtractor {
-    private static let cache = NSCache<NSUUID, NSArray>()
+    private static let cache: NSCache<NSUUID, NSArray> = {
+        let c = NSCache<NSUUID, NSArray>()
+        // Bound it like the other caches (ItemThumbnailCache, ClipenIconCache)
+        // rather than relying solely on system memory-pressure eviction. The
+        // ring tops out at 500 items, so this comfortably covers a full ring.
+        c.countLimit = 500
+        return c
+    }()
 
     static func cells(for item: ClipboardItem) -> [[String]]? {
         if let cached = cache.object(forKey: item.id as NSUUID) as? [[String]] {
@@ -876,6 +931,9 @@ struct FilePreviewContent: View {
 struct Model3DPreview: NSViewRepresentable {
     let url: URL
 
+    final class Coordinator { var loadedURL: URL? }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> SCNView {
         let view = SpinUntilTouchedSCNView()
         view.allowsCameraControl = true      // drag to rotate, scroll to zoom
@@ -883,6 +941,7 @@ struct Model3DPreview: NSViewRepresentable {
         view.backgroundColor = .clear
         view.antialiasingMode = .multisampling4X
         view.scene = Self.loadScene(url)
+        context.coordinator.loadedURL = url
         // The preview panel is non-activating (never key), so mouse-drag rotation
         // can't reach SceneKit. Auto-spin the whole scene so the model is seen
         // from all sides without interaction. Drag still works in any window that
@@ -894,6 +953,12 @@ struct Model3DPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
+        // Only re-parse the scene when the URL actually changed — popup-adjacent
+        // views re-render on every keystroke, and loadScene does file I/O +
+        // MDLAsset/SCNScene parsing that would otherwise run (and reset the
+        // spin) on each pass. Matches the guard the sibling previews use.
+        guard context.coordinator.loadedURL != url else { return }
+        context.coordinator.loadedURL = url
         view.scene = Self.loadScene(url)
         Self.startAutoRotation(in: view)
     }

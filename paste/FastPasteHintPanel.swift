@@ -46,6 +46,17 @@ final class FastPasteHintPanel: NSPanel {
     }
 
     override var canBecomeKey: Bool { true }
+
+    override func orderOut(_ sender: Any?) {
+        super.orderOut(sender)
+        // Tear down the hosted SwiftUI tree once hidden so its self-rescheduling
+        // demo animation stops (fires onDisappear) instead of looping forever
+        // behind the invisible panel. Deferred so the view isn't freed while a
+        // button action inside it is still executing.
+        DispatchQueue.main.async { [weak self] in
+            if self?.isVisible == false { self?.contentView = nil }
+        }
+    }
 }
 
 // MARK: - Outer container
@@ -155,6 +166,14 @@ struct AnimatedGestureDemo: View {
     /// matching the user's slider value.
     @State private var ringFill: CGFloat = 0
 
+    /// Reference-type liveness flag. The choreography reschedules itself via
+    /// escaping `asyncAfter` closures forever; without this they keep firing
+    /// after the panel is dismissed (the SwiftUI tree isn't torn down on
+    /// `orderOut`). A class lets those already-captured closures observe the
+    /// live value — a captured `Bool` would freeze at its closure-creation value.
+    private final class LoopToken { var active = true }
+    @State private var loopToken = LoopToken()
+
     private enum Step { case idle, cmdDown, vDown, vUp, ringFull, pickerShown }
 
     /// The ring's visible fill duration.  We clamp to a minimum 0.35 s so
@@ -201,7 +220,8 @@ struct AnimatedGestureDemo: View {
             }
             .frame(height: 80)
         }
-        .onAppear { startLoop() }
+        .onAppear { loopToken.active = true; startLoop() }
+        .onDisappear { loopToken.active = false }
     }
 
     private var cmdPressed: Bool {
@@ -219,6 +239,7 @@ struct AnimatedGestureDemo: View {
     }
 
     private func startLoop() {
+        guard loopToken.active else { return }
         // Reset to known idle state.  Ring fill resets WITHOUT animation
         // so the next loop starts clean (no rewind line).
         var noAnim = Transaction(); noAnim.disablesAnimations = true
@@ -252,7 +273,10 @@ struct AnimatedGestureDemo: View {
         }
         // Hold the picker on screen, then loop.
         let total = 1.20 + ringDuration + 0.05 + 1.25
-        DispatchQueue.main.asyncAfter(deadline: .now() + total) { startLoop() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + total) {
+            guard loopToken.active else { return }
+            startLoop()
+        }
     }
 }
 

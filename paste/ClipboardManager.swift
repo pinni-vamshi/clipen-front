@@ -604,6 +604,9 @@ class ClipboardManager: ObservableObject {
     /// tries again against the same (hopefully now-ready) pasteboard.
     var remoteClipboardRetryCount = 0
     static let maxRemoteClipboardRetries = 30  // ~9s at the 0.3s poll interval — large iPhone photos/videos can take longer than the original 3s window to fully stream in over Continuity.
+    /// Upper bound on text length the (synchronous, capture-path) diff badge
+    /// will line-split and set-compare. Human-scale edits are far under this.
+    static let maxDiffBadgeTextLength = 20_000
     /// Last-seen byte size per file-URL path, so a file-URL can be required
     /// to report the SAME non-zero size on two consecutive polls before
     /// it's trusted — a non-zero size alone isn't enough: a file mid-write
@@ -613,6 +616,30 @@ class ClipboardManager: ObservableObject {
     var eventTap: CFMachPort?
     var runLoopSource: CFRunLoopSource?
     var isSimulatingPaste = false
+
+    /// Monotonic token identifying the current synthetic-paste session. Every
+    /// paste bumps it; a delayed "clear isSimulatingPaste" only takes effect if
+    /// its captured token still matches. Without this, a rapid second paste
+    /// (e.g. repeated double-click-to-paste) that starts before the first
+    /// paste's fixed-delay reset timer fires would get un-guarded early — and
+    /// the poll could then capture the second synthetic ⌘V as a new ring item.
+    private var pasteSimulationToken = 0
+
+    /// Begin a synthetic-paste session. Returns the token to hand back to
+    /// `endPasteSimulation(token:)` when this specific paste finishes.
+    @discardableResult
+    func beginPasteSimulation() -> Int {
+        pasteSimulationToken &+= 1
+        isSimulatingPaste = true
+        return pasteSimulationToken
+    }
+
+    /// End a synthetic-paste session — but only if no newer paste has started
+    /// in the meantime (i.e. the token still matches the latest session).
+    func endPasteSimulation(token: Int) {
+        guard token == pasteSimulationToken else { return }
+        isSimulatingPaste = false
+    }
 
     // Two-stage cycling: Stage 1 = items, Stage 2 = transforms for selected item
     var inTransformStage = false
@@ -733,6 +760,15 @@ class ClipboardManager: ObservableObject {
 
     var appActivationObserver: NSObjectProtocol?
 
+    /// Serial queue for the Smart Reference context AppleScript round-trips.
+    /// Serial so NSAppleScript is never executed concurrently (the Apple Event
+    /// Manager isn't safe for parallel use), and off-main so a hung/busy
+    /// browser can't freeze the app on every application switch.
+    let referenceContextQueue = DispatchQueue(label: "com.clipen.referenceContext")
+    /// Latest app to surface for. Set on main; lets an in-flight fetch chase
+    /// the newest frontmost app instead of piling up redundant fetches.
+    var pendingReferenceBundleID: String?
+
     /// Watches for app switches so pinned reference panels can auto-surface:
     /// each pinned page remembers which app was frontmost when it was
     /// pinned (see openQuickClipPanel), and switching to that app again
@@ -758,14 +794,41 @@ class ClipboardManager: ObservableObject {
         guard referenceAppAffinityEnabled,
               !quickClipPanels.isEmpty, bundleID != Bundle.main.bundleIdentifier else { return }
 
-        // Best-effort tab/window context for the app just switched to — a
-        // page pinned from one specific browser tab or Finder folder should
-        // only auto-surface for THAT tab/folder, not any window of the same
-        // app. AppleScript round-trips are typically single-digit-to-low-
-        // double-digit ms, small next to the app-switch animation already in
-        // flight, so this stays synchronous rather than adding the
-        // complexity of a second async re-match pass.
-        let liveContext = AppContextService.currentContext(for: bundleID)
+        // Record the newest target. If a fetch is already running, it will pick
+        // this up when it finishes rather than kicking off a parallel one.
+        let alreadyFetching = pendingReferenceBundleID != nil
+        pendingReferenceBundleID = bundleID
+        guard !alreadyFetching else { return }
+        fetchReferenceContext(for: bundleID)
+    }
+
+    /// Off-main: gather the tab/window context (AppleScript) for `bundleID`,
+    /// then apply the panel matching back on the main thread.
+    private func fetchReferenceContext(for bundleID: String) {
+        referenceContextQueue.async { [weak self] in
+            // AppleScript round-trips happen HERE, off the main thread — a page
+            // pinned from one specific browser tab/Finder folder should only
+            // auto-surface for THAT tab/folder, so we need per-tab context, but
+            // fetching it must never block the UI.
+            let liveContext = AppContextService.currentContext(for: bundleID)
+            let tabTexts    = AppContextService.allTabTexts(for: bundleID)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.applyReferenceSurface(bundleID: bundleID, liveContext: liveContext, tabTexts: tabTexts)
+                // If the frontmost app changed while we were fetching, chase it.
+                if let latest = self.pendingReferenceBundleID, latest != bundleID {
+                    self.fetchReferenceContext(for: latest)
+                } else {
+                    self.pendingReferenceBundleID = nil
+                }
+            }
+        }
+    }
+
+    private func applyReferenceSurface(bundleID: String, liveContext: String?, tabTexts: [String]) {
+        // Panels/toggle could have changed while off-main — re-check the guards.
+        guard referenceAppAffinityEnabled,
+              !quickClipPanels.isEmpty, bundleID != Bundle.main.bundleIdentifier else { return }
 
         var matched: QuickClipPanel?
         for panel in quickClipPanels where panel.carousel.jumpToPage(ownedBy: bundleID, context: liveContext) {
@@ -778,7 +841,7 @@ class ClipboardManager: ObservableObject {
         // one) against every pinned page's own content embedding. Catches
         // e.g. a background tab that's clearly about the same topic as a
         // pinned reference, even though it was never explicitly linked.
-        if matched == nil, let (panel, pageID) = semanticBestMatch(forBundleID: bundleID, in: quickClipPanels) {
+        if matched == nil, let (panel, pageID) = semanticBestMatch(forBundleID: bundleID, in: quickClipPanels, tabTexts: tabTexts) {
             panel.carousel.jumpToPage(id: pageID)
             // Now that a real match was found, link it properly so the next
             // switch to this app/tab is an exact match, not a re-scan.
@@ -1256,10 +1319,6 @@ struct ClipboardItem: Identifiable {
         return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
-    var category: ClipboardCategory {
-        ContentDetector.category(for: self)
-    }
-
     func isDuplicate(of other: ClipboardItem) -> Bool {
         switch (content, other.content) {
         case (.text(let a),                     .text(let b)):                     return a == b
@@ -1304,6 +1363,7 @@ enum ClipboardContent {
         case .richText(_, plain: let s): return s
         case .html(_, plain: let s):     return s
         case .rtfd(_, plain: let s):     return s
+        case .svg(let s):                return s   // SVG is editable text markup
         default:                         return nil
         }
     }
@@ -1325,15 +1385,20 @@ enum ClipboardContent {
     ///
     /// `fallback` covers data ImageIO can't thumbnail (PDF-typed images,
     /// odd encodings): those keep the caller's full NSImage, same as before.
+    // `fallback` is an @autoclosure so the (full-size) NSImage decode it
+    // usually wraps is only evaluated when ImageIO thumbnailing fails — not
+    // eagerly for every image. At history load this removes a full-image
+    // decode per stored image, since the thumbnail path succeeds for all
+    // normal formats and the fallback is never needed.
     static func imageContent(rawData: Data, dataType: NSPasteboard.PasteboardType,
-                             fallback: NSImage?) -> ClipboardContent? {
+                             fallback: @autoclosure () -> NSImage?) -> ClipboardContent? {
         // PDF data is vector — NSImage's PDF rep is compact and ImageIO
         // can't thumbnail it anyway.
         if !dataType.rawValue.lowercased().contains("pdf"),
            let thumb = NSImage.ringThumbnail(from: rawData) {
             return .image(thumb, rawData: rawData, dataType: dataType)
         }
-        guard let fallback else { return nil }
+        guard let fallback = fallback() else { return nil }
         return .image(fallback, rawData: rawData, dataType: dataType)
     }
 }

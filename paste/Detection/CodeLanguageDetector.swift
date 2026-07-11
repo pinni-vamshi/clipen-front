@@ -21,13 +21,18 @@ enum CodeLanguageDetector {
             ("LaTeX",      ["\\begin{", "\\end{", "\\frac{", "\\sum", "\\int", "\\alpha"]),
         ]
 
+        // Score EVERY language by its total keyword hits and return the best
+        // match, rather than short-circuiting on the first language in list
+        // order to reach 2 hits. Many keywords overlap across languages
+        // (`func `, `import `, `def `), so first-to-2 biased results toward
+        // whichever language happened to be checked first.
+        var best: (lang: String, hits: Int)? = nil
         for (lang, keywords) in checks {
-            var hits = 0
-            for keyword in keywords where text.contains(keyword) {
-                hits += 1
-                if hits >= 2 { return lang }
+            let hits = keywords.reduce(0) { $0 + (text.contains($1) ? 1 : 0) }
+            if hits >= 2, hits > (best?.hits ?? 1) {
+                best = (lang, hits)
             }
         }
-        return nil
+        return best?.lang
     }
 }

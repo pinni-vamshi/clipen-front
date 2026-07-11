@@ -506,9 +506,9 @@ extension ClipboardManager {
     /// underlying item was ever copied FROM or pasted TO this same app
     /// before, that's a real signal it belongs here even when two pages
     /// score nearly identically on text alone.
-    func semanticBestMatch(forBundleID bundleID: String, in panels: [QuickClipPanel]) -> (panel: QuickClipPanel, pageID: UUID)? {
+    func semanticBestMatch(forBundleID bundleID: String, in panels: [QuickClipPanel],
+                           tabTexts: [String]) -> (panel: QuickClipPanel, pageID: UUID)? {
         guard let nlEmbedding else { return nil }
-        let tabTexts = AppContextService.allTabTexts(for: bundleID)
         guard !tabTexts.isEmpty else { return nil }
         let tabVectors: [[Float]] = tabTexts.compactMap { text in
             nlEmbedding.vector(for: text)?.map(Float.init)

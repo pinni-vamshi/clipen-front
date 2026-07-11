@@ -11,9 +11,24 @@ enum TextTraditionalDetectors {
         return NSColor(hexString: t)
     }
 
+    /// A single small value (an email address, a phone number, a postal
+    /// address) is never a 100 KB log paste. Gating these whole-string
+    /// heuristics keeps every regex/character scan off huge captures — this
+    /// runs synchronously on the capture path, so an unbounded scan there is a
+    /// direct main-thread hitch on large pastes.
+    private static let maxSingleValueScanLength = 2_048
+    /// Structured-document heuristics (markdown, LaTeX) can legitimately appear
+    /// in larger text, but still shouldn't run over a multi-megabyte blob;
+    /// matches CodeLanguageDetector's own 50 K cap.
+    private static let maxDocumentScanLength = 50_000
+
     static func candidates(for text: String, color: NSColor?) -> [DetectionCandidate] {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return [] }
+
+        let n = t.count
+        let scanSingleValue = n <= maxSingleValueScanLength
+        let scanDocument    = n <= maxDocumentScanLength
 
         var candidates: [DetectionCandidate] = []
 
@@ -21,16 +36,17 @@ enum TextTraditionalDetectors {
             candidates.append(.init(type: .hexColor(color), confidence: 1.0, method: .deterministic))
         }
 
-        if (t.hasPrefix("http://") || t.hasPrefix("https://")),
+        if scanSingleValue,
+           (t.hasPrefix("http://") || t.hasPrefix("https://")),
            let url = URL(string: t), url.host != nil {
             candidates.append(.init(type: .url, confidence: 0.98, method: .deterministic))
         }
 
-        if isEmail(t) {
+        if scanSingleValue, isEmail(t) {
             candidates.append(.init(type: .email, confidence: 0.97, method: .deterministic))
         }
 
-        if isPhoneNumber(t) {
+        if scanSingleValue, isPhoneNumber(t) {
             candidates.append(.init(type: .phone, confidence: 0.9, method: .deterministic))
         }
 
@@ -43,11 +59,11 @@ enum TextTraditionalDetectors {
             candidates.append(.init(type: .table(table), confidence: 0.92, method: .deterministic))
         }
 
-        if isLatex(t) {
+        if scanDocument, isLatex(t) {
             candidates.append(.init(type: .latex, confidence: 0.9, method: .deterministic))
         }
 
-        if isMarkdown(t) {
+        if scanDocument, isMarkdown(t) {
             candidates.append(.init(type: .markdown, confidence: 0.86, method: .deterministic))
         }
 
@@ -55,7 +71,7 @@ enum TextTraditionalDetectors {
             candidates.append(.init(type: .code(lang), confidence: 0.84, method: .deterministic))
         }
 
-        if isPostalAddress(t) {
+        if scanSingleValue, isPostalAddress(t) {
             candidates.append(.init(type: .address, confidence: 0.72, method: .deterministic))
         }
 

@@ -33,7 +33,6 @@ final class AuthManager: ObservableObject {
     private let clickCountKey              = "backendFeatureFlagsClickCount"
     private let fastPasteCountKey          = "backendFastPasteCount"
     private let lastUpdateCheckClickKey    = "backendFeatureFlagsLastUpdateCheckClick"
-    private let toolUsageCountsKey         = "backendToolUsageCounts"
     private let toolUsageTotalsKey         = "backendToolUsageTotals"
     private let toolLastUsedAtKey          = "backendToolLastUsedAt"
     private let toolBucketUsageKey         = "backendToolBucketUsage"
@@ -63,10 +62,6 @@ final class AuthManager: ObservableObject {
             ClipboardManager.shared.applyPlanLimits(ringLimit: self.ringLimit)
             self.applyFeatureFlagsToRuntime()
         }
-        // One-time cleanup: this pending-counts dict was flushed by the old
-        // account/refresh backend call, which no longer exists — it just
-        // accumulated in UserDefaults forever, never sent, never cleared.
-        UserDefaults.standard.removeObject(forKey: toolUsageCountsKey)
         flushCompletedDailyUsage()
         // Periodic flush, independent of user activity. Launch + per-⌘V
         // flushes alone had a real hole: a menu-bar session left running

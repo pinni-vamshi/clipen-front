@@ -264,9 +264,13 @@ enum MarkedToolService {
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let pdf = PDFDocument()
-                for (idx, input) in inputs.enumerated() {
+                // Insert at the running page count, not the source-array index —
+                // if any image fails to become a page, using `idx` would either
+                // leave gaps or push the insert index past pageCount (a PDFKit
+                // out-of-bounds crash).
+                for input in inputs {
                     if let page = PDFPage(image: input.image) {
-                        pdf.insert(page, at: idx)
+                        pdf.insert(page, at: pdf.pageCount)
                     }
                 }
                 guard pdf.pageCount >= 2, let data = pdf.dataRepresentation() else {
@@ -293,8 +297,8 @@ enum MarkedToolService {
         return await withCheckedContinuation { continuation in
             DispatchQueue.main.async {
                 // NSImage drawing needs the main thread's graphics context.
-                let width  = vertical ? images.map(\.size.width).max()! : images.map(\.size.width).reduce(0, +)
-                let height = vertical ? images.map(\.size.height).reduce(0, +) : images.map(\.size.height).max()!
+                let width  = vertical ? (images.map(\.size.width).max() ?? 0) : images.map(\.size.width).reduce(0, +)
+                let height = vertical ? images.map(\.size.height).reduce(0, +) : (images.map(\.size.height).max() ?? 0)
                 guard width > 0, height > 0 else {
                     continuation.resume(returning: .status("Couldn't stitch the images."))
                     return

@@ -42,6 +42,8 @@ extension ClipboardManager {
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef) == .success,
               let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID()
         else { return false }
+        // Force cast is provably safe: the CFGetTypeID guard above verified this
+        // is an AXUIElement, and `as!` is the idiomatic conversion for CF types.
         let axApp = focusedAppRef as! AXUIElement  // swiftlint:disable:this force_cast
         var pid: pid_t = 0
         guard AXUIElementGetPid(axApp, &pid) == .success,
@@ -257,11 +259,9 @@ extension ClipboardManager {
                 if let input = PDFTools.pdfInput(for: item) {
                     let mode: PageRangeOutputMode =
                         (selectedToolID == "pdf.paste-pages-as-images") ? .perPageImages : .combinedPDF
-                    NSLog("[Clipen] commitPaste intercept → enterPageRangeMode mode=\(mode) pages=\(input.pdf.pageCount)")
                     enterPageRangeMode(pdf: input.pdf, item: item, outputMode: mode)
                     return
                 } else {
-                    NSLog("[Clipen] commitPaste intercept FAILED: pdfInput returned nil for item content=\(item.content)")
                     flashStatus("Couldn't open PDF for page picker.")
                     return
                 }
@@ -409,7 +409,7 @@ extension ClipboardManager {
         write(item, to: pb)
         lastChangeCount = pb.changeCount
 
-        isSimulatingPaste = true
+        let token = beginPasteSimulation()
 
         // Use character injection for Spotlight (nil frontmost), Raycast, Alfred,
         // and any other app that ignores externally simulated ⌘V.
@@ -417,7 +417,7 @@ extension ClipboardManager {
            text.count <= Self.maxInjectionLength,
            shouldInjectCharacters(to: target) {
             injectCharacters(text) { [weak self] in
-                self?.isSimulatingPaste = false
+                self?.endPasteSimulation(token: token)
                 completion?()
             }
         } else {
@@ -428,7 +428,7 @@ extension ClipboardManager {
             down?.post(tap: .cgAnnotatedSessionEventTap)
             up?.post(tap: .cgAnnotatedSessionEventTap)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                self?.isSimulatingPaste = false
+                self?.endPasteSimulation(token: token)
                 completion?()
             }
         }
@@ -466,7 +466,7 @@ extension ClipboardManager {
         let item      = itemList[0]
         let remaining = Array(itemList.dropFirst())
 
-        isSimulatingPaste = true   // set BEFORE clearContents to block the poll guard immediately
+        let token = beginPasteSimulation()   // set BEFORE clearContents to block the poll guard immediately
         recordPasteDestination(for: item.id)
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -479,7 +479,7 @@ extension ClipboardManager {
             injectCharacters(text) { [weak self] in
                 guard let self else { return }
                 if remaining.isEmpty {
-                    self.isSimulatingPaste = false
+                    self.endPasteSimulation(token: token)
                     self.selectedIndex = 0; self.cycleCount = 0
                 } else {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -498,7 +498,7 @@ extension ClipboardManager {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self else { return }
                 if remaining.isEmpty {
-                    self.isSimulatingPaste = false
+                    self.endPasteSimulation(token: token)
                     self.selectedIndex = 0; self.cycleCount = 0
                 } else {
                     self.commitMultiPaste(remaining, target: target)

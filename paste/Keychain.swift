@@ -2,7 +2,9 @@ import Foundation
 import Security
 
 /// Tiny Keychain wrapper for sensitive secrets that must NOT live in
-/// UserDefaults. Currently used for the Clipen JWT.
+/// UserDefaults. Retained for wiping any legacy secrets on factory reset;
+/// the app no longer stores a backend token here (the AES-GCM history key
+/// lives in a 0600 file — see HistoryCrypto).
 ///
 /// Why not UserDefaults?
 ///  - On macOS, UserDefaults may persist across app deletion (`defaults`

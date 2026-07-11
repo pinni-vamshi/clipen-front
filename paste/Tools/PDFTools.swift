@@ -136,7 +136,30 @@ enum PDFTools {
         )
     }
 
+    // Single-slot decode memo — same rationale as ImageService.imageInput:
+    // building the transform panel evaluates every PDF tool's preview() twice,
+    // each parsing the PDFDocument from bytes, so one panel open could parse the
+    // same multi-page PDF ~18×. Keyed by id; PDF bytes are immutable post-capture.
+    private static let inputCacheLock = NSLock()
+    private static var cachedInput: (id: UUID, input: (pdf: PDFDocument, data: Data?))?
+
     static func pdfInput(for item: ClipboardItem) -> (pdf: PDFDocument, data: Data?)? {
+        inputCacheLock.lock()
+        if let cached = cachedInput, cached.id == item.id {
+            let hit = cached.input
+            inputCacheLock.unlock()
+            return hit
+        }
+        inputCacheLock.unlock()
+
+        guard let input = decodePDFInput(for: item) else { return nil }
+        inputCacheLock.lock()
+        cachedInput = (item.id, input)
+        inputCacheLock.unlock()
+        return input
+    }
+
+    private static func decodePDFInput(for item: ClipboardItem) -> (pdf: PDFDocument, data: Data?)? {
         switch item.content {
         case .image(let image, let data, let dataType) where dataType.rawValue.contains("pdf"):
             guard let pdf = PDFDocument(data: data) ?? PDFDocument(data: image.tiffRepresentation ?? Data()) else { return nil }

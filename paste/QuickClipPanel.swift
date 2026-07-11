@@ -980,6 +980,7 @@ private struct ReferencePageContentView: View {
                 }
                 .buttonStyle(.plain)
                 .help(pageCount > 1 ? "Close entire panel (all \(pageCount) references)" : "Close")
+                .accessibilityLabel(pageCount > 1 ? "Close entire panel, all \(pageCount) references" : "Close reference panel")
 
                 // Minimize — shrinks the whole panel to the same small corner
                 // badge Smart Reference's own "no match" state uses, purely
@@ -992,6 +993,7 @@ private struct ReferencePageContentView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Minimize to corner")
+                .accessibilityLabel("Minimize reference panel to corner")
 
                 HStack(spacing: 6) {
                     Image(systemName: item.iconName)
@@ -1220,101 +1222,11 @@ private struct ReferencePageContentView: View {
 private struct QuickClipPreview: View {
     let item: ClipboardItem
 
+    // Delegates to the shared ContentPreviewView (defined in ItemPreviewPanel)
+    // with the reference-panel chrome — this switch used to be a near-identical
+    // copy of the item-preview panel's and drifted from it repeatedly.
     var body: some View {
-        switch item.content {
-        case .text(let text):
-            if let url = validWebURL(text) {
-                WebsitePreview(url: url)
-            } else {
-                RichTextContentPreview(text: text, detectedType: item.detectedType)
-            }
-        case .richText(let attrStr, _):
-            AttributedTextPreview(attributedString: attrStr.adjustingColorsForCurrentAppearance())
-        case .html(let html, let plain):
-            // Same rule as ItemPreviewPanel's .html case: these items only
-            // exist when the HTML carries real formatting, so render it
-            // properly instead of gating on table-only content.
-            if plain.isEmpty && html.isEmpty {
-                textPreview(plain, monospaced: false)
-            } else {
-                HTMLStringPreview(html: html)
-            }
-        case .rtfd(let data, let plain):
-            if let attrStr = NSAttributedString(rtfd: data, documentAttributes: nil) {
-                AttributedTextPreview(attributedString: attrStr.adjustingColorsForCurrentAppearance())
-            } else {
-                textPreview(plain, monospaced: false)
-            }
-        case .image(let image, let data, let dataType):
-            // PDFs captured as image-typed pasteboard data get a real,
-            // zoomable PDF view (same dispatch ItemPreviewPanel does) —
-            // previously they rendered as one flat stretched bitmap here.
-            // GIFs get the animated variant — the plain path shows only the
-            // first frame frozen.
-            if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
-                PDFPreview(document: pdf)
-                    .cornerRadius(8)
-            } else if dataType.rawValue.contains("gif") {
-                ZoomableImagePreview(image: image, animatedData: data)
-                    .cornerRadius(8)
-            } else {
-                // Full-res via fullResData — decoded ONCE inside the view,
-                // never here in body (re-evaluates per render pass; that
-                // inline decode was v1.0.144's CPU/memory churn regression).
-                ZoomableImagePreview(image: image, fullResData: data)
-                    .cornerRadius(8)
-            }
-        case .file(let url):
-            filePreview(url)
-        case .files(let urls):
-            fileListPreview(urls)
-        case .svg(let src):
-            textPreview(src, monospaced: true)
-        case .blob(let dict):
-            textPreview(dict.keys.sorted().map { "· \($0)" }.joined(separator: "\n"), monospaced: true)
-        }
-    }
-
-    private func validWebURL(_ text: String) -> URL? {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.contains("\n"), !t.contains("\r"),
-              let url = URL(string: t),
-              url.scheme == "http" || url.scheme == "https",
-              url.host != nil else { return nil }
-        return url
-    }
-
-    private func textPreview(_ text: String, monospaced: Bool) -> some View {
-        ScrollView {
-            Text(text)
-                .font(.system(size: 12, design: monospaced ? .monospaced : .default))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func filePreview(_ url: URL) -> some View {
-        // Was just an icon + filename + path — never rendered actual PDF,
-        // image, or media content. Reuses the same rich per-type dispatch
-        // ItemPreviewPanel already has instead of duplicating it.
-        FilePreviewContent(url: url)
-    }
-
-    private func fileListPreview(_ urls: [URL]) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 4) {
-                ForEach(urls, id: \.path) { url in
-                    HStack(spacing: 6) {
-                        Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
-                            .resizable()
-                            .frame(width: 16, height: 16)
-                        Text(url.lastPathComponent)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1)
-                    }
-                }
-            }
-        }
+        ContentPreviewView(item: item, chrome: .reference)
     }
 }
 

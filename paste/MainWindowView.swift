@@ -201,6 +201,11 @@ struct MainWindowView: View {
             toolbarPill("How to Use", icon: "questionmark.circle") {
                 showTutorial = true
             }
+            toolbarPill("Support Clipen", icon: "heart") {
+                if let url = URL(string: "https://www.instagram.com/clipen.official") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
         }
     }
 
@@ -301,6 +306,7 @@ struct MainWindowView: View {
                     Image(systemName: "xmark.circle.fill").foregroundColor(.textDim)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
             }
             filterDropdown
         }
@@ -357,6 +363,7 @@ struct MainWindowView: View {
                     LazyVStack(spacing: 1) {
                         ForEach(filtered) { item in
                             CompactItemRow(item: item, isSelected: mainSelectedID == item.id)
+                                .equatable()
                                 .onTapGesture(count: 1) { mainSelectedID = item.id }
                                 .onTapGesture(count: 2) {
                                     if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
@@ -445,7 +452,7 @@ struct MainWindowView: View {
             UserDefaults.standard.synchronize()
         }
 
-        // Wipe Keychain (JWT + any stored secrets)
+        // Wipe Keychain (any legacy stored secrets)
         Keychain.wipeAll()
 
         // Quit so next launch feels like a fresh install
@@ -900,11 +907,25 @@ private struct SelectableTextBlock: View {
 
 // MARK: - Compact list row (Raycast-style: icon + one line, nothing else)
 
-private struct CompactItemRow: View {
+private struct CompactItemRow: View, Equatable {
     let item:       ClipboardItem
     let isSelected: Bool
 
     @State private var isHovered = false
+
+    // Skip re-rendering unchanged rows when the list re-evaluates (any manager
+    // @Published change, incl. async enrichment re-publishing `items`). Local
+    // hover @State still updates independently — `.equatable()` only short-
+    // circuits parent-driven re-renders, not a view's own state changes.
+    // Compares exactly what title/icon/pin render: identity, selection, and the
+    // mutable fields (isPinned, urlTitle, metadataSummary); content is immutable.
+    static func == (l: CompactItemRow, r: CompactItemRow) -> Bool {
+        l.item.id == r.item.id &&
+        l.isSelected == r.isSelected &&
+        l.item.isPinned == r.item.isPinned &&
+        l.item.urlTitle == r.item.urlTitle &&
+        l.item.metadataSummary == r.item.metadataSummary
+    }
 
     var body: some View {
         HStack(spacing: 10) {
