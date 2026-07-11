@@ -589,15 +589,19 @@ final class InteractionLabController: ObservableObject {
         try await pause(400)
         showPanel(true)
         try await tap(.v)
-        try await pause(500)
-        hint("Tap P to jump between pins")
-        try await tap(.p)
+        // Popup opens ON the first pinned item (item 1). Because P jumps to
+        // the "next" pinned item RELATIVE to where you already are, the very
+        // first P — landing on an item that's already the first pin — stays
+        // put; it's the SECOND P that advances to the next pinned item.
         selectItem(0)
         try await pause(500)
-        try await tap(.p)
+        hint("Tap P to jump between pins")
+        try await tap(.p)          // first P: already on the first pin → stays
+        try await pause(500)
+        try await tap(.p)          // second P: advance to the next pinned item
         selectItem(2)
         try await pause(500)
-        try await tap(.p)
+        try await tap(.p)          // third P: wrap back to the first pin
         selectItem(0)
         try await pause(800)
         release(.cmd)
