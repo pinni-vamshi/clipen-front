@@ -1805,7 +1805,11 @@ struct ClipenSettingsView: View {
             // list's card exactly, not just its outer frame.
             InteractionLabStage(lab: lab)
                 .padding(18)
-                .frame(minHeight: row2Height, alignment: .top)
+                // Center the animation vertically in the card instead of
+                // pinning it to the top — the card is stretched to match the
+                // interactions list's height, so top-alignment left the whole
+                // animation clustered up top with dead space below it.
+                .frame(minHeight: row2Height, alignment: .center)
                 .background(Color.surfaceHi.opacity(0.3), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.border, lineWidth: 1))
                 .measured(Row2HeightKey.self)
