@@ -89,8 +89,8 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return [.cmd, .c]
         case .delete:       return [.cmd, .backspace]
         case .reverseCycle: return [.cmd, .shift, .v]
-        case .cyclePinned:  return [.cmd, .p]
-        case .pinItem:      return [.cmd, .p]
+        case .cyclePinned:  return [.cmd, .v, .p]
+        case .pinItem:      return [.cmd, .v, .p]
         }
     }
 }
@@ -576,11 +576,14 @@ final class InteractionLabController: ObservableObject {
     }
 
     private func runCyclePinned() async throws {
-        stageKeys = [.cmd, .p]
+        stageKeys = [.cmd, .v, .p]
+        // Open the popup the SAME way every other interaction does: hold ⌘,
+        // tap V. P only works once the popup is already open.
         press(.cmd)
         try await pause(400)
         showPanel(true)
-        try await pause(300)
+        try await tap(.v)
+        try await pause(400)
         // Pin item 1 and item 3, leave item 2 unpinned — sets up the "P
         // skips over unpinned items" point the caption makes.
         withAnimation(.easeOut(duration: 0.15)) { items[0].pin = true }
@@ -604,16 +607,19 @@ final class InteractionLabController: ObservableObject {
     }
 
     private func runPinItem() async throws {
-        stageKeys = [.cmd, .p]
+        stageKeys = [.cmd, .v, .p]
+        // Open with ⌘V first (like every other interaction), then use P.
         press(.cmd)
         try await pause(400)
         showPanel(true)
-        try await pause(300)
-        // Move onto item 2, then HOLD P to pin it — the badge appears while
-        // P is still down, the same moment the real pin fires.
-        try await tap(.p, hold: 150)
+        try await tap(.v)
+        try await pause(350)
+        // Cycle onto item 2 with a normal V tap, then HOLD P to pin it —
+        // the badge appears while P is still down, the same moment the real
+        // pin fires.
+        try await tap(.v)
         selectItem(1)
-        try await pause(400)
+        try await pause(450)
         hint("Hold P to pin")
         press(.p)
         try await pause(650)
