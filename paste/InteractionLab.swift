@@ -1193,14 +1193,24 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 2) {
             Toggle(isOn: $manager.openOnSecondTap) {
                 Text("Open on second V click").font(.system(size: 12)).foregroundColor(.textPri)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .toggleStyle(.switch).controlSize(.mini).tint(.accent)
-            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
+            .padding(.horizontal, 12).padding(.vertical, 10)
 
             Divider().padding(.horizontal, 8)
 
             Text("Delay speed").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
-                .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+                .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
+
+            // "Off" (0s) = popup opens immediately on the first V tap, no
+            // tap-vs-hold delay — the default, and mutually exclusive with
+            // both second-tap mode and the timed presets below.
+            openDelayChoice(label: "Off",
+                            isOn: !manager.openOnSecondTap && manager.firstOpenDelay == 0) {
+                manager.firstOpenDelay = 0
+                manager.openOnSecondTap = false
+            }
 
             ForEach(Self.openDelayPresets, id: \.label) { preset in
                 // A delay preset and second-tap mode are mutually
@@ -1212,27 +1222,30 @@ struct ClipenSettingsView: View {
                 // pendingFirstOpen's existing "second tap during the delay
                 // window cancels the timer and opens immediately" behavior,
                 // unchanged here.)
-                let isOn = !manager.openOnSecondTap && abs(manager.firstOpenDelay - preset.seconds) < 0.001
-                Button {
+                openDelayChoice(label: preset.label,
+                                isOn: !manager.openOnSecondTap && manager.firstOpenDelay == preset.seconds) {
                     manager.firstOpenDelay = preset.seconds
                     manager.openOnSecondTap = false
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(preset.label).font(.system(size: 12)).foregroundColor(.textPri)
-                        Spacer()
-                        if isOn {
-                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(.accent)
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
             }
-            Spacer(minLength: 6)
         }
-        .frame(width: 190)
-        .padding(.bottom, 4)
+        .padding(.vertical, 6)
+        .frame(width: 200)
+    }
+
+    private func openDelayChoice(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(label).font(.system(size: 12)).foregroundColor(.textPri)
+                Spacer()
+                if isOn {
+                    Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(.accent)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// "Pin to top" placement — where pinning an item sends it, in both the
@@ -1456,15 +1469,11 @@ struct ClipenSettingsView: View {
                 }
             }
 
-            // Min / current / max — current value centered in the
-            // horizontal space (not pinned to the left).
+            // Min / max end labels only — the current value already reads
+            // large at the top of this section, so a second copy here just
+            // duplicated it.
             HStack {
                 Text("10").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
-                Spacer()
-                Text("\(manager.maxItems)")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundColor(.accent)
-                    .contentTransition(.numericText())
                 Spacer()
                 Text("500").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
             }

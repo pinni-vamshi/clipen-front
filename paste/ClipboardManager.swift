@@ -413,7 +413,10 @@ class ClipboardManager: ObservableObject {
     /// notice the delay, long enough to absorb a relaxed "quick tap" of
     /// ~50–100 ms. User-tunable via the slider in the menu bar widget.
     @Published var firstOpenDelay: Double = {
-        let stored = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.12
+        // Default 0 = "Off" — the popup opens immediately on the first V tap,
+        // no tap-vs-hold disambiguation delay. Users who want that cushion
+        // pick Fast/Medium/Slow in the Open-delay picker.
+        let stored = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.0
         return min(max(stored, 0.0), 1.0)
     }() {
         didSet {
