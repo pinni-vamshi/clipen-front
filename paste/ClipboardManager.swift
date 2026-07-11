@@ -573,6 +573,10 @@ class ClipboardManager: ObservableObject {
     /// when it's the chosen reverse key: tap = step backward, hold = mark
     /// (and auto-move BACKWARD when advance-after-marking is on).
     var bTapHoldTimer: Timer?
+    /// Same tap-vs-hold decision timer as `vTapHoldTimer`, for the P key:
+    /// tap = cycle between pinned items, hold = pin/unpin the highlighted
+    /// item. Uses the same `vHoldThreshold` so the hold feel is consistent.
+    var pTapHoldTimer: Timer?
     /// User-facing Fast/Medium/Slow presets for the two hold/double-tap
     /// timing windows below — hides raw millisecond numbers behind a
     /// feel-based choice instead of a slider showing exact ms values.
@@ -590,6 +594,19 @@ class ClipboardManager: ObservableObject {
     /// was hardcoded to before it became a setting, so existing installs see
     /// no behavior change unless they touch the new preference.
     var vHoldThreshold: TimeInterval { markHoldSpeed.holdSeconds }
+
+    /// Same Fast/Medium/Slow choice for the P key's tap-vs-hold split: how
+    /// long P must be held before it pins/unpins the highlighted item
+    /// instead of cycling to the next pinned one. Independent of
+    /// markHoldSpeed so the two holds can feel different.
+    @Published var pinHoldSpeed: GestureSpeed =
+        GestureSpeed(rawValue: UserDefaults.standard.string(forKey: "pinHoldSpeed") ?? "") ?? .medium {
+        didSet {
+            UserDefaults.standard.set(pinHoldSpeed.rawValue, forKey: "pinHoldSpeed")
+            if oldValue != pinHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.pin_hold_speed") }
+        }
+    }
+    var pinHoldThreshold: TimeInterval { pinHoldSpeed.holdSeconds }
 
     /// Same Fast/Medium/Slow choice for the Space-key double-tap window
     /// (tap twice quickly to pin the current preview into a reference panel).

@@ -32,7 +32,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return "tap C"
         case .delete:       return "tap ⌫"
         case .reverseCycle: return "⇧ + tap V"
-        case .cyclePinned:  return "tap P"
+        case .cyclePinned:  return "tap / hold P"
         }
     }
 
@@ -68,7 +68,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return "Tap C to move the highlighted item to the front of the ring.\nThe selection stays put — keep tapping C to promote a run of items."
         case .delete:       return "Tap ⌫ to remove the highlighted item from the ring.\nThe next item slides into its place."
         case .reverseCycle: return "Hold ⌘ and tap ⇧V.\nMoves to the previous item instead of the next."
-        case .cyclePinned:  return "Tap P to jump between PINNED items only, wrapping at the end.\nUnpinned items in between are skipped entirely."
+        case .cyclePinned:  return "Tap P to jump between PINNED items only (wrapping at the end).\nHOLD P to pin or unpin the highlighted item."
         }
     }
 
@@ -609,15 +609,22 @@ struct LabKeyCapView: View {
     var size: CGFloat = 44
 
     var body: some View {
-        Text(key.symbol)
-            .font(.system(size: key.isWide ? size * 0.26 : size * 0.42, weight: .semibold))
-            .foregroundColor(pressed ? .white : .textPri)
-            .frame(width: key.isWide ? size * 2.2 : size, height: size)
-            .background(pressed ? Color.accent : Color.surfaceHi,
-                        in: RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+        // The key cap's drop-shadow is applied to the BACKGROUND shape only,
+        // never the whole view — an earlier version shadowed the composited
+        // Text, so in light mode the black shadow duplicated the dark glyph
+        // and "SPACE" rendered doubled/muddy. Text now sits as an overlay on
+        // top of a separately-shadowed shape, so only the cap casts a shadow.
+        RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+            .fill(pressed ? Color.accent : Color.surfaceHi)
             .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
                 .stroke(Color.border, lineWidth: 1))
+            .frame(width: key.isWide ? size * 2.2 : size, height: size)
             .shadow(color: .black.opacity(pressed ? 0 : 0.45), radius: 0, y: pressed ? 0 : 4)
+            .overlay(
+                Text(key.symbol)
+                    .font(.system(size: key.isWide ? size * 0.26 : size * 0.42, weight: .semibold))
+                    .foregroundColor(pressed ? .white : .textPri)
+            )
             .offset(y: pressed ? 4 : 0)
     }
 }
@@ -882,6 +889,7 @@ struct ClipenSettingsView: View {
     @State private var showMarkSpeedEditor = false
     @State private var showReferSpeedEditor = false
     @State private var showPinnedOpenSpeedEditor = false
+    @State private var showPinHoldSpeedEditor = false
     @State private var showAutoPreviewPicker = false
     @State private var showRememberTimeoutPicker = false
     @State private var showAutoDismissPicker = false
@@ -1257,45 +1265,44 @@ struct ClipenSettingsView: View {
     }
 
     private var pinPositionPicker: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Pin start position").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
-                .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
-            Text("At most \(ClipboardManager.maxPinnedItems) items can be pinned at once.")
-                .font(.system(size: 10)).foregroundColor(.textDim)
-                .padding(.horizontal, 12).padding(.bottom, 6)
-                .fixedSize(horizontal: false, vertical: true)
-            ForEach(1...ClipboardManager.maxPinnedItems, id: \.self) { position in
-                let isOn = manager.pinStartPosition == position
-                Button {
-                    manager.pinStartPosition = position
-                    showPinPositionPicker = false
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(position == 1 ? "Top" : "\(Self.ordinal(position)) slot")
-                            .font(.system(size: 12)).foregroundColor(.textPri)
-                        Spacer()
-                        if isOn {
-                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(.accent)
-                        }
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Starting position").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+
+            // Plain − N + counter instead of an ordinal list ("2nd slot",
+            // "3rd slot" read as daunting) — just a number 1…5, clamped to
+            // the pin cap on both ends.
+            HStack(spacing: 14) {
+                pinCounterButton("minus", enabled: manager.pinStartPosition > 1) {
+                    manager.pinStartPosition = max(1, manager.pinStartPosition - 1)
                 }
-                .buttonStyle(.plain)
+                Text("\(manager.pinStartPosition)")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundColor(.textPri)
+                    .frame(minWidth: 28)
+                pinCounterButton("plus", enabled: manager.pinStartPosition < ClipboardManager.maxPinnedItems) {
+                    manager.pinStartPosition = min(ClipboardManager.maxPinnedItems, manager.pinStartPosition + 1)
+                }
             }
-            Spacer(minLength: 6)
+            .frame(maxWidth: .infinity)
+
+            Text("At most \(ClipboardManager.maxPinnedItems) items can be pinned at once.")
+                .font(.system(size: 10)).foregroundColor(.textSec)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(width: 190)
-        .padding(.bottom, 4)
+        .padding(14)
+        .frame(width: 200)
     }
 
-    private static func ordinal(_ n: Int) -> String {
-        switch n {
-        case 1: return "1st"
-        case 2: return "2nd"
-        case 3: return "3rd"
-        default: return "\(n)th"
+    private func pinCounterButton(_ icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 12, weight: .bold))
+                .foregroundColor(enabled ? .textPri : .textDim)
+                .frame(width: 30, height: 30)
+                .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.border, lineWidth: 1))
         }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 
     private static let autoDismissPresets: [Double] = [10, 30, 60, 180, 300, 600, 1800]
@@ -1598,6 +1605,11 @@ struct ClipenSettingsView: View {
                                 lab.select(.pinnedOpen)
                             }
                         }
+                        if demo == .cyclePinned && showPinHoldSpeedEditor {
+                            speedPicker(label: "Hold speed", selection: $manager.pinHoldSpeed) {
+                                lab.select(.cyclePinned)
+                            }
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -1674,6 +1686,17 @@ struct ClipenSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Adjust hold speed")
+                }
+                if demo == .cyclePinned {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { showPinHoldSpeedEditor.toggle() }
+                    } label: {
+                        Image(systemName: showPinHoldSpeedEditor ? "pencil.circle.fill" : "pencil.circle")
+                            .font(.system(size: 13))
+                            .foregroundColor(showPinHoldSpeedEditor ? .accent : .textSec)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Adjust hold-to-pin speed")
                 }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))

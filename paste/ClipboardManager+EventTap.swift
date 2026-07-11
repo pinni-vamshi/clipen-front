@@ -257,6 +257,14 @@ extension ClipboardManager {
                 }
             }
         }
+        // Releasing P before its hold timer fired means it was a TAP —
+        // cycle to the next pinned item now. The hold path (pin/unpin the
+        // highlighted item) already ran from the timer if it fired.
+        if key == 35, let timer = pTapHoldTimer {
+            timer.invalidate()
+            pTapHoldTimer = nil
+            DispatchQueue.main.async { [weak self] in self?.cyclePinnedItems() }
+        }
         // Releasing Space ends the current physical press, independent of
         // whether the OS's autorepeat flag was reliable for this key event
         // stream (see spaceKeyIsDown in handleKeyDown).
@@ -628,12 +636,31 @@ extension ClipboardManager {
             return nil
         }
 
-        // P — cycle through PINNED items only, one per tap, wrapping back
-        // to the first after the last (same repeated-tap shape as ⌘V, just
-        // scoped to the pinned subset instead of the whole ring).
+        // P — tap-vs-hold, same wait-then-decide shape as V:
+        //   tap  → cycle through PINNED items only (wraps at the end)
+        //   hold → pin/unpin the highlighted item
+        // The decision fires either when the timer elapses while P is still
+        // held (hold → pin) or when keyUp arrives first (tap → cycle, in
+        // handleKeyUp). Autorepeat between is swallowed.
         if key == 35 && previewWindow.isVisible {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
-            DispatchQueue.main.async { [weak self] in self?.cyclePinnedItems() }
+            let pendingID: UUID? = displayItems.indices.contains(selectedIndex)
+                ? displayItems[selectedIndex].id : nil
+            pTapHoldTimer?.invalidate()
+            let t = Timer(timeInterval: pinHoldThreshold, repeats: false) { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.pTapHoldTimer = nil
+                    guard let id = pendingID,
+                          self.items.contains(where: { $0.id == id }) else { return }
+                    self.togglePin(id: id)
+                    self.resetAutoDismissTimer()
+                    self.syncItemPreviewWithSelection()
+                    AuthManager.shared.registerActionUsage(actionID: "action.pin")
+                }
+            }
+            RunLoop.main.add(t, forMode: .common)
+            pTapHoldTimer = t
             return nil
         }
 

@@ -13,7 +13,12 @@ extension Color {
     static let accentDim = Color(hex: "#4F8EF7").opacity(0.15)
     static let textPri   = Color(light: "#1A1A1A", dark: "#FFFFFF")
     static let textSec   = Color(light: "#6E6E73", dark: "#888888")
-    static let textDim   = Color(light: "#A0A0A5", dark: "#444444")
+    // Dark value was #444444 — barely 1.7:1 on the dark surface, which made
+    // the many places that use textDim for real label/description/tool text
+    // (edit-picker labels, lab tool abbreviations, helper lines) unreadable
+    // in dark mode. #707070 lifts those to a legible ~3.8:1 while staying
+    // clearly dimmer than textSec.
+    static let textDim   = Color(light: "#9A9AA0", dark: "#707070")
 }
 
 // MARK: - Window minimum-size configurator

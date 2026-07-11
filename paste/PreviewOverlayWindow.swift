@@ -682,6 +682,7 @@ struct PopoverRow: View, Equatable {
         l.isSelected == r.isSelected &&
         l.markOrder == r.markOrder &&
         l.showColorSwatches == r.showColorSwatches &&
+        l.item.isPinned == r.item.isPinned &&
         l.item.urlTitle == r.item.urlTitle &&
         l.item.diffBadge == r.item.diffBadge &&
         l.item.userNote == r.item.userNote &&
@@ -739,6 +740,13 @@ struct PopoverRow: View, Equatable {
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundColor(.secondary.opacity(0.6))
                     .help("This item has a note")
+            }
+
+            if item.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.accentColor)
+                    .help("Pinned — hold P to unpin")
             }
 
             Spacer()
