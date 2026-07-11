@@ -53,6 +53,7 @@
 		B1000000000000000000001C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001C /* Assets.xcassets */; };
 		EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68612FB7847C002CA5C3 /* Sparkle */; };
 		EE8C68652FB7847C002CA5C3 /* webp in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68642FB7847C002CA5C3 /* webp */; };
+		FE00000000000000000003 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = FE00000000000000000002 /* Highlightr */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -111,6 +112,7 @@
 			files = (
 				EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */,
 				EE8C68652FB7847C002CA5C3 /* webp in Frameworks */,
+				FE00000000000000000003 /* Highlightr in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -220,6 +222,7 @@
 			packageProductDependencies = (
 				EE8C68612FB7847C002CA5C3 /* Sparkle */,
 				EE8C68642FB7847C002CA5C3 /* webp */,
+				FE00000000000000000002 /* Highlightr */,
 			);
 			productName = paste;
 			productReference = EE8C684D2FB7847A002CA5C3 /* Clipen.app */;
@@ -252,6 +255,7 @@
 			packageReferences = (
 				EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp.swift" */,
+				FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EE8C684E2FB7847A002CA5C3 /* Products */;
@@ -456,7 +460,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 184;
+				CURRENT_PROJECT_VERSION = 185;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -474,7 +478,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.184;
+				MARKETING_VERSION = 1.0.185;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -495,7 +499,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 184;
+				CURRENT_PROJECT_VERSION = 185;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -513,7 +517,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.184;
+				MARKETING_VERSION = 1.0.185;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -566,6 +570,14 @@
 				minimumVersion = 1.1.0;
 			};
 		};
+		FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/raspu/Highlightr";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.1.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -578,6 +590,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp.swift" */;
 			productName = webp;
+		};
+		FE00000000000000000002 /* Highlightr */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */;
+			productName = Highlightr;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

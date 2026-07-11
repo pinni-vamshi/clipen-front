@@ -1,5 +1,6 @@
 import AppKit
 import AVKit
+import Highlightr
 import ModelIO
 import Quartz
 import SceneKit
@@ -893,127 +894,101 @@ struct CodeSyntaxPreview: View {
     let text: String
     let language: String?
 
-    private static let keywordSets: [String: Set<String>] = [
-        "Swift": ["func","var","let","if","else","guard","return","struct","class","enum","protocol",
-                  "extension","import","for","while","switch","case","default","break","continue","init",
-                  "self","Self","super","true","false","nil","private","public","internal","static",
-                  "override","in","as","is","try","catch","throw","throws","async","await"],
-        "Python": ["def","class","if","elif","else","return","import","from","for","while","in","try",
-                   "except","finally","with","as","pass","break","continue","lambda","None","True",
-                   "False","and","or","not","is","yield","global","nonlocal","raise","assert","del"],
-        "JavaScript": ["function","const","let","var","if","else","return","for","while","do","switch",
-                       "case","default","break","continue","class","extends","new","this","try","catch",
-                       "finally","throw","typeof","instanceof","in","of","async","await","import",
-                       "export","from","null","undefined","true","false"],
-        "TypeScript": ["function","const","let","var","if","else","return","for","while","interface",
-                       "type","class","extends","implements","new","this","try","catch","finally",
-                       "throw","import","export","from","null","undefined","true","false","public",
-                       "private","protected","readonly","async","await"],
-        "Rust": ["fn","let","mut","if","else","match","for","while","loop","return","struct","enum",
-                 "impl","trait","pub","use","mod","self","true","false","as","in","break","continue",
-                 "async","await","move","ref","where"],
-        "Go": ["func","var","const","if","else","for","range","switch","case","default","return",
-               "package","import","struct","interface","go","chan","select","defer","break",
-               "continue","true","false","nil","type","map"],
-        "Kotlin": ["fun","val","var","if","else","for","while","when","return","class","interface",
-                   "object","package","import","true","false","null","is","as","in","override",
-                   "private","public","companion","data"],
-        "Java": ["public","private","protected","class","interface","extends","implements","static",
-                 "final","void","if","else","for","while","switch","case","default","return","new",
-                 "this","super","true","false","null","try","catch","finally","throw","throws",
-                 "import","package"],
-        "C/C++": ["int","float","double","char","void","if","else","for","while","do","switch","case",
-                  "default","return","struct","class","public","private","protected","namespace",
-                  "using","include","define","static","const","true","false","nullptr","new","delete",
-                  "template","typename"],
-        "Shell": ["if","then","else","elif","fi","for","while","do","done","case","esac","function",
-                  "return","echo","export","local","in"],
-        "Ruby": ["def","end","class","module","if","elsif","else","unless","case","when","for","while",
-                 "until","return","true","false","nil","self","require","attr_accessor","yield",
-                 "begin","rescue","ensure"],
-        "SQL": ["SELECT","FROM","WHERE","INSERT","INTO","VALUES","UPDATE","SET","DELETE","CREATE",
-                "TABLE","ALTER","DROP","JOIN","LEFT","RIGHT","INNER","OUTER","ON","GROUP","BY",
-                "ORDER","HAVING","AND","OR","NOT","NULL","AS","DISTINCT","LIMIT"]
-    ]
+    @State private var highlighted: NSAttributedString? = nil
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            Text(highlighted)
-                .font(.system(size: 12, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(4)
-        }
-    }
-
-    private var highlighted: AttributedString {
-        var result = AttributedString()
-        let keywords = language.flatMap { Self.keywordSets[$0] } ?? []
-        for line in text.components(separatedBy: "\n") {
-            result += highlightLine(line, keywords: keywords)
-            result += AttributedString("\n")
-        }
-        return result
-    }
-
-    private func highlightLine(_ line: String, keywords: Set<String>) -> AttributedString {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        if trimmed.hasPrefix("//") || trimmed.hasPrefix("#") || trimmed.hasPrefix("--") {
-            var s = AttributedString(line)
-            s.foregroundColor = .secondary
-            return s
-        }
-
-        var result = AttributedString()
-        var current = ""
-        var inString: Character? = nil
-
-        func flushWord() {
-            guard !current.isEmpty else { return }
-            var piece = AttributedString(current)
-            if keywords.contains(current) {
-                piece.foregroundColor = .purple
-                piece.font = .system(size: 12, weight: .semibold, design: .monospaced)
-            } else if current.first?.isNumber == true {
-                piece.foregroundColor = .orange
-            }
-            result += piece
-            current = ""
-        }
-
-        for ch in line {
-            if let quote = inString {
-                current.append(ch)
-                if ch == quote {
-                    var piece = AttributedString(current)
-                    piece.foregroundColor = .green
-                    result += piece
-                    current = ""
-                    inString = nil
-                }
-                continue
-            }
-            if ch == "\"" || ch == "'" {
-                flushWord()
-                inString = ch
-                current = String(ch)
-                continue
-            }
-            if ch.isLetter || ch.isNumber || ch == "_" {
-                current.append(ch)
+        Group {
+            if let highlighted {
+                // Real syntax highlighting (Highlightr / highlight.js),
+                // rendered in a selectable, scrollable text view.
+                HighlightedCodeTextView(attributed: highlighted)
             } else {
-                flushWord()
-                result += AttributedString(String(ch))
+                // Fallback until the (fast) highlight pass completes, or if
+                // Highlightr is unavailable — plain monospaced text.
+                ScrollView([.horizontal, .vertical]) {
+                    Text(text)
+                        .font(.system(size: 12, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(4)
+                }
             }
         }
-        if inString != nil {
-            var piece = AttributedString(current)
-            piece.foregroundColor = .green
-            result += piece
-        } else {
-            flushWord()
+        .task(id: HighlightKey(text: text, language: language, dark: colorScheme == .dark)) {
+            highlighted = CodeHighlighter.shared.highlight(
+                text, languageDisplayName: language, dark: colorScheme == .dark)
         }
-        return result
+    }
+
+    /// Re-highlight only when the text, detected language, or appearance
+    /// actually changes — not on every view update.
+    private struct HighlightKey: Equatable {
+        let text: String
+        let language: String?
+        let dark: Bool
+    }
+
+}
+
+/// Wraps Highlightr (highlight.js via JavaScriptCore) as a single reused
+/// instance — creating one loads the JS engine + themes, which is too costly
+/// to redo per snippet. Runs on the main actor because Highlightr's
+/// JSContext isn't thread-safe; each call is only a few ms for preview-sized
+/// input (the caller already caps huge pastes upstream).
+@MainActor
+final class CodeHighlighter {
+    static let shared = CodeHighlighter()
+
+    private let highlightr = Highlightr()
+    private var currentTheme: String?
+
+    private init() {}
+
+    /// Highlighted `NSAttributedString`, or nil if Highlightr is unavailable.
+    /// `languageDisplayName` is the app's detected label (e.g. "Swift"); it's
+    /// mapped to a highlight.js id, and when unknown Highlightr auto-detects.
+    func highlight(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
+        guard let highlightr else { return nil }
+        // Themes tuned to read well on the app's own surfaces in each mode.
+        let theme = dark ? "atom-one-dark" : "atom-one-light"
+        if currentTheme != theme {
+            highlightr.setTheme(to: theme)
+            currentTheme = theme
+        }
+        let hljsID = CodeLanguageDetector.hljsIdentifier(for: languageDisplayName)
+        return highlightr.highlight(code, as: hljsID, fastRender: true)
+    }
+}
+
+/// Read-only, selectable, scrollable NSTextView that renders a highlighted
+/// `NSAttributedString` faithfully (SwiftUI `Text` mangles some of
+/// Highlightr's attributes). Transparent background so the panel's own
+/// surface shows through.
+struct HighlightedCodeTextView: NSViewRepresentable {
+    let attributed: NSAttributedString
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        if let tv = scroll.documentView as? NSTextView {
+            tv.isEditable = false
+            tv.isSelectable = true
+            tv.drawsBackground = false
+            tv.textContainerInset = NSSize(width: 6, height: 6)
+            tv.isHorizontallyResizable = true
+            tv.textContainer?.widthTracksTextView = false
+            tv.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                                     height: CGFloat.greatestFiniteMagnitude)
+        }
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let tv = scroll.documentView as? NSTextView else { return }
+        tv.textStorage?.setAttributedString(attributed)
     }
 }
 
@@ -1042,12 +1017,19 @@ struct AsyncTextFilePreview: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color.primary.opacity(0.06))
                     }
-                    ScrollView {
-                        Text(text)
-                            .font(.system(size: 13, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    // Code files (by extension) get real syntax highlighting;
+                    // everything else stays plain monospaced text.
+                    if let lang = CodeLanguageDetector.languageForExtension(url.pathExtension) {
+                        CodeSyntaxPreview(text: text, language: lang)
                             .padding(.top, isTruncated ? 8 : 0)
+                    } else {
+                        ScrollView {
+                            Text(text)
+                                .font(.system(size: 13, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, isTruncated ? 8 : 0)
+                        }
                     }
                 }
             } else if loadFailed {
