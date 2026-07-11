@@ -141,7 +141,12 @@ struct TutorialSheet: View {
             Divider().background(Color.border)
             tutorialFooter
         }
-        .frame(width: 500).background(Color.surface).preferredColorScheme(.dark)
+        // Wider than a purely-vertical sheet needs — the animated pages now
+        // lay text/hints and the interaction stage out SIDE BY SIDE, which
+        // needs real horizontal room for both halves to breathe. The copy-
+        // gate page (page 0) just gets extra margin; nothing there depends
+        // on this width.
+        .frame(width: 760).background(Color.surface).preferredColorScheme(.dark)
         .onAppear {
             baselineIDs = Set(manager.items.map(\.id))
             if let demo = Self.demoForPage[page] { lab.select(demo) }
@@ -301,16 +306,26 @@ struct TutorialSheet: View {
         ) { InteractionLabStage(lab: lab) }
     }
 
+    /// Side by side, not stacked: text/hints on the left, the interaction
+    /// stage on the right — scoped to this tutorial panel only, not a change
+    /// to how the same stage/text pairing looks anywhere else (e.g. the real
+    /// Interaction Lab in Settings stays exactly as it was).
     private func animatedPage<A: View>(title: String, detail: String, hint: String,
                                        @ViewBuilder anim: () -> A) -> some View {
-        VStack(spacing: 16) {
-            anim()
-            VStack(spacing: 6) {
-                Text(title).font(.system(size: 17, weight: .bold)).foregroundColor(.textPri)
-                Text(detail).font(.system(size: 12)).foregroundColor(.textSec)
-                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 420)
+        HStack(alignment: .top, spacing: 26) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(.system(size: 17, weight: .bold)).foregroundColor(.textPri)
+                    Text(detail).font(.system(size: 12)).foregroundColor(.textSec)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                practiceBox(hint: hint)
+                Spacer(minLength: 0)
             }
-            practiceBox(hint: hint)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            anim()
+                .frame(width: 280)
         }
         .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 14).frame(maxWidth: .infinity)
     }

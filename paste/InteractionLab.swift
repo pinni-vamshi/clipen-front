@@ -834,6 +834,10 @@ struct ClipenSettingsView: View {
     @State private var row2Height: CGFloat = 0
     /// Inline editor under the Reverse Cycle row (⇧V vs B picker).
     @State private var showReverseKeyEditor = false
+    /// Same inline-editor pattern as showReverseKeyEditor, for the two
+    /// gesture-timing rows (Mark for Multi-Paste / Refer).
+    @State private var showMarkSpeedEditor = false
+    @State private var showReferSpeedEditor = false
 
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
@@ -992,29 +996,6 @@ struct ClipenSettingsView: View {
         .frame(maxHeight: .infinity)
         .disabled(disabled)
         .opacity(disabled ? 0.4 : 1)
-    }
-
-    /// Same top-level chrome as behaviourRow, but for a Fast/Medium/Slow
-    /// gesture-timing choice instead of an on/off toggle — presented as a
-    /// feel-based segmented picker rather than a raw-millisecond slider.
-    private func speedPickerRow(_ n: Int, icon: String, _ label: String,
-                                selection: Binding<GestureSpeed>) -> some View {
-        HStack(spacing: 10) {
-            rowNumber(n)
-            Image(systemName: icon).font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
-            Text(label).font(.system(size: 13)).foregroundColor(.textPri)
-            Spacer()
-            Picker("", selection: selection) {
-                ForEach(GestureSpeed.allCases) { speed in
-                    Text(speed.label).tag(speed)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 190)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 16)
-        .frame(maxHeight: .infinity)
     }
 
     // MARK: 01 — Ring size
@@ -1191,13 +1172,6 @@ struct ClipenSettingsView: View {
                            in: 10...600)
                         .tint(.accent)
                 }
-
-                rowDivider()
-                speedPickerRow(6, icon: "hand.point.up.left", "Mark hold speed",
-                               selection: $manager.markHoldSpeed)
-                rowDivider()
-                speedPickerRow(7, icon: "hand.tap", "Space double-tap speed",
-                               selection: $manager.spaceDoubleTapSpeed)
             }
         }
     }
@@ -1234,6 +1208,16 @@ struct ClipenSettingsView: View {
                         // Inline editor: pick which key means "back".
                         if demo == .reverseCycle && showReverseKeyEditor {
                             reverseKeyPicker
+                        }
+                        if demo == .multiPaste && showMarkSpeedEditor {
+                            speedPicker(label: "Hold speed", selection: $manager.markHoldSpeed) {
+                                lab.select(.multiPaste)
+                            }
+                        }
+                        if demo == .pinPreview && showReferSpeedEditor {
+                            speedPicker(label: "Double-tap speed", selection: $manager.spaceDoubleTapSpeed) {
+                                lab.select(.pinPreview)
+                            }
                         }
                     }
                 }
@@ -1276,6 +1260,31 @@ struct ClipenSettingsView: View {
                     .buttonStyle(.plain)
                     .help("Choose the reverse key")
                 }
+                if demo == .multiPaste {
+                    // Edit — opens the Fast/Medium/Slow hold-speed picker
+                    // below this row. Same pattern as Reverse Cycle's key
+                    // picker above.
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { showMarkSpeedEditor.toggle() }
+                    } label: {
+                        Image(systemName: showMarkSpeedEditor ? "pencil.circle.fill" : "pencil.circle")
+                            .font(.system(size: 13))
+                            .foregroundColor(showMarkSpeedEditor ? .accent : .textSec)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Adjust hold speed")
+                }
+                if demo == .pinPreview {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { showReferSpeedEditor.toggle() }
+                    } label: {
+                        Image(systemName: showReferSpeedEditor ? "pencil.circle.fill" : "pencil.circle")
+                            .font(.system(size: 13))
+                            .foregroundColor(showReferSpeedEditor ? .accent : .textSec)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Adjust double-tap speed")
+                }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.textDim)
@@ -1311,6 +1320,39 @@ struct ClipenSettingsView: View {
             lab.select(.reverseCycle)
         } label: {
             Text(label)
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(selected ? .white : .textSec)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(selected ? Color.accent : Color.surfaceHi,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Same inline-editor layout as reverseKeyPicker, for a Fast/Medium/Slow
+    /// gesture-timing choice instead of a key choice. `onSelect` replays the
+    /// matching lab demo so the new speed is immediately visible.
+    private func speedPicker(label: String, selection: Binding<GestureSpeed>,
+                             onSelect: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 10)).foregroundColor(.textDim)
+            ForEach(GestureSpeed.allCases) { speed in
+                speedChoice(speed, selection: selection, onSelect: onSelect)
+            }
+            Spacer()
+        }
+        .padding(.leading, 116).padding(.trailing, 14).padding(.vertical, 8)
+    }
+
+    private func speedChoice(_ speed: GestureSpeed, selection: Binding<GestureSpeed>,
+                             onSelect: @escaping () -> Void) -> some View {
+        let selected = selection.wrappedValue == speed
+        return Button {
+            selection.wrappedValue = speed
+            onSelect()
+        } label: {
+            Text(speed.label)
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(selected ? .white : .textSec)
                 .padding(.horizontal, 10).padding(.vertical, 5)
@@ -1363,20 +1405,19 @@ struct ClipenSettingsView: View {
         HStack(spacing: 18) {
             Text("Clipen \(Self.appVersionString)  ·  Built by Vamshi Krishna Pinni")
                 .font(.system(size: 11)).foregroundColor(.textDim)
+            Button {
+                if let url = URL(string: "https://www.instagram.com/clipen.official") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Image(systemName: "heart").font(.system(size: 11)).foregroundColor(.textDim)
+            }
+            .buttonStyle(.plain)
+            .help("Support Clipen")
             Spacer()
             footerLink("Website", "https://clipen.lovable.app")
             footerLink("Privacy", "https://clipen.lovable.app/privacy.html")
             footerLink("Support", "https://clipen.lovable.app/support.html")
-            Button {
-                AppDelegate.shared?.checkForUpdates()
-            } label: {
-                HStack(spacing: 4) {
-                    Text("Check updates")
-                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 9))
-                }
-                .font(.system(size: 11)).foregroundColor(.textSec)
-            }
-            .buttonStyle(.plain)
             Button {
                 showResetConfirm = true
             } label: {

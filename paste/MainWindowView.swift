@@ -203,11 +203,6 @@ struct MainWindowView: View {
             toolbarPill("How to Use", icon: "questionmark.circle") {
                 showTutorial = true
             }
-            toolbarPill("Support Clipen", icon: "heart") {
-                if let url = URL(string: "https://www.instagram.com/clipen.official") {
-                    NSWorkspace.shared.open(url)
-                }
-            }
         }
     }
 
@@ -408,6 +403,16 @@ struct MainWindowView: View {
                 }
             }
             .buttonStyle(.plain)
+
+            Button {
+                if let url = URL(string: "https://www.instagram.com/clipen.official") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Image(systemName: "heart").font(.system(size: 11)).foregroundColor(.textSec)
+            }
+            .buttonStyle(.plain)
+            .help("Support Clipen")
 
             Text("\(manager.items.count) / \(manager.maxItems)")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
