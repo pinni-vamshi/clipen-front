@@ -577,18 +577,18 @@ final class InteractionLabController: ObservableObject {
 
     private func runCyclePinned() async throws {
         stageKeys = [.cmd, .v, .p]
+        // Items 1 and 3 are ALREADY pinned before the popup appears — this
+        // demo is about cycling through EXISTING pins, not creating them, so
+        // the badges are baked in up front (no post-open pin animation) and
+        // simply fade in with the popup.
+        items[0].pin = true
+        items[2].pin = true
         // Open the popup the SAME way every other interaction does: hold ⌘,
         // tap V. P only works once the popup is already open.
         press(.cmd)
         try await pause(400)
         showPanel(true)
         try await tap(.v)
-        try await pause(400)
-        // Pin item 1 and item 3, leave item 2 unpinned — sets up the "P
-        // skips over unpinned items" point the caption makes.
-        withAnimation(.easeOut(duration: 0.15)) { items[0].pin = true }
-        try await pause(300)
-        withAnimation(.easeOut(duration: 0.15)) { items[2].pin = true }
         try await pause(500)
         hint("Tap P to jump between pins")
         try await tap(.p)

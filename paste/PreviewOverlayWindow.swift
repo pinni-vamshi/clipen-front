@@ -744,8 +744,10 @@ struct PopoverRow: View, Equatable {
 
             if item.isPinned {
                 Image(systemName: "pin.fill")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundColor(.accentColor)
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 14, height: 14)
+                    .background(Color.blue, in: Circle())
                     .help("Pinned — hold P to unpin")
             }
 
