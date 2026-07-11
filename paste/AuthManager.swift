@@ -49,6 +49,10 @@ final class AuthManager: ObservableObject {
     /// stays hidden once seen, even if the backend leaves it `enabled`,
     /// but a NEW `id` (a different message) shows again regardless.
     private let lastDismissedMessageIDKey  = "lastDismissedRemoteMessageID"
+    /// The last LOCAL calendar day a heartbeat was successfully sent — so the
+    /// unconditional daily "still alive" ping fires at most once per day even
+    /// though its trigger (launch + the 30-min timer) runs far more often.
+    private let lastHeartbeatDateKey       = "lastHeartbeatDate"
 
     /// Anonymous usage-ping endpoint — the deployed clipen_backend on Render.
     /// (The old value, https://api.clipen.app, was a placeholder domain that
@@ -80,8 +84,10 @@ final class AuthManager: ObservableObject {
         usageFlushTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
             self?.flushCompletedDailyUsage()
             self?.checkForRemoteMessage()
+            self?.sendHeartbeatIfNeeded()
         }
         checkForRemoteMessage()
+        sendHeartbeatIfNeeded()
     }
 
     private var usageFlushTimer: Timer?
@@ -580,6 +586,63 @@ final class AuthManager: ObservableObject {
                 NSApp.activate(ignoringOtherApps: true)
                 alert.runModal()
                 UserDefaults.standard.set(message.id, forKey: self.lastDismissedMessageIDKey)
+            }
+        }.resume()
+    }
+
+    // MARK: - Daily liveness heartbeat ("still installed on this machine")
+
+    /// An UNCONDITIONAL once-per-day "still alive" ping — the piece pure usage
+    /// reporting can't give us. Usage counts only arrive when the user
+    /// actually does something, so a silent day is ambiguous: installed-but-
+    /// idle and uninstalled look identical. This ping fires every calendar
+    /// day the app runs, regardless of activity, so the backend can tell
+    /// "alive but not used today" (heartbeat present, zero usage) apart from
+    /// "gone" (no heartbeat for a stretch of days).
+    ///
+    /// Deletion is never a POSITIVE signal — a removed app can't phone home,
+    /// and macOS gives no uninstall callback — so the backend INFERS it from a
+    /// trailing gap of missing heartbeats ("last seen alive on <date>"), never
+    /// receives a delete event. Absence can also mean the Mac was off or
+    /// offline that day; only sustained absence is a meaningful "gone" signal.
+    ///
+    /// Fires at launch and on the same 30-min timer as the usage flush, but
+    /// dedupes to one send per LOCAL day via `lastHeartbeatDateKey`. Best-
+    /// effort and silent, exactly like the usage flush and remote-message
+    /// poll — it must never surface anything to the user.
+    ///
+    /// Expected backend contract — POST clipen/heartbeat, JSON body:
+    ///   { "install_key": "...", "date": "yyyy-MM-dd", "alive": true,
+    ///     "app_version": "...", "os_version": "..." }
+    /// The local day-stamp is only advanced once the backend confirms
+    /// `recorded: true` (same rule as the usage flush), so a failed/again-
+    /// cold-started send is retried on the next tick instead of being lost.
+    func sendHeartbeatIfNeeded() {
+        let today = Self.dateKey(for: Date())
+        guard UserDefaults.standard.string(forKey: lastHeartbeatDateKey) != today else { return }
+
+        var request = URLRequest(url: Self.usageBaseURL.appendingPathComponent("clipen/heartbeat"),
+                                  timeoutInterval: 90)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "install_key": DeviceIdentity.installKey,
+            "date": today,
+            "alive": true,
+            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
+            "schema_version": 1,
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                guard error == nil,
+                      let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                      let data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      json["recorded"] as? Bool == true
+                else { return }
+                UserDefaults.standard.set(today, forKey: self.lastHeartbeatDateKey)
             }
         }.resume()
     }
