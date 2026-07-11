@@ -1410,7 +1410,11 @@ struct ClipenSettingsView: View {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
-                Image(systemName: "heart").font(.system(size: 11)).foregroundColor(.textDim)
+                HStack(spacing: 4) {
+                    Image(systemName: "heart").font(.system(size: 11))
+                    Text("Support Clipen").font(.system(size: 11))
+                }
+                .foregroundColor(.textDim)
             }
             .buttonStyle(.plain)
             .help("Support Clipen")

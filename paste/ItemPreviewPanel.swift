@@ -673,36 +673,52 @@ struct RichTextContentPreview: View {
     var body: some View {
         // Trimmed once here so every sub-case below (markdown/table/code/
         // plain) benefits — a copy that happens to start with blank lines
-        // no longer opens the preview on empty space.
-        let text = text.displayTrimmedLeading
-        switch detectedType {
-        case .markdown:
-            MarkdownTextPreview(text: text)
-        case .table:
-            // Detection picks ONE type for the whole item — a code file or
-            // markdown doc that happens to contain a delimited-looking block
-            // could get classified as .table overall, and this used to
-            // render ONLY the parsed grid, discarding the rest of the text.
-            // Show both: the real content stays visible, with the table
-            // rendered as a grid underneath for a quick structured view.
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text(text)
-                        .font(.system(size: 13, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    DelimitedTablePreview(text: text)
-                        .frame(maxHeight: 320)
-                }
-            }
-        case .code(let language):
-            CodeSyntaxPreview(text: text, language: language)
-        default:
-            ScrollView {
-                Text(text)
-                    .font(.system(size: 13, design: .monospaced))
-                    .textSelection(.enabled)
+        // no longer opens the preview on empty space. Then CAPPED — a huge
+        // pasted blob (a JSON dump, a giant log paste) is already fully in
+        // memory (no file to bound), but handing it whole to a SwiftUI Text
+        // view still costs real layout time on every render; this bounds
+        // what's actually RENDERED, never what gets pasted/searched.
+        let (text, isTruncated) = self.text.displayTrimmedLeading.displayCapped()
+        VStack(alignment: .leading, spacing: 0) {
+            if isTruncated {
+                Text("Showing the first part of a large paste")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.primary.opacity(0.06))
+            }
+            Group {
+                switch detectedType {
+                case .markdown:
+                    MarkdownTextPreview(text: text)
+                case .table:
+                    // Detection picks ONE type for the whole item — a code file
+                    // or markdown doc that happens to contain a delimited-
+                    // looking block could get classified as .table overall,
+                    // and this used to render ONLY the parsed grid, discarding
+                    // the rest of the text. Show both: the real content stays
+                    // visible, with the table rendered as a grid underneath.
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text(text)
+                                .font(.system(size: 13, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            DelimitedTablePreview(text: text)
+                                .frame(maxHeight: 320)
+                        }
+                    }
+                case .code(let language):
+                    CodeSyntaxPreview(text: text, language: language)
+                default:
+                    ScrollView {
+                        Text(text)
+                            .font(.system(size: 13, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
         }
     }
@@ -1477,13 +1493,23 @@ struct ZoomableImagePreview: NSViewRepresentable {
         /// while the window isn't key — it never becomes key in the popup.
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-        /// Trackpad pinch, from the raw event — no recognizer involved.
-        override func magnify(with event: NSEvent) {
-            applyZoom(factor: 1 + event.magnification, at: event.locationInWindow)
-        }
+        // Trackpad pinch-to-zoom is NOT hand-rolled here. `allowsMagnification
+        // = true` (set in makeNSView) already gives this scroll view Apple's
+        // own native pinch handling — correctly centered at the pinch
+        // location, momentum-aware, and coexisting cleanly with panning —
+        // for free. A previous version reimplemented this via a raw
+        // `magnify(with:)` override with custom centering math, which is
+        // exactly the kind of thing that can go subtly wrong (reported: pinch
+        // didn't reliably zoom, and panning after zooming didn't work
+        // properly). Deleting the custom override in favor of AppKit's own,
+        // more thoroughly-tested implementation fixes both: native pinch
+        // zoom, AND panning (a magnified NSScrollView pans via drag/scroll
+        // automatically) work the way the platform already guarantees.
 
         /// ⌘-scroll zooms (mouse-wheel users, and the guaranteed-delivery
-        /// fallback everywhere); plain scroll keeps panning while zoomed.
+        /// fallback everywhere trackpad pinch isn't available); plain
+        /// scroll/drag pans — NSScrollView's own default behavior once
+        /// magnified, so it's a straight `super` call, not reimplemented.
         override func scrollWheel(with event: NSEvent) {
             guard event.modifierFlags.contains(.command) else {
                 super.scrollWheel(with: event)
@@ -1491,16 +1517,14 @@ struct ZoomableImagePreview: NSViewRepresentable {
             }
             let delta = max(-10, min(10, event.scrollingDeltaY))
             guard delta != 0 else { return }
-            applyZoom(factor: 1 + delta * 0.02, at: event.locationInWindow)
-        }
-
-        private func applyZoom(factor: CGFloat, at windowPoint: NSPoint) {
-            let target = min(maxMagnification, max(minMagnification, magnification * factor))
-            let point = documentView?.convert(windowPoint, from: nil) ?? .zero
+            let target = min(maxMagnification, max(minMagnification, magnification * (1 + delta * 0.02)))
+            let point = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
             setMagnification(target, centeredAt: point)
             // Landing back at 1× must re-fit — layout() skips the re-fit
             // while zoomed, so a resize mid-zoom would otherwise leave a
-            // stale fit frame behind.
+            // stale fit frame behind. (Native pinch zoom re-triggers
+            // layout() on every magnification change already, so it gets
+            // this re-fit for free without needing the same explicit call.)
             if target <= 1.001 {
                 documentView?.frame = contentView.bounds
             }

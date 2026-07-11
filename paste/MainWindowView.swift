@@ -409,7 +409,11 @@ struct MainWindowView: View {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
-                Image(systemName: "heart").font(.system(size: 11)).foregroundColor(.textSec)
+                HStack(spacing: 4) {
+                    Image(systemName: "heart").font(.system(size: 11))
+                    Text("Support Clipen").font(.system(size: 11))
+                }
+                .foregroundColor(.textSec)
             }
             .buttonStyle(.plain)
             .help("Support Clipen")
@@ -581,6 +585,54 @@ struct MainWindowView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+/// Chip strip for the "Pasted to" row. A plain `ScrollView(.horizontal)` only
+/// responds to a horizontal-capable scroll input (trackpad two-finger swipe,
+/// or shift+wheel) — a user on a plain vertical-scroll mouse has no way to
+/// reveal chips past the visible edge. This tracks its own drag offset so
+/// click-and-drag panning works with any pointing device, clamped so it
+/// can't be dragged past either end.
+private struct PastedToChipStrip: View {
+    let names: [String]
+
+    @State private var committedOffset: CGFloat = 0
+    @State private var dragOffset: CGFloat = 0
+    @State private var contentWidth: CGFloat = 0
+    @State private var stripWidth: CGFloat = 0
+
+    private var maxOffset: CGFloat { max(0, contentWidth - stripWidth) }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(names, id: \.self) { name in
+                Text(name)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.textPri)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color.white.opacity(0.08), in: Capsule())
+            }
+        }
+        .background(GeometryReader { geo in
+            Color.clear.onAppear { contentWidth = geo.size.width }
+                .onChange(of: geo.size.width) { _, newWidth in contentWidth = newWidth }
+        })
+        .offset(x: -min(maxOffset, max(0, committedOffset + dragOffset)))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipped()
+        .background(GeometryReader { geo in
+            Color.clear.onAppear { stripWidth = geo.size.width }
+                .onChange(of: geo.size.width) { _, newWidth in stripWidth = newWidth }
+        })
+        .gesture(
+            DragGesture()
+                .onChanged { value in dragOffset = -value.translation.width }
+                .onEnded { value in
+                    committedOffset = min(maxOffset, max(0, committedOffset - value.translation.width))
+                    dragOffset = 0
+                }
+        )
     }
 }
 
@@ -820,18 +872,7 @@ private struct ItemDetailView: View {
         HStack(spacing: 12) {
             Text("Pasted to").font(.system(size: 12)).foregroundColor(.textSec)
             Spacer(minLength: 8)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(pastedToNames, id: \.self) { name in
-                        Text(name)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundColor(.textPri)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.white.opacity(0.08), in: Capsule())
-                    }
-                }
-            }
-            .frame(maxWidth: 280)
+            PastedToChipStrip(names: pastedToNames).frame(maxWidth: 280)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
@@ -926,16 +967,30 @@ private struct ItemDetailView: View {
 }
 
 private struct SelectableTextBlock: View {
+    /// Raw text — capped for DISPLAY here (never affects paste/search,
+    /// which read the item's actual content directly). A huge pasted blob
+    /// (a JSON dump, a giant log) is already fully in memory, but handing
+    /// it whole to a SwiftUI Text view still costs real per-render layout
+    /// time; this bounds what's actually rendered.
     let text: String
+    private var capped: (text: String, isTruncated: Bool) { text.displayCapped() }
+
     var body: some View {
-        // Plain text on the pinned region's own darker backdrop — no boxed
-        // background or rounded border of its own.
-        Text(text)
-            .font(.system(size: 14, design: .monospaced))
-            .foregroundColor(.textPri)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
+        VStack(alignment: .leading, spacing: 4) {
+            if capped.isTruncated {
+                Text("Showing the first part of a large paste")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.textDim)
+            }
+            // Plain text on the pinned region's own darker backdrop — no
+            // boxed background or rounded border of its own.
+            Text(capped.text)
+                .font(.system(size: 14, design: .monospaced))
+                .foregroundColor(.textPri)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 4)
     }
 }
 

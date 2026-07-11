@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
@@ -44,6 +45,10 @@ final class AuthManager: ObservableObject {
     /// "toolID" used for the ⌘V/paste-action count.
     private let dailyUsageKey              = "backendDailyUsageByDateTool"
     private static let cmdVBucketToolID    = "__cmdv__"
+    /// Last remote-message `id` this install has dismissed — a message
+    /// stays hidden once seen, even if the backend leaves it `enabled`,
+    /// but a NEW `id` (a different message) shows again regardless.
+    private let lastDismissedMessageIDKey  = "lastDismissedRemoteMessageID"
 
     /// Anonymous usage-ping endpoint — the deployed clipen_backend on Render.
     /// (The old value, https://api.clipen.app, was a placeholder domain that
@@ -74,7 +79,9 @@ final class AuthManager: ObservableObject {
         // user to paste again.
         usageFlushTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
             self?.flushCompletedDailyUsage()
+            self?.checkForRemoteMessage()
         }
+        checkForRemoteMessage()
     }
 
     private var usageFlushTimer: Timer?
@@ -519,6 +526,62 @@ final class AuthManager: ObservableObject {
             ClipboardManager.shared.applyPlanLimits(ringLimit: ringLimit)
             AppDelegate.shared?.automaticallyChecksForUpdates = sparkleAutomaticChecks
         }
+    }
+
+    // MARK: - Remote message (server-controlled, reaches installs without a new release)
+
+    /// A message the backend can turn on for already-installed apps without
+    /// shipping a new version — "please update," "payment now required,"
+    /// or any one-off announcement. `enabled: false` is the off state;
+    /// nothing is ever shown unless the backend explicitly turns a message
+    /// on. Each unique `id` is shown at most once per install: dismissing
+    /// it (the single button) hides that id forever, even if the backend
+    /// leaves `enabled` true — sending a NEW message later just means
+    /// picking a new `id`.
+    private struct RemoteMessage: Decodable {
+        let enabled: Bool
+        let id: String
+        let title: String
+        let body: String
+        let buttonLabel: String
+    }
+
+    /// Polled on the same cadence as the daily usage flush (once at launch,
+    /// then every 30 minutes) — a PULL, not a push: no APNs, no extra
+    /// infrastructure, just piggybacking on the check-in the app already
+    /// makes. A message can therefore take up to that long to reach any
+    /// given install after being enabled, not instantly.
+    ///
+    /// Expected backend contract — GET clipen/message, 200 with JSON body:
+    ///   { "enabled": true, "id": "msg-2026-07-15",
+    ///     "title": "...", "body": "...", "buttonLabel": "OK" }
+    /// Any non-200, unparsable body, `enabled: false`, or already-dismissed
+    /// `id` is treated as "nothing to show" and fails silently — this must
+    /// never surface an error to the user; it's a best-effort announcement
+    /// channel, not a critical path.
+    func checkForRemoteMessage() {
+        var request = URLRequest(url: Self.usageBaseURL.appendingPathComponent("clipen/message"),
+                                  timeoutInterval: 20)
+        request.httpMethod = "GET"
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self,
+                  error == nil,
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data,
+                  let message = try? JSONDecoder().decode(RemoteMessage.self, from: data),
+                  message.enabled, !message.id.isEmpty,
+                  UserDefaults.standard.string(forKey: self.lastDismissedMessageIDKey) != message.id
+            else { return }
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = message.title
+                alert.informativeText = message.body
+                alert.addButton(withTitle: message.buttonLabel.isEmpty ? "OK" : message.buttonLabel)
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+                UserDefaults.standard.set(message.id, forKey: self.lastDismissedMessageIDKey)
+            }
+        }.resume()
     }
 
 }

@@ -1478,6 +1478,19 @@ extension String {
     var displayTrimmedLeading: String {
         String(drop(while: \.isWhitespace))
     }
+
+    /// Bounded-prefix DISPLAY cap — the in-memory counterpart to
+    /// FileKindDetector.readableTextPreview's disk-read cap. A pasted/copied
+    /// `.text` item is already fully in memory (no file I/O to bound), but
+    /// SwiftUI's Text layout cost for one huge string is real regardless —
+    /// handing a multi-hundred-KB string straight to a Text view measures
+    /// the whole thing every render. This bounds what's RENDERED, never
+    /// what's pasted, searched, or embedded (those read the untouched
+    /// content directly, not through this helper).
+    func displayCapped(_ maxLength: Int = 300_000) -> (text: String, isTruncated: Bool) {
+        guard count > maxLength else { return (self, false) }
+        return (String(prefix(maxLength)), true)
+    }
 }
 
 extension NSImage {
