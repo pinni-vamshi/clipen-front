@@ -171,7 +171,7 @@ final class InteractionLabController: ObservableObject {
     @Published var instruction: String? = nil
 
     private var task: Task<Void, Never>? = nil
-    private let tabNames = ["Recents", "Image", "URL"]
+    private let tabNames = ["Recents", "Image"]
 
     /// Stage caption — follows the user's reverse-key selection for the
     /// Reverse Cycle demo instead of the enum's static ⇧V wording.
@@ -394,11 +394,11 @@ final class InteractionLabController: ObservableObject {
         showPanel(true)
         try await tap(.v)
         try await pause(400)
-        hint("Press 1–3 to switch category")
+        hint("Press 1–2 to switch category")
         withAnimation(.easeOut(duration: 0.2)) { showNumberRow = true }
         try await pause(200)
         var last = 0
-        for i in 0..<3 {
+        for i in 0..<2 {
             withAnimation(.easeOut(duration: 0.1)) { pressedNumber = i + 1 }
             try await pause(200)
             withAnimation(.easeOut(duration: 0.1)) { pressedNumber = nil }
@@ -702,12 +702,16 @@ private struct LabMockPanel: View {
 
             Divider().background(Color.border)
 
-            // Category tabs
+            // Category tabs — two only, each pinned to a single line. A third
+            // ("⌘3 URL") pushed the row past the panel width, wrapping "⌘2
+            // Image" onto two lines, which read as a distracting layout jump
+            // during the animations.
             HStack(spacing: 5) {
-                ForEach(0..<3, id: \.self) { i in
-                    Text("⌘\(i + 1) \(["Recents", "Image", "URL"][i])")
+                ForEach(0..<2, id: \.self) { i in
+                    Text("⌘\(i + 1) \(["Recents", "Image"][i])")
                         .font(.system(size: 8, weight: lab.activeTab == i ? .bold : .regular))
                         .foregroundColor(lab.activeTab == i ? .white : .textDim)
+                        .lineLimit(1).fixedSize()
                         .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(lab.activeTab == i ? Color.accent : Color.surfaceHi,
                                     in: Capsule())
