@@ -580,6 +580,9 @@ class ClipboardManager: ObservableObject {
     /// tap = cycle between pinned items, hold = pin/unpin the highlighted
     /// item. Uses the same `vHoldThreshold` so the hold feel is consistent.
     var pTapHoldTimer: Timer?
+    /// Tap-vs-hold timer for the S key: tap = open/cycle the Share Sheet,
+    /// hold = close the share panel (mirrors X's hold-to-close).
+    var sTapHoldTimer: Timer?
     /// User-facing Fast/Medium/Slow presets for the two hold/double-tap
     /// timing windows below — hides raw millisecond numbers behind a
     /// feel-based choice instead of a slider showing exact ms values.
@@ -753,6 +756,14 @@ class ClipboardManager: ObservableObject {
         guard token == pasteSimulationToken else { return }
         isSimulatingPaste = false
     }
+
+    /// True once the user EXPLICITLY opened the item preview (Space, or a
+    /// click on a row) — as opposed to it being auto-shown by the
+    /// `autoPreviewTypes` rule. A user-opened preview follows the selection
+    /// and stays open until the user closes it, regardless of whether the
+    /// newly-highlighted item's type is in the auto-preview set; only an
+    /// AUTO-shown preview hides itself when it lands on a non-matching type.
+    var userOpenedItemPreview = false
 
     // Two-stage cycling: Stage 1 = items, Stage 2 = transforms for selected item
     var inTransformStage = false

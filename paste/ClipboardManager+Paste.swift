@@ -204,6 +204,10 @@ extension ClipboardManager {
         vTapHoldTimer = nil
         bTapHoldTimer?.invalidate()
         bTapHoldTimer = nil
+        pTapHoldTimer?.invalidate()
+        pTapHoldTimer = nil
+        sTapHoldTimer?.invalidate()
+        sTapHoldTimer = nil
         xTapHoldTimer?.invalidate()
         xTapHoldTimer = nil
         // Analytics: the paste path closes the popup without going through

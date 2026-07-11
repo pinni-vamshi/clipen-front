@@ -265,6 +265,17 @@ extension ClipboardManager {
             pTapHoldTimer = nil
             DispatchQueue.main.async { [weak self] in self?.cyclePinnedItems() }
         }
+        // Releasing S before its hold timer fired means it was a TAP — open
+        // the Share Sheet or cycle to the next destination. The hold path
+        // (close the share panel) already ran from the timer if it fired.
+        if key == 1, let timer = sTapHoldTimer {
+            timer.invalidate()
+            sTapHoldTimer = nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.inShareStage { self.cycleShare() } else { self.enterShareStage() }
+            }
+        }
         // Releasing Space ends the current physical press, independent of
         // whether the OS's autorepeat flag was reliable for this key event
         // stream (see spaceKeyIsDown in handleKeyDown).
@@ -610,17 +621,26 @@ extension ClipboardManager {
             return nil
         }
 
-        // S — tap opens the native macOS Share Sheet for the highlighted
-        // item (or every marked item, if any are marked); tapping again
-        // cycles to the next share destination. No hold action of its own,
-        // unlike X — releasing ⌘ (commitPaste → commitShare) sends via
-        // whichever destination is currently highlighted.
+        // S — tap-vs-hold, mirroring X for the transform panel:
+        //   tap  → open the native Share Sheet for the highlighted item (or
+        //          every marked item); tapping again cycles destinations
+        //   hold → close the share panel
+        // Releasing ⌘ (commitPaste → commitShare) still sends via whichever
+        // destination is highlighted. The tap action fires on key-up if the
+        // hold timer never fired; the hold timer fires the close while S is
+        // still down.
         if key == 1 && previewWindow.isVisible {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if self.inShareStage { self.cycleShare() } else { self.enterShareStage() }
+            sTapHoldTimer?.invalidate()
+            let t = Timer(timeInterval: Self.xHoldThreshold, repeats: false) { [weak self] _ in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.sTapHoldTimer = nil
+                    if self.inShareStage { self.exitShareStage() }
+                }
             }
+            RunLoop.main.add(t, forMode: .common)
+            sTapHoldTimer = t
             return nil
         }
 

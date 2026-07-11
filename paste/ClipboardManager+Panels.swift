@@ -14,6 +14,7 @@ extension ClipboardManager {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
         // Only one secondary panel at a time — close preview/share if open.
         if itemPreviewPanel.isVisible { itemPreviewPanel.hide() }
+        userOpenedItemPreview = false
         if inShareStage { exitShareStage() }
 
         // 2+ marked items: X opens the marked-set tool list (classified by
@@ -102,27 +103,54 @@ extension ClipboardManager {
         return [displayItems[selectedIndex]]
     }
 
-    /// One Sharing-Service-compatible representation per item: real file
-    /// URLs pass through untouched (AirDrop/Mail can attach them directly);
-    /// everything else falls back to its plain-text form, which every
-    /// sharing service can at least handle as a text attachment.
-    private func shareRepresentation(for item: ClipboardItem) -> Any? {
+    /// Sharing-Service-compatible representation(s) for an item — always as
+    /// FILE URLs. This is the key to AirDrop reliably appearing: AirDrop (and
+    /// several other services) can't accept a raw NSString or NSImage, so a
+    /// plain-text / code / log item shared as a bare String silently dropped
+    /// AirDrop from the destination list ("sometimes I can't see AirDrop").
+    /// Writing text/image/svg to a small temp file and sharing the URL makes
+    /// EVERY item AirDrop-able, and every other service (Mail, Messages,
+    /// Notes…) still handles a file attachment fine. Real files/URLs pass
+    /// through untouched.
+    private func shareRepresentations(for item: ClipboardItem) -> [URL] {
         switch item.content {
         case .file(let url) where FileManager.default.fileExists(atPath: url.path):
-            return url
+            return [url]
         case .files(let urls):
-            return urls.first { FileManager.default.fileExists(atPath: $0.path) }
-        case .image(let image, _, _):
-            return image
+            return urls.filter { FileManager.default.fileExists(atPath: $0.path) }
+        case .image(_, let rawData, let dataType):
+            let ext = dataType.rawValue.contains("gif") ? "gif"
+                : dataType.rawValue.contains("pdf") ? "pdf"
+                : dataType.rawValue.contains("jpeg") ? "jpg" : "png"
+            return Self.shareTempFile(rawData, ext: ext, id: item.id).map { [$0] } ?? []
+        case .svg(let src):
+            return Self.shareTempFile(Data(src.utf8), ext: "svg", id: item.id).map { [$0] } ?? []
         default:
-            return item.content.plainText
+            guard let text = item.content.plainText, !text.isEmpty else { return [] }
+            return Self.shareTempFile(Data(text.utf8), ext: "txt", id: item.id).map { [$0] } ?? []
+        }
+    }
+
+    /// Writes share payload bytes to a per-item temp file (idempotent — the
+    /// same item id reuses the same path), returning the URL or nil on
+    /// failure. Named after the item so AirDrop/Mail show a sensible filename.
+    private static func shareTempFile(_ data: Data, ext: String, id: UUID) -> URL? {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ClipenShare", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("Clipen-\(id.uuidString.prefix(8)).\(ext)")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
         }
     }
 
     func enterShareStage() {
         let targets = shareCandidateItems
         guard !targets.isEmpty else { return }
-        let items = targets.compactMap { shareRepresentation(for: $0) }
+        let items = targets.flatMap { shareRepresentations(for: $0) }
         let services = NSSharingService.sharingServices(forItems: items)
         guard !services.isEmpty else {
             flashStatus("No share destinations available for this item.")
@@ -130,6 +158,7 @@ extension ClipboardManager {
         }
         if inTransformStage { exitTransformStage() }
         if itemPreviewPanel.isVisible { itemPreviewPanel.hide() }
+        userOpenedItemPreview = false
         shareTargetItems = targets
         shareServices = Self.rankedShareServices(services)
         shareIndex = 0
@@ -201,7 +230,7 @@ extension ClipboardManager {
             return
         }
         let service = shareServices[shareIndex]
-        let items = shareTargetItems.compactMap { shareRepresentation(for: $0) }
+        let items = shareTargetItems.flatMap { shareRepresentations(for: $0) }
         // Feeds next time's ranking — the same usage-score pipeline
         // transform tools already report into.
         AuthManager.shared.registerToolUsage(toolID: Self.shareUsageKey(service))
@@ -297,10 +326,15 @@ extension ClipboardManager {
               selectedIndex < displayItems.count else { return }
         if itemPreviewPanel.isVisible {
             itemPreviewPanel.hide()
+            userOpenedItemPreview = false
         } else {
             // Only one secondary panel at a time — close transforms/share if open.
             if inTransformStage { exitTransformStage() }
             if inShareStage { exitShareStage() }
+            // Explicit user open — the preview now follows the selection and
+            // stays open until the user presses Space again (see
+            // syncItemPreviewWithSelection).
+            userOpenedItemPreview = true
             // Counted HERE (the explicit Space press), not inside
             // showSelectedItemPreview — that's also called on every cycle
             // step by syncItemPreviewWithSelection, which would inflate
@@ -320,6 +354,9 @@ extension ClipboardManager {
               selectedIndex < displayItems.count else { return }
         if inTransformStage { exitTransformStage() }
         if inShareStage { exitShareStage() }
+        // A click is an explicit open too — same "stays until the user
+        // closes it" behavior as the Space key.
+        userOpenedItemPreview = true
         resetAutoDismissTimer()
         showSelectedItemPreview()
     }
@@ -374,6 +411,17 @@ extension ClipboardManager {
     /// refreshes it when the user already opened preview via Space.
     func syncItemPreviewWithSelection() {
         guard previewWindow.isVisible else { return }
+        // A preview the USER opened follows the selection and stays open —
+        // it updates to show whatever's now highlighted and only closes when
+        // the user closes it, never because the new item's type isn't in the
+        // auto-preview set. That auto-hide rule applies ONLY to previews the
+        // app itself auto-showed.
+        if userOpenedItemPreview {
+            if itemPreviewPanel.isVisible {
+                showSelectedItemPreview()
+            }
+            return
+        }
         let autoShowsCurrent = !autoPreviewTypes.isEmpty
             && displayItems.indices.contains(selectedIndex)
             && autoPreviewTypes.contains(AutoPreviewContentType.from(displayItems[selectedIndex]))

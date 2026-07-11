@@ -221,17 +221,39 @@ extension ClipboardManager {
             return
         }
 
-        // 4. Everything else (plain text, SVG, image, opaque blob) — captured
-        // synchronously and reliably via the shared `basicItem` builder.
-        if let item = basicItem(from: pb) {
-            addCaptured(item, sidecar: sidecarSnapshot)
-            if fetchURLTitles, case .text(let str) = item.content {
-                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let url = URL(string: trimmed),
-                   url.scheme == "http" || url.scheme == "https" {
-                    fetchURLTitle(for: item.id, url: url)
+        // 4a. Plain text — the one capture path whose ClipboardItem
+        // construction is genuinely expensive: init() runs the full content
+        // detection (code / JSON / table classification, which scans up to
+        // 50 K chars, JSON-parses, etc.) plus the normalized search-haystack
+        // build, all synchronously. On a big JSON dump, code file, or log
+        // paste that was blocking the main thread → the "copies load a bit
+        // slow" stall. The string is read on the main thread (cheap value
+        // copy), then the heavy init runs on a background queue and only the
+        // insert hops back to main. Non-text captures below stay synchronous
+        // — their detection is trivial.
+        if let str = pb.string(forType: .string), !str.isEmpty {
+            let sidecar = sidecarSnapshot
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self else { return }
+                let item = ClipboardItem(content: .text(str))
+                DispatchQueue.main.async {
+                    self.addCaptured(item, sidecar: sidecar)
+                    if self.fetchURLTitles {
+                        let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let url = URL(string: trimmed),
+                           url.scheme == "http" || url.scheme == "https" {
+                            self.fetchURLTitle(for: item.id, url: url)
+                        }
+                    }
                 }
             }
+            return
+        }
+
+        // 4b. Everything else (SVG, image, opaque blob) — cheap detection,
+        // captured synchronously via the shared `basicItem` builder.
+        if let item = basicItem(from: pb) {
+            addCaptured(item, sidecar: sidecarSnapshot)
         } else {
             // Analytics: a pasteboard change we couldn't turn into ANY item
             // — the capture was effectively dropped.

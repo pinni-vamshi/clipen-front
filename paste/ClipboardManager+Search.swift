@@ -207,6 +207,7 @@ extension ClipboardManager {
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()
+        userOpenedItemPreview = false
         cancelPendingFirstOpen()
         // A V/B tap/hold decision in flight when the popup closes must not
         // fire later against a stale target (or a ring that's shrunk since).
@@ -214,6 +215,10 @@ extension ClipboardManager {
         vTapHoldTimer = nil
         bTapHoldTimer?.invalidate()
         bTapHoldTimer = nil
+        pTapHoldTimer?.invalidate()
+        pTapHoldTimer = nil
+        sTapHoldTimer?.invalidate()
+        sTapHoldTimer = nil
         firstOpenHoldTimer?.invalidate()
         firstOpenHoldTimer = nil
         popupPinnedOpen = false

@@ -39,6 +39,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Sparkle auto-update controller — must be retained for the app lifetime.
     private var updaterController: SPUStandardUpdaterController?
 
+    /// A downloaded, ready-to-install update's "install and relaunch now"
+    /// block, held until the app is idle enough to relaunch without
+    /// interrupting the user. See `updater(_:willInstallUpdateOnQuit:…)`.
+    /// Clipen is a menu-bar app that's basically never quit, so Sparkle's
+    /// default "install on quit" would wait forever — this installs it
+    /// during an idle moment instead (main window closed, popup not showing).
+    private var pendingUpdateInstall: (() -> Void)?
+    private var pendingUpdateTimer: Timer?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
 
@@ -238,6 +247,55 @@ extension AppDelegate: SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Sparkle calls this when an update has been silently downloaded and is
+    /// ready — its default is to install on the NEXT app quit. For a
+    /// menu-bar app that's never quit, that moment never comes, so the app
+    /// stayed on the old version forever with the new one sitting downloaded
+    /// (the "it never updates in the background" bug). Returning `true` takes
+    /// ownership of installation; we then relaunch-to-install as soon as the
+    /// app is idle so it's never interrupting active use.
+    func updater(_ updater: SPUUpdater,
+                 willInstallUpdateOnQuit item: SUAppcastItem,
+                 immediateInstallationBlock: @escaping () -> Void) -> Bool {
+        pendingUpdateInstall = immediateInstallationBlock
+        installPendingUpdateWhenIdle()
+        return true
+    }
+
+    /// Installs a pending update immediately if the app is idle; otherwise
+    /// keeps a light timer running that retries every couple of minutes
+    /// until an idle moment arrives.
+    private func installPendingUpdateWhenIdle() {
+        guard pendingUpdateInstall != nil else { return }
+        if tryInstallPendingUpdate() { return }
+        guard pendingUpdateTimer == nil else { return }
+        pendingUpdateTimer = Timer.scheduledTimer(withTimeInterval: 120, repeats: true) { [weak self] _ in
+            _ = self?.tryInstallPendingUpdate()
+        }
+    }
+
+    /// Returns true once the install has been fired (or there's nothing to
+    /// do). Idle = no visible main window and the ⌘V popup isn't showing, so
+    /// the relaunch never yanks a window or an in-progress cycle out from
+    /// under the user.
+    @discardableResult
+    private func tryInstallPendingUpdate() -> Bool {
+        guard let block = pendingUpdateInstall else {
+            pendingUpdateTimer?.invalidate(); pendingUpdateTimer = nil
+            return true
+        }
+        let mainWindowVisible = NSApp.windows.contains {
+            !($0 is NSPanel) && $0.isVisible && $0.identifier?.rawValue == "main"
+        }
+        let popupVisible = ClipboardManager.shared.previewWindow.isVisible
+        guard !mainWindowVisible, !popupVisible else { return false }
+
+        pendingUpdateTimer?.invalidate(); pendingUpdateTimer = nil
+        pendingUpdateInstall = nil
+        block()   // installs the update and relaunches Clipen
+        return true
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) { }
