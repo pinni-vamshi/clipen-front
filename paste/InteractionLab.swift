@@ -1837,10 +1837,9 @@ struct ClipenSettingsView: View {
                 }
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: "heart").font(.system(size: 11))
-                    Text("Support Clipen").font(.system(size: 11))
+                    Image(systemName: "heart.fill").font(.system(size: 11)).foregroundColor(.pink)
+                    Text("Support Clipen").font(.system(size: 11)).foregroundColor(.textDim)
                 }
-                .foregroundColor(.textDim)
             }
             .buttonStyle(.plain)
             .help("Support Clipen")

@@ -410,6 +410,15 @@ struct MainWindowView: View {
 
     // MARK: Bottom footer bar
 
+    /// Same "vX.Y.Z (build)" string the Settings footer shows, so both
+    /// footers display the running version identically.
+    private static var appVersionString: String {
+        let info  = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"]            as? String ?? "?"
+        return "v\(short) (\(build))"
+    }
+
     private var footerBar: some View {
         HStack(spacing: 10) {
             Button {
@@ -418,10 +427,13 @@ struct MainWindowView: View {
                 HStack(spacing: 6) {
                     Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
                         .resizable().frame(width: 16, height: 16).cornerRadius(4)
-                    Text("Clipen").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+                    Text("Clipen \(Self.appVersionString)").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
                 }
             }
             .buttonStyle(.plain)
+
+            Text("· Built by Vamshi Krishna Pinni")
+                .font(.system(size: 11)).foregroundColor(.textDim)
 
             Button {
                 if let url = URL(string: "https://www.instagram.com/clipen.official") {
@@ -429,10 +441,9 @@ struct MainWindowView: View {
                 }
             } label: {
                 HStack(spacing: 4) {
-                    Image(systemName: "heart").font(.system(size: 11))
-                    Text("Support Clipen").font(.system(size: 11))
+                    Image(systemName: "heart.fill").font(.system(size: 11)).foregroundColor(.pink)
+                    Text("Support Clipen").font(.system(size: 11)).foregroundColor(.textSec)
                 }
-                .foregroundColor(.textSec)
             }
             .buttonStyle(.plain)
             .help("Support Clipen")
