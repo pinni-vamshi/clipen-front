@@ -1459,21 +1459,33 @@ struct ClipboardItem: Identifiable {
     }
 }
 
-/// One toggle per `ClipboardContent` top-level case, for the auto-preview
-/// data-type picker — lets the user pick e.g. "always preview images" without
-/// also auto-previewing every text snippet copied.
+/// One toggle per recognizable content KIND for the auto-preview picker.
+/// Broken down finer than `ClipboardContent`'s top-level cases: a copied
+/// text snippet is classified by its DETECTED type (code / link / JSON /
+/// Markdown / email / phone / color), and a file by whether it's a PDF —
+/// so the user can auto-preview, say, only code and PDFs without every plain
+/// text snippet also popping a preview.
 enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
-    case text, richText, html, table, image, file, files, svg, blob
+    case text, code, link, json, markdown, email, phone, color
+    case richText, html, table, image, pdf, file, files, svg, blob
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .text:     return "Text"
+        case .code:     return "Code"
+        case .link:     return "Link"
+        case .json:     return "JSON"
+        case .markdown: return "Markdown"
+        case .email:    return "Email"
+        case .phone:    return "Phone"
+        case .color:    return "Color"
         case .richText: return "Rich Text"
         case .html:     return "HTML"
         case .table:    return "Table"
         case .image:    return "Image"
+        case .pdf:      return "PDF"
         case .file:     return "File"
         case .files:    return "Files"
         case .svg:      return "SVG"
@@ -1484,10 +1496,18 @@ enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
     var sfIcon: String {
         switch self {
         case .text:     return "doc.text"
+        case .code:     return "chevron.left.forwardslash.chevron.right"
+        case .link:     return "link"
+        case .json:     return "curlybraces"
+        case .markdown: return "doc.plaintext"
+        case .email:    return "envelope"
+        case .phone:    return "phone"
+        case .color:    return "paintpalette"
         case .richText: return "doc.richtext"
         case .html:     return "globe"
         case .table:    return "tablecells"
         case .image:    return "photo"
+        case .pdf:      return "doc.richtext.fill"
         case .file:     return "doc"
         case .files:    return "doc.on.doc"
         case .svg:      return "square.on.circle"
@@ -1495,14 +1515,30 @@ enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    static func from(_ content: ClipboardContent) -> AutoPreviewContentType {
-        switch content {
-        case .text:     return .text
+    /// Classify a whole item — needs the item (not just its content) so it
+    /// can read `detectedType` for text snippets and the file extension for
+    /// files.
+    static func from(_ item: ClipboardItem) -> AutoPreviewContentType {
+        switch item.content {
+        case .text:
+            switch item.detectedType {
+            case .code:     return .code
+            case .url:      return .link
+            case .json:     return .json
+            case .markdown, .latex: return .markdown
+            case .email:    return .email
+            case .phone:    return .phone
+            case .hexColor: return .color
+            case .table:    return .table
+            case .plain, .address: return .text
+            }
         case .richText: return .richText
         case .html:     return .html
         case .rtfd:     return .table
-        case .image:    return .image
-        case .file:     return .file
+        case .image(_, _, let dataType):
+            return dataType.rawValue.contains("pdf") ? .pdf : .image
+        case .file(let url):
+            return url.pathExtension.lowercased() == "pdf" ? .pdf : .file
         case .files:    return .files
         case .svg:      return .svg
         case .blob:     return .blob

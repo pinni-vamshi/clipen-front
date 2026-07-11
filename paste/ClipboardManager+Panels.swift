@@ -376,7 +376,7 @@ extension ClipboardManager {
         guard previewWindow.isVisible else { return }
         let autoShowsCurrent = !autoPreviewTypes.isEmpty
             && displayItems.indices.contains(selectedIndex)
-            && autoPreviewTypes.contains(AutoPreviewContentType.from(displayItems[selectedIndex].content))
+            && autoPreviewTypes.contains(AutoPreviewContentType.from(displayItems[selectedIndex]))
         if autoShowsCurrent {
             showSelectedItemPreview()
         } else if itemPreviewPanel.isVisible {
