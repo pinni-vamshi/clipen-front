@@ -307,6 +307,15 @@ struct MainWindowView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Clear search")
             }
+
+            // Ring count at the right end of the search bar, just before the
+            // filter dropdown — quieter here than in the footer, and reads
+            // as a live status next to the "All" filter it relates to.
+            Text("\(manager.items.count) / \(manager.maxItems)")
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(.textDim)
+                .help("Items in ring / maximum")
+
             filterDropdown
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
@@ -421,20 +430,8 @@ struct MainWindowView: View {
 
     private var footerBar: some View {
         HStack(spacing: 10) {
-            Button {
-                NSWorkspace.shared.open(URL(string: "https://clipen.lovable.app")!)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(nsImage: NSImage(named: "AppIcon") ?? NSImage())
-                        .resizable().frame(width: 16, height: 16).cornerRadius(4)
-                    Text("Clipen \(Self.appVersionString)").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
-                }
-            }
-            .buttonStyle(.plain)
-
-            Text("· Built by Vamshi Krishna Pinni")
-                .font(.system(size: 11)).foregroundColor(.textDim)
-
+            // Left cluster: ♥ Support Clipen · version · Built by — same
+            // shape as the Settings footer's left side.
             Button {
                 if let url = URL(string: "https://www.instagram.com/clipen.official") {
                     NSWorkspace.shared.open(url)
@@ -448,9 +445,8 @@ struct MainWindowView: View {
             .buttonStyle(.plain)
             .help("Support Clipen")
 
-            Text("\(manager.items.count) / \(manager.maxItems)")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(.textDim)
+            Text("· \(Self.appVersionString) · Built by Vamshi Krishna Pinni")
+                .font(.system(size: 11)).foregroundColor(.textDim)
 
             Spacer()
 

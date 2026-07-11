@@ -1829,8 +1829,8 @@ struct ClipenSettingsView: View {
     /// there) — this is just the row content, like the Dashboard's footerBar.
     private var footer: some View {
         HStack(spacing: 18) {
-            Text("Clipen \(Self.appVersionString)  ·  Built by Vamshi Krishna Pinni")
-                .font(.system(size: 11)).foregroundColor(.textDim)
+            // Left cluster: ♥ Support Clipen · version · Built by — same
+            // order as the Dashboard footer's left side.
             Button {
                 if let url = URL(string: "https://www.instagram.com/clipen.official") {
                     NSWorkspace.shared.open(url)
@@ -1843,6 +1843,8 @@ struct ClipenSettingsView: View {
             }
             .buttonStyle(.plain)
             .help("Support Clipen")
+            Text("· Clipen \(Self.appVersionString) · Built by Vamshi Krishna Pinni")
+                .font(.system(size: 11)).foregroundColor(.textDim)
             Spacer()
             footerLink("Website", "https://clipen.lovable.app")
             footerLink("Privacy", "https://clipen.lovable.app/privacy.html")
