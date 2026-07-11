@@ -5,15 +5,15 @@ import AppKit
 // MARK: - Design tokens
 
 extension Color {
-    static let bg        = Color(hex: "#0F0F0F")
-    static let surface   = Color(hex: "#1A1A1A")
-    static let surfaceHi = Color(hex: "#242424")
-    static let border    = Color(hex: "#2C2C2C")
+    static let bg        = Color(light: "#F5F5F7", dark: "#0F0F0F")
+    static let surface   = Color(light: "#FFFFFF", dark: "#1A1A1A")
+    static let surfaceHi = Color(light: "#ECECEF", dark: "#242424")
+    static let border    = Color(light: "#D9D9DE", dark: "#2C2C2C")
     static let accent    = Color(hex: "#4F8EF7")
     static let accentDim = Color(hex: "#4F8EF7").opacity(0.15)
-    static let textPri   = Color.white
-    static let textSec   = Color(hex: "#888888")
-    static let textDim   = Color(hex: "#444444")
+    static let textPri   = Color(light: "#1A1A1A", dark: "#FFFFFF")
+    static let textSec   = Color(light: "#6E6E73", dark: "#888888")
+    static let textDim   = Color(light: "#A0A0A5", dark: "#444444")
 }
 
 // MARK: - Window minimum-size configurator
@@ -159,7 +159,6 @@ struct MainWindowView: View {
         // No system material behind the toolbar — the window's own frosted
         // background shows through, same look as the previous custom row.
         .toolbarBackground(.hidden, for: .windowToolbar)
-        .preferredColorScheme(.dark)
         .sheet(isPresented: $showTutorial) {
             TutorialSheet(isPresented: $showTutorial, onSeeMore: { showSettings = true })
         }
@@ -294,11 +293,6 @@ struct MainWindowView: View {
                 .font(.system(size: 16))
                 .foregroundColor(.textPri)
             if !searchText.isEmpty {
-                if auth.semanticSearch && !filtered.isEmpty {
-                    Text("Smart").font(.system(size: 9, weight: .semibold)).foregroundColor(.accent)
-                        .padding(.horizontal, 5).padding(.vertical, 2)
-                        .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 4))
-                }
                 Button { searchText = "" } label: {
                     Image(systemName: "xmark.circle.fill").foregroundColor(.textDim)
                 }

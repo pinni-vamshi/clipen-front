@@ -220,7 +220,6 @@ struct PopoverPreviewView: View {
             popupSearchBar
             categoryStrip
             firstCycleHint
-            shareStageBanner
             Divider()
             rowArea
             Divider()
@@ -445,37 +444,6 @@ struct PopoverPreviewView: View {
         }
     }
 
-    // MARK: Share stage banner (S key)
-
-    /// Shows the currently-highlighted Share Sheet destination while
-    /// cycling with S, and how many items will be sent if more than one is
-    /// marked — same role as TransformPanel's tool name, just inline
-    /// instead of a separate floating panel since there's no per-service
-    /// preview content to show.
-    @ViewBuilder
-    private var shareStageBanner: some View {
-        if manager.inShareStage, manager.shareServices.indices.contains(manager.shareIndex) {
-            let service = manager.shareServices[manager.shareIndex]
-            HStack(spacing: 6) {
-                Image(nsImage: service.image).resizable().frame(width: 14, height: 14)
-                Text("Share via \(service.title)")
-                    .font(.system(size: 11, weight: .medium))
-                if manager.shareTargetItems.count > 1 {
-                    Text("· \(manager.shareTargetItems.count) items")
-                        .font(.system(size: 10)).foregroundColor(.secondary)
-                }
-                Spacer()
-                Text("\(manager.shareIndex + 1)/\(manager.shareServices.count)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.secondary)
-            }
-            .foregroundColor(.textPri)
-            .padding(.horizontal, 14).padding(.vertical, 7)
-            .background(Color.accent.opacity(0.15))
-            .transition(.opacity)
-        }
-    }
-
     // MARK: Row area
 
     private var rowArea: some View {
@@ -633,6 +601,61 @@ private struct PopoverDragPreview: View {
     }
 }
 
+// MARK: - Multi-item drag source
+
+/// Starts a genuine multi-item AppKit drag session (one `NSDraggingItem` per
+/// marked item) instead of SwiftUI's `.onDrag`, which only ever supports a
+/// single `NSItemProvider` per drag regardless of how it's populated. See
+/// the doc comment on its call site in `PopoverRow` for the bug this fixes.
+private struct MultiItemDragSource: NSViewRepresentable {
+    let writers: [NSPasteboardWriting]
+
+    func makeNSView(context: Context) -> DragSourceView {
+        let view = DragSourceView()
+        view.writers = writers
+        return view
+    }
+
+    func updateNSView(_ nsView: DragSourceView, context: Context) {
+        nsView.writers = writers
+    }
+
+    final class DragSourceView: NSView, NSDraggingSource {
+        var writers: [NSPasteboardWriting] = []
+        private var mouseDownPoint: NSPoint?
+
+        // Report a hit everywhere in bounds so mouseDown/mouseDragged reach
+        // this view instead of falling through to whatever SwiftUI gesture
+        // recognizer sits underneath it in the row.
+        override func hitTest(_ point: NSPoint) -> NSView? { self }
+
+        override func mouseDown(with event: NSEvent) {
+            mouseDownPoint = convert(event.locationInWindow, from: nil)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start = mouseDownPoint, !writers.isEmpty else { return }
+            let current = convert(event.locationInWindow, from: nil)
+            // A small movement threshold so a plain click (select/preview)
+            // doesn't get swallowed as an accidental drag start.
+            guard hypot(current.x - start.x, current.y - start.y) > 4 else { return }
+            mouseDownPoint = nil
+
+            let draggingItems: [NSDraggingItem] = writers.map { writer in
+                let dragItem = NSDraggingItem(pasteboardWriter: writer)
+                dragItem.setDraggingFrame(bounds, contents: nil)
+                return dragItem
+            }
+            beginDraggingSession(with: draggingItems, event: event, source: self)
+        }
+
+        func draggingSession(_ session: NSDraggingSession,
+                             sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+            .every
+        }
+    }
+}
+
 // MARK: - Row
 
 struct PopoverRow: View, Equatable {
@@ -674,10 +697,25 @@ struct PopoverRow: View, Equatable {
         .background(isSelected ? Color.accentColor : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.horizontal, 6)
+        .overlay {
+            // SwiftUI's .onDrag below only ever hands the system ONE
+            // NSItemProvider, no matter how many representations get
+            // crammed into it — a drop target still materializes exactly
+            // ONE pasteboard item from it. That's why dragging a multi-mark
+            // selection out only ever produced the first marked item: a
+            // single item literally can't split into several dropped files.
+            // A real multi-item drag needs one NSDraggingItem PER item,
+            // which only AppKit's own beginDraggingSession supports — this
+            // overlay intercepts the drag with that instead, whenever 2+
+            // items are marked (matches the old fallback's "any row drags
+            // the whole marked set" behavior).
+            if ClipboardManager.shared.markedItemIDs.count > 1 {
+                MultiItemDragSource(
+                    writers: ClipboardManager.shared.orderedMarkedItems.map { $0.makePasteboardWriter() })
+            }
+        }
         .onDrag {
-            // If this item is marked (part of the multi-paste queue), drag ALL
-            // marked items together. Otherwise drag just this item.
-            ClipboardManager.shared.markedItemsDragProvider(fallback: item)
+            item.makeItemProvider()
         } preview: {
             PopoverDragPreview(item: item,
                                markedCount: ClipboardManager.shared.markedItemIDs.count)

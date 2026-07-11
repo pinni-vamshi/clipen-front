@@ -304,6 +304,7 @@ class ClipboardManager: ObservableObject {
     let previewWindow  = PreviewOverlayWindow()
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
+    let sharePanel = SharePanel()
     let fastPasteHintPanel = FastPasteHintPanel()
     /// Mirrors `AXIsProcessTrusted()`. Initialized synchronously so the
     /// onboarding screen doesn't flash on launch for users who already
@@ -515,6 +516,28 @@ class ClipboardManager: ObservableObject {
     /// a different item than the one remembered. Restore resolves this ID
     /// first and only falls back to the clamped index when the item is gone.
     var rememberedItemID: UUID? = nil
+    /// When the popup last closed with a position captured — restoring only
+    /// makes sense for a SHORT gap (you tabbed away and came right back);
+    /// after `rememberLastPositionTimeoutMinutes` of being closed, the ring
+    /// has likely moved on enough that starting fresh at the top makes more
+    /// sense than jumping back to a now-stale row. nil until the popup has
+    /// closed at least once this session.
+    var rememberedSelectionSavedAt: Date? = nil
+    /// User-facing preset (minutes) for how long a remembered position stays
+    /// valid — editable via the pill next to the "Remember last position"
+    /// toggle, only enabled while that toggle is on. 0 is the special
+    /// "Until turned off" preset — no expiry at all, matching the original
+    /// behavior this timeout was layered on top of — so it's the default,
+    /// not one of the timed presets (1/3/5/10/15/30/60 minutes).
+    @Published var rememberLastPositionTimeoutMinutes: Int =
+        UserDefaults.standard.object(forKey: "rememberLastPositionTimeoutMinutes") as? Int ?? 0 {
+        didSet {
+            UserDefaults.standard.set(rememberLastPositionTimeoutMinutes, forKey: "rememberLastPositionTimeoutMinutes")
+            if oldValue != rememberLastPositionTimeoutMinutes {
+                AuthManager.shared.registerActionUsage(actionID: "setting.remember_last_timeout")
+            }
+        }
+    }
 
     /// Wait-then-decide disambiguation for a plain V press while the popup is
     /// already open — mirrors cycleNext()'s own pendingFirstOpen/
@@ -1749,6 +1772,56 @@ extension ClipboardItem {
             }
         }
         return provider
+    }
+
+    /// A real NSPasteboardWriting object for exactly this one item — used to
+    /// build one NSDraggingItem per marked item for a genuine multi-item
+    /// AppKit drag. `NSItemProvider` (used by `makeItemProvider()` above,
+    /// for SwiftUI's single-provider `.onDrag`) does NOT conform to
+    /// NSPasteboardWriting on macOS, so it can't be reused here.
+    func makePasteboardWriter() -> NSPasteboardWriting {
+        switch content {
+        case .file(let url):
+            return url as NSURL
+        case .files(let urls):
+            // Same "first URL only" limitation makeItemProvider() already
+            // has for this case — a single dragged item can carry one
+            // pasteboard payload; genuinely splitting a multi-file HISTORY
+            // ENTRY into further separate drag items is a separate change.
+            if let first = urls.first { return first as NSURL }
+            return NSPasteboardItem()
+        default:
+            let pbItem = NSPasteboardItem()
+            switch content {
+            case .text(let str):
+                pbItem.setString(str, forType: .string)
+            case .richText(let attrStr, let plain):
+                if let rtfData = try? attrStr.data(from: NSRange(location: 0, length: attrStr.length),
+                                                    documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) {
+                    pbItem.setData(rtfData, forType: .rtf)
+                }
+                pbItem.setString(plain, forType: .string)
+            case .html(let html, let plain):
+                if let htmlData = html.data(using: .utf8) {
+                    pbItem.setData(htmlData, forType: .html)
+                }
+                pbItem.setString(plain, forType: .string)
+            case .rtfd(let rtfdData, let plain):
+                pbItem.setData(rtfdData, forType: .rtfd)
+                pbItem.setString(plain, forType: .string)
+            case .image(_, let rawData, let dataType):
+                pbItem.setData(rawData, forType: dataType)
+            case .svg(let src):
+                pbItem.setString(src, forType: .string)
+            case .blob(let dict):
+                if let firstKey = dict.keys.first, let firstData = dict[firstKey] {
+                    pbItem.setData(firstData, forType: NSPasteboard.PasteboardType(firstKey))
+                }
+            case .file, .files:
+                break // handled above
+            }
+            return pbItem
+        }
     }
 
     /// Creates a single NSItemProvider that carries ALL items for a multi-item drag.

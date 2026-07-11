@@ -100,9 +100,10 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     /// Preview several marked items at once, stacked top-to-bottom in a single
     /// scrolling panel. Used when the user presses Space with a multi-paste
     /// queue active — one panel, scroll to see every marked item in order.
-    func show(forItems items: [ClipboardItem], near popupFrame: NSRect, anchorPoint: NSPoint? = nil) {
+    func show(forItems items: [ClipboardItem], currentItemID: UUID? = nil,
+              near popupFrame: NSRect, anchorPoint: NSPoint? = nil) {
         guard !items.isEmpty else { hide(); return }
-        present(AnyView(MultiItemPreviewView(items: items)), width: 520, height: 520,
+        present(AnyView(MultiItemPreviewView(items: items, currentItemID: currentItemID)), width: 520, height: 520,
                 near: popupFrame, anchorPoint: anchorPoint)
     }
 
@@ -176,11 +177,20 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
 /// scrolling panel with the standard popover chrome.
 private struct MultiItemPreviewView: View {
     let items: [ClipboardItem]
+    /// The item the user is actually highlighted on right now — always
+    /// present in `items` (folded in by showSelectedItemPreview even when
+    /// it isn't itself marked) and badged distinctly so it's never lost
+    /// inside a stack of marked rows.
+    var currentItemID: UUID? = nil
+
+    private var markedCount: Int {
+        currentItemID == nil ? items.count : items.count - 1
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("\(items.count) marked")
+                Text("\(markedCount) marked")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Text("Space to close")
@@ -196,14 +206,23 @@ private struct MultiItemPreviewView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                         if idx > 0 { Divider() }
+                        let isCurrent = item.id == currentItemID
                         HStack(spacing: 8) {
                             Text("\(idx + 1)")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .foregroundColor(.accentColor)
                                 .frame(width: 18)
                             ItemPreviewView(item: item, compact: true)
+                            if isCurrent {
+                                Text("CURRENT")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 3))
+                            }
                         }
                         .padding(.leading, 8)
+                        .background(isCurrent ? Color.accentColor.opacity(0.08) : Color.clear)
                     }
                 }
             }

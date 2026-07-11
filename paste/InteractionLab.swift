@@ -599,7 +599,7 @@ private struct LabMockPanel: View {
                 if lab.searchActive {
                     Text("Type to search")
                         .font(.system(size: 9))
-                    Rectangle().fill(Color.white).frame(width: 1, height: 10)
+                    Rectangle().fill(Color.textPri).frame(width: 1, height: 10)
                         .opacity(0.9)
                 } else {
                     Text("Press F to search").font(.system(size: 9))
@@ -840,6 +840,8 @@ struct ClipenSettingsView: View {
     @State private var showReferSpeedEditor = false
     @State private var showPinnedOpenSpeedEditor = false
     @State private var showAutoPreviewPicker = false
+    @State private var showRememberTimeoutPicker = false
+    @State private var showAutoDismissPicker = false
 
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
@@ -983,24 +985,24 @@ struct ClipenSettingsView: View {
             rowNumber(n)
             Image(systemName: "eye").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Always show preview").font(.system(size: 13)).foregroundColor(.textPri)
-            Spacer(minLength: 8)
-            if !manager.autoPreviewTypes.isEmpty {
-                AutoPreviewChipStrip(types: Array(manager.autoPreviewTypes).sorted { $0.label < $1.label }) { type in
-                    manager.autoPreviewTypes.remove(type)
-                }
-                .frame(maxWidth: 160)
-            }
             Button {
                 showAutoPreviewPicker.toggle()
             } label: {
-                Image(systemName: "plus.circle\(showAutoPreviewPicker ? ".fill" : "")")
-                    .font(.system(size: 14))
-                    .foregroundColor(showAutoPreviewPicker ? .accent : .textSec)
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 15))
+                    .foregroundColor(.accent)
             }
             .buttonStyle(.plain)
             .help("Choose which content types auto-show preview")
             .popover(isPresented: $showAutoPreviewPicker, arrowEdge: .bottom) {
                 autoPreviewPicker
+            }
+            if !manager.autoPreviewTypes.isEmpty {
+                AutoPreviewChipStrip(types: Array(manager.autoPreviewTypes).sorted { $0.label < $1.label }) { type in
+                    manager.autoPreviewTypes.remove(type)
+                }
+            } else {
+                Spacer(minLength: 0)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 16)
@@ -1046,6 +1048,153 @@ struct ClipenSettingsView: View {
         }
         .frame(width: 200)
         .padding(.bottom, 4)
+    }
+
+    private static let rememberTimeoutPresets = [1, 3, 5, 10, 15, 30, 60]
+
+    /// "Remember last position" toggle plus a pill that sets how long a
+    /// remembered position stays valid before a reopen starts fresh at the
+    /// top instead — the pill is only interactive while the toggle is on,
+    /// matching the request that the timer is meaningless with the feature
+    /// itself switched off.
+    private func rememberLastPositionRow(_ n: Int) -> some View {
+        HStack(spacing: 10) {
+            rowNumber(n)
+            Image(systemName: "clock.arrow.circlepath").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+            Text("Remember last position").font(.system(size: 13)).foregroundColor(.textPri)
+            Spacer(minLength: 8)
+            Button {
+                showRememberTimeoutPicker.toggle()
+            } label: {
+                let minutes = manager.rememberLastPositionTimeoutMinutes
+                let label = minutes == 0 ? "∞"
+                    : (minutes >= 60 ? "\(minutes / 60)h" : "\(minutes)m")
+                HStack(spacing: 4) {
+                    Image(systemName: minutes == 0 ? "infinity" : "timer").font(.system(size: 9, weight: .semibold))
+                    Text(label).font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+                .foregroundColor(manager.rememberLastSelection ? .textPri : .textDim)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(manager.rememberLastSelection ? Color.surfaceHi : Color.surfaceHi.opacity(0.4),
+                            in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!manager.rememberLastSelection)
+            .opacity(manager.rememberLastSelection ? 1 : 0.4)
+            .help("How long a remembered position stays valid before reopening starts at the top again")
+            .popover(isPresented: $showRememberTimeoutPicker, arrowEdge: .bottom) {
+                rememberTimeoutPicker
+            }
+            Toggle("", isOn: $manager.rememberLastSelection).toggleStyle(.switch).controlSize(.mini).tint(.accent)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 16)
+        .frame(maxHeight: .infinity)
+    }
+
+    private static let autoDismissPresets: [Double] = [10, 30, 60, 180, 300, 600, 1800]
+
+    /// "Auto-dismiss popup" toggle plus a pill/popover preset picker — same
+    /// pattern as `rememberLastPositionRow` above, replacing the old
+    /// separate slider row entirely. Pill only interactive while the
+    /// toggle is on, same reasoning as the remember-position pill.
+    private func autoDismissRow(_ n: Int) -> some View {
+        HStack(spacing: 10) {
+            rowNumber(n)
+            Image(systemName: "timer").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+            Text("Auto-dismiss popup").font(.system(size: 13)).foregroundColor(.textPri)
+            Spacer(minLength: 8)
+            Button {
+                showAutoDismissPicker.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "hourglass.bottomhalf.filled").font(.system(size: 9, weight: .semibold))
+                    Text(Self.autoDismissLabel(manager.autoDismissSeconds))
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+                .foregroundColor(manager.autoDismissEnabled ? .textPri : .textDim)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(manager.autoDismissEnabled ? Color.surfaceHi : Color.surfaceHi.opacity(0.4),
+                            in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!manager.autoDismissEnabled)
+            .opacity(manager.autoDismissEnabled ? 1 : 0.4)
+            .help("How long the popup sits idle before it auto-dismisses")
+            .popover(isPresented: $showAutoDismissPicker, arrowEdge: .bottom) {
+                autoDismissPicker
+            }
+            Toggle("", isOn: $manager.autoDismissEnabled).toggleStyle(.switch).controlSize(.mini).tint(.accent)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 16)
+        .frame(maxHeight: .infinity)
+    }
+
+    private static func autoDismissLabel(_ seconds: Double) -> String {
+        seconds >= 60 ? "\(Int(seconds / 60))m" : "\(Int(seconds))s"
+    }
+
+    private var autoDismissPicker: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Dismiss after").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+                .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
+            ForEach(Self.autoDismissPresets, id: \.self) { seconds in
+                rememberTimeoutRow(
+                    label: seconds >= 60 ? "\(Int(seconds / 60)) min\(seconds == 60 ? "" : "s")" : "\(Int(seconds)) sec",
+                    isOn: manager.autoDismissSeconds == seconds
+                ) {
+                    manager.autoDismissSeconds = seconds
+                    showAutoDismissPicker = false
+                }
+            }
+            Spacer(minLength: 6)
+        }
+        .frame(width: 160)
+        .padding(.bottom, 4)
+    }
+
+    private var rememberTimeoutPicker: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Reopen within").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+                .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
+
+            // "Until turned off" is its own top-of-list entry, not just
+            // another number in the sequence — it's a fundamentally
+            // different mode (no expiry at all) and the default, so it
+            // gets its own row above a divider instead of being sandwiched
+            // between timed presets.
+            rememberTimeoutRow(label: "Until turned off", isOn: manager.rememberLastPositionTimeoutMinutes == 0) {
+                manager.rememberLastPositionTimeoutMinutes = 0
+                showRememberTimeoutPicker = false
+            }
+
+            Divider().padding(.horizontal, 8).padding(.vertical, 2)
+
+            ForEach(Self.rememberTimeoutPresets, id: \.self) { minutes in
+                rememberTimeoutRow(label: minutes >= 60 ? "\(minutes / 60) hour" : "\(minutes) min\(minutes == 1 ? "" : "s")",
+                                   isOn: manager.rememberLastPositionTimeoutMinutes == minutes) {
+                    manager.rememberLastPositionTimeoutMinutes = minutes
+                    showRememberTimeoutPicker = false
+                }
+            }
+            Spacer(minLength: 6)
+        }
+        .frame(width: 160)
+        .padding(.bottom, 4)
+    }
+
+    private func rememberTimeoutRow(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(label).font(.system(size: 12)).foregroundColor(.textPri)
+                Spacer()
+                if isOn {
+                    Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(.accent)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// A nested slider row belonging to the toggle directly above it (e.g.
@@ -1231,24 +1380,9 @@ struct ClipenSettingsView: View {
                 rowDivider()
                 autoPreviewRow(3)
                 rowDivider()
-                behaviourRow(4, icon: "clock.arrow.circlepath", "Remember last position",
-                             isOn: $manager.rememberLastSelection)
+                rememberLastPositionRow(4)
                 rowDivider()
-                behaviourRow(5, icon: "timer", "Auto-dismiss popup",
-                             isOn: $manager.autoDismissEnabled)
-
-                // Same as Open delay: the interval slider is part of the
-                // Auto-dismiss setting itself — no divider between them.
-                nestedSliderRow(
-                    icon: "hourglass.bottomhalf.filled", label: "Dismiss after",
-                    valueText: String(format: "%.0f s", manager.autoDismissSeconds),
-                    disabled: !manager.autoDismissEnabled
-                ) {
-                    Slider(value: Binding(get: { manager.autoDismissSeconds },
-                                         set: { manager.autoDismissSeconds = ($0 / 10).rounded() * 10 }),
-                           in: 10...600)
-                        .tint(.accent)
-                }
+                autoDismissRow(5)
             }
         }
     }

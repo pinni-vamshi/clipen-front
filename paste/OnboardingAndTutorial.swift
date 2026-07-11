@@ -146,7 +146,7 @@ struct TutorialSheet: View {
         // needs real horizontal room for both halves to breathe. The copy-
         // gate page (page 0) just gets extra margin; nothing there depends
         // on this width.
-        .frame(width: 760).background(Color.surface).preferredColorScheme(.dark)
+        .frame(width: 760).background(Color.surface)
         .onAppear {
             baselineIDs = Set(manager.items.map(\.id))
             if let demo = Self.demoForPage[page] { lab.select(demo) }

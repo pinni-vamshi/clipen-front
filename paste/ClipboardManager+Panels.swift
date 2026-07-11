@@ -12,8 +12,9 @@ extension ClipboardManager {
 
     func enterTransformStage() {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
-        // Only one secondary panel at a time — close preview if open.
+        // Only one secondary panel at a time — close preview/share if open.
         if itemPreviewPanel.isVisible { itemPreviewPanel.hide() }
+        if inShareStage { exitShareStage() }
 
         // 2+ marked items: X opens the marked-set tool list (classified by
         // what's marked: all-text / all-image / all-PDF / all-file / mixed)
@@ -130,14 +131,56 @@ extension ClipboardManager {
         if inTransformStage { exitTransformStage() }
         if itemPreviewPanel.isVisible { itemPreviewPanel.hide() }
         shareTargetItems = targets
-        shareServices = services
+        shareServices = Self.rankedShareServices(services)
         shareIndex = 0
         inShareStage = true
+        updateSharePanel()
+    }
+
+    /// Alphabetical by default (no signal to rank by yet); once there's real
+    /// usage history for at least one of these services, ranks by the same
+    /// frequency + recency + time-of-day composite score transform tools use
+    /// (`AuthManager.toolImportanceScore`) — services you actually share
+    /// through often, or recently, float to the top instead of staying
+    /// pinned alphabetically forever.
+    private static func rankedShareServices(_ services: [NSSharingService]) -> [NSSharingService] {
+        let scored = services.map { ($0, AuthManager.shared.toolImportanceScore(for: shareUsageKey($0))) }
+        let hasData = scored.contains { $0.1 > 0 }
+        guard hasData else {
+            return services.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        }
+        return scored.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            return lhs.0.title.localizedCaseInsensitiveCompare(rhs.0.title) == .orderedAscending
+        }.map(\.0)
+    }
+
+    /// NSSharingService exposes no stable bundle-level identifier publicly —
+    /// title is the best available stable-enough key ("Mail", "AirDrop",
+    /// "Messages" don't change between launches).
+    private static func shareUsageKey(_ service: NSSharingService) -> String {
+        "share.\(service.title)"
     }
 
     func cycleShare() {
         guard inShareStage, !shareServices.isEmpty else { return }
         shareIndex = (shareIndex + 1) % shareServices.count
+        updateSharePanel()
+    }
+
+    /// Lets the share panel's own row clicks move the highlight without
+    /// going through the S-key cycle path — same "click to select" pattern
+    /// TransformPanel's rows already use.
+    func refreshShareStagePanel() {
+        updateSharePanel()
+    }
+
+    private func updateSharePanel() {
+        guard inShareStage else { return }
+        let anchor = selectedRowAnchor()
+        sharePanel.show(services: shareServices, selectedIndex: shareIndex,
+                        itemCount: shareTargetItems.count,
+                        near: previewWindow.frame, anchorPoint: anchor)
     }
 
     func exitShareStage() {
@@ -145,6 +188,7 @@ extension ClipboardManager {
         shareServices = []
         shareTargetItems = []
         shareIndex = 0
+        sharePanel.hide()
     }
 
     /// ⌘-release while in share stage: invoke the currently-highlighted
@@ -158,6 +202,9 @@ extension ClipboardManager {
         }
         let service = shareServices[shareIndex]
         let items = shareTargetItems.compactMap { shareRepresentation(for: $0) }
+        // Feeds next time's ranking — the same usage-score pipeline
+        // transform tools already report into.
+        AuthManager.shared.registerToolUsage(toolID: Self.shareUsageKey(service))
         exitShareStage()
         markedItemIDs = []
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
@@ -251,8 +298,9 @@ extension ClipboardManager {
         if itemPreviewPanel.isVisible {
             itemPreviewPanel.hide()
         } else {
-            // Only one secondary panel at a time — close transforms if open.
+            // Only one secondary panel at a time — close transforms/share if open.
             if inTransformStage { exitTransformStage() }
+            if inShareStage { exitShareStage() }
             // Counted HERE (the explicit Space press), not inside
             // showSelectedItemPreview — that's also called on every cycle
             // step by syncItemPreviewWithSelection, which would inflate
@@ -265,28 +313,44 @@ extension ClipboardManager {
     /// Mouse-driven counterpart to `toggleSelectedItemPreview()` (Space key):
     /// a single click on a popup row always SHOWS the preview for that row
     /// (never toggles it closed), reusing the exact same panel/anchor logic.
-    /// Only one secondary panel at a time — closes the transform stage first
-    /// if it was open, same rule Space already follows.
+    /// Only one secondary panel at a time — closes the transform/share stage
+    /// first if it was open, same rule Space already follows.
     func uiPreviewSelectedItem() {
         guard previewWindow.isVisible, !displayItems.isEmpty,
               selectedIndex < displayItems.count else { return }
         if inTransformStage { exitTransformStage() }
+        if inShareStage { exitShareStage() }
         resetAutoDismissTimer()
         showSelectedItemPreview()
     }
 
     func showSelectedItemPreview() {
         let anchor = selectedRowAnchor()
+        let current: ClipboardItem? = (!displayItems.isEmpty && selectedIndex < displayItems.count)
+            ? displayItems[selectedIndex] : nil
         // If the user has built a multi-paste queue, preview ALL marked items
-        // stacked in one scrolling panel (in marking order) instead of just the
-        // highlighted row — so Space shows exactly what ⌘-release will paste.
+        // stacked in one scrolling panel (in marking order) — so Space shows
+        // exactly what ⌘-release will paste. But cycling with V can land the
+        // highlight on an item that ISN'T marked, and that row would then
+        // vanish from the preview entirely even though it's the one actually
+        // highlighted right now — always fold the current row into the stack,
+        // moved to the front, so what's under the cursor is never missing.
         let marked = markedItemIDs.compactMap { id in items.first(where: { $0.id == id }) }
         if marked.count > 1 {
-            itemPreviewPanel.show(forItems: marked, near: previewWindow.frame, anchorPoint: anchor)
+            var stack = marked
+            if let current {
+                if let idx = stack.firstIndex(where: { $0.id == current.id }) {
+                    stack.insert(stack.remove(at: idx), at: 0)
+                } else {
+                    stack.insert(current, at: 0)
+                }
+            }
+            itemPreviewPanel.show(forItems: stack, currentItemID: current?.id,
+                                   near: previewWindow.frame, anchorPoint: anchor)
             return
         }
-        guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
-        itemPreviewPanel.show(for: displayItems[selectedIndex], near: previewWindow.frame, anchorPoint: anchor)
+        guard let current else { return }
+        itemPreviewPanel.show(for: current, near: previewWindow.frame, anchorPoint: anchor)
     }
 
     /// The highlighted row's screen anchor point, for panels that show beside
@@ -657,10 +721,21 @@ extension ClipboardManager {
     ///   2. Centre of the screen — fallback when no text field is focused.
     func openPopupNow() {
         popupTagFilter = nil
-        // Restore the last row the user was on, if that setting is enabled.
-        // Overrides whatever first-open index the cycle path set (row 0/1),
-        // clamped to the current ring so a shrunken history can't overflow.
-        if rememberLastSelection, !displayItems.isEmpty {
+        // Restore the last row the user was on, if that setting is enabled —
+        // but only within the configured time window: a position captured
+        // 45 minutes ago is more likely stale than useful, so a gap longer
+        // than rememberLastPositionTimeoutMinutes starts fresh at the top
+        // instead, same as if the setting were off. Overrides whatever
+        // first-open index the cycle path set (row 0/1), clamped to the
+        // current ring so a shrunken history can't overflow.
+        let withinRememberWindow: Bool = {
+            guard let savedAt = rememberedSelectionSavedAt else { return false }
+            // 0 = "Until turned off" — no expiry, always restore regardless
+            // of how long the popup's been closed.
+            guard rememberLastPositionTimeoutMinutes > 0 else { return true }
+            return Date().timeIntervalSince(savedAt) <= TimeInterval(rememberLastPositionTimeoutMinutes * 60)
+        }()
+        if rememberLastSelection, withinRememberWindow, !displayItems.isEmpty {
             if let id = rememberedItemID,
                let idx = displayItems.firstIndex(where: { $0.id == id }) {
                 selectedIndex = idx
@@ -723,6 +798,7 @@ extension ClipboardManager {
         if displayItems.indices.contains(selectedIndex) {
             rememberedIndex  = selectedIndex
             rememberedItemID = displayItems[selectedIndex].id
+            rememberedSelectionSavedAt = Date()
         }
     }
 

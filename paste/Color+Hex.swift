@@ -15,6 +15,19 @@ extension Color {
             blue:  Double( val        & 0xFF) / 255
         )
     }
+
+    /// A color that resolves to a different hex value depending on the
+    /// CURRENT system/window appearance, resolved fresh at draw time via
+    /// `NSColor`'s dynamic provider — not baked in once like plain
+    /// `Color(hex:)`. This is what lets the design tokens below follow
+    /// Dark Mode without the app forcing `.preferredColorScheme(.dark)`.
+    init(light: String, dark: String) {
+        let dynamic = NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(Color(hex: isDark ? dark : light))
+        }
+        self.init(dynamic)
+    }
 }
 
 /// Wraps the real macOS `NSVisualEffectView` with the same `.popover` material

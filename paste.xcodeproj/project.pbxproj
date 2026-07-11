@@ -19,6 +19,7 @@
 		B1000000000000000000002D /* OnboardingAndTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002D /* OnboardingAndTutorial.swift */; };
 		B10000000000000000000003 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* Color+Hex.swift */; };
 		B10000000000000000000032 /* QuickLookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* QuickLookPreview.swift */; };
+		B10000000000000000000033 /* SharePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* SharePanel.swift */; };
 		B10000000000000000000005 /* FileSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* FileSnapshotStore.swift */; };
 		B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ItemPreviewPanel.swift */; };
 		B10000000000000000000007 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Keychain.swift */; };
@@ -67,6 +68,7 @@
 		A1000000000000000000002D /* OnboardingAndTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingAndTutorial.swift"; sourceTree = "<group>"; };
 		A10000000000000000000003 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		A10000000000000000000032 /* QuickLookPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "QuickLookPreview.swift"; sourceTree = "<group>"; };
+		A10000000000000000000033 /* SharePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SharePanel.swift"; sourceTree = "<group>"; };
 		A10000000000000000000005 /* FileSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSnapshotStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* ItemPreviewPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemPreviewPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000007 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
@@ -181,6 +183,7 @@
 				A1000000000000000000002D /* OnboardingAndTutorial.swift */,
 				A10000000000000000000003 /* Color+Hex.swift */,
 				A10000000000000000000032 /* QuickLookPreview.swift */,
+				A10000000000000000000033 /* SharePanel.swift */,
 				A10000000000000000000005 /* FileSnapshotStore.swift */,
 				A10000000000000000000006 /* ItemPreviewPanel.swift */,
 				A10000000000000000000007 /* Keychain.swift */,
@@ -288,6 +291,7 @@
 				B1000000000000000000002D /* OnboardingAndTutorial.swift in Sources */,
 				B10000000000000000000003 /* Color+Hex.swift in Sources */,
 				B10000000000000000000032 /* QuickLookPreview.swift in Sources */,
+				B10000000000000000000033 /* SharePanel.swift in Sources */,
 				B10000000000000000000005 /* FileSnapshotStore.swift in Sources */,
 				B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */,
 				B10000000000000000000007 /* Keychain.swift in Sources */,
@@ -452,7 +456,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 170;
+				CURRENT_PROJECT_VERSION = 171;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -470,7 +474,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.170;
+				MARKETING_VERSION = 1.0.171;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -491,7 +495,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 170;
+				CURRENT_PROJECT_VERSION = 171;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -509,7 +513,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.170;
+				MARKETING_VERSION = 1.0.171;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

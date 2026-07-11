@@ -234,6 +234,7 @@ extension ClipboardManager {
         shareServices = []
         shareTargetItems = []
         shareIndex = 0
+        sharePanel.hide()
         selectedIndex    = 0
         popupTagFilter   = nil
         cycleCount       = 0
