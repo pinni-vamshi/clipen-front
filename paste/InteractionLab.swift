@@ -13,7 +13,7 @@ import Combine
 enum InteractionDemo: String, CaseIterable, Identifiable {
     case cycle, pinnedOpen, multiPaste, search, category
     case spacePreview, pinPreview, transform, moveToFront, delete, reverseCycle
-    case cyclePinned
+    case cyclePinned, pinItem
 
     var id: String { rawValue }
 
@@ -32,7 +32,8 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return "tap C"
         case .delete:       return "tap ⌫"
         case .reverseCycle: return "⇧ + tap V"
-        case .cyclePinned:  return "tap / hold P"
+        case .cyclePinned:  return "tap P"
+        case .pinItem:      return "hold P"
         }
     }
 
@@ -50,6 +51,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .delete:       return "Delete"
         case .reverseCycle: return "Previous Item"
         case .cyclePinned:  return "Cycle Pinned"
+        case .pinItem:      return "Pin / Unpin"
         }
     }
 
@@ -68,7 +70,8 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return "Tap C to move the highlighted item to the front of the ring.\nThe selection stays put — keep tapping C to promote a run of items."
         case .delete:       return "Tap ⌫ to remove the highlighted item from the ring.\nThe next item slides into its place."
         case .reverseCycle: return "Hold ⌘ and tap ⇧V.\nMoves to the previous item instead of the next."
-        case .cyclePinned:  return "Tap P to jump between PINNED items only (wrapping at the end).\nHOLD P to pin or unpin the highlighted item."
+        case .cyclePinned:  return "Tap P to jump between PINNED items only, wrapping at the end.\nUnpinned items in between are skipped entirely."
+        case .pinItem:      return "HOLD P to pin the highlighted item (or unpin it if already pinned).\nUp to 5 items can be pinned at once."
         }
     }
 
@@ -87,6 +90,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .delete:       return [.cmd, .backspace]
         case .reverseCycle: return [.cmd, .shift, .v]
         case .cyclePinned:  return [.cmd, .p]
+        case .pinItem:      return [.cmd, .p]
         }
     }
 }
@@ -288,6 +292,7 @@ final class InteractionLabController: ObservableObject {
         case .delete:        try await runDelete()
         case .reverseCycle:  try await runReverseCycle()
         case .cyclePinned:   try await runCyclePinned()
+        case .pinItem:       try await runPinItem()
         }
     }
 
@@ -596,6 +601,38 @@ final class InteractionLabController: ObservableObject {
         showPanel(false)
         hint(nil)
         finish("Cycled between 2 pinned items — the unpinned one was skipped")
+    }
+
+    private func runPinItem() async throws {
+        stageKeys = [.cmd, .p]
+        press(.cmd)
+        try await pause(400)
+        showPanel(true)
+        try await pause(300)
+        // Move onto item 2, then HOLD P to pin it — the badge appears while
+        // P is still down, the same moment the real pin fires.
+        try await tap(.p, hold: 150)
+        selectItem(1)
+        try await pause(400)
+        hint("Hold P to pin")
+        press(.p)
+        try await pause(650)
+        withAnimation(.easeOut(duration: 0.2)) { items[1].pin = true }
+        try await pause(400)
+        release(.p)
+        try await pause(700)
+        // Hold again on the same item → unpins it, showing the toggle.
+        hint("Hold P again to unpin")
+        press(.p)
+        try await pause(650)
+        withAnimation(.easeOut(duration: 0.2)) { items[1].pin = false }
+        try await pause(400)
+        release(.p)
+        try await pause(700)
+        release(.cmd)
+        showPanel(false)
+        hint(nil)
+        finish("Hold P pins the highlighted item — hold again to unpin")
     }
 }
 
@@ -1574,7 +1611,7 @@ struct ClipenSettingsView: View {
         [.reverseCycle, .multiPaste],
         [.spacePreview, .pinPreview],
         [.transform, .search, .category, .moveToFront, .delete],
-        [.cyclePinned],
+        [.cyclePinned, .pinItem],
     ]
 
     private var interactionsSection: some View {
@@ -1614,9 +1651,9 @@ struct ClipenSettingsView: View {
                                 lab.select(.pinnedOpen)
                             }
                         }
-                        if demo == .cyclePinned && showPinHoldSpeedEditor {
+                        if demo == .pinItem && showPinHoldSpeedEditor {
                             speedPicker(label: "Hold speed", selection: $manager.pinHoldSpeed) {
-                                lab.select(.cyclePinned)
+                                lab.select(.pinItem)
                             }
                         }
                     }
@@ -1696,7 +1733,7 @@ struct ClipenSettingsView: View {
                     .buttonStyle(.plain)
                     .help("Adjust hold speed")
                 }
-                if demo == .cyclePinned {
+                if demo == .pinItem {
                     Button {
                         withAnimation(.easeOut(duration: 0.15)) { showPinHoldSpeedEditor.toggle() }
                     } label: {
@@ -1829,22 +1866,25 @@ struct ClipenSettingsView: View {
     /// there) — this is just the row content, like the Dashboard's footerBar.
     private var footer: some View {
         HStack(spacing: 18) {
-            // Left cluster: ♥ Support Clipen · version · Built by — same
-            // order as the Dashboard footer's left side.
-            Button {
-                if let url = URL(string: "https://www.instagram.com/clipen.official") {
-                    NSWorkspace.shared.open(url)
+            // Left cluster — byte-for-byte identical to the Dashboard footer:
+            // ♥ Support Clipen · version · Built by, same spacing and colors.
+            HStack(spacing: 10) {
+                Button {
+                    if let url = URL(string: "https://www.instagram.com/clipen.official") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "heart.fill").font(.system(size: 11)).foregroundColor(.pink)
+                        Text("Support Clipen").font(.system(size: 11)).foregroundColor(.textSec)
+                    }
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "heart.fill").font(.system(size: 11)).foregroundColor(.pink)
-                    Text("Support Clipen").font(.system(size: 11)).foregroundColor(.textDim)
-                }
+                .buttonStyle(.plain)
+                .help("Support Clipen")
+
+                Text("· \(Self.appVersionString) · Built by Vamshi Krishna Pinni")
+                    .font(.system(size: 11)).foregroundColor(.textDim)
             }
-            .buttonStyle(.plain)
-            .help("Support Clipen")
-            Text("· Clipen \(Self.appVersionString) · Built by Vamshi Krishna Pinni")
-                .font(.system(size: 11)).foregroundColor(.textDim)
             Spacer()
             footerLink("Website", "https://clipen.lovable.app")
             footerLink("Privacy", "https://clipen.lovable.app/privacy.html")
