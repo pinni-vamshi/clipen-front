@@ -13,6 +13,7 @@ import Combine
 enum InteractionDemo: String, CaseIterable, Identifiable {
     case cycle, pinnedOpen, multiPaste, search, category
     case spacePreview, pinPreview, transform, moveToFront, delete, reverseCycle
+    case cyclePinned
 
     var id: String { rawValue }
 
@@ -31,6 +32,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return "tap C"
         case .delete:       return "tap ⌫"
         case .reverseCycle: return "⇧ + tap V"
+        case .cyclePinned:  return "tap P"
         }
     }
 
@@ -47,6 +49,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return "Move to Front"
         case .delete:       return "Delete"
         case .reverseCycle: return "Previous Item"
+        case .cyclePinned:  return "Cycle Pinned"
         }
     }
 
@@ -65,6 +68,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return "Tap C to move the highlighted item to the front of the ring.\nThe selection stays put — keep tapping C to promote a run of items."
         case .delete:       return "Tap ⌫ to remove the highlighted item from the ring.\nThe next item slides into its place."
         case .reverseCycle: return "Hold ⌘ and tap ⇧V.\nMoves to the previous item instead of the next."
+        case .cyclePinned:  return "Tap P to jump between PINNED items only, wrapping at the end.\nUnpinned items in between are skipped entirely."
         }
     }
 
@@ -82,6 +86,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .moveToFront:  return [.cmd, .c]
         case .delete:       return [.cmd, .backspace]
         case .reverseCycle: return [.cmd, .shift, .v]
+        case .cyclePinned:  return [.cmd, .p]
         }
     }
 }
@@ -89,7 +94,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
 // MARK: - Key caps
 
 enum LabKey: String, Identifiable, Hashable {
-    case cmd, v, x, f, c, b, shift, space, backspace, one
+    case cmd, v, x, f, c, b, p, shift, space, backspace, one
 
     var id: String { rawValue }
 
@@ -101,6 +106,7 @@ enum LabKey: String, Identifiable, Hashable {
         case .f:         return "F"
         case .c:         return "C"
         case .b:         return "B"
+        case .p:         return "P"
         case .shift:     return "⇧"
         case .space:     return "SPACE"
         case .backspace: return "⌫"
@@ -122,6 +128,7 @@ final class InteractionLabController: ObservableObject {
         let id = UUID()
         var title: String
         var mark: Int? = nil
+        var pin: Bool = false
     }
 
     static func defaultItems() -> [LabItem] {
@@ -280,6 +287,7 @@ final class InteractionLabController: ObservableObject {
         case .moveToFront:   try await runMoveToFront()
         case .delete:        try await runDelete()
         case .reverseCycle:  try await runReverseCycle()
+        case .cyclePinned:   try await runCyclePinned()
         }
     }
 
@@ -561,6 +569,34 @@ final class InteractionLabController: ObservableObject {
         showPanel(false)
         finish("Pasted “\(items[idx].title)”")
     }
+
+    private func runCyclePinned() async throws {
+        stageKeys = [.cmd, .p]
+        press(.cmd)
+        try await pause(400)
+        showPanel(true)
+        try await pause(300)
+        // Pin item 1 and item 3, leave item 2 unpinned — sets up the "P
+        // skips over unpinned items" point the caption makes.
+        withAnimation(.easeOut(duration: 0.15)) { items[0].pin = true }
+        try await pause(300)
+        withAnimation(.easeOut(duration: 0.15)) { items[2].pin = true }
+        try await pause(500)
+        hint("Tap P to jump between pins")
+        try await tap(.p)
+        selectItem(0)
+        try await pause(500)
+        try await tap(.p)
+        selectItem(2)
+        try await pause(500)
+        try await tap(.p)
+        selectItem(0)
+        try await pause(800)
+        release(.cmd)
+        showPanel(false)
+        hint(nil)
+        finish("Cycled between 2 pinned items — the unpinned one was skipped")
+    }
 }
 
 // MARK: - Stage views
@@ -636,6 +672,13 @@ private struct LabMockPanel: View {
                             .font(.system(size: 10, weight: idx == lab.selectedIndex ? .semibold : .regular))
                             .foregroundColor(idx == lab.selectedIndex ? .white : .textSec)
                         Spacer()
+                        if item.pin {
+                            Image(systemName: "pin.fill")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(width: 15, height: 15)
+                                .background(Color.blue, in: Circle())
+                        }
                         if let mark = item.mark {
                             Text("\(mark)")
                                 .font(.system(size: 8, weight: .bold))
@@ -842,6 +885,8 @@ struct ClipenSettingsView: View {
     @State private var showAutoPreviewPicker = false
     @State private var showRememberTimeoutPicker = false
     @State private var showAutoDismissPicker = false
+    @State private var showOpenDelayPicker = false
+    @State private var showPinPositionPicker = false
 
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
@@ -985,25 +1030,34 @@ struct ClipenSettingsView: View {
             rowNumber(n)
             Image(systemName: "eye").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Always show preview").font(.system(size: 13)).foregroundColor(.textPri)
-            Button {
-                showAutoPreviewPicker.toggle()
-            } label: {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 15))
-                    .foregroundColor(.accent)
-            }
-            .buttonStyle(.plain)
-            .help("Choose which content types auto-show preview")
-            .popover(isPresented: $showAutoPreviewPicker, arrowEdge: .bottom) {
-                autoPreviewPicker
-            }
-            if !manager.autoPreviewTypes.isEmpty {
-                AutoPreviewChipStrip(types: Array(manager.autoPreviewTypes).sorted { $0.label < $1.label }) { type in
-                    manager.autoPreviewTypes.remove(type)
+            Spacer(minLength: 8)
+            // + button and chips live together in ONE bounded container —
+            // a fixed width, not "however much space is left in the row" —
+            // so it reads as a single distinct widget: the + stays pinned
+            // at its left edge, new chips are appended to the right and
+            // pushed out of view, and ONLY this box scrolls horizontally
+            // to reveal them (never the row itself, and never by truncating
+            // a chip's text — full labels always, scroll instead of clip).
+            HStack(spacing: 8) {
+                Button {
+                    showAutoPreviewPicker.toggle()
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundColor(.accent)
                 }
-            } else {
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .help("Choose which content types auto-show preview")
+                .popover(isPresented: $showAutoPreviewPicker, arrowEdge: .bottom) {
+                    autoPreviewPicker
+                }
+                if !manager.autoPreviewTypes.isEmpty {
+                    AutoPreviewChipStrip(types: Array(manager.autoPreviewTypes).sorted { $0.label < $1.label }) { type in
+                        manager.autoPreviewTypes.remove(type)
+                    }
+                }
             }
+            .frame(width: 210, alignment: .leading)
         }
         .padding(.horizontal, 14).padding(.vertical, 16)
         .frame(maxHeight: .infinity)
@@ -1089,6 +1143,159 @@ struct ClipenSettingsView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 16)
         .frame(maxHeight: .infinity)
+    }
+
+    /// (label, seconds) — the tap-disambiguation delay before the popup
+    /// opens on a first V tap. Sub-second, unlike the minute-scale presets
+    /// above, since this is purely about telling a deliberate double-tap
+    /// apart from two separate single taps.
+    private static let openDelayPresets: [(label: String, seconds: Double)] =
+        [("Fast", 0.10), ("Medium", 0.25), ("Slow", 0.50)]
+
+    /// "Popup on second tap" and "Open delay" used to be two separate rows
+    /// (a toggle plus a disabled-while-that-toggle-is-on slider) — merged
+    /// into one row with a "Configure" pill that opens both controls
+    /// together, since they're really one decision: how a first V tap is
+    /// disambiguated from a deliberate double-tap.
+    private func openDelayRow(_ n: Int) -> some View {
+        HStack(spacing: 10) {
+            rowNumber(n)
+            Image(systemName: "hourglass").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+            Text("Open delay").font(.system(size: 13)).foregroundColor(.textPri)
+            Spacer(minLength: 8)
+            Button {
+                showOpenDelayPicker.toggle()
+            } label: {
+                Text("Configure")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.accent)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showOpenDelayPicker, arrowEdge: .bottom) {
+                openDelayPicker
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 16)
+        .frame(maxHeight: .infinity)
+    }
+
+    private var openDelayPicker: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(isOn: $manager.openOnSecondTap) {
+                Text("Open on second V click").font(.system(size: 12)).foregroundColor(.textPri)
+            }
+            .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
+
+            Divider().padding(.horizontal, 8)
+
+            Text("Delay speed").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+                .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+
+            ForEach(Self.openDelayPresets, id: \.label) { preset in
+                // A delay preset and second-tap mode are mutually
+                // exclusive — cycleNext() checks openOnSecondTap FIRST, so
+                // picking a preset here only takes effect once second-tap
+                // is off, hence turning it off as part of the same tap.
+                // (A genuine rapid second V tap still opens the popup
+                // instantly regardless of which preset is active — that's
+                // pendingFirstOpen's existing "second tap during the delay
+                // window cancels the timer and opens immediately" behavior,
+                // unchanged here.)
+                let isOn = !manager.openOnSecondTap && abs(manager.firstOpenDelay - preset.seconds) < 0.001
+                Button {
+                    manager.firstOpenDelay = preset.seconds
+                    manager.openOnSecondTap = false
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(preset.label).font(.system(size: 12)).foregroundColor(.textPri)
+                        Spacer()
+                        if isOn {
+                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(.accent)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 6)
+        }
+        .frame(width: 190)
+        .padding(.bottom, 4)
+    }
+
+    /// "Pin to top" placement — where pinning an item sends it, in both the
+    /// popup and the main window. Default (1) means the very top; a higher
+    /// value leaves that many of the most-recent UNPINNED items above the
+    /// pinned block instead. Presets stop at maxPinnedItems since a start
+    /// position beyond the pin cap could never actually be reached.
+    private func pinPositionRow(_ n: Int) -> some View {
+        HStack(spacing: 10) {
+            rowNumber(n)
+            Image(systemName: "pin.fill").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+            Text("Pin to top").font(.system(size: 13)).foregroundColor(.textPri)
+            Spacer(minLength: 8)
+            Button {
+                showPinPositionPicker.toggle()
+            } label: {
+                Text("Configure")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.accent)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showPinPositionPicker, arrowEdge: .bottom) {
+                pinPositionPicker
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 16)
+        .frame(maxHeight: .infinity)
+    }
+
+    private var pinPositionPicker: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Pin start position").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+                .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
+            Text("At most \(ClipboardManager.maxPinnedItems) items can be pinned at once.")
+                .font(.system(size: 10)).foregroundColor(.textDim)
+                .padding(.horizontal, 12).padding(.bottom, 6)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(1...ClipboardManager.maxPinnedItems, id: \.self) { position in
+                let isOn = manager.pinStartPosition == position
+                Button {
+                    manager.pinStartPosition = position
+                    showPinPositionPicker = false
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(position == 1 ? "Top" : "\(Self.ordinal(position)) slot")
+                            .font(.system(size: 12)).foregroundColor(.textPri)
+                        Spacer()
+                        if isOn {
+                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(.accent)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 6)
+        }
+        .frame(width: 190)
+        .padding(.bottom, 4)
+    }
+
+    private static func ordinal(_ n: Int) -> String {
+        switch n {
+        case 1: return "1st"
+        case 2: return "2nd"
+        case 3: return "3rd"
+        default: return "\(n)th"
+        }
     }
 
     private static let autoDismissPresets: [Double] = [10, 30, 60, 180, 300, 600, 1800]
@@ -1195,34 +1402,6 @@ struct ClipenSettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    /// A nested slider row belonging to the toggle directly above it (e.g.
-    /// "Open delay" under "Popup on second tap") — same category, same
-    /// setting, so no divider separates them and the icon/label columns
-    /// line up exactly with the parent row's. Text reads white while the
-    /// control is enabled; dim only when disabled.
-    private func nestedSliderRow(icon: String, label: String, valueText: String,
-                                 disabled: Bool, slider: () -> some View) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon).font(.system(size: 10))
-                .foregroundColor(disabled ? .textDim : .textSec).frame(width: 16)
-            Text(label).font(.system(size: 11))
-                .foregroundColor(disabled ? .textDim : .textPri)
-            slider()
-            Text(valueText)
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundColor(disabled ? .textDim : .textPri)
-                .frame(width: 48, alignment: .trailing)
-        }
-        // 14 (card inset) + 18 (row number) + 10 (spacing) = 42 — puts this
-        // row's icon in the same column as the parent toggle's icon, and
-        // therefore its label exactly where the parent's label starts.
-        .padding(.leading, 42).padding(.trailing, 14).padding(.vertical, 9)
-        // Same equal-share stretching as behaviourRow — see its comment.
-        .frame(maxHeight: .infinity)
-        .disabled(disabled)
-        .opacity(disabled ? 0.4 : 1)
     }
 
     // MARK: 01 — Ring size
@@ -1352,26 +1531,7 @@ struct ClipenSettingsView: View {
             sectionHeader("03", "MAIN BEHAVIOUR")
 
             rowCard {
-                behaviourRow(1, icon: "hand.tap", "Popup on second tap",
-                             isOn: Binding(get: { manager.openOnSecondTap },
-                                           set: { manager.openOnSecondTap = $0 }))
-
-                // No divider before the nested slider — it belongs to the
-                // toggle above (same setting), not a separate row.
-
-                // Open delay — nested under 01, disabled while second-tap mode is on.
-                nestedSliderRow(
-                    icon: "hourglass", label: "Open delay",
-                    valueText: manager.openOnSecondTap ? "—"
-                        : manager.firstOpenDelay == 0 ? "Off"
-                        : String(format: "%.0f ms", manager.firstOpenDelay * 1000),
-                    disabled: manager.openOnSecondTap
-                ) {
-                    Slider(value: Binding(get: { manager.firstOpenDelay * 1000 },
-                                         set: { manager.firstOpenDelay = ($0 / 5).rounded() * 5 / 1000 }),
-                           in: 0...1000)
-                        .tint(.accent)
-                }
+                openDelayRow(1)
 
                 rowDivider()
                 behaviourRow(2, icon: "arrow.right.to.line", "Advance after marking",
@@ -1383,6 +1543,8 @@ struct ClipenSettingsView: View {
                 rememberLastPositionRow(4)
                 rowDivider()
                 autoDismissRow(5)
+                rowDivider()
+                pinPositionRow(6)
             }
         }
     }
@@ -1396,6 +1558,7 @@ struct ClipenSettingsView: View {
         [.reverseCycle, .multiPaste],
         [.spacePreview, .pinPreview],
         [.transform, .search, .category, .moveToFront, .delete],
+        [.cyclePinned],
     ]
 
     private var interactionsSection: some View {

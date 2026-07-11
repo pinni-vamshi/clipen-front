@@ -632,6 +632,28 @@ extension ClipboardManager {
         syncTransformPanelWithSelection()
     }
 
+    /// P — step through PINNED items only, one per tap, wrapping from the
+    /// last pinned item back to the first instead of stopping. Ignores
+    /// everything unpinned in between, unlike ⌘V's full-ring cycle.
+    func cyclePinnedItems() {
+        guard previewWindow.isVisible, !displayItems.isEmpty else { return }
+        let pinnedIndices = displayItems.indices.filter { displayItems[$0].isPinned }
+        guard !pinnedIndices.isEmpty else {
+            flashStatus("No pinned items yet.")
+            return
+        }
+        if let currentPos = pinnedIndices.firstIndex(of: selectedIndex) {
+            selectedIndex = pinnedIndices[(currentPos + 1) % pinnedIndices.count]
+        } else {
+            // Not currently on a pinned item — jump straight to the first one.
+            selectedIndex = pinnedIndices[0]
+        }
+        resetAutoDismissTimer()
+        AuthManager.shared.registerActionUsage(actionID: "action.cycle_pinned")
+        syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
+    }
+
     /// Top-row number keycodes (kVK_ANSI_1 … kVK_ANSI_9) mapped to the
     /// zero-based CATEGORY index they should select.  ⌘1 → Recents (no
     /// filter), ⌘2 → first available category, ⌘3 → second, etc.  Numbers

@@ -75,8 +75,11 @@ struct MainWindowView: View {
     @State private var mainTagFilter: ClipboardTag? = nil
 
     private var mainFilteredItems: [ClipboardItem] {
-        guard let tag = mainTagFilter else { return manager.items }
-        return manager.items.filter { $0.tags.contains(tag) }
+        let base = mainTagFilter.map { tag in manager.items.filter { $0.tags.contains(tag) } } ?? manager.items
+        // Same pin-block placement as the popup's displayItems — applied
+        // here (not in `filtered` below) so an active search's relevance
+        // ranking is never overridden by pin position.
+        return manager.applyPinOrdering(base)
     }
 
     private var filtered: [ClipboardItem] {
@@ -353,7 +356,13 @@ struct MainWindowView: View {
                 ScrollView {
                     LazyVStack(spacing: 1) {
                         ForEach(filtered) { item in
-                            CompactItemRow(item: item, isSelected: mainSelectedID == item.id)
+                            CompactItemRow(item: item, isSelected: mainSelectedID == item.id,
+                                          onDelete: {
+                                              if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
+                                                  manager.removeItem(at: i)
+                                              }
+                                          },
+                                          onTogglePin: { manager.togglePin(id: item.id) })
                                 .equatable()
                                 .onTapGesture(count: 1) { mainSelectedID = item.id }
                                 .onTapGesture(count: 2) {
@@ -1004,6 +1013,8 @@ private struct SelectableTextBlock: View {
 private struct CompactItemRow: View, Equatable {
     let item:       ClipboardItem
     let isSelected: Bool
+    var onDelete: () -> Void = {}
+    var onTogglePin: () -> Void = {}
 
     @State private var isHovered = false
 
@@ -1030,7 +1041,18 @@ private struct CompactItemRow: View, Equatable {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
-            if item.isPinned {
+            if isHovered {
+                // Hover-revealed actions — delete (red) and pin/unpin
+                // (blue) — instead of needing the right-click context menu
+                // for the two most common row-level actions.
+                HStack(spacing: 6) {
+                    rowActionButton(icon: "xmark", background: .red, action: onDelete)
+                        .help("Delete")
+                    rowActionButton(icon: item.isPinned ? "pin.slash.fill" : "pin.fill",
+                                    background: .blue, action: onTogglePin)
+                        .help(item.isPinned ? "Unpin" : "Pin to top")
+                }
+            } else if item.isPinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 9))
                     .foregroundColor(.accent)
@@ -1045,6 +1067,17 @@ private struct CompactItemRow: View, Equatable {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onDrag { item.makeItemProvider() }
+    }
+
+    private func rowActionButton(icon: String, background: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 8, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 16, height: 16)
+                .background(background, in: Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

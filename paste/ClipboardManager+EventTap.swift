@@ -628,6 +628,15 @@ extension ClipboardManager {
             return nil
         }
 
+        // P — cycle through PINNED items only, one per tap, wrapping back
+        // to the first after the last (same repeated-tap shape as ⌘V, just
+        // scoped to the pinned subset instead of the whole ring).
+        if key == 35 && previewWindow.isVisible {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in self?.cyclePinnedItems() }
+            return nil
+        }
+
         // B — context-aware "back", only when the user picked B as the
         // reverse key in Settings. Same tap-vs-hold decision shape as V:
         //   tap  → step backward (previous transform while the transform

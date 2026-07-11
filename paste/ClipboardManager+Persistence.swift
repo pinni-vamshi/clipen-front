@@ -209,7 +209,42 @@ extension ClipboardManager {
 
     func togglePin(id: UUID) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
-        items[idx].isPinned.toggle()
+        if items[idx].isPinned {
+            items[idx].isPinned = false
+            return
+        }
+        let pinnedCount = items.filter(\.isPinned).count
+        guard pinnedCount < Self.maxPinnedItems else {
+            flashStatus("Only \(Self.maxPinnedItems) items can be pinned at once.")
+            return
+        }
+        items[idx].isPinned = true
+        // Storage order (`items`) stays untouched — chronological order is
+        // load-bearing elsewhere (eviction, persistence, "front item" =
+        // items[0] assumptions). Where a pinned item actually SITS is a
+        // presentation concern, applied by applyPinOrdering() wherever a
+        // list is displayed (popup's displayItems, main window's
+        // mainFilteredItems) — both read pinStartPosition/isPinned fresh
+        // every time, so this toggle alone is enough to move it visually.
+        _displayItems = nil
+    }
+
+    /// Reorders an already-filtered/searched list so pinned items form one
+    /// contiguous block starting at `pinStartPosition` (1-based) — the
+    /// first `pinStartPosition - 1` slots stay the most-recent UNPINNED
+    /// items in their natural order, then every currently-pinned item
+    /// (also in their relative/natural order), then the rest of the
+    /// unpinned items continue after. Applied identically by the popup and
+    /// the main window so pin placement never diverges between the two.
+    func applyPinOrdering(_ list: [ClipboardItem]) -> [ClipboardItem] {
+        guard list.contains(where: \.isPinned) else { return list }
+        let pinned   = list.filter(\.isPinned)
+        let unpinned = list.filter { !$0.isPinned }
+        let leadingCount = min(max(0, pinStartPosition - 1), unpinned.count)
+        var result = Array(unpinned.prefix(leadingCount))
+        result.append(contentsOf: pinned)
+        result.append(contentsOf: unpinned.dropFirst(leadingCount))
+        return result
     }
     func removeItem(at index: Int) {
         guard items.indices.contains(index) else { return }

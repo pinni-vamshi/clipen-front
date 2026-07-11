@@ -274,6 +274,7 @@ class ClipboardManager: ObservableObject {
                 }
             }
         }
+        result = applyPinOrdering(result)
         _displayItems = result
         return result
     }
@@ -484,6 +485,24 @@ class ClipboardManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(openOnSecondTap, forKey: "openOnSecondTap")
             if oldValue != openOnSecondTap { AuthManager.shared.registerActionUsage(actionID: "setting.second_tap") }
+        }
+    }
+    /// Hard cap on simultaneously-pinned items — pinning is a small
+    /// "keep these handy" set, not a second unbounded list; a 6th pin
+    /// attempt while 5 are already pinned is refused outright rather than
+    /// silently bumping the oldest pin.
+    static let maxPinnedItems = 5
+    /// 1-based slot pinned items are inserted at, in both the popup and the
+    /// main window — 1 (the default) means pinning sends an item straight
+    /// to the very top; a higher value leaves that many of the most-recent
+    /// UNPINNED items sitting above the pinned block instead. Clamped to
+    /// maxPinnedItems since a start position beyond that can never actually
+    /// be reached with at most 5 pins to fill it.
+    @Published var pinStartPosition: Int =
+        min(max(1, UserDefaults.standard.object(forKey: "pinStartPosition") as? Int ?? 1), ClipboardManager.maxPinnedItems) {
+        didSet {
+            UserDefaults.standard.set(pinStartPosition, forKey: "pinStartPosition")
+            if oldValue != pinStartPosition { AuthManager.shared.registerActionUsage(actionID: "setting.pin_position") }
         }
     }
     /// Which content types auto-show the Space-style item preview panel as
