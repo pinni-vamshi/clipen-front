@@ -838,6 +838,7 @@ struct ClipenSettingsView: View {
     /// gesture-timing rows (Mark for Multi-Paste / Refer).
     @State private var showMarkSpeedEditor = false
     @State private var showReferSpeedEditor = false
+    @State private var showPinnedOpenSpeedEditor = false
 
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
@@ -1219,6 +1220,11 @@ struct ClipenSettingsView: View {
                                 lab.select(.pinPreview)
                             }
                         }
+                        if demo == .pinnedOpen && showPinnedOpenSpeedEditor {
+                            speedPicker(label: "Hold speed", selection: $manager.pinnedOpenHoldSpeed) {
+                                lab.select(.pinnedOpen)
+                            }
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -1284,6 +1290,17 @@ struct ClipenSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Adjust double-tap speed")
+                }
+                if demo == .pinnedOpen {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { showPinnedOpenSpeedEditor.toggle() }
+                    } label: {
+                        Image(systemName: showPinnedOpenSpeedEditor ? "pencil.circle.fill" : "pencil.circle")
+                            .font(.system(size: 13))
+                            .foregroundColor(showPinnedOpenSpeedEditor ? .accent : .textSec)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Adjust hold speed")
                 }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))

@@ -556,7 +556,7 @@ extension ClipboardManager {
             // becomes PINNED — handled by firstOpenHoldTimer below.
             if !isAutorepeat {
                 firstOpenHoldTimer?.invalidate()
-                let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
+                let t = Timer(timeInterval: pinnedOpenHoldThreshold, repeats: false) { [weak self] _ in
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
                         self.firstOpenHoldTimer = nil

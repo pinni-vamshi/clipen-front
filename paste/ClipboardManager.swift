@@ -554,6 +554,21 @@ class ClipboardManager: ObservableObject {
     /// twice). `.medium` matches the previous hardcoded 0.35s default.
     var spaceDoubleTapWindow: TimeInterval { spaceDoubleTapSpeed.doubleTapSeconds }
 
+    /// Same Fast/Medium/Slow choice for the very first ⌘+hold-V that pins the
+    /// popup open (see `firstOpenHoldTimer` below) — independent of
+    /// `markHoldSpeed` so pinning the popup and marking an item can be tuned
+    /// to different feels even though both start as a plain V hold.
+    @Published var pinnedOpenHoldSpeed: GestureSpeed =
+        GestureSpeed(rawValue: UserDefaults.standard.string(forKey: "pinnedOpenHoldSpeed") ?? "") ?? .medium {
+        didSet {
+            UserDefaults.standard.set(pinnedOpenHoldSpeed.rawValue, forKey: "pinnedOpenHoldSpeed")
+            if oldValue != pinnedOpenHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.pinned_open_hold_speed") }
+        }
+    }
+    /// How long the first V press must be held before the popup opens
+    /// PINNED instead of the normal tap-opens-briefly behavior.
+    var pinnedOpenHoldThreshold: TimeInterval { pinnedOpenHoldSpeed.holdSeconds }
+
     /// Same tap-vs-hold disambiguation as `vTapHoldTimer`, but for the very
     /// FIRST V press that opens the popup (before `previewWindow.isVisible`).
     /// A tap opens the popup exactly as before (⌘-release commits + closes).
