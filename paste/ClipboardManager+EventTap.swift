@@ -367,11 +367,15 @@ extension ClipboardManager {
             return nil
         }
 
-        // Enter/Return — commit the currently-selected search result while in
-        // search mode (mirrors ⌘-release's normal commit, since search mode
-        // suppresses that path specifically so this is needed as the
-        // alternative way to finish).
-        if (key == 36 || key == 76) && isSearchActive && previewWindow.isVisible {
+        // Enter/Return — commit while the popup is open. In search mode this
+        // mirrors ⌘-release's normal commit (search mode suppresses that path
+        // specifically so this is needed as the alternative way to finish).
+        // Outside search mode it's the way to commit a ⌘/⇧-click multi-
+        // selection or a pinned-open popup without needing ⌘ held down —
+        // commitPaste() already knows to paste every marked item together
+        // when markedItemIDs isn't empty, same as the hold-V mark queue.
+        if (key == 36 || key == 76) && previewWindow.isVisible {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
             DispatchQueue.main.async { [weak self] in self?.commitPaste() }
             return nil
         }
@@ -595,6 +599,20 @@ extension ClipboardManager {
             }
             RunLoop.main.add(t, forMode: .common)
             xTapHoldTimer = t
+            return nil
+        }
+
+        // S — tap opens the native macOS Share Sheet for the highlighted
+        // item (or every marked item, if any are marked); tapping again
+        // cycles to the next share destination. No hold action of its own,
+        // unlike X — releasing ⌘ (commitPaste → commitShare) sends via
+        // whichever destination is currently highlighted.
+        if key == 1 && previewWindow.isVisible {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.inShareStage { self.cycleShare() } else { self.enterShareStage() }
+            }
             return nil
         }
 

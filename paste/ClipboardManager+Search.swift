@@ -230,6 +230,10 @@ extension ClipboardManager {
         // a genuinely different item forced a recompute.
         transformDisplaysCache = []
         lastTransformCacheItemID = nil
+        inShareStage = false
+        shareServices = []
+        shareTargetItems = []
+        shareIndex = 0
         selectedIndex    = 0
         popupTagFilter   = nil
         cycleCount       = 0

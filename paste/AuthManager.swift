@@ -304,7 +304,7 @@ final class AuthManager: ObservableObject {
             "pinned_items":       m.items.filter(\.isPinned).count,
             "ring_size":          m.maxItems,
             "second_tap":         m.openOnSecondTap,
-            "always_preview":     m.alwaysShowItemPreview,
+            "always_preview":     !m.autoPreviewTypes.isEmpty,
             "advance_after_mark": m.advanceAfterMark,
             "remember_last":      m.rememberLastSelection,
             "auto_dismiss":       m.autoDismissEnabled,

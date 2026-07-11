@@ -117,10 +117,17 @@ class ClipboardManager: ObservableObject {
     @Published var popupHintSpaceDoubleTap = false
     @Published var popupHintCmd = false
 
-    /// Items marked for sequential multi-paste, in marking order.
-    /// Index 0 = first-marked item (pastes first). Session-only — always
-    /// cleared on paste or dismiss. Never persisted to disk.
+    /// Items marked for sequential multi-paste. Session-only — always
+    /// cleared on paste or dismiss. Never persisted to disk. Populated either
+    /// by holding V (mark order) or by ⌘/⇧-click in the popup row list
+    /// (Finder-style multi-select) — paste order is always resolved from
+    /// `displayItems` position at commit time, not this array's order.
     @Published var markedItemIDs: [UUID] = []
+
+    /// Anchor row for Finder-style ⇧-click range selection in the popup —
+    /// the "other end" of the range a ⇧-click extends from. Set on every
+    /// plain click and ⌘-click; read (not written) by a ⇧-click.
+    var multiSelectAnchorIndex: Int? = nil
 
     /// Popup-only tag filter. nil = Recents (no filter).
     /// Drives displayItems + popup chip strip. The main window has its own
@@ -478,12 +485,14 @@ class ClipboardManager: ObservableObject {
             if oldValue != openOnSecondTap { AuthManager.shared.registerActionUsage(actionID: "setting.second_tap") }
         }
     }
-    /// When true, the Space-style item preview panel follows the highlighted
-    /// row while cycling. When false, Space toggles preview on/off (default).
-    @Published var alwaysShowItemPreview: Bool = UserDefaults.standard.object(forKey: "alwaysShowItemPreview") as? Bool ?? false {
+    /// Which content types auto-show the Space-style item preview panel as
+    /// the highlighted row changes, instead of requiring an explicit Space
+    /// press each time. Empty (the default) means auto-preview is off
+    /// entirely — Space still toggles preview manually either way.
+    @Published var autoPreviewTypes: Set<AutoPreviewContentType> = AutoPreviewContentType.loadSaved() {
         didSet {
-            UserDefaults.standard.set(alwaysShowItemPreview, forKey: "alwaysShowItemPreview")
-            if oldValue != alwaysShowItemPreview { AuthManager.shared.registerActionUsage(actionID: "setting.always_preview") }
+            AutoPreviewContentType.save(autoPreviewTypes)
+            if oldValue != autoPreviewTypes { AuthManager.shared.registerActionUsage(actionID: "setting.always_preview") }
             applyAlwaysShowItemPreviewPolicy()
         }
     }
@@ -689,6 +698,21 @@ class ClipboardManager: ObservableObject {
     /// Snapshot transform ordering for the current stage so ⌘X cycles in a
     /// stable one-by-one sequence even if global usage rankings change.
     var transformDisplaysCache: [TransformDisplay] = []
+
+    // Same tap-to-open/tap-to-cycle shape as Stage 2 transforms, but for the
+    // native macOS Share Sheet (S key) instead of Clipen's own tools —
+    // ⌘-release invokes whichever NSSharingService is highlighted when the
+    // popup closes, same as ⌘-release commits a paste.
+    @Published var inShareStage = false
+    @Published var shareIndex = 0
+    /// The services available for whatever's being shared — recomputed once
+    /// when share stage opens, then just cycled through, same reasoning as
+    /// transformDisplaysCache (stable order while cycling).
+    var shareServices: [NSSharingService] = []
+    /// Snapshot of which items are being shared (marked set, or just the
+    /// highlighted item) — captured at share-stage entry so a stray
+    /// selection change mid-cycle can't retarget the eventual send.
+    var shareTargetItems: [ClipboardItem] = []
 
     var saveCancellable: AnyCancellable?
 
@@ -1370,6 +1394,68 @@ struct ClipboardItem: Identifiable {
         case (.files(let a),                    .files(let b)):                    return a == b
         default:                                                                   return false
         }
+    }
+}
+
+/// One toggle per `ClipboardContent` top-level case, for the auto-preview
+/// data-type picker — lets the user pick e.g. "always preview images" without
+/// also auto-previewing every text snippet copied.
+enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
+    case text, richText, html, table, image, file, files, svg, blob
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .text:     return "Text"
+        case .richText: return "Rich Text"
+        case .html:     return "HTML"
+        case .table:    return "Table"
+        case .image:    return "Image"
+        case .file:     return "File"
+        case .files:    return "Files"
+        case .svg:      return "SVG"
+        case .blob:     return "Private"
+        }
+    }
+
+    var sfIcon: String {
+        switch self {
+        case .text:     return "doc.text"
+        case .richText: return "doc.richtext"
+        case .html:     return "globe"
+        case .table:    return "tablecells"
+        case .image:    return "photo"
+        case .file:     return "doc"
+        case .files:    return "doc.on.doc"
+        case .svg:      return "square.on.circle"
+        case .blob:     return "lock.doc"
+        }
+    }
+
+    static func from(_ content: ClipboardContent) -> AutoPreviewContentType {
+        switch content {
+        case .text:     return .text
+        case .richText: return .richText
+        case .html:     return .html
+        case .rtfd:     return .table
+        case .image:    return .image
+        case .file:     return .file
+        case .files:    return .files
+        case .svg:      return .svg
+        case .blob:     return .blob
+        }
+    }
+
+    private static let defaultsKey = "autoPreviewTypes"
+
+    static func loadSaved() -> Set<AutoPreviewContentType> {
+        guard let raw = UserDefaults.standard.array(forKey: defaultsKey) as? [String] else { return [] }
+        return Set(raw.compactMap(AutoPreviewContentType.init(rawValue:)))
+    }
+
+    static func save(_ types: Set<AutoPreviewContentType>) {
+        UserDefaults.standard.set(types.map(\.rawValue), forKey: defaultsKey)
     }
 }
 

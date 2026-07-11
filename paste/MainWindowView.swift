@@ -363,9 +363,12 @@ struct MainWindowView: View {
                                 .equatable()
                                 .onTapGesture(count: 1) { mainSelectedID = item.id }
                                 .onTapGesture(count: 2) {
-                                    if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
-                                        manager.pasteItem(at: i)
-                                    }
+                                    // Double-click opens the native macOS Quick
+                                    // Look panel (same as Space in Finder) instead
+                                    // of pasting — Enter now pastes the selection,
+                                    // see the .onKeyPress(.return) below.
+                                    mainSelectedID = item.id
+                                    QuickLookController.shared.toggle(for: item)
                                 }
                                 .contextMenu {
                                     Button("Paste") {
@@ -386,6 +389,14 @@ struct MainWindowView: View {
                     .padding(8)
                 }
             }
+        }
+        // Paste moved here from double-click (now Quick Look) — Enter pastes
+        // whichever row is currently selected.
+        .onKeyPress(.return) {
+            guard let id = mainSelectedID,
+                  let i = manager.items.firstIndex(where: { $0.id == id }) else { return .ignored }
+            manager.pasteItem(at: i)
+            return .handled
         }
     }
 

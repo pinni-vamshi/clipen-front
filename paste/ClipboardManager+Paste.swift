@@ -191,6 +191,13 @@ extension ClipboardManager {
     }
 
     func commitPaste() {
+        // Share stage (S key) hijacks the commit gesture: ⌘-release sends
+        // via the highlighted service instead of pasting, mirroring how
+        // Stage 2 transforms hijack it for "apply tool, then paste result."
+        if inShareStage {
+            commitShare()
+            return
+        }
         // A V/B/X tap/hold decision in flight when ⌘ is released must not
         // fire later against a stale target in a popup that's about to close.
         vTapHoldTimer?.invalidate()
@@ -348,13 +355,23 @@ extension ClipboardManager {
 
         inTransformStage = false; transformIndex = 0
 
-        // Multi-paste: if any items are marked, paste them ALL in marking order.
+        // Multi-paste: if any items are marked, paste them ALL — in LIST
+        // order (top to bottom as shown), not marking order. Mark order and
+        // list order coincide for the common hold-V-down-the-list case, but
+        // ⇧-click range-selection and out-of-order ⌘-clicking both rely on
+        // list order to paste in the sequence the user actually sees.
         // Fires only from stage-1 (item selection) — transforms always paste a
         // single result.
         if !markedItemIDs.isEmpty {
-            let ids = markedItemIDs
+            let ids = Set(markedItemIDs)
             markedItemIDs = []
+            // Order by displayItems position when the item is currently
+            // visible (the common case); a mark that's fallen out of the
+            // active filter/search still pastes, just after the visible
+            // ones, instead of silently vanishing.
+            let displayOrder = Dictionary(uniqueKeysWithValues: displayItems.enumerated().map { ($1.id, $0) })
             let orderedItems = ids.compactMap { id in items.first(where: { $0.id == id }) }
+                .sorted { (displayOrder[$0.id] ?? Int.max) < (displayOrder[$1.id] ?? Int.max) }
             guard !orderedItems.isEmpty else {
                 previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
                 return

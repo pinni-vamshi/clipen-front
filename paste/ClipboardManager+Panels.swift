@@ -89,6 +89,83 @@ extension ClipboardManager {
         itemPreviewPanel.hide()
     }
 
+    // MARK: - Share Sheet (S key)
+
+    /// Whatever S would share right now: every marked item if any are
+    /// marked (mirrors commitPaste's multi-paste rule — "marked" always
+    /// means "act on the whole set"), otherwise just the highlighted item.
+    private var shareCandidateItems: [ClipboardItem] {
+        let marked = orderedMarkedItems
+        if !marked.isEmpty { return marked }
+        guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return [] }
+        return [displayItems[selectedIndex]]
+    }
+
+    /// One Sharing-Service-compatible representation per item: real file
+    /// URLs pass through untouched (AirDrop/Mail can attach them directly);
+    /// everything else falls back to its plain-text form, which every
+    /// sharing service can at least handle as a text attachment.
+    private func shareRepresentation(for item: ClipboardItem) -> Any? {
+        switch item.content {
+        case .file(let url) where FileManager.default.fileExists(atPath: url.path):
+            return url
+        case .files(let urls):
+            return urls.first { FileManager.default.fileExists(atPath: $0.path) }
+        case .image(let image, _, _):
+            return image
+        default:
+            return item.content.plainText
+        }
+    }
+
+    func enterShareStage() {
+        let targets = shareCandidateItems
+        guard !targets.isEmpty else { return }
+        let items = targets.compactMap { shareRepresentation(for: $0) }
+        let services = NSSharingService.sharingServices(forItems: items)
+        guard !services.isEmpty else {
+            flashStatus("No share destinations available for this item.")
+            return
+        }
+        if inTransformStage { exitTransformStage() }
+        if itemPreviewPanel.isVisible { itemPreviewPanel.hide() }
+        shareTargetItems = targets
+        shareServices = services
+        shareIndex = 0
+        inShareStage = true
+    }
+
+    func cycleShare() {
+        guard inShareStage, !shareServices.isEmpty else { return }
+        shareIndex = (shareIndex + 1) % shareServices.count
+    }
+
+    func exitShareStage() {
+        inShareStage = false
+        shareServices = []
+        shareTargetItems = []
+        shareIndex = 0
+    }
+
+    /// ⌘-release while in share stage: invoke the currently-highlighted
+    /// service instead of pasting. Called from commitPaste() before its
+    /// normal paste logic — sharing and pasting are mutually exclusive
+    /// outcomes of the same ⌘-release gesture.
+    func commitShare() {
+        guard inShareStage, shareServices.indices.contains(shareIndex) else {
+            exitShareStage()
+            return
+        }
+        let service = shareServices[shareIndex]
+        let items = shareTargetItems.compactMap { shareRepresentation(for: $0) }
+        exitShareStage()
+        markedItemIDs = []
+        previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
+        guard !items.isEmpty else { return }
+        service.perform(withItems: items)
+        AuthManager.shared.registerActionUsage(actionID: "action.share")
+    }
+
     /// Rebuild transform list from current usage scores; keep highlight on the same tool id.
     /// Short-circuits when the selected item hasn't changed — avoids re-running
     /// all tool preview closures (JSON parse, regex, etc.) on every V-key tap.
@@ -222,28 +299,30 @@ extension ClipboardManager {
 
     func applyAlwaysShowItemPreviewPolicy() {
         guard previewWindow.isVisible else {
-            if !alwaysShowItemPreview { itemPreviewPanel.hide() }
+            if autoPreviewTypes.isEmpty { itemPreviewPanel.hide() }
             return
         }
         syncItemPreviewWithSelection()
     }
 
     /// Keeps the item preview panel in sync with the current selection when
-    /// `alwaysShowItemPreview` is on, or refreshes it when the user already
-    /// opened preview via Space.
+    /// the highlighted item's content type is in `autoPreviewTypes`, or
+    /// refreshes it when the user already opened preview via Space.
     func syncItemPreviewWithSelection() {
         guard previewWindow.isVisible else { return }
-        if alwaysShowItemPreview {
-            guard !displayItems.isEmpty,
-                  selectedIndex < displayItems.count else {
-                if itemPreviewPanel.isVisible {
-                    itemPreviewPanel.hide()
-                }
-                return
-            }
+        let autoShowsCurrent = !autoPreviewTypes.isEmpty
+            && displayItems.indices.contains(selectedIndex)
+            && autoPreviewTypes.contains(AutoPreviewContentType.from(displayItems[selectedIndex].content))
+        if autoShowsCurrent {
             showSelectedItemPreview()
         } else if itemPreviewPanel.isVisible {
-            showSelectedItemPreview()
+            if !autoPreviewTypes.isEmpty {
+                // Auto-preview is on but this item's type isn't selected —
+                // hide rather than keep showing the PREVIOUS item's preview.
+                itemPreviewPanel.hide()
+            } else {
+                showSelectedItemPreview()
+            }
         }
     }
 
@@ -1067,7 +1146,41 @@ extension ClipboardManager {
         guard previewWindow.isVisible,
               displayItems.indices.contains(absoluteIndex) else { return }
         selectedIndex = absoluteIndex
+        multiSelectAnchorIndex = absoluteIndex
         resetAutoDismissTimer()
+        syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
+    }
+
+    /// ⌘-click a row: Finder-style toggle of that single row into/out of the
+    /// existing multi-selection, leaving every other mark untouched. Also
+    /// becomes the new ⇧-click anchor, matching Finder.
+    func uiToggleSelectItem(at absoluteIndex: Int) {
+        guard previewWindow.isVisible,
+              displayItems.indices.contains(absoluteIndex) else { return }
+        selectedIndex = absoluteIndex
+        multiSelectAnchorIndex = absoluteIndex
+        resetAutoDismissTimer()
+        toggleMark(id: displayItems[absoluteIndex].id)
+        syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
+    }
+
+    /// ⇧-click a row: Finder-style contiguous range select from the anchor
+    /// (the last plain- or ⌘-clicked row) through this row, replacing
+    /// whatever was previously marked — not additive, matching Finder's
+    /// plain ⇧-click (as opposed to ⌘⇧-click, which this app doesn't
+    /// distinguish separately since a single range covers the common case).
+    func uiRangeSelectItem(to absoluteIndex: Int) {
+        guard previewWindow.isVisible,
+              displayItems.indices.contains(absoluteIndex) else { return }
+        let anchor = multiSelectAnchorIndex.flatMap { displayItems.indices.contains($0) ? $0 : nil }
+            ?? selectedIndex
+        guard displayItems.indices.contains(anchor) else { return }
+        let range = anchor <= absoluteIndex ? anchor...absoluteIndex : absoluteIndex...anchor
+        selectedIndex = absoluteIndex
+        resetAutoDismissTimer()
+        markedItemIDs = range.map { displayItems[$0].id }
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
     }

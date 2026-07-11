@@ -220,6 +220,7 @@ struct PopoverPreviewView: View {
             popupSearchBar
             categoryStrip
             firstCycleHint
+            shareStageBanner
             Divider()
             rowArea
             Divider()
@@ -308,6 +309,8 @@ struct PopoverPreviewView: View {
                 // panel" was actively confusing. "Refer" matches what this
                 // actually does.
                 DoubleSpaceKeyFlatHint(label: "Refer", isActive: manager.popupHintSpaceDoubleTap)
+
+                FlatHint(key: "S", label: "Share", isActive: manager.inShareStage)
             }
 
             // Mouse equivalents of the keyboard hints above — click and
@@ -442,6 +445,37 @@ struct PopoverPreviewView: View {
         }
     }
 
+    // MARK: Share stage banner (S key)
+
+    /// Shows the currently-highlighted Share Sheet destination while
+    /// cycling with S, and how many items will be sent if more than one is
+    /// marked — same role as TransformPanel's tool name, just inline
+    /// instead of a separate floating panel since there's no per-service
+    /// preview content to show.
+    @ViewBuilder
+    private var shareStageBanner: some View {
+        if manager.inShareStage, manager.shareServices.indices.contains(manager.shareIndex) {
+            let service = manager.shareServices[manager.shareIndex]
+            HStack(spacing: 6) {
+                Image(nsImage: service.image).resizable().frame(width: 14, height: 14)
+                Text("Share via \(service.title)")
+                    .font(.system(size: 11, weight: .medium))
+                if manager.shareTargetItems.count > 1 {
+                    Text("· \(manager.shareTargetItems.count) items")
+                        .font(.system(size: 10)).foregroundColor(.secondary)
+                }
+                Spacer()
+                Text("\(manager.shareIndex + 1)/\(manager.shareServices.count)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+            .foregroundColor(.textPri)
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(Color.accent.opacity(0.15))
+            .transition(.opacity)
+        }
+    }
+
     // MARK: Row area
 
     private var rowArea: some View {
@@ -479,6 +513,19 @@ struct PopoverPreviewView: View {
                                         manager.pasteItemKeepingPopupOpen(id: item.id)
                                     }
                                     .onTapGesture(count: 1) {
+                                        // Finder-style modifiers: NSEvent's current
+                                        // flags at the moment the tap resolves,
+                                        // since SwiftUI's TapGesture doesn't carry
+                                        // modifier state of its own.
+                                        let mods = NSEvent.modifierFlags
+                                        if mods.contains(.shift) {
+                                            manager.uiRangeSelectItem(to: idx)
+                                            return
+                                        }
+                                        if mods.contains(.command) {
+                                            manager.uiToggleSelectItem(at: idx)
+                                            return
+                                        }
                                         manager.uiSelectItem(at: idx)
                                         // Single click both selects AND previews —
                                         // same "peek" intent Space already provides,
