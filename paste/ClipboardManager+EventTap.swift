@@ -507,6 +507,10 @@ extension ClipboardManager {
 
         if key == 9 { // V — ⌘V cycle, ⌘⌥V jump+5, ⌘⇧V next category
             if isSimulatingPaste { return Unmanaged.passUnretained(event) }
+            // Latency marker: raw ⌘V keydown received on the event-tap thread —
+            // the head of the "V event → selection target → visual commit"
+            // interval a Points-of-Interest trace measures.
+            ClipenSignpost.event("v.keydown")
             let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
 
             // Plain V while the popup is ALREADY open: don't act on keyDown at

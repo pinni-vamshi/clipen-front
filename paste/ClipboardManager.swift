@@ -324,6 +324,14 @@ class ClipboardManager: ObservableObject {
     /// tap creation races with TCC propagation.
     @Published var hasAccessibilityPermission: Bool = AXIsProcessTrusted()
     var accessibilityPollTimer: Timer?
+    /// One-shot registration flag for the app-reactivation observer that
+    /// re-checks accessibility permission. The 1 Hz poll below is allowed to
+    /// STOP once permission is granted and the tap is live (its terminal
+    /// state) rather than spinning an AXIsProcessTrusted() syscall every
+    /// second for the whole process lifetime; this observer is what re-checks
+    /// (and re-arms the poll if permission was revoked) when the app is next
+    /// activated — a "meaningful lifecycle event" instead of a permanent loop.
+    var accessibilityActiveObserver: NSObjectProtocol?
     // ID of the item the user last explicitly selected. Resolved in
     // commitPaste() so a displayItems rebuild between selection and ⌘ release
     // never causes a stale-index paste (the root cause of the wrong-item bug).
@@ -1073,16 +1081,46 @@ class ClipboardManager: ObservableObject {
     /// onboarding screen even when System Settings shows Clipen as ON.
     func startAccessibilityWatcher() {
         accessibilityPollTimer?.invalidate()
+        accessibilityPollTimer = nil
         // Sync immediately so the very first render reflects reality.
         let trusted = AXIsProcessTrusted()
         if hasAccessibilityPermission != trusted {
             hasAccessibilityPermission = trusted
         }
+
+        // Re-check on app reactivation rather than polling forever. Registered
+        // exactly once. This is what makes it safe for the 1 Hz poll below to
+        // self-terminate at its terminal state — a grant OR revoke made in
+        // System Settings while Clipen was backgrounded is picked up the next
+        // time the app is brought to the foreground.
+        if accessibilityActiveObserver == nil {
+            accessibilityActiveObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.refreshAccessibilityStatusOnActivate()
+            }
+        }
+
+        // Terminal state: permission granted AND the tap is live. There is
+        // nothing left to poll for, so don't spin a 1 Hz AXIsProcessTrusted()
+        // syscall (~86,400/day) for the rest of the process lifetime. The
+        // reactivation observer above resumes the watcher if state regresses.
+        if trusted && eventTap != nil { return }
+
         accessibilityPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
             let now = AXIsProcessTrusted()
             if self.hasAccessibilityPermission != now {
                 self.hasAccessibilityPermission = now
+            }
+            // Once permission is granted AND the tap is live, the state this
+            // poll exists to observe has reached its terminal value — stop the
+            // loop instead of running it forever.
+            if now && self.eventTap != nil {
+                self.accessibilityPollTimer?.invalidate()
+                self.accessibilityPollTimer = nil
+                return
             }
             // Once trusted, make sure the event tap is actually live —
             // useful when the user grants permission *after* launch and
@@ -1092,6 +1130,22 @@ class ClipboardManager: ObservableObject {
             }
         }
         RunLoop.main.add(accessibilityPollTimer!, forMode: .common)
+    }
+
+    /// Called when the app is reactivated. Reconciles the cached permission
+    /// state with reality (a grant OR revoke made in System Settings while we
+    /// were backgrounded) and re-arms the 1 Hz watcher if — and only if — the
+    /// state has regressed from its terminal "granted + tap live" value, so the
+    /// poll runs only while it still has something to observe.
+    func refreshAccessibilityStatusOnActivate() {
+        let now = AXIsProcessTrusted()
+        if hasAccessibilityPermission != now { hasAccessibilityPermission = now }
+        if now && eventTap == nil { attemptEventTap() }
+        // Regressed (permission revoked, or the tap isn't live) and no watcher
+        // is currently running → restart it so we notice when it recovers.
+        if (!now || eventTap == nil) && accessibilityPollTimer == nil {
+            startAccessibilityWatcher()
+        }
     }
 
     // (caret prewarmer removed — caused stale-position bug: cached position

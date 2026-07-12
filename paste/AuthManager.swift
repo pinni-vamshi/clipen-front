@@ -53,6 +53,17 @@ final class AuthManager: ObservableObject {
     /// unconditional daily "still alive" ping fires at most once per day even
     /// though its trigger (launch + the 30-min timer) runs far more often.
     private let lastHeartbeatDateKey       = "lastHeartbeatDate"
+    /// Bounded lifetime set of LOCAL active days (yyyy-MM-dd), for the Habit /
+    /// churn dimensions of the value profile. The daily-usage store can't serve
+    /// this: it's an outbox pruned once a day is confirmed sent, so it only
+    /// holds the recent unsent window. This is append-only, deduped, and capped
+    /// so it can't grow without bound; one guarded write per NEW day, never per
+    /// event (see noteActiveDayIfNeeded).
+    private let lifetimeActiveDaysKey       = "clipenLifetimeActiveDays"
+    private static let lifetimeActiveDaysCap = 400
+    /// Process-lifetime guard so the once-per-day active-day write is attempted
+    /// at most once per launch after it's confirmed present.
+    private var todayMarkedActive = false
 
     /// Anonymous usage-ping endpoint — the deployed clipen_backend on Render.
     /// (The old value, https://api.clipen.app, was a placeholder domain that
@@ -129,7 +140,28 @@ final class AuthManager: ObservableObject {
     private func incrementDailyUsage(toolID: String, count: Int = 1, date: String) {
         guard !toolID.isEmpty, count > 0 else { return }
         pendingDailyUsage["\(date)|\(toolID)", default: 0] += count
+        noteActiveDayIfNeeded()
         scheduleDailyUsageFlush()
+    }
+
+    /// Record today (local) in the bounded lifetime active-days set. O(1) after
+    /// the first call of the day thanks to the in-memory guard; touches
+    /// UserDefaults at most once per calendar day, never on the keystroke path
+    /// after that. Every activity funnels through incrementDailyUsage, so this
+    /// captures every day the app was actually used.
+    private func noteActiveDayIfNeeded() {
+        guard !todayMarkedActive else { return }
+        let today = Self.dateKey(for: Date())
+        var days = UserDefaults.standard.stringArray(forKey: lifetimeActiveDaysKey) ?? []
+        if days.last == today { todayMarkedActive = true; return }
+        if !days.contains(today) {
+            days.append(today)
+            if days.count > Self.lifetimeActiveDaysCap {
+                days.removeFirst(days.count - Self.lifetimeActiveDaysCap)
+            }
+            UserDefaults.standard.set(days, forKey: lifetimeActiveDaysKey)
+        }
+        todayMarkedActive = true
     }
 
     private func scheduleDailyUsageFlush() {
@@ -363,6 +395,11 @@ final class AuthManager: ObservableObject {
             "capture_rich":       m.captureRichText,
             "capture_files":      m.captureFiles,
         ] as [String: Any]
+        // Mathematically-grounded behavioural profile (Habit/Dependency/
+        // Workflow/Exploration/Friction + confidence/churn/interest), derived
+        // on-device from already-collected local counters — a meaningful value
+        // signal instead of leaving the backend to guess from raw event totals.
+        body["value_profile"] = clipenValueProfile()
         // First-ever-session paste record, if this install has one — the
         // backend writes it once and ignores every later copy.
         if let firstSession = UserDefaults.standard.dictionary(forKey: "firstSessionPastes") {
@@ -546,6 +583,213 @@ final class AuthManager: ObservableObject {
         }
         _globalBucketUsageCache = counts
         return counts
+    }
+
+    // MARK: - Clipen Value Profile (behavioural dimensions, computed on-device)
+    //
+    // Raw event counts are a poor proxy for genuine product value: a user
+    // pressing V twenty times can mean deep history reliance OR difficulty
+    // finding an item (friction). This computes six orthogonal, bounded
+    // behavioural dimensions from the counters already collected locally, so
+    // the backend receives a mathematically defensible signal instead of
+    // uninterpretable raw totals. It is a PURE function of already-persisted
+    // data — no new information is gathered — and is versioned so a future
+    // change to the math can be told apart server-side from old payloads.
+    //
+    //   P = [H, D, W, E, F]  (each in [0, 1])
+    //     H  Habit        — recency-weighted repeated temporal return
+    //     D  Dependency   — reliance on history depth beyond the front item
+    //     W  Workflow     — breadth + intensity of advanced-feature use
+    //     E  Exploration  — feature/settings discovery (deliberately small weight)
+    //     F  Friction     — abandonment + failure signals
+    //   plus confidence, churn risk, and (only because a scalar is sometimes
+    //   wanted) a single shrunk Interest value.
+    static let valueProfileFormulaVersion = 1
+
+    /// yyyy-MM-dd → Date (local midnight). Cached formatter; keys are the ones
+    /// `dateKey(for:)` writes, so parsing always succeeds.
+    private static let dateKeyParser: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = .current
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Bayesian-smoothed proportion: (x + α) / (n + α + β). Pulls small-sample
+    /// ratios toward the prior mean α/(α+β) instead of letting one event read
+    /// as 0% or 100%.
+    private static func smoothedRatio(_ x: Double, _ n: Double, alpha: Double, beta: Double) -> Double {
+        (x + alpha) / (n + alpha + beta)
+    }
+
+    /// Heavy-tailed count → [0, 1] via log compression, so a power user with
+    /// 10× the counts of a regular user doesn't score 10× (diminishing returns).
+    private static func logNorm(_ x: Double, cap: Double) -> Double {
+        guard x > 0, cap > 0 else { return 0 }
+        return min(1, log1p(x) / log1p(cap))
+    }
+
+    /// The full behavioural profile, ready to embed in the usage snapshot.
+    ///
+    /// Dimensions are computed from the most STABLE source available for each,
+    /// because the day|tool store is a pruned outbox (see dailyUsageRaw):
+    ///   • Habit / churn / cohort   ← the lifetime active-days set (never pruned)
+    ///   • ⌘V + fast-paste          ← lifetime counters (clickCountKey, fastPasteCountKey)
+    ///   • Transform breadth        ← toolUsageTotals (lifetime)
+    ///   • Friction / exploration   ← the recent unsent window (inherently recent signals)
+    func clipenValueProfile(now: Date = Date()) -> [String: Any] {
+        // Recent (unsent-window) counters — used only for signals that are
+        // inherently about the present: friction, exploration, in-session depth.
+        let raw = dailyUsageRaw()
+        var recentByTool: [String: Int] = [:]
+        for (compound, value) in raw where value > 0 {
+            guard let sep = compound.firstIndex(of: "|") else { continue }
+            recentByTool[String(compound[compound.index(after: sep)...]), default: 0] += value
+        }
+        func recent(_ id: String) -> Double { Double(recentByTool[id, default: 0]) }
+        func recentPrefix(_ p: String) -> Double {
+            recentByTool.reduce(0.0) { $0 + ($1.key.hasPrefix(p) ? Double($1.value) : 0) }
+        }
+        func recentDistinct(_ p: String) -> Int {
+            recentByTool.reduce(0) { $0 + ($1.key.hasPrefix(p) && $1.value > 0 ? 1 : 0) }
+        }
+
+        let todayStart = Calendar.current.startOfDay(for: now)
+        func ageDays(_ key: String) -> Double {
+            guard let d = Self.dateKeyParser.date(from: key) else { return .infinity }
+            return max(0, todayStart.timeIntervalSince(Calendar.current.startOfDay(for: d)) / 86_400)
+        }
+
+        // Lifetime active days (deduped, bounded) — the real basis for habit.
+        let activeDates = Set(UserDefaults.standard.stringArray(forKey: lifetimeActiveDaysKey) ?? [])
+        let activeDayCount = Double(activeDates.count)
+
+        // Cohort age: the true first-session stamp, else the earliest active
+        // day. A six-hour-old install cannot have 7-day retention — every rate
+        // below is normalised against this so young cohorts aren't punished.
+        let firstStamp = UserDefaults.standard.object(forKey: "firstSessionStamp") as? Double
+        let earliestAge = activeDates.map(ageDays).filter { $0.isFinite }.max() ?? 0
+        let accountAgeDays = max(firstStamp.map { max(0, todayStart.timeIntervalSince1970 - $0) / 86_400 } ?? 0,
+                                 earliestAge)
+
+        // Lifetime paste counters.
+        let cmdVLifetime = Double(UserDefaults.standard.integer(forKey: clickCountKey))
+        let fastPastes = Double(UserDefaults.standard.integer(forKey: fastPasteCountKey))
+
+        // ── H — Habit ────────────────────────────────────────────────────
+        // Smoothed active-day rate over the install's life (prior ≈ 0.2/day)…
+        let activeDayRate = Self.smoothedRatio(activeDayCount, max(1, accountAgeDays),
+                                               alpha: 1, beta: 4)
+        // …plus a recency-weighted return density (14-day half-life): coming
+        // back this week counts far more than a burst two months ago.
+        let habitLambda = log(2.0) / 14.0
+        let weightedActive = activeDates.reduce(0.0) { $0 + exp(-habitLambda * ageDays($1)) }
+        let habitDensity = Self.logNorm(weightedActive, cap: 14)
+        let H = min(1, 0.5 * activeDayRate + 0.5 * habitDensity)
+
+        // ── D — History Dependency ───────────────────────────────────────
+        // A fast paste is the front item with no popup; every other ⌘V went
+        // through the ring deliberately. The popup-paste fraction is therefore
+        // a clean LIFETIME reliance signal, smoothed toward a 0.15 prior.
+        let popupPastes = max(0, cmdVLifetime - fastPastes)
+        let dependencyRatio = Self.smoothedRatio(popupPastes, max(1, cmdVLifetime), alpha: 1, beta: 6)
+        // Robust p90 selected depth from the recent paste-index buckets (pidx.*
+        // is logged once per history paste, bucketed) — a weighted percentile,
+        // never a raw max one outlier could spike.
+        let depthBuckets: [(id: String, depth: Double)] = [
+            ("pidx.0", 0), ("pidx.1", 1), ("pidx.2", 2), ("pidx.3", 3), ("pidx.4", 4),
+            ("pidx.5_10", 7), ("pidx.11_50", 30), ("pidx.50p", 60),
+        ]
+        let pidxTotal = recentPrefix("pidx.")
+        let p90Depth: Double = {
+            guard pidxTotal > 0 else { return 0 }
+            let threshold = 0.9 * pidxTotal
+            var cumulative = 0.0
+            for b in depthBuckets {
+                cumulative += recent(b.id)
+                if cumulative >= threshold { return b.depth }
+            }
+            return depthBuckets.last?.depth ?? 0
+        }()
+        let D = min(1, 0.7 * dependencyRatio + 0.3 * Self.logNorm(p90Depth, cap: 50))
+
+        // ── W — Workflow Depth ───────────────────────────────────────────
+        // Transform breadth/intensity is lifetime (toolUsageTotals); the other
+        // advanced-feature families come from the recent window (they aren't
+        // mirrored into lifetime totals). Breadth = how many families touched.
+        let transformUses = Double(toolUsageTotals().values.reduce(0, +))
+        let workflowFamilies: [Double] = [
+            recent("action.preview"),
+            recent("action.reference-pin") + recentPrefix("ref."),
+            recent("action.mark"),
+            transformUses,
+            recent("action.popup-search") + recent("action.window-search"),
+            recent("action.similar-items"),
+            recent("action.share"),
+        ]
+        let familiesUsed = Double(workflowFamilies.filter { $0 > 0 }.count)
+        let workflowBreadth = familiesUsed / Double(workflowFamilies.count)
+        let workflowIntensity = Self.logNorm(workflowFamilies.reduce(0, +), cap: 120)
+        let W = min(1, 0.6 * workflowBreadth + 0.4 * workflowIntensity)
+
+        // ── E — Exploration ──────────────────────────────────────────────
+        // Distinct settings touched + distinct action kinds tried. Capped and
+        // given a SMALL Interest weight so novelty never poses as durable value.
+        let distinctSettings = Double(recentDistinct("setting."))
+        let distinctActions = Double(recentDistinct("action."))
+        let E = min(1, Self.logNorm(distinctSettings + distinctActions, cap: 18))
+
+        // ── F — Friction ─────────────────────────────────────────────────
+        let opens = recent("popup.open")
+        let abandons = recent("popup.abandon")
+        let abandonRate = Self.smoothedRatio(abandons, max(1, opens), alpha: 1, beta: 4)
+        let failTotal = recentPrefix("fail.")
+        let failDenom = max(1, recent(Self.cmdVBucketToolID) + recentPrefix("capture."))
+        let failRate = Self.logNorm(failTotal / failDenom * 100, cap: 100)
+        // Oscillation: lots of navigation per open that ends in abandonment
+        // reads as "couldn't find it"; only counts alongside abandonment.
+        let navsPerOpen = opens > 0 ? recent("popup.nav") / opens : 0
+        let oscillation = min(1, navsPerOpen / 25) * abandonRate
+        let F = min(1, 0.55 * abandonRate + 0.30 * failRate + 0.15 * oscillation)
+
+        // ── Confidence ───────────────────────────────────────────────────
+        // Grows with lifetime observation volume; a handful of events can't
+        // yield a confident verdict. τ = 60 reaches ~0.63.
+        let observations = cmdVLifetime + transformUses + activeDayCount
+        let confidence = 1 - exp(-observations / 60.0)
+
+        // ── Interest (single shrunk scalar, only because one is sometimes
+        // wanted) ─────────────────────────────────────────────────────────
+        let wH = 0.30, wD = 0.30, wW = 0.25, wE = 0.05, wF = 0.20
+        let rawInterest = max(0, min(1, wH * H + wD * D + wW * W + wE * E - wF * F))
+        // Shrink toward a slightly-below-neutral prior at low confidence, so a
+        // brand-new install reads as neither a power user nor a reject.
+        let neutralPrior = 0.35
+        let interest = confidence * rawInterest + (1 - confidence) * neutralPrior
+
+        // ── Churn risk ───────────────────────────────────────────────────
+        // Staleness of the most recent return (7-day half-life) dominates,
+        // tempered by weak habit and active friction.
+        let daysSinceActive = activeDates.map(ageDays).filter { $0.isFinite }.min() ?? accountAgeDays
+        let recencyDecay = 1 - exp(-daysSinceActive / 7.0)
+        let churn = max(0, min(1, 0.5 * recencyDecay + 0.3 * (1 - H) + 0.2 * F))
+
+        func rnd(_ x: Double) -> Double { (x * 1000).rounded() / 1000 }
+        return [
+            "formula_version": Self.valueProfileFormulaVersion,
+            "habit": rnd(H),
+            "dependency": rnd(D),
+            "workflow": rnd(W),
+            "exploration": rnd(E),
+            "friction": rnd(F),
+            "confidence": rnd(confidence),
+            "interest": rnd(interest),
+            "churn_risk": rnd(churn),
+            "cohort_age_days": Int(accountAgeDays.rounded()),
+            "active_days": Int(activeDayCount),
+        ]
     }
 
     private func currentTimeBucket(for date: Date) -> String {

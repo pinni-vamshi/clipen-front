@@ -1,5 +1,32 @@
 import SwiftUI
 import ImageIO
+import os
+
+/// Latency instrumentation for Clipen's real-time interaction pipeline.
+///
+/// Uses `OSSignposter`, which is effectively free when no Instruments trace is
+/// attached: `signpostsEnabled` short-circuits before any work, so these calls
+/// stay compiled into release builds (that's the point — a shipped build can be
+/// profiled on real hardware) without a measurable cost on the keystroke path.
+///
+/// Inspect in Instruments → **Points of Interest**, alongside **Time Profiler**,
+/// **SwiftUI**, **Core Animation**, **Allocations**, and **Leaks**. The markers
+/// let you measure, on device, the interaction pipeline:
+///   `v.keydown` → `selection.target` → `popup.show` → `preview.request`
+/// i.e. CGEvent V keydown → selection mutation → popover on screen → preview.
+enum ClipenSignpost {
+    static let signposter = OSSignposter(subsystem: "com.clipen.app",
+                                         category: .pointsOfInterest)
+
+    /// One-shot marker (no duration) — cheap enough for the keystroke path.
+    /// `emitEvent` with a `StaticString` does no argument formatting and the
+    /// signposting machinery no-ops when no trace is attached, so this stays in
+    /// release builds without a measurable cost.
+    @inline(__always)
+    static func event(_ name: StaticString) {
+        signposter.emitEvent(name)
+    }
+}
 
 /// Convenience initializer for SwiftUI Color from a hex string like "#RRGGBB"
 /// (the leading "#" is optional). Used across the app — defined once here so
@@ -55,7 +82,20 @@ struct SystemPopoverMaterial: NSViewRepresentable {
 final class ItemThumbnailCache {
     static let shared = ItemThumbnailCache()
     private let cache = NSCache<NSString, NSImage>()
-    private init() { cache.countLimit = 300 }
+    private init() {
+        cache.countLimit = 300
+        // Bound by decoded BYTES too, not just count. A 360px thumbnail is
+        // ~360·360·4 ≈ 0.5 MB, so 300 of them could pin ~150 MB resident with
+        // no cost ceiling. Cap total decoded thumbnail memory at ~96 MB; NSCache
+        // evicts the least-recently-used entries once either limit is hit.
+        cache.totalCostLimit = 96 * 1024 * 1024
+    }
+
+    /// Estimated decoded footprint of a thumbnail, for NSCache cost accounting.
+    private static func cost(_ image: NSImage) -> Int {
+        guard let rep = image.representations.first else { return 0 }
+        return max(1, rep.pixelsWide * rep.pixelsHigh * 4)
+    }
 
     /// Thumbnail for an in-memory clipboard image, keyed by the item's ID.
     /// Synchronous — CGImageSource thumbnailing is a few ms, paid once per
@@ -66,7 +106,7 @@ final class ItemThumbnailCache {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
               let cg  = Self.makeThumb(src, maxPixel) else { return nil }
         let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-        cache.setObject(img, forKey: k)
+        cache.setObject(img, forKey: k, cost: Self.cost(img))
         return img
     }
 
@@ -77,7 +117,7 @@ final class ItemThumbnailCache {
     }
 
     func storeFileThumbnail(_ image: NSImage, for url: URL) {
-        cache.setObject(image, forKey: "file:\(url.path)" as NSString)
+        cache.setObject(image, forKey: "file:\(url.path)" as NSString, cost: Self.cost(image))
     }
 
     /// Cache-only lookup / store for an in-memory image's thumbnail — the
@@ -89,7 +129,7 @@ final class ItemThumbnailCache {
     }
 
     func storeDataThumbnail(_ image: NSImage, key: String) {
-        cache.setObject(image, forKey: "data:\(key)" as NSString)
+        cache.setObject(image, forKey: "data:\(key)" as NSString, cost: Self.cost(image))
     }
 
     /// Pure decode of in-memory image data, safe on a background task.

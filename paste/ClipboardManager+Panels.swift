@@ -453,6 +453,7 @@ extension ClipboardManager {
     }
 
     func showSelectedItemPreview() {
+        ClipenSignpost.event("preview.request")
         let anchor = selectedRowAnchor()
         let current: ClipboardItem? = (!displayItems.isEmpty && selectedIndex < displayItems.count)
             ? displayItems[selectedIndex] : nil
@@ -737,6 +738,10 @@ extension ClipboardManager {
         } else {
             selectedIndex = (selectedIndex + 1) % display.count
         }
+        // Latency marker: the selection TARGET has moved. Everything below
+        // (analytics, preview/transform/share sync) is downstream of this and
+        // is what a Points-of-Interest trace measures the tail cost of.
+        ClipenSignpost.event("selection.target")
 
         cycleCount += 1
         AuthManager.shared.registerActionUsage(actionID: "popup.nav")
@@ -912,6 +917,7 @@ extension ClipboardManager {
         // Capture the real destination app NOW, before previewWindow.show()
         // brings up our own NSPopover — see capturedPasteTarget's doc comment.
         capturedPasteTarget = NSWorkspace.shared.frontmostApplication
+        ClipenSignpost.event("popup.show")
         previewWindow.show()
         popupOpenGeneration += 1
         // Analytics: one popup session begins.
