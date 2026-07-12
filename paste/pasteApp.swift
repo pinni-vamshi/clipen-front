@@ -138,6 +138,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Fallback for the idle-install path: if the user explicitly quits while
+    /// a downloaded update is still pending (they kept the main window open,
+    /// so `tryInstallPendingUpdate` never found an idle moment), install it
+    /// now on the way out — otherwise, since the delegate took ownership by
+    /// returning `true`, the update would sit downloaded but unapplied.
+    func applicationWillTerminate(_ notification: Notification) {
+        // Persist any usage increments still buffered in memory (the nav path
+        // coalesces them instead of writing on every keystroke) before we go.
+        AuthManager.shared.flushPendingDailyUsage()
+        pendingUpdateInstall?()
+        pendingUpdateInstall = nil
+    }
+
     /// Reopen the main window when the user double-clicks the app icon in /Applications.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { openMainWindow() }

@@ -113,14 +113,57 @@ final class AuthManager: ObservableObject {
     /// bucket). Never sent immediately — only once that calendar day is over,
     /// via flushCompletedDailyUsage(), so the number reported is always a
     /// FINAL count, never a still-growing one from partway through the day.
+    /// In-memory accumulator for daily-usage increments, flushed to
+    /// UserDefaults on a coalesced schedule. The navigation path fires
+    /// `registerActionUsage("popup.nav")` on every ⌘-held V press; the old
+    /// implementation read the ENTIRE daily-usage dictionary out of
+    /// UserDefaults, type-cast every entry, mutated one key, and serialized
+    /// the whole dictionary back — an O(n) read + O(n) copy + full plist
+    /// encode on the main thread, once (twice for ⇧V) per keystroke, in the
+    /// latency-critical selection path. Increments now land here in O(1) and
+    /// the expensive read-modify-write happens at most once every couple of
+    /// seconds (plus on every ⌘V and on quit), off the keystroke path.
+    private var pendingDailyUsage: [String: Int] = [:]
+    private var dailyUsageFlushScheduled = false
+
     private func incrementDailyUsage(toolID: String, count: Int = 1, date: String) {
         guard !toolID.isEmpty, count > 0 else { return }
-        var counts = dailyUsageRaw()
-        counts["\(date)|\(toolID)", default: 0] += count
+        pendingDailyUsage["\(date)|\(toolID)", default: 0] += count
+        scheduleDailyUsageFlush()
+    }
+
+    private func scheduleDailyUsageFlush() {
+        guard !dailyUsageFlushScheduled else { return }
+        dailyUsageFlushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.dailyUsageFlushScheduled = false
+            self?.flushPendingDailyUsage()
+        }
+    }
+
+    /// Merge the in-memory increment buffer into the persisted dictionary in a
+    /// single read-modify-write. Called on a short debounce, before any read
+    /// of the authoritative daily-usage data (see `dailyUsageRaw`), and on app
+    /// termination so a session ending mid-navigation doesn't drop counts.
+    /// All callers are on the main thread, so `pendingDailyUsage` needs no
+    /// locking.
+    func flushPendingDailyUsage() {
+        guard !pendingDailyUsage.isEmpty else { return }
+        var counts = persistedDailyUsageRaw()
+        for (k, v) in pendingDailyUsage { counts[k, default: 0] += v }
+        pendingDailyUsage.removeAll(keepingCapacity: true)
         UserDefaults.standard.set(counts, forKey: dailyUsageKey)
     }
 
+    /// Authoritative view of accumulated daily usage: flush the in-memory
+    /// buffer first so senders and removers see every increment, then return
+    /// the persisted store as the single source of truth.
     private func dailyUsageRaw() -> [String: Int] {
+        flushPendingDailyUsage()
+        return persistedDailyUsageRaw()
+    }
+
+    private func persistedDailyUsageRaw() -> [String: Int] {
         guard let raw = UserDefaults.standard.dictionary(forKey: dailyUsageKey) else { return [:] }
         var counts: [String: Int] = [:]
         for (k, v) in raw {

@@ -144,17 +144,36 @@ extension ClipboardManager {
 
     /// Writes share payload bytes to a per-item temp file (idempotent — the
     /// same item id reuses the same path), returning the URL or nil on
-    /// failure. Named after the item so AirDrop/Mail show a sensible filename.
+    /// failure. The filename uses the FULL uuid (a truncated prefix could
+    /// collide across a multi-item share and share the wrong bytes). Stale
+    /// files from earlier shares are pruned first so the temp dir doesn't
+    /// grow unbounded.
     private static func shareTempFile(_ data: Data, ext: String, id: UUID) -> URL? {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ClipenShare", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent("Clipen-\(id.uuidString.prefix(8)).\(ext)")
+        pruneStaleShareFiles(in: dir)
+        let url = dir.appendingPathComponent("Clipen-\(id.uuidString).\(ext)")
         do {
             try data.write(to: url, options: .atomic)
             return url
         } catch {
             return nil
+        }
+    }
+
+    /// Best-effort removal of share temp files older than an hour — long
+    /// enough that any in-flight AirDrop/Mail transfer of a just-written file
+    /// has finished reading it, so this never yanks a file mid-share.
+    private static func pruneStaleShareFiles(in dir: URL) {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        let cutoff = Date().addingTimeInterval(-3600)
+        for url in entries {
+            let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            if let modified, modified < cutoff {
+                try? FileManager.default.removeItem(at: url)
+            }
         }
     }
 
@@ -242,15 +261,42 @@ extension ClipboardManager {
             updateSharePanel()
             return
         }
-        let items = shareRepresentations(for: newTarget)
-        let services = NSSharingService.sharingServices(forItems: items)
-        guard !services.isEmpty else {
-            // Nothing can share this item — retire the share stage rather than
-            // leave a stale destination list up.
-            exitShareStage()
+        // Already enumerated this item earlier in the session — reuse it, no
+        // disk write, no enumeration.
+        if let cached = shareServicesCache[newTarget.id] {
+            applyShareTarget(newTarget, services: cached)
             return
         }
-        shareTargetItems = [newTarget]
+        // Re-anchor NOW (cheap) so the panel follows the row immediately, then
+        // do the expensive part — the temp-file write inside
+        // shareRepresentations plus NSSharingService enumeration — OFF the
+        // main thread so a fast V-cycle never blocks on disk I/O. Apply only
+        // if the user is still on this item when it finishes.
+        updateSharePanel()
+        shareSyncGeneration += 1
+        let gen = shareSyncGeneration
+        let targetID = newTarget.id
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let items = self.shareRepresentations(for: newTarget)
+            let services = NSSharingService.sharingServices(forItems: items)
+            DispatchQueue.main.async {
+                guard self.inShareStage, self.shareSyncGeneration == gen,
+                      self.displayItems.indices.contains(self.selectedIndex),
+                      self.displayItems[self.selectedIndex].id == targetID else { return }
+                guard !services.isEmpty else {
+                    // Nothing can share this item — retire the share stage.
+                    self.exitShareStage()
+                    return
+                }
+                self.shareServicesCache[targetID] = services
+                self.applyShareTarget(newTarget, services: services)
+            }
+        }
+    }
+
+    private func applyShareTarget(_ target: ClipboardItem, services: [NSSharingService]) {
+        shareTargetItems = [target]
         shareServices = Self.rankedShareServices(services)
         shareIndex = 0
         updateSharePanel()
@@ -260,6 +306,7 @@ extension ClipboardManager {
         inShareStage = false
         shareServices = []
         shareTargetItems = []
+        shareServicesCache = [:]
         shareIndex = 0
         sharePanel.hide()
     }

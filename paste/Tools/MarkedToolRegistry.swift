@@ -295,39 +295,61 @@ enum MarkedToolService {
         let images = items.compactMap { ImageService.imageInput(for: $0)?.image }
         guard images.count >= 2 else { return .status("Need at least 2 images.") }
         return await withCheckedContinuation { continuation in
-            DispatchQueue.main.async {
-                // NSImage drawing needs the main thread's graphics context.
-                let width  = vertical ? (images.map(\.size.width).max() ?? 0) : images.map(\.size.width).reduce(0, +)
-                let height = vertical ? images.map(\.size.height).reduce(0, +) : (images.map(\.size.height).max() ?? 0)
-                guard width > 0, height > 0 else {
+            // Composite OFF the main thread. The old path did the whole draw +
+            // PNG encode inside DispatchQueue.main.async via NSImage.lockFocus,
+            // which froze the UI for the entire stitch — hundreds of ms for a
+            // marked set of large screenshots. lockFocus is the only part that
+            // actually needs the main thread; drawing CGImages into an explicit
+            // CGBitmapContext does not, so it runs here on a background core and
+            // the UI (spinner, cancel) stays live.
+            DispatchQueue.global(qos: .userInitiated).async {
+                // Work in each image's NATIVE pixels (its CGImage), not NSImage
+                // points, so a Retina screenshot keeps full detail regardless of
+                // thread or screen backing scale.
+                var cgs: [CGImage] = []
+                cgs.reserveCapacity(images.count)
+                for img in images {
+                    var rect = NSRect(origin: .zero, size: img.size)
+                    guard let cg = img.cgImage(forProposedRect: &rect, context: nil, hints: nil) else {
+                        continuation.resume(returning: .status("Couldn't stitch the images."))
+                        return
+                    }
+                    cgs.append(cg)
+                }
+                let width  = vertical ? (cgs.map(\.width).max() ?? 0) : cgs.map(\.width).reduce(0, +)
+                let height = vertical ? cgs.map(\.height).reduce(0, +) : (cgs.map(\.height).max() ?? 0)
+                guard width > 0, height > 0,
+                      let ctx = CGContext(data: nil, width: width, height: height,
+                                          bitsPerComponent: 8, bytesPerRow: 0,
+                                          space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
                     continuation.resume(returning: .status("Couldn't stitch the images."))
                     return
                 }
-                let canvas = NSImage(size: NSSize(width: width, height: height))
-                canvas.lockFocus()
-                var offset: CGFloat = 0
+                // CGContext's origin is bottom-left; both branches place the
+                // first marked item at the top / left, matching the old output.
+                var offset = 0
                 if vertical {
-                    // Draw top-down in mark order (flipped math: first item at top).
-                    for img in images {
-                        img.draw(in: NSRect(x: 0, y: height - offset - img.size.height,
-                                            width: img.size.width, height: img.size.height))
-                        offset += img.size.height
+                    for cg in cgs {
+                        ctx.draw(cg, in: CGRect(x: 0, y: height - offset - cg.height,
+                                                width: cg.width, height: cg.height))
+                        offset += cg.height
                     }
                 } else {
-                    for img in images {
-                        img.draw(in: NSRect(x: offset, y: 0,
-                                            width: img.size.width, height: img.size.height))
-                        offset += img.size.width
+                    for cg in cgs {
+                        ctx.draw(cg, in: CGRect(x: offset, y: 0, width: cg.width, height: cg.height))
+                        offset += cg.width
                     }
                 }
-                canvas.unlockFocus()
-                guard let png = canvas.pngData() else {
+                guard let stitched = ctx.makeImage(),
+                      let png = NSBitmapImageRep(cgImage: stitched).representation(using: .png, properties: [:]) else {
                     continuation.resume(returning: .status("Couldn't encode the stitched image."))
                     return
                 }
+                let fallback = NSImage(cgImage: stitched, size: NSSize(width: width, height: height))
                 continuation.resume(returning: .item(
-                    ClipboardItem(content: ClipboardContent.imageContent(rawData: png, dataType: .init("public.png"), fallback: canvas)!),
-                    message: "Stitched \(images.count) images \(vertical ? "vertically" : "horizontally")."
+                    ClipboardItem(content: ClipboardContent.imageContent(rawData: png, dataType: .init("public.png"), fallback: fallback)!),
+                    message: "Stitched \(cgs.count) images \(vertical ? "vertically" : "horizontally")."
                 ))
             }
         }

@@ -358,61 +358,23 @@ struct MainWindowView: View {
     // MARK: Left list pane (minimal rows — icon + one line)
 
     private var listPane: some View {
-        // Compute the filtered list ONCE per render — it was evaluated twice
-        // (`.isEmpty` + the ForEach), which re-ran hybridSearch twice on every
-        // update while searching.
-        let rows = filtered
-        return Group {
-            if rows.isEmpty {
-                VStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 28, weight: .thin)).foregroundColor(.textDim)
-                    Text("No matches").font(.system(size: 13, weight: .medium)).foregroundColor(.textSec)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 1) {
-                        ForEach(rows) { item in
-                            CompactItemRow(item: item, isSelected: mainSelectedID == item.id,
-                                          onDelete: {
-                                              if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
-                                                  manager.removeItem(at: i)
-                                              }
-                                          },
-                                          onTogglePin: { manager.togglePin(id: item.id) })
-                                .equatable()
-                                .onTapGesture(count: 1) { mainSelectedID = item.id }
-                                .onTapGesture(count: 2) {
-                                    // Double-click opens the native macOS Quick
-                                    // Look panel (same as Space in Finder) instead
-                                    // of pasting — Enter now pastes the selection,
-                                    // see the .onKeyPress(.return) below.
-                                    mainSelectedID = item.id
-                                    QuickLookController.shared.toggle(for: item)
-                                }
-                                .contextMenu {
-                                    Button("Paste") {
-                                        if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
-                                            manager.pasteItem(at: i)
-                                        }
-                                    }
-                                    Divider()
-                                    Button(item.isPinned ? "Unpin" : "Pin") { manager.togglePin(id: item.id) }
-                                    Button("Remove", role: .destructive) {
-                                        if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
-                                            manager.removeItem(at: i)
-                                        }
-                                    }
-                                }
-                        }
-                    }
-                    .padding(8)
-                }
-            }
-        }
-        // Paste moved here from double-click (now Quick Look) — Enter pastes
-        // whichever row is currently selected.
+        // Delegated to an `.equatable()` child so the filtered-list build (tag
+        // filter + pin ordering + search intersection) is SKIPPED whenever the
+        // main window's body re-evaluates for a reason the list doesn't care
+        // about — e.g. popup cycling mutating `manager.selectedIndex`/hint
+        // flags while the window is open, or a transient status flashing. The
+        // child re-renders only when one of its actual inputs changes.
+        HistoryListPane(
+            items:            manager.items,
+            itemsRevision:    manager.itemsRevision,
+            tagFilter:        mainTagFilter,
+            searchText:       debouncedSearchText,
+            pinStartPosition: manager.pinStartPosition,
+            selectedID:       $mainSelectedID,
+            manager:          manager
+        )
+        .equatable()
+        // Enter pastes whichever row is currently selected.
         .onKeyPress(.return) {
             guard let id = mainSelectedID,
                   let i = manager.items.firstIndex(where: { $0.id == id }) else { return .ignored }
@@ -1021,6 +983,98 @@ private struct SelectableTextBlock: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - History list pane (equatable — see listPane for why)
+
+/// The scrollable history list. Split out of `MainWindowView` and made
+/// `Equatable` so SwiftUI can skip rebuilding it (and recomputing `filtered`)
+/// when the parent re-evaluates for reasons unrelated to the list. It observes
+/// nothing — it's a pure function of the values passed in, comparing them in
+/// `==`. `itemsRevision` stands in for "did the ring change" since
+/// `[ClipboardItem]` isn't Equatable. `manager` is held as a plain reference
+/// for actions only (no `@ObservedObject`), so manager churn never re-renders
+/// it; changes that DO matter arrive as changed inputs.
+private struct HistoryListPane: View, Equatable {
+    let items:            [ClipboardItem]
+    let itemsRevision:    Int
+    let tagFilter:        ClipboardTag?
+    let searchText:       String
+    let pinStartPosition: Int
+    @Binding var selectedID: UUID?
+    let manager:          ClipboardManager
+
+    static func == (l: HistoryListPane, r: HistoryListPane) -> Bool {
+        l.itemsRevision    == r.itemsRevision &&
+        l.tagFilter        == r.tagFilter &&
+        l.searchText       == r.searchText &&
+        l.pinStartPosition == r.pinStartPosition &&
+        l.selectedID       == r.selectedID
+    }
+
+    /// Same logic as `MainWindowView.filtered` — tag filter, then pin ordering,
+    /// then (if searching) intersect with hybridSearch's ranked hits.
+    private var filtered: [ClipboardItem] {
+        let base = tagFilter.map { tag in items.filter { $0.tags.contains(tag) } } ?? items
+        let pinOrdered = manager.applyPinOrdering(base)
+        guard !searchText.isEmpty else { return pinOrdered }
+        let hits = manager.hybridSearch(query: searchText)
+        if hits.isEmpty { return [] }
+        let visible = Set(pinOrdered.map(\.id))
+        return hits.filter { visible.contains($0.id) }
+    }
+
+    var body: some View {
+        let rows = filtered
+        return Group {
+            if rows.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 28, weight: .thin)).foregroundColor(.textDim)
+                    Text("No matches").font(.system(size: 13, weight: .medium)).foregroundColor(.textSec)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(rows) { item in
+                            CompactItemRow(item: item, isSelected: selectedID == item.id,
+                                          onDelete: {
+                                              if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
+                                                  manager.removeItem(at: i)
+                                              }
+                                          },
+                                          onTogglePin: { manager.togglePin(id: item.id) })
+                                .equatable()
+                                .onTapGesture(count: 1) { selectedID = item.id }
+                                .onTapGesture(count: 2) {
+                                    // Double-click opens the native macOS Quick
+                                    // Look panel (same as Space in Finder) instead
+                                    // of pasting — Enter pastes the selection.
+                                    selectedID = item.id
+                                    QuickLookController.shared.toggle(for: item)
+                                }
+                                .contextMenu {
+                                    Button("Paste") {
+                                        if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
+                                            manager.pasteItem(at: i)
+                                        }
+                                    }
+                                    Divider()
+                                    Button(item.isPinned ? "Unpin" : "Pin") { manager.togglePin(id: item.id) }
+                                    Button("Remove", role: .destructive) {
+                                        if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
+                                            manager.removeItem(at: i)
+                                        }
+                                    }
+                                }
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+        }
     }
 }
 

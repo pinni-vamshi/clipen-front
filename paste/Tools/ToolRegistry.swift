@@ -4,7 +4,62 @@ import PDFKit
 
 enum ToolRegistry {
     static func tools(for item: ClipboardItem) -> [ClipboardTool] {
-        applicable(toolPool(for: item), to: item)
+        resolved(for: item).map { $0.tool }
+    }
+
+    // ── Single-entry resolution cache.
+    //
+    // `displays`, `tools`, and every run/lookup helper below funnel through
+    // `resolved(for:)`. Opening the transform panel and then applying a tool
+    // used to recompute the whole applicable-tools list repeatedly for the
+    // SAME item — and each recompute ran every tool's `preview`, which
+    // executes the real transform over the full text (a big JSON/CSV blob got
+    // fully re-parsed per tool). Content is immutable, so resolution is a pure
+    // function of the item id; cache the most-recent item's result and reuse
+    // it. Lock-guarded because the run helpers can be reached off the main
+    // thread (async apply / capture paths).
+    private struct ResolvedTools {
+        let itemID: UUID
+        let entries: [(tool: ClipboardTool, preview: String?)]
+    }
+    private static var resolvedCache: ResolvedTools?
+    private static let resolvedLock = NSLock()
+
+    /// Applicable tools for `item`, each paired with the preview computed while
+    /// deciding applicability, sorted by importance. Preview and importance
+    /// score are computed EXACTLY ONCE per tool here — the old split
+    /// `applicable` + `displays` ran every preview twice, and the sort
+    /// recomputed each tool's score O(n log n) times.
+    private static func resolved(for item: ClipboardItem) -> [(tool: ClipboardTool, preview: String?)] {
+        resolvedLock.lock()
+        if let cached = resolvedCache, cached.itemID == item.id {
+            let entries = cached.entries
+            resolvedLock.unlock()
+            return entries
+        }
+        resolvedLock.unlock()
+
+        let pool = toolPool(for: item)
+        var scored: [(tool: ClipboardTool, preview: String?, score: Double, order: Int)] = []
+        scored.reserveCapacity(pool.count)
+        for (order, tool) in pool.enumerated() {
+            if tool.id == "image.ocr", !AuthManager.shared.ocrEnabled { continue }
+            if (tool.id == "pdf.extract-all-text" || tool.id == "pdf.first-page-text"),
+               !AuthManager.shared.pdfTextExtract { continue }
+            // A tool is applicable iff it produces a preview for this item.
+            guard let preview = tool.preview(item) else { continue }
+            scored.append((tool, preview, AuthManager.shared.toolImportanceScore(for: tool.id), order))
+        }
+        scored.sort { lhs, rhs in
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.order < rhs.order   // stable catalog order on score ties
+        }
+        let entries = scored.map { (tool: $0.tool, preview: $0.preview) }
+
+        resolvedLock.lock()
+        resolvedCache = ResolvedTools(itemID: item.id, entries: entries)
+        resolvedLock.unlock()
+        return entries
     }
 
     /// One primary pool per item so image/PDF/file tools sort among themselves
@@ -52,14 +107,19 @@ enum ToolRegistry {
     }
 
     static func displays(for item: ClipboardItem) -> [TransformDisplay] {
-        tools(for: item).map { tool in
-            let preview = tool.preview(item)
+        resolved(for: item).map { entry in
+            // The preview is rendered two lines tall; a transform of a large
+            // blob can produce a huge string, so cap what we hand to SwiftUI.
+            let preview: String? = {
+                guard let p = entry.preview, !p.isEmpty else { return nil }
+                return p.count > 200 ? String(p.prefix(200)) : p
+            }()
             return TransformDisplay(
-                id: tool.id,
-                icon: tool.icon,
-                label: tool.label,
-                group: tool.group,
-                preview: preview?.isEmpty == true ? nil : preview
+                id: entry.tool.id,
+                icon: entry.tool.icon,
+                label: entry.tool.label,
+                group: entry.tool.group,
+                preview: preview
             )
         }
     }
@@ -102,28 +162,6 @@ enum ToolRegistry {
         let tools = tools(for: item)
         guard tools.indices.contains(index) else { return nil }
         return tools[index].id
-    }
-
-    private static func applicable(_ tools: [ClipboardTool], to item: ClipboardItem) -> [ClipboardTool] {
-        let filtered = tools.filter { tool in
-            if tool.id == "image.ocr", !AuthManager.shared.ocrEnabled { return false }
-            if (tool.id == "pdf.extract-all-text" || tool.id == "pdf.first-page-text"),
-               !AuthManager.shared.pdfTextExtract {
-                return false
-            }
-            // A tool is applicable iff it produces a preview for this item.
-            // (This used to ALSO execute runSync(item) when preview was nil,
-            // discard the output, and return false on every path anyway —
-            // running full transforms just to throw the result away.)
-            return tool.preview(item) != nil
-        }
-        let catalogOrder = Dictionary(uniqueKeysWithValues: tools.enumerated().map { ($1.id, $0) })
-        return filtered.sorted { lhs, rhs in
-            let ls = AuthManager.shared.toolImportanceScore(for: lhs.id)
-            let rs = AuthManager.shared.toolImportanceScore(for: rhs.id)
-            if ls != rs { return ls > rs }
-            return (catalogOrder[lhs.id] ?? .max) < (catalogOrder[rhs.id] ?? .max)
-        }
     }
 
     private static func tool(for item: ClipboardItem, toolID: String) -> ClipboardTool? {

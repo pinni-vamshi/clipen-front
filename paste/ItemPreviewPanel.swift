@@ -916,39 +916,72 @@ struct CodeSyntaxPreview: View {
             }
         }
         .task(id: HighlightKey(text: text, language: language, dark: colorScheme == .dark)) {
-            highlighted = CodeHighlighter.shared.highlight(
-                text, languageDisplayName: language, dark: colorScheme == .dark)
+            let dark = colorScheme == .dark
+            let result = await CodeHighlighter.shared.highlight(
+                text, languageDisplayName: language, dark: dark)
+            guard !Task.isCancelled else { return }
+            highlighted = result
         }
     }
 
     /// Re-highlight only when the text, detected language, or appearance
-    /// actually changes — not on every view update.
+    /// actually changes. Keyed on a cheap FINGERPRINT (length + boundary
+    /// chars) rather than the whole snippet, so `.task(id:)`'s per-update
+    /// equality check is O(1)-ish instead of an O(n) compare of a string up
+    /// to the 300 KB display cap. Clipboard items are immutable, so distinct
+    /// items reliably differ in length or boundary characters.
     private struct HighlightKey: Equatable {
-        let text: String
+        let fingerprint: String
         let language: String?
         let dark: Bool
+
+        init(text: String, language: String?, dark: Bool) {
+            self.fingerprint = "\(text.count)|\(text.prefix(48))|\(text.suffix(48))"
+            self.language = language
+            self.dark = dark
+        }
     }
 
 }
 
 /// Wraps Highlightr (highlight.js via JavaScriptCore) as a single reused
-/// instance — creating one loads the JS engine + themes, which is too costly
-/// to redo per snippet. Runs on the main actor because Highlightr's
-/// JSContext isn't thread-safe; each call is only a few ms for preview-sized
-/// input (the caller already caps huge pastes upstream).
-@MainActor
+/// instance — creating one loads the JS engine + themes, too costly to redo
+/// per snippet. Runs on a DEDICATED SERIAL background queue (not the main
+/// thread): Highlightr's JSContext isn't thread-safe, but a single consistent
+/// background thread satisfies that while keeping the highlight pass — which
+/// can be tens–hundreds of ms for a large (capped) snippet — off the main
+/// thread so it never hitches the UI.
 final class CodeHighlighter {
     static let shared = CodeHighlighter()
 
-    private let highlightr = Highlightr()
+    private let queue = DispatchQueue(label: "com.clipen.codehighlighter", qos: .userInitiated)
+    private var highlightr: Highlightr?
+    private var didInit = false
     private var currentTheme: String?
 
     private init() {}
 
     /// Highlighted `NSAttributedString`, or nil if Highlightr is unavailable.
-    /// `languageDisplayName` is the app's detected label (e.g. "Swift"); it's
-    /// mapped to a highlight.js id, and when unknown Highlightr auto-detects.
-    func highlight(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
+    /// Async — the highlight runs on the serial queue and the result is
+    /// awaited by the caller (its SwiftUI `.task`). `languageDisplayName` is
+    /// the app's detected label (e.g. "Swift"); unknown → Highlightr
+    /// auto-detects.
+    func highlight(_ code: String, languageDisplayName: String?, dark: Bool) async -> NSAttributedString? {
+        await withCheckedContinuation { continuation in
+            queue.async { [weak self] in
+                continuation.resume(returning: self?.highlightOnQueue(code, languageDisplayName: languageDisplayName, dark: dark))
+            }
+        }
+    }
+
+    /// MUST be called only on `queue` — the JSContext is confined to it.
+    private func highlightOnQueue(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
+        // Lazily create the instance on the queue's thread so the JSContext is
+        // born on the same thread it's used from.
+        if !didInit {
+            highlightr = Highlightr()
+            didInit = true
+        }
         guard let highlightr else { return nil }
         // Themes tuned to read well on the app's own surfaces in each mode.
         let theme = dark ? "atom-one-dark" : "atom-one-light"

@@ -65,8 +65,17 @@ class ClipboardManager: ObservableObject {
     /// Single cap for all data handled by Clipen — backend-driven via features.py `max_data_bytes`.
     static var maxDataBytes: Int { AuthManager.shared.maxDataBytes }
 
+    /// Bumped on every mutation of `items` (add, remove, pin, edit, reorder,
+    /// async enrichment). A cheap, Equatable stand-in for "did the ring
+    /// change" so views can gate expensive derived work (filtering, pin
+    /// ordering) on this Int instead of recomputing on every unrelated
+    /// @Published change. `[ClipboardItem]` isn't Equatable, so this is what
+    /// `.onChange`/`.equatable()` can actually compare against.
+    var itemsRevision = 0
+
     @Published var items: [ClipboardItem] = [] {
         didSet {
+            itemsRevision &+= 1
             _displayItems = nil
             _availableTags = nil
             updatePendingPasteID()
@@ -791,6 +800,15 @@ class ClipboardManager: ObservableObject {
     /// highlighted item) — captured at share-stage entry so a stray
     /// selection change mid-cycle can't retarget the eventual send.
     var shareTargetItems: [ClipboardItem] = []
+    /// Per-item cache of computed share destinations, so cycling V back and
+    /// forth over items whose services were already enumerated doesn't redo
+    /// the temp-file write + NSSharingService enumeration each keystroke.
+    /// Cleared when the share stage exits. Keyed by immutable item id.
+    var shareServicesCache: [UUID: [NSSharingService]] = [:]
+    /// Monotonic token so an off-main service enumeration that finishes after
+    /// the user has already cycled past its item is discarded instead of
+    /// clobbering the current target.
+    var shareSyncGeneration = 0
 
     var saveCancellable: AnyCancellable?
 

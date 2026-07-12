@@ -200,7 +200,12 @@ struct PopoverPreviewView: View {
     let visibleCount: Int
 
     @ObservedObject private var manager = ClipboardManager.shared
-    @ObservedObject private var auth    = AuthManager.shared
+    // Plain reference, NOT @ObservedObject: the only thing read from auth here
+    // is `transformsEnabled`, a hardcoded constant. AuthManager's sole
+    // @Published property is `lastError`, which this view never shows — so
+    // observing it just re-evaluated the whole popup body every time an error
+    // alert toggled, for nothing.
+    private let auth = AuthManager.shared
 
     // Popup always renders from displayItems — the exact same array that
     // keyboard navigation (V/⌘V) and paste use. One array, one index,
