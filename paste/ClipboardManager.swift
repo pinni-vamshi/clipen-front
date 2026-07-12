@@ -399,9 +399,38 @@ class ClipboardManager: ObservableObject {
     @Published var showFirstCycleHint: Bool = false
 
 
+    /// Cached launch-at-login state. `SMAppService.mainApp.status` is a
+    /// SYNCHRONOUS XPC round-trip to the service-management daemon. The old
+    /// `launchAtLogin` computed getter called it inline in the settings
+    /// Toggle's binding — so it ran on the SwiftUI render path, and because the
+    /// settings screen's height-matching preference layout re-renders that
+    /// section several times to converge, the daemon was hit repeatedly on the
+    /// main thread every time Settings opened. That was the ~1s "Settings is
+    /// slow to load" hang (the Dashboard makes no such call, hence instant).
+    /// Now the status is read once at launch (off the render path) and cached;
+    /// the Toggle reads this Published value with zero XPC.
+    @Published var launchAtLoginEnabled: Bool = (SMAppService.mainApp.status == .enabled)
+
+    /// Re-read the true launch-at-login status OFF the main thread and publish
+    /// any change — so a change made in System Settings is picked up. Called
+    /// when the settings pane appears; never on the render path.
+    func refreshLaunchAtLoginStatus() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let enabled = SMAppService.mainApp.status == .enabled
+            DispatchQueue.main.async {
+                guard let self, self.launchAtLoginEnabled != enabled else { return }
+                self.launchAtLoginEnabled = enabled
+            }
+        }
+    }
+
     var launchAtLogin: Bool {
-        get { SMAppService.mainApp.status == .enabled }
+        get { launchAtLoginEnabled }
         set {
+            // Reflect the user's flip instantly (optimistic), then perform the
+            // actual register/unregister. This is a click, not a render, so the
+            // synchronous SMAppService call here is fine.
+            launchAtLoginEnabled = newValue
             // Failures are surfaced via flashStatus so the user knows the
             // toggle didn't stick — silent print() would leave them confused
             // when "Launch at login" stays off after they flipped it on.
@@ -410,6 +439,7 @@ class ClipboardManager: ObservableObject {
                 else        { try SMAppService.mainApp.unregister() }
             } catch {
                 flashStatus("Couldn't update Launch at login — \(error.localizedDescription)")
+                refreshLaunchAtLoginStatus()   // roll the toggle back to reality
             }
         }
     }

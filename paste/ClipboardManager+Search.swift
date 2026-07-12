@@ -385,14 +385,37 @@ extension ClipboardManager {
         var scored: [(ClipboardItem, Float)] = []
         scored.reserveCapacity(items.count)
 
-        for item in items {
-            let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, firstToken: firstToken, item: item)
-            let sem = Self.semanticComponent(queryVec: queryVec, itemVec: item.embedding)
-            let rec = Self.recencyBoost(item: item, now: now)
+        // The scorers are pure functions over immutable, pre-cached per-item
+        // haystacks (see note below), so each item's score is independent. On a
+        // large ring — where this runs per keystroke while searching — spread
+        // the scoring across cores; small rings stay serial since the dispatch
+        // overhead would outweigh the win. Scores land in a pre-sized buffer by
+        // index (distinct slots, no shared mutable state), then the >= 0.15
+        // filter + sort run once on the main flow.
+        if items.count >= 128 {
+            var scores = [Float](repeating: 0, count: items.count)
+            scores.withUnsafeMutableBufferPointer { buf in
+                DispatchQueue.concurrentPerform(iterations: items.count) { i in
+                    let item = items[i]
+                    let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, firstToken: firstToken, item: item)
+                    let sem = Self.semanticComponent(queryVec: queryVec, itemVec: item.embedding)
+                    let rec = Self.recencyBoost(item: item, now: now)
+                    buf[i] = 0.55 * lex + 0.40 * sem + rec
+                }
+            }
+            for i in items.indices where scores[i] >= 0.15 {
+                scored.append((items[i], scores[i]))
+            }
+        } else {
+            for item in items {
+                let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, firstToken: firstToken, item: item)
+                let sem = Self.semanticComponent(queryVec: queryVec, itemVec: item.embedding)
+                let rec = Self.recencyBoost(item: item, now: now)
 
-            let combined = 0.55 * lex + 0.40 * sem + rec
-            if combined >= 0.15 {
-                scored.append((item, combined))
+                let combined = 0.55 * lex + 0.40 * sem + rec
+                if combined >= 0.15 {
+                    scored.append((item, combined))
+                }
             }
         }
 

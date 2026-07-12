@@ -1023,6 +1023,10 @@ struct ClipenSettingsView: View {
             footer
                 .padding(.horizontal, 14).padding(.vertical, 8)
         }
+        // Pick up any launch-at-login change made in System Settings — read
+        // OFF the main thread, so the daemon call never touches the render
+        // path (that inline read was the ~1s Settings-open hang).
+        .onAppear { manager.refreshLaunchAtLoginStatus() }
     }
 
     private var settingsScrollContent: some View {
@@ -1146,33 +1150,23 @@ struct ClipenSettingsView: View {
             Image(systemName: "eye").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Always show preview").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
-            // + button and chips live together in ONE bounded container —
-            // a fixed width, not "however much space is left in the row" —
-            // so it reads as a single distinct widget: the + stays pinned
-            // at its left edge, new chips are appended to the right and
-            // pushed out of view, and ONLY this box scrolls horizontally
-            // to reveal them (never the row itself, and never by truncating
-            // a chip's text — full labels always, scroll instead of clip).
-            HStack(spacing: 8) {
-                Button {
-                    showAutoPreviewPicker.toggle()
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundColor(.accent)
-                }
-                .buttonStyle(.plain)
-                .help("Choose which content types auto-show preview")
-                .popover(isPresented: $showAutoPreviewPicker, arrowEdge: .bottom) {
-                    autoPreviewPicker
-                }
-                if !manager.autoPreviewTypes.isEmpty {
-                    AutoPreviewChipStrip(types: Array(manager.autoPreviewTypes).sorted { $0.label < $1.label }) { type in
-                        manager.autoPreviewTypes.remove(type)
-                    }
-                }
+            // A single "Configure" pill, identical to the other picker rows
+            // (Open delay, Pin position…). The selected content types live
+            // inside the popover only — no inline chip strip at the toggle.
+            Button {
+                showAutoPreviewPicker.toggle()
+            } label: {
+                Text("Configure")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.accent)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
             }
-            .frame(width: 210, alignment: .leading)
+            .buttonStyle(.plain)
+            .help("Choose which content types auto-show preview")
+            .popover(isPresented: $showAutoPreviewPicker, arrowEdge: .bottom) {
+                autoPreviewPicker
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 16)
         .frame(maxHeight: .infinity)
@@ -1961,56 +1955,3 @@ struct ClipenSettingsView: View {
     }
 }
 
-/// Horizontally-scrolling chip strip for the selected auto-preview types —
-/// same click-and-drag panning as the main window's "Pasted to" strip (a
-/// plain mouse can't scroll a ScrollView(.horizontal) at all), plus a small
-/// × on each chip since this list is directly editable, unlike Pasted To.
-private struct AutoPreviewChipStrip: View {
-    let types: [AutoPreviewContentType]
-    let onRemove: (AutoPreviewContentType) -> Void
-
-    @State private var committedOffset: CGFloat = 0
-    @State private var dragOffset: CGFloat = 0
-    @State private var contentWidth: CGFloat = 0
-    @State private var stripWidth: CGFloat = 0
-
-    private var maxOffset: CGFloat { max(0, contentWidth - stripWidth) }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(types) { type in
-                HStack(spacing: 4) {
-                    Text(type.label)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.textPri)
-                    Button { onRemove(type) } label: {
-                        Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                            .foregroundColor(.textSec)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Color.white.opacity(0.08), in: Capsule())
-            }
-        }
-        .background(GeometryReader { geo in
-            Color.clear.onAppear { contentWidth = geo.size.width }
-                .onChange(of: geo.size.width) { _, newWidth in contentWidth = newWidth }
-        })
-        .offset(x: -min(maxOffset, max(0, committedOffset + dragOffset)))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
-        .background(GeometryReader { geo in
-            Color.clear.onAppear { stripWidth = geo.size.width }
-                .onChange(of: geo.size.width) { _, newWidth in stripWidth = newWidth }
-        })
-        .gesture(
-            DragGesture()
-                .onChanged { value in dragOffset = -value.translation.width }
-                .onEnded { value in
-                    committedOffset = min(maxOffset, max(0, committedOffset - value.translation.width))
-                    dragOffset = 0
-                }
-        )
-    }
-}

@@ -79,6 +79,18 @@ struct MainWindowView: View {
     // It never reads or writes manager.popupTagFilter.
     @State private var mainTagFilter: ClipboardTag? = nil
 
+    // Dashboard list/detail split width. Persisted explicitly (not left to
+    // HSplitView) because HSplitView reset its divider to the ideal width
+    // every time the detail pane's `.id(item.id)` changed — i.e. on every row
+    // click — so an adjusted split snapped back to "detail fills everything"
+    // the moment you selected an item. A plain width we own can't be reset by
+    // a selection change. `liveListWidth` tracks the drag cheaply; the
+    // persisted value is only written on release.
+    @AppStorage("dashboardListWidth") private var listWidth: Double = 300
+    @State private var liveListWidth: Double? = nil
+    @State private var dragStartListWidth: Double? = nil
+    private var effectiveListWidth: CGFloat { CGFloat(liveListWidth ?? listWidth) }
+
     private var mainFilteredItems: [ClipboardItem] {
         let base = mainTagFilter.map { tag in manager.items.filter { $0.tags.contains(tag) } } ?? manager.items
         // Same pin-block placement as the popup's displayItems — applied
@@ -259,10 +271,11 @@ struct MainWindowView: View {
                 // so give the animated onboarding the whole area instead.
                 OnboardingView()
             } else {
-                HSplitView {
+                HStack(spacing: 0) {
                     listPane
-                        .frame(minWidth: 240, idealWidth: 300, maxWidth: 400)
+                        .frame(width: effectiveListWidth)
                         .frame(maxHeight: .infinity)
+                    listDetailDivider
                     detailPane
                         .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -381,6 +394,35 @@ struct MainWindowView: View {
             manager.pasteItem(at: i)
             return .handled
         }
+    }
+
+    /// Draggable divider between the list and detail panes. Owns the split
+    /// width via `listWidth`/`liveListWidth` (persisted @AppStorage), so — unlike
+    /// HSplitView — a row selection can never snap it back. Width is committed
+    /// once on release, not per pixel, so the drag pays no UserDefaults cost.
+    private var listDetailDivider: some View {
+        ZStack {
+            Divider().background(Color.border)
+        }
+        .frame(width: 8)
+        .frame(maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    let base = dragStartListWidth ?? listWidth
+                    dragStartListWidth = base
+                    liveListWidth = min(400, max(240, base + Double(value.translation.width)))
+                }
+                .onEnded { _ in
+                    if let w = liveListWidth { listWidth = w }
+                    liveListWidth = nil
+                    dragStartListWidth = nil
+                }
+        )
     }
 
     // MARK: Bottom footer bar
@@ -1110,11 +1152,24 @@ private struct CompactItemRow: View, Equatable {
                 .foregroundColor(isSelected ? .textPri : .textSec)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Spacer(minLength: 0)
-            if isHovered {
-                // Hover-revealed actions — delete (red) and pin/unpin
-                // (blue) — instead of needing the right-click context menu
-                // for the two most common row-level actions.
+            Spacer(minLength: 8)
+            // Fixed-width trailing zone. The action buttons used to be
+            // CONDITIONALLY INSERTED on hover (`if isHovered { … }`), which
+            // changed the row's layout the instant hover toggled — so the
+            // hover tracking area shifted out from under the cursor right as
+            // you moved toward the pin, dropped `isHovered`, and the buttons
+            // vanished before you could click. Reserving constant space and
+            // fading the buttons in over the pinned indicator keeps the
+            // geometry stable, so hover never flickers.
+            ZStack(alignment: .trailing) {
+                if item.isPinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.accent)
+                        .opacity(isHovered ? 0 : 1)
+                }
+                // Hover-revealed actions — delete (red) and pin/unpin (blue),
+                // the two most common row actions without the context menu.
                 HStack(spacing: 6) {
                     rowActionButton(icon: "xmark", background: .red, action: onDelete)
                         .help("Delete")
@@ -1122,11 +1177,10 @@ private struct CompactItemRow: View, Equatable {
                                     background: .blue, action: onTogglePin)
                         .help(item.isPinned ? "Unpin" : "Pin to top")
                 }
-            } else if item.isPinned {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 9))
-                    .foregroundColor(.accent)
+                .opacity(isHovered ? 1 : 0)
+                .allowsHitTesting(isHovered)
             }
+            .frame(width: 46, alignment: .trailing)
         }
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(

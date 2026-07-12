@@ -358,11 +358,23 @@ enum MarkedToolService {
     static func ocrAll(_ items: [ClipboardItem]) async -> TransformOutput? {
         let inputs = items.compactMap { ImageService.imageInput(for: $0) }
         guard inputs.count >= 2 else { return .status("Need at least 2 images.") }
-        var parts: [String] = []
-        for (idx, input) in inputs.enumerated() {
-            if let text = await OCRService.extractText(from: input.image) {
-                parts.append("===== image \(idx + 1) =====\n\(text)")
+        // OCR every image CONCURRENTLY. Each request is independent and already
+        // runs on a background queue, so the old serial `await` loop made the
+        // total the SUM of every image's OCR time. A task group runs them
+        // across cores; results are reassembled in mark order by index.
+        let byIndex: [Int: String] = await withTaskGroup(of: (Int, String?).self) { group in
+            for (idx, input) in inputs.enumerated() {
+                let image = input.image
+                group.addTask { (idx, await OCRService.extractText(from: image)) }
             }
+            var out: [Int: String] = [:]
+            for await (idx, text) in group where text != nil {
+                out[idx] = text
+            }
+            return out
+        }
+        let parts = inputs.indices.compactMap { idx in
+            byIndex[idx].map { "===== image \(idx + 1) =====\n\($0)" }
         }
         guard !parts.isEmpty else { return .status("No text found in any image.") }
         return .text(parts.joined(separator: "\n\n"))
