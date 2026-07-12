@@ -71,11 +71,79 @@ enum TextTraditionalDetectors {
             candidates.append(.init(type: .code(lang), confidence: 0.84, method: .deterministic))
         }
 
+        // Shell / command-line detection. Catches single-line and short blocks
+        // of terminal commands (`git commit -m …`, `brew install …`, a `$`-
+        // prompted paste) that the token-scoring code detector misses because
+        // they're too short to accumulate a language score. Labelled "Shell"
+        // so it reuses the existing code badge + syntax-highlighted preview.
+        // Confidence above generic code/markdown so a clear command wins.
+        if scanDocument, isCommand(t) {
+            candidates.append(.init(type: .code("Shell"), confidence: 0.88, method: .deterministic))
+        }
+
         if scanSingleValue, isPostalAddress(t) {
             candidates.append(.init(type: .address, confidence: 0.72, method: .deterministic))
         }
 
         return candidates
+    }
+
+    // Commands that are almost never ordinary English words — the first token
+    // alone signals a shell command.
+    private static let distinctiveCommands: Set<String> = [
+        "sudo","git","npm","npx","yarn","pnpm","brew","curl","wget","docker","kubectl",
+        "kubectx","ssh","scp","rsync","xcodebuild","xcrun","cargo","rustc","gradle","mvn",
+        "pip","pip3","gem","bundle","rails","rake","composer","gh","glab","terraform",
+        "ansible","vagrant","helm","systemctl","journalctl","launchctl","defaults",
+        "hdiutil","diskutil","codesign","notarytool","stapler","adb","flutter","expo",
+        "tsc","eslint","prettier","jest","webpack","vite","psql","mysql","mongo",
+        "redis-cli","aws","gcloud","az","heroku","apt","apt-get","dnf","pacman","conda",
+        "poetry","deno","bun","otool","swiftc","dotnet","chmod","chown","chsh","ifconfig",
+        "systemsetup","softwareupdate","networksetup","scutil","pmset",
+    ]
+
+    // Common commands that are also English words — need command shape (a flag,
+    // path, or pipe/chain) to count, so "make dinner" or "find them" don't match.
+    private static let commonCommands: Set<String> = [
+        "cd","ls","cat","cp","mv","rm","rmdir","mkdir","touch","ln","echo","printf",
+        "export","source","make","cmake","find","grep","egrep","awk","sed","tar","zip",
+        "unzip","gzip","open","code","vim","nvim","nano","emacs","less","more","head",
+        "tail","sort","uniq","wc","tr","cut","xargs","tee","which","whereis","man","kill",
+        "killall","ps","top","htop","df","du","free","mount","ping","dig","nslookup",
+        "node","python","python3","go","java","ruby","php","perl","curl","set","alias",
+    ]
+
+    private static func lineLooksLikeCommand(_ raw: String) -> Bool {
+        var line = raw.trimmingCharacters(in: .whitespaces)
+        var startedWithPrompt = false
+        for prompt in ["$ ", "# ", "% ", "❯ ", "➜ ", "PS> ", "> "] where line.hasPrefix(prompt) {
+            line = String(line.dropFirst(prompt.count)).trimmingCharacters(in: .whitespaces)
+            startedWithPrompt = true
+            break
+        }
+        guard let firstToken = line.split(separator: " ").first.map(String.init),
+              !firstToken.isEmpty else { return false }
+        if startedWithPrompt { return true }
+        let cmd = firstToken.lowercased()
+        if distinctiveCommands.contains(cmd) { return true }
+        // sudo/env-style leading wrapper: check the next token too.
+        let hasFlag  = line.range(of: #"\s-\w"#, options: .regularExpression) != nil
+        let hasPath  = line.contains("/") || line.contains("./") || line.contains("~/")
+        let hasChain = line.contains(" | ") || line.contains("&&") || line.contains("; ")
+            || line.contains(" > ") || line.contains(" >> ") || line.contains("$(") || line.contains("`")
+        if commonCommands.contains(cmd), hasFlag || hasPath || hasChain { return true }
+        return false
+    }
+
+    /// True when the text is a single terminal command or a short block of them.
+    private static func isCommand(_ text: String) -> Bool {
+        let lines = text.split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty, lines.count <= 40 else { return false }
+        if lines.count == 1 { return lineLooksLikeCommand(lines[0]) }
+        let cmdCount = lines.filter(lineLooksLikeCommand).count
+        return cmdCount >= 2 && Double(cmdCount) >= Double(lines.count) * 0.6
     }
 
     private static func detectDelimitedTable(_ text: String) -> String? {

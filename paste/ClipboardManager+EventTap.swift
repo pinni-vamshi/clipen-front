@@ -560,7 +560,14 @@ extension ClipboardManager {
             }
 
             if shift && !opt {
-                DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }
+                // ⇧V reverses ONLY when it's the currently-chosen reverse key.
+                // If the user switched the reverse key to B, ⇧V has no function
+                // anymore — swallow it (so it doesn't fall through to the
+                // plain-V "advance" path below) instead of still reversing on
+                // the old binding.
+                if !reverseCycleUsesB {
+                    DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }
+                }
                 return nil
             }
 
@@ -691,7 +698,9 @@ extension ClipboardManager {
         //   hold → mark/unmark the highlighted item, then auto-move
         //          BACKWARD when advance-after-marking is on — V's
         //          hold-to-mark mirrored, in the reverse direction.
-        // ⇧V and ⇧X keep working regardless.
+        // The two reverse bindings are mutually exclusive: when B is the chosen
+        // reverse key, ⇧V no longer reverses (see the ⇧V handler above). ⇧X
+        // (transform-panel back) is unaffected — it has no B alternative.
         if key == 11 && previewWindow.isVisible && reverseCycleUsesB {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
             let pendingID: UUID? = displayItems.indices.contains(selectedIndex)
@@ -887,10 +896,12 @@ extension ClipboardManager {
         var v = false, shiftV = false
         if hintKeyVDown && cmd {
             v = !hintShiftHeld
-            shiftV = hintShiftHeld
+            // ⇧V lights the reverse ("Prev") hint only when it's the chosen
+            // reverse key — in B mode ⇧V does nothing, so it must not light it.
+            shiftV = hintShiftHeld && !reverseCycleUsesB
         }
         // With B as the chosen reverse key, the "Prev" hint (relabelled "B"
-        // in the legend) lights up on ⌘B too.
+        // in the legend) lights up on ⌘B instead.
         if reverseCycleUsesB, hintKeyBDown, cmd, visible { shiftV = true }
 
         var x = false, shiftX = false

@@ -872,7 +872,9 @@ struct PopoverRow: View, Equatable {
                 // dedicated Space-preview, where only one item is shown.
                 Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
                     .resizable().aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 280, maxHeight: 48).cornerRadius(5).clipped()
+                    .frame(maxWidth: 280, maxHeight: 48, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if let summary = item.metadataSummary {
                     Text(summary).font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
                 }

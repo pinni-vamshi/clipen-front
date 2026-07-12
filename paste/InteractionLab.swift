@@ -942,7 +942,6 @@ struct InteractionPreviewCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 HStack(spacing: 8) {
-                    Text("05").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.accent)
                     Text("INTERACTION PREVIEW").font(.system(size: 11, weight: .semibold)).tracking(1.5).foregroundColor(.textSec)
                 }
                 Spacer()

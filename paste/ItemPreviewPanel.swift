@@ -335,7 +335,10 @@ struct ContentPreviewView: View {
                 RichTextContentPreview(text: text, detectedType: item.detectedType)
             }
         case .richText(let attrStr, _):
-            AttributedTextPreview(attributedString: attrStr.adjustingColorsForCurrentAppearance())
+            let adjusted = attrStr.adjustingColorsForCurrentAppearance()
+            RichLinkedPreview(links: LinkExtractor.links(from: adjusted)) {
+                AttributedTextPreview(attributedString: adjusted)
+            }
         case .html(let html, let plain):
             // .html items only ever exist when the HTML carries real formatting
             // (see ClipboardManager+Capture's htmlMustSurvive check), so render
@@ -343,11 +346,16 @@ struct ContentPreviewView: View {
             if plain.isEmpty && html.isEmpty {
                 textPreview(plain, monospaced: false)
             } else {
-                HTMLStringPreview(html: html)
+                RichLinkedPreview(links: LinkExtractor.links(fromHTML: html)) {
+                    HTMLStringPreview(html: html)
+                }
             }
         case .rtfd(let data, let plain):
             if let attrStr = NSAttributedString(rtfd: data, documentAttributes: nil) {
-                AttributedTextPreview(attributedString: attrStr.adjustingColorsForCurrentAppearance())
+                let adjusted = attrStr.adjustingColorsForCurrentAppearance()
+                RichLinkedPreview(links: LinkExtractor.links(from: adjusted)) {
+                    AttributedTextPreview(attributedString: adjusted)
+                }
             } else {
                 textPreview(plain, monospaced: false)
             }
@@ -1107,9 +1115,17 @@ struct AsyncTextFilePreview: View {
 struct FilePreviewContent: View {
     let url: URL
 
+    private var isDirectory: Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+    }
+
     var body: some View {
         Group {
-            if url.pathExtension.lowercased() == "pdf", let pdf = PDFDocument(url: url) {
+            if isDirectory {
+                // A copied folder — show its contents (recursively, capped),
+                // not a bare Finder icon via QuickLook.
+                FolderTreePreview(url: url)
+            } else if url.pathExtension.lowercased() == "pdf", let pdf = PDFDocument(url: url) {
                 PDFPreview(document: pdf)
             } else if url.pathExtension.lowercased() == "gif", let data = try? Data(contentsOf: url),
                       let gifImage = NSImage(data: data) {
@@ -1163,6 +1179,134 @@ struct FilePreviewContent: View {
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+/// Recursive listing of a copied folder's contents — up to 5 levels deep and
+/// capped at 2000 entries — so pressing Space on a folder shows what's inside
+/// instead of a bare Finder icon. The tree is walked OFF the main thread (a
+/// deep/large folder would otherwise block the UI) and re-scanned whenever the
+/// previewed folder changes.
+struct FolderTreePreview: View {
+    let url: URL
+
+    struct Entry: Identifiable {
+        let id = UUID()
+        let name: String
+        let depth: Int
+        let isDir: Bool
+    }
+
+    @State private var entries: [Entry] = []
+    @State private var loading = true
+    @State private var truncated = false
+
+    private static let maxDepth = 5
+    private static let maxEntries = 2000
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 13)).foregroundColor(.accentColor)
+                Text(url.lastPathComponent)
+                    .font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Spacer()
+                if !loading {
+                    Text("\(entries.count)\(truncated ? "+" : "") items")
+                        .font(.system(size: 10, design: .monospaced)).foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            Divider()
+
+            if loading {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if entries.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "folder").font(.system(size: 28, weight: .thin)).foregroundColor(.secondary)
+                    Text("Empty folder").font(.system(size: 12)).foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(entries) { e in
+                            HStack(spacing: 6) {
+                                Image(systemName: e.isDir ? "folder.fill" : Self.icon(forFile: e.name))
+                                    .font(.system(size: 11))
+                                    .foregroundColor(e.isDir ? .accentColor : .secondary)
+                                    .frame(width: 14)
+                                Text(e.name)
+                                    .font(.system(size: 12, weight: e.isDir ? .medium : .regular))
+                                    .foregroundColor(e.isDir ? .primary : .primary.opacity(0.82))
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.leading, CGFloat(e.depth) * 16)
+                        }
+                        if truncated {
+                            Text("… more (truncated)")
+                                .font(.system(size: 10)).foregroundColor(.secondary)
+                                .padding(.top, 4)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                }
+            }
+        }
+        .task(id: url) {
+            loading = true
+            let result = await Self.scan(url)
+            entries = result.entries
+            truncated = result.truncated
+            loading = false
+        }
+    }
+
+    private static func icon(forFile name: String) -> String {
+        let ext = (name as NSString).pathExtension.lowercased()
+        switch ext {
+        case "png","jpg","jpeg","gif","heic","webp","tiff","bmp": return "photo"
+        case "pdf":                                               return "doc.richtext"
+        case "mp4","mov","m4v","avi","mkv":                       return "film"
+        case "mp3","wav","aac","m4a","flac":                      return "music.note"
+        case "zip","tar","gz","dmg","7z":                         return "archivebox"
+        case "swift","js","ts","py","rb","go","c","cpp","h","java","rs","sh": return "chevron.left.forwardslash.chevron.right"
+        default:                                                  return "doc"
+        }
+    }
+
+    private static func scan(_ root: URL) async -> (entries: [Entry], truncated: Bool) {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var out: [Entry] = []
+                var truncated = false
+                let fm = FileManager.default
+
+                func walk(_ dir: URL, depth: Int) {
+                    guard depth < maxDepth else { return }
+                    guard let items = try? fm.contentsOfDirectory(
+                        at: dir,
+                        includingPropertiesForKeys: [.isDirectoryKey],
+                        options: [.skipsHiddenFiles]) else { return }
+                    let sorted = items.sorted { a, b in
+                        let ad = (try? a.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                        let bd = (try? b.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                        if ad != bd { return ad && !bd }   // folders first
+                        return a.lastPathComponent.localizedCaseInsensitiveCompare(b.lastPathComponent) == .orderedAscending
+                    }
+                    for item in sorted {
+                        if out.count >= maxEntries { truncated = true; return }
+                        let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                        out.append(Entry(name: item.lastPathComponent, depth: depth, isDir: isDir))
+                        if isDir { walk(item, depth: depth + 1) }
+                    }
+                }
+                walk(root, depth: 0)
+                continuation.resume(returning: (out, truncated))
             }
         }
     }
@@ -1458,9 +1602,17 @@ struct ZoomableImagePreview: NSViewRepresentable {
             imageView.image = animated
             imageView.animates = true
             scrollView.lastImageDataCount = animatedData.count
-        } else if let fullResData, let full = NSImage(data: fullResData) {
-            imageView.image = full
+        } else if let fullResData {
+            // Show the already-decoded ring thumbnail INSTANTLY, then decode the
+            // full-resolution bytes off the main thread and swap them in. The
+            // old code decoded a multi-MB NSImage(data:) synchronously right
+            // here — and the detail pane recreates this view (via .id) on every
+            // selection — so picking a large image blocked the main thread
+            // before anything appeared. That's the "preview takes a moment to
+            // load" lag.
+            imageView.image = image
             scrollView.lastImageDataCount = fullResData.count
+            Self.decodeFullRes(fullResData, into: imageView, scrollView: scrollView)
         } else {
             imageView.image = image
         }
@@ -1487,12 +1639,30 @@ struct ZoomableImagePreview: NSViewRepresentable {
             scrollView.magnification = 1
         } else if let fullResData {
             guard scrollView.lastImageDataCount != fullResData.count else { return }
-            imageView.image = NSImage(data: fullResData) ?? image
+            // Same instant-thumbnail-then-full-res swap as makeNSView, for the
+            // reused-view case (selection changed to a different image without
+            // recreating the view).
+            imageView.image = image
             scrollView.lastImageDataCount = fullResData.count
             scrollView.magnification = 1
+            Self.decodeFullRes(fullResData, into: imageView, scrollView: scrollView)
         } else if imageView.image !== image {
             imageView.image = image
             scrollView.magnification = 1
+        }
+    }
+
+    /// Decode full-resolution image bytes off the main thread and swap them
+    /// into `imageView`, but only if the view is still showing THIS payload
+    /// (guards against a fast selection change landing an obsolete decode).
+    private static func decodeFullRes(_ data: Data, into imageView: NSImageView,
+                                      scrollView: FitOnLayoutScrollView) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let full = NSImage(data: data)
+            DispatchQueue.main.async {
+                guard let full, scrollView.lastImageDataCount == data.count else { return }
+                imageView.image = full
+            }
         }
     }
 
@@ -1649,6 +1819,120 @@ struct HTMLStringPreview: NSViewRepresentable {
         </html>
         """
         view.loadHTMLString(styledHTML, baseURL: nil)
+    }
+}
+
+// MARK: - Embedded link extraction + strip
+
+/// A hyperlink pulled out of rich content — the visible label plus its URL.
+struct ExtractedLink: Identifiable {
+    let id = UUID()
+    let label: String
+    let url: URL
+}
+
+enum LinkExtractor {
+    /// Every distinct `.link` attribute in an attributed string (rich text /
+    /// RTFD), paired with the text it wraps — e.g. a Wikipedia paste keeps the
+    /// URL behind every linked word.
+    static func links(from attr: NSAttributedString) -> [ExtractedLink] {
+        guard attr.length > 0 else { return [] }
+        var out: [ExtractedLink] = []
+        var seen = Set<String>()
+        attr.enumerateAttribute(.link, in: NSRange(location: 0, length: attr.length)) { value, range, _ in
+            let url: URL?
+            switch value {
+            case let u as URL:    url = u
+            case let s as String: url = URL(string: s)
+            default:              url = nil
+            }
+            guard let url, url.scheme != nil, seen.insert(url.absoluteString).inserted else { return }
+            let text = attr.attributedSubstring(from: range).string
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            out.append(ExtractedLink(label: text.isEmpty ? (url.host ?? url.absoluteString) : text, url: url))
+        }
+        return out
+    }
+
+    /// `<a href>` links from raw HTML (the `.html` content type). Length-capped
+    /// so a huge document doesn't run the regex on the render path.
+    static func links(fromHTML html: String) -> [ExtractedLink] {
+        guard html.count <= 300_000,
+              let re = try? NSRegularExpression(
+                pattern: #"<a\b[^>]*?href\s*=\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a>"#,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return [] }
+        let ns = html as NSString
+        var out: [ExtractedLink] = []
+        var seen = Set<String>()
+        for m in re.matches(in: html, range: NSRange(location: 0, length: ns.length)) where m.numberOfRanges >= 3 {
+            let href = ns.substring(with: m.range(at: 1))
+            guard let url = URL(string: href), url.scheme != nil,
+                  seen.insert(url.absoluteString).inserted else { continue }
+            let inner = ns.substring(with: m.range(at: 2))
+                .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            out.append(ExtractedLink(label: inner.isEmpty ? (url.host ?? href) : inner, url: url))
+        }
+        return out
+    }
+}
+
+/// Horizontal, scrolling strip of every embedded link, shown under a rich-text
+/// preview — the same "row of chips beneath the content" pattern used
+/// elsewhere. Each chip opens its URL.
+struct LinkStrip: View {
+    let links: [ExtractedLink]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 4) {
+                Image(systemName: "link").font(.system(size: 9, weight: .semibold))
+                Text("\(links.count) LINK\(links.count == 1 ? "" : "S")")
+                    .font(.system(size: 9, weight: .semibold)).tracking(1)
+            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 12)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(links) { link in
+                        Button { NSWorkspace.shared.open(link.url) } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "link").font(.system(size: 9))
+                                Text(link.label).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Color.accentColor.opacity(0.12), in: Capsule())
+                            .overlay(Capsule().stroke(Color.accentColor.opacity(0.25), lineWidth: 1))
+                            .foregroundColor(.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .help(link.url.absoluteString)
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.04))
+    }
+}
+
+/// Rich-text preview + the link strip beneath it (only when links are present).
+struct RichLinkedPreview<Content: View>: View {
+    let links: [ExtractedLink]
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if !links.isEmpty {
+                Divider()
+                LinkStrip(links: links)
+            }
+        }
     }
 }
 
