@@ -1,8 +1,6 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Onboarding (animated empty state)
-
 struct OnboardingView: View {
     @State private var step      = 0
     @State private var fade      = true
@@ -80,21 +78,10 @@ struct OnboardingView: View {
         }
     }
 
-// MARK: - Tutorial sheet
-
 struct TutorialSheet: View {
     @Binding var isPresented: Bool
-    /// Invoked when the user taps "See more" on the last page — takes them
-    /// to the full Interaction Lab in Settings, which has every gesture
-    /// (this tutorial only walks through three: cycle, preview, transform).
     var onSeeMore: () -> Void = {}
     @ObservedObject private var manager = ClipboardManager.shared
-    // Drives the SAME animated stage Settings' "INTERACTION PREVIEW" uses —
-    // previously this sheet hand-rolled its own separate mini-animations
-    // (cycleAnimation/transformAnimation/deleteAnimation and their key-cap/
-    // row-drawing helpers) that duplicated, and could silently drift from,
-    // the real interaction lab. One engine now; the tutorial just points it
-    // at the demo the current page is teaching.
     @StateObject private var lab = InteractionLabController()
 
     @State private var page: Int = 0
@@ -102,8 +89,6 @@ struct TutorialSheet: View {
     @State private var practiceText: String = ""
 
     private static let totalPages = 4
-    /// Which InteractionLab demo each animated page teaches, in the order
-    /// the user asked for: ⌘V cycle, Space preview, X transform.
     private static let demoForPage: [Int: InteractionDemo] = [
         1: .cycle, 2: .spacePreview, 3: .transform,
     ]
@@ -141,11 +126,6 @@ struct TutorialSheet: View {
             Divider().background(Color.border)
             tutorialFooter
         }
-        // Wider than a purely-vertical sheet needs — the animated pages now
-        // lay text/hints and the interaction stage out SIDE BY SIDE, which
-        // needs real horizontal room for both halves to breathe. The copy-
-        // gate page (page 0) just gets extra margin; nothing there depends
-        // on this width.
         .frame(width: 760).background(Color.surface)
         .onAppear {
             baselineIDs = Set(manager.items.map(\.id))
@@ -195,10 +175,6 @@ struct TutorialSheet: View {
             }
             let isLast = page == Self.totalPages - 1
             let enabled = page == 0 ? canAdvance : true
-            // Only three gestures are walked through here — "See more" hands
-            // off to the full Interaction Lab in Settings (every gesture:
-            // marking, search, category jump, pin preview, delete, reverse
-            // cycle…) instead of the tutorial trying to teach all of it.
             if isLast {
                 Button {
                     isPresented = false
@@ -223,8 +199,6 @@ struct TutorialSheet: View {
         }
         .padding(.horizontal, 22).padding(.vertical, 14)
     }
-
-    // MARK: Page 1 — copy gate
 
     private var copyGatePage: some View {
         VStack(spacing: 18) {
@@ -279,9 +253,6 @@ struct TutorialSheet: View {
         }
     }
 
-    // MARK: Pages 2-4 — each embeds the REAL Interaction Lab stage (same
-    // engine as Settings' "INTERACTION PREVIEW"), pointed at one demo.
-
     private var cyclePage: some View {
         animatedPage(
             title: "Hold ⌘ and tap V to cycle",
@@ -306,10 +277,6 @@ struct TutorialSheet: View {
         ) { InteractionLabStage(lab: lab) }
     }
 
-    /// Side by side, not stacked: text/hints on the left, the interaction
-    /// stage on the right — scoped to this tutorial panel only, not a change
-    /// to how the same stage/text pairing looks anywhere else (e.g. the real
-    /// Interaction Lab in Settings stays exactly as it was).
     private func animatedPage<A: View>(title: String, detail: String, hint: String,
                                        @ViewBuilder anim: () -> A) -> some View {
         HStack(alignment: .top, spacing: 26) {
@@ -358,4 +325,3 @@ struct TutorialSheet: View {
     }
 
 }
-

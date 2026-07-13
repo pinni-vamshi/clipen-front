@@ -9,40 +9,14 @@ import SwiftUI
 import WebKit
 @preconcurrency import PDFKit
 
-/// Real system NSPopover, anchored through an invisible helper panel — see the
-/// header comment on PreviewOverlayWindow for why this indirection exists: an
-/// NSPopover can only anchor to a view inside one of THIS app's own windows,
-/// never to a rect inside another app's window, so an invisible 1×1
-/// non-activating panel is positioned next to the ring popup and the popover
-/// anchors to a view inside that. Gets the same benefit as the ring popup:
-/// AppKit's own rounded box, vibrancy, and native pop-in animation for free,
-/// instead of the hand-drawn approximation this used to be.
 final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     private let anchorPanel: NSPanel
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
     private let popover = NSPopover()
-    /// The anchor strip's frame for the CURRENT popover session, nil when
-    /// hidden. Placed once per session and never moved while shown — see
-    /// present() for why that invariant matters.
     private var shownStrip: NSRect? = nil
-    /// True from show until hide. Closes the race where hide() lands while
-    /// the popover is still ANIMATING IN — popover.isShown is false then, so
-    /// the performClose was skipped and the preview finished appearing as an
-    /// orphan after the popup was already gone. popoverDidShow checks this
-    /// and immediately tears down any presentation nobody wants anymore.
     private var wantsVisible = false
 
-    /// `wantsVisible` is ANDed in because NSPopover's close is animated:
-    /// popover.isShown keeps returning true until the close animation
-    /// finishes, ~0.2s after hide() was called. Guards that ran in that
-    /// window ("is the preview open? refresh it") saw stale true and
-    /// re-showed a panel that was being dismissed — the "preview reappears
-    /// right after Esc closes everything" bug. Intent flips instantly;
-    /// isShown alone doesn't.
     var isVisible: Bool { wantsVisible && popover.isShown }
-    /// Actual on-screen content rect (not the popover window's frame, which
-    /// includes AppKit's arrow/shadow chrome) — used by outside-click
-    /// dismissal to know whether a click landed inside this panel.
     var frame: NSRect {
         if let view = popover.contentViewController?.view, let win = view.window {
             return win.convertToScreen(view.convert(view.bounds, to: nil))
@@ -56,13 +30,6 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
             anchorPanel.orderOut(nil)
             return
         }
-        // Defensive feedback loop: this panel is shared between two owners —
-        // the main ring popup's selection preview, and a QuickClipPanel's
-        // "similar items" hover preview. By the time the show animation
-        // actually finishes, re-verify one of those owners is still around.
-        // If neither is, whatever asked for this show() has since vanished
-        // (a race between show() firing and its owner closing mid-animation)
-        // and this would otherwise be left floating with nothing showing it.
         let mainPopupVisible = ClipboardManager.shared.previewWindow.isVisible
         let quickClipVisible = ClipboardManager.shared.hasVisibleQuickClipPanel
         if !mainPopupVisible && !quickClipVisible {
@@ -98,9 +65,6 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
                 near: popupFrame, anchorPoint: anchorPoint)
     }
 
-    /// Preview several marked items at once, stacked top-to-bottom in a single
-    /// scrolling panel. Used when the user presses Space with a multi-paste
-    /// queue active — one panel, scroll to see every marked item in order.
     func show(forItems items: [ClipboardItem], currentItemID: UUID? = nil,
               near popupFrame: NSRect, anchorPoint: NSPoint? = nil) {
         guard !items.isEmpty else { hide(); return }
@@ -123,15 +87,6 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
             popover.contentViewController = NSHostingController(rootView: view)
         }
 
-        // Stationary 1pt anchor strip spanning the source frame's full height,
-        // placed ONCE per popover session and never moved while shown. The
-        // previous approach — teleporting a 1×1 anchor window to the new row
-        // per cycle and re-calling show() — broke AppKit's popover attachment
-        // and replayed the full close+open animation on every keystroke.
-        // Row tracking happens via `positioningRect` inside the fixed strip.
-        // When the SOURCE frame itself changes (preview invoked from the
-        // popup vs the transform picker vs a Quick Clip panel), the strip
-        // must genuinely move, so that rare case is a real re-present.
         let anchorY = anchorPoint?.y ?? popupFrame.midY
         let stripHeight = max(1, popupFrame.height)
         let desiredStrip = NSRect(x: placeRight ? popupFrame.maxX : popupFrame.minX,
@@ -149,8 +104,6 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         anchorPanel.setFrame(desiredStrip, display: false)
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
         shownStrip = desiredStrip
-        // Fast open with a REAL visible animation — see clipenAnimateIn.
-        // animates is restored so the close keeps the native fade-out.
         popover.animates = false
         popover.show(relativeTo: rowRect, of: anchorView,
                      preferredEdge: placeRight ? .maxX : .minX)
@@ -160,11 +113,6 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
 
     func hide() {
         wantsVisible = false
-        // Reset the SwiftUI tree so AVPlayer / QuickLook / web previews are
-        // dismantled (and stop playing) — the content controller outlives the
-        // popover's close, so without this a video/audio preview could keep
-        // playing invisibly. The old NSPanel implementation did this too; it
-        // was lost in the NSPopover conversion.
         if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
             hostingController.rootView = AnyView(EmptyView())
         }
@@ -174,14 +122,8 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     }
 }
 
-/// Stacked preview of every marked item, in marking order, inside one shared
-/// scrolling panel with the standard popover chrome.
 private struct MultiItemPreviewView: View {
     let items: [ClipboardItem]
-    /// The item the user is actually highlighted on right now — always
-    /// present in `items` (folded in by showSelectedItemPreview even when
-    /// it isn't itself marked) and badged distinctly so it's never lost
-    /// inside a stack of marked rows.
     var currentItemID: UUID? = nil
 
     private var markedCount: Int {
@@ -228,16 +170,11 @@ private struct MultiItemPreviewView: View {
                 }
             }
         }
-        // No background/clipShape/overlay/shadow here — hosted inside a real
-        // NSPopover now, which draws all of that itself.
     }
 }
 
 private struct ItemPreviewView: View {
     let item: ClipboardItem
-    /// When true, renders without the outer window chrome (header/background/
-    /// shadow) and at a fixed height so several can be stacked inside a shared
-    /// scrolling container — used by the marked-items multi preview.
     var compact: Bool = false
 
     var body: some View {
@@ -292,37 +229,23 @@ private struct ItemPreviewView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(14)
             }
-            // No background/clipShape/overlay/shadow here — hosted inside a
-            // real NSPopover now, which draws all of that itself.
         }
     }
 
-    // Shared across the item-preview panel, the reference panel, and (soon)
-    // any other full-content surface — one dispatch, parameterized only by the
-    // per-surface chrome (font size, image framing, file-row density).
     private var content: some View {
         ContentPreviewView(item: item, chrome: .panel)
     }
 }
 
-/// The single source of truth for "render a ClipboardItem's full content."
-/// Previously this switch existed three times (item-preview panel, reference
-/// panel, main-window detail) and drifted; the two panel surfaces now share
-/// this one, differing only via `chrome`. (The main-window detail pane keeps
-/// its own distinct, table-extraction-first design on purpose.)
 struct ContentPreviewView: View {
     enum Chrome {
-        /// Item-preview panel: 13pt text, boxed images (cr10), rich file rows.
         case panel
-        /// Reference (Quick Clip) panel: 12pt text, rounded images (cr8), dense file rows.
         case reference
     }
     let item: ClipboardItem
     let chrome: Chrome
 
     private var plainFontSize: CGFloat { chrome == .panel ? 13 : 12 }
-    /// The one file currently shown full-size, when the user tapped a
-    /// thumbnail in the multi-file strip below. Non-nil shows the overlay.
     @State private var selectedFileForFullPreview: URL? = nil
 
     @ViewBuilder
@@ -340,9 +263,6 @@ struct ContentPreviewView: View {
                 AttributedTextPreview(attributedString: adjusted)
             }
         case .html(let html, let plain):
-            // .html items only ever exist when the HTML carries real formatting
-            // (see ClipboardManager+Capture's htmlMustSurvive check), so render
-            // it properly; fall back to flattened plain text only if empty.
             if plain.isEmpty && html.isEmpty {
                 textPreview(plain, monospaced: false)
             } else {
@@ -375,10 +295,6 @@ struct ContentPreviewView: View {
 
     @ViewBuilder
     private func imagePreview(image: NSImage, data: Data, dataType: NSPasteboard.PasteboardType) -> some View {
-        // PDFs captured as image-typed pasteboard data get a real, zoomable PDF
-        // view; GIFs get the animated variant; everything else decodes full-res
-        // ONCE inside the view (never in body — that inline decode was the
-        // v1.0.144 CPU/memory churn regression).
         switch chrome {
         case .panel:
             if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
@@ -460,11 +376,6 @@ struct ContentPreviewView: View {
         }
     }
 
-    /// Full `.files` preview: the existing name/icon list, plus — when the
-    /// set has any non-text element (image, video, PDF, or any other binary
-    /// file) — a horizontal thumbnail strip pinned to the bottom. Tapping a
-    /// thumbnail opens that ONE element full-size in an overlay, from which
-    /// it can be pasted on its own (see ClipboardManager.pasteSingleFile).
     @ViewBuilder
     private func filesPreview(_ urls: [URL]) -> some View {
         ZStack {
@@ -516,11 +427,6 @@ struct ContentPreviewView: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 1))
     }
 
-    /// One element blown up full-size with a close button and a "Paste"
-    /// action that pastes ONLY this file — independent of the multi-file
-    /// item it came from. Reuses FilePreviewContent, so images zoom/pan,
-    /// PDFs/video/3D models are all already interactive exactly as they are
-    /// everywhere else in the app.
     private func singleElementOverlay(url: URL) -> some View {
         ZStack {
             Color.black.opacity(0.55)
@@ -573,20 +479,9 @@ struct ContentPreviewView: View {
     }
 }
 
-/// Extracts a cell grid out of table-bearing clipboard content so the row
-/// views (main popup rows, main window rows) can render an actual mini table
-/// instead of flattened plain text. Handles the two ways tables arrive:
-///   • richText/rtfd (Apple Notes, Pages, Word…) — NSTextTable blocks in the
-///     attributed string's paragraph styles, addressed by row/column.
-///   • html (browsers, Excel-as-html…) — <tr>/<td> parsed with a light regex.
-/// Results are NSCache'd per item ID — extraction walks the whole attributed
-/// string, far too heavy to redo on every scroll-frame row render.
 enum TableCellExtractor {
     private static let cache: NSCache<NSUUID, NSArray> = {
         let c = NSCache<NSUUID, NSArray>()
-        // Bound it like the other caches (ItemThumbnailCache, ClipenIconCache)
-        // rather than relying solely on system memory-pressure eviction. The
-        // ring tops out at 500 items, so this comfortably covers a full ring.
         c.countLimit = 500
         return c
     }()
@@ -658,10 +553,6 @@ enum TableCellExtractor {
     }
 }
 
-/// Compact real-table rendering for LIST ROWS (main popup + main window):
-/// a bordered grid of the first few rows/columns, so a copied table looks
-/// like a table at a glance instead of two lines of flattened text. The
-/// full-fidelity rendering still lives in the preview panel.
 struct MiniTablePreview: View {
     let cells: [[String]]
     var maxRows: Int = 2
@@ -690,22 +581,11 @@ struct MiniTablePreview: View {
     }
 }
 
-/// Dispatches `.text` content by its DETECTED type (markdown / delimited
-/// table / code) instead of always rendering plain monospaced text — the
-/// detection (ClipboardContentType) already existed, but nothing previously
-/// rendered based on it. Shared between ItemPreviewPanel and QuickClipPanel.
 struct RichTextContentPreview: View {
     let text: String
     let detectedType: ClipboardContentType
 
     var body: some View {
-        // Trimmed once here so every sub-case below (markdown/table/code/
-        // plain) benefits — a copy that happens to start with blank lines
-        // no longer opens the preview on empty space. Then CAPPED — a huge
-        // pasted blob (a JSON dump, a giant log paste) is already fully in
-        // memory (no file to bound), but handing it whole to a SwiftUI Text
-        // view still costs real layout time on every render; this bounds
-        // what's actually RENDERED, never what gets pasted/searched.
         let (text, isTruncated) = self.text.displayTrimmedLeading.displayCapped()
         VStack(alignment: .leading, spacing: 0) {
             if isTruncated {
@@ -721,12 +601,6 @@ struct RichTextContentPreview: View {
                 case .markdown:
                     MarkdownTextPreview(text: text)
                 case .table:
-                    // Detection picks ONE type for the whole item — a code file
-                    // or markdown doc that happens to contain a delimited-
-                    // looking block could get classified as .table overall,
-                    // and this used to render ONLY the parsed grid, discarding
-                    // the rest of the text. Show both: the real content stays
-                    // visible, with the table rendered as a grid underneath.
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
                             Text(text)
@@ -752,10 +626,6 @@ struct RichTextContentPreview: View {
     }
 }
 
-/// Line-based Markdown renderer — headers, bullet/numbered lists, fenced code
-/// blocks (routed to CodeSyntaxPreview), and inline formatting (bold/italic/
-/// code spans/links) via AttributedString. Not a full CommonMark parser, but
-/// covers what people actually paste.
 struct MarkdownTextPreview: View {
     let text: String
 
@@ -849,9 +719,6 @@ struct MarkdownTextPreview: View {
     }
 }
 
-/// Renders CSV/TSV-shaped text as an actual grid instead of raw delimited
-/// text — tries tab first (TSV), falls back to comma (CSV). First row is
-/// styled as a header.
 struct DelimitedTablePreview: View {
     let text: String
 
@@ -891,13 +758,6 @@ struct DelimitedTablePreview: View {
     }
 }
 
-/// Lightweight, best-effort syntax coloring — real per-language keyword sets
-/// (not the detection heuristics CodeLanguageDetector uses, which are
-/// fingerprint phrases like "if __name__", not actual reserved words) plus
-/// generic string/number/whole-line-comment coloring. This is NOT a full
-/// tokenizer/parser per language (no block comments, no escape-aware string
-/// parsing, no inline trailing comments) — it's a genuine, working
-/// approximation, not a placeholder.
 struct CodeSyntaxPreview: View {
     let text: String
     let language: String?
@@ -908,12 +768,8 @@ struct CodeSyntaxPreview: View {
     var body: some View {
         Group {
             if let highlighted {
-                // Real syntax highlighting (Highlightr / highlight.js),
-                // rendered in a selectable, scrollable text view.
                 HighlightedCodeTextView(attributed: highlighted)
             } else {
-                // Fallback until the (fast) highlight pass completes, or if
-                // Highlightr is unavailable — plain monospaced text.
                 ScrollView([.horizontal, .vertical]) {
                     Text(text)
                         .font(.system(size: 12, design: .monospaced))
@@ -932,12 +788,6 @@ struct CodeSyntaxPreview: View {
         }
     }
 
-    /// Re-highlight only when the text, detected language, or appearance
-    /// actually changes. Keyed on a cheap FINGERPRINT (length + boundary
-    /// chars) rather than the whole snippet, so `.task(id:)`'s per-update
-    /// equality check is O(1)-ish instead of an O(n) compare of a string up
-    /// to the 300 KB display cap. Clipboard items are immutable, so distinct
-    /// items reliably differ in length or boundary characters.
     private struct HighlightKey: Equatable {
         let fingerprint: String
         let language: String?
@@ -952,13 +802,6 @@ struct CodeSyntaxPreview: View {
 
 }
 
-/// Wraps Highlightr (highlight.js via JavaScriptCore) as a single reused
-/// instance — creating one loads the JS engine + themes, too costly to redo
-/// per snippet. Runs on a DEDICATED SERIAL background queue (not the main
-/// thread): Highlightr's JSContext isn't thread-safe, but a single consistent
-/// background thread satisfies that while keeping the highlight pass — which
-/// can be tens–hundreds of ms for a large (capped) snippet — off the main
-/// thread so it never hitches the UI.
 final class CodeHighlighter {
     static let shared = CodeHighlighter()
 
@@ -969,11 +812,6 @@ final class CodeHighlighter {
 
     private init() {}
 
-    /// Highlighted `NSAttributedString`, or nil if Highlightr is unavailable.
-    /// Async — the highlight runs on the serial queue and the result is
-    /// awaited by the caller (its SwiftUI `.task`). `languageDisplayName` is
-    /// the app's detected label (e.g. "Swift"); unknown → Highlightr
-    /// auto-detects.
     func highlight(_ code: String, languageDisplayName: String?, dark: Bool) async -> NSAttributedString? {
         await withCheckedContinuation { continuation in
             queue.async { [weak self] in
@@ -982,16 +820,12 @@ final class CodeHighlighter {
         }
     }
 
-    /// MUST be called only on `queue` — the JSContext is confined to it.
     private func highlightOnQueue(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
-        // Lazily create the instance on the queue's thread so the JSContext is
-        // born on the same thread it's used from.
         if !didInit {
             highlightr = Highlightr()
             didInit = true
         }
         guard let highlightr else { return nil }
-        // Themes tuned to read well on the app's own surfaces in each mode.
         let theme = dark ? "atom-one-dark" : "atom-one-light"
         if currentTheme != theme {
             highlightr.setTheme(to: theme)
@@ -1002,10 +836,6 @@ final class CodeHighlighter {
     }
 }
 
-/// Read-only, selectable, scrollable NSTextView that renders a highlighted
-/// `NSAttributedString` faithfully (SwiftUI `Text` mangles some of
-/// Highlightr's attributes). Transparent background so the panel's own
-/// surface shows through.
 struct HighlightedCodeTextView: NSViewRepresentable {
     let attributed: NSAttributedString
 
@@ -1033,13 +863,6 @@ struct HighlightedCodeTextView: NSViewRepresentable {
     }
 }
 
-/// Loads a text file's contents off the main thread and shows a spinner
-/// meanwhile, instead of FilePreviewContent's old behavior of reading (and
-/// decoding — up to 3 encoding attempts) the whole file synchronously inside
-/// `body`, which blocked the entire view update — including switching the
-/// selection to a DIFFERENT item — until a large file finished loading.
-/// `.task(id: url)` automatically cancels the in-flight load the instant
-/// `url` changes, so navigating away never waits for a stale read to finish.
 struct AsyncTextFilePreview: View {
     let url: URL
     @State private var text: String?
@@ -1058,8 +881,6 @@ struct AsyncTextFilePreview: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color.primary.opacity(0.06))
                     }
-                    // Code files (by extension) get real syntax highlighting;
-                    // everything else stays plain monospaced text.
                     if let lang = CodeLanguageDetector.languageForExtension(url.pathExtension) {
                         CodeSyntaxPreview(text: text, language: lang)
                             .padding(.top, isTruncated ? 8 : 0)
@@ -1074,9 +895,6 @@ struct AsyncTextFilePreview: View {
                     }
                 }
             } else if loadFailed {
-                // Extension said "text," but the read failed (oversized,
-                // undecodable) — fall back to the same generic icon view
-                // FilePreviewContent's own last-resort branch uses.
                 QuickLookFilePreview(url: url)
             } else {
                 ProgressView()
@@ -1087,11 +905,6 @@ struct AsyncTextFilePreview: View {
             text = nil
             isTruncated = false
             loadFailed = false
-            // Bounded-prefix read (readableTextPreview), not the full file —
-            // a preview should load fast regardless of how large the file
-            // actually is. The full content is still what gets pasted/
-            // embedded elsewhere (readableText, untouched); this is a
-            // fast, honest glance, not the source of truth.
             let loaded = await Task.detached(priority: .userInitiated) {
                 FileKindDetector.readableTextPreview(from: url)
             }.value
@@ -1106,12 +919,6 @@ struct AsyncTextFilePreview: View {
     }
 }
 
-/// Full per-type file preview dispatch (PDF, image, GIF, HTML, plain text,
-/// media, 3D model, QuickLook fallback, or a generic icon+name+path as a last
-/// resort). Shared between ItemPreviewPanel's own preview and QuickClipPanel
-/// so both surfaces render files identically — QuickClipPanel used to have
-/// its own much weaker duplicate that only ever showed an icon + filename,
-/// never actual PDF/image/media content.
 struct FilePreviewContent: View {
     let url: URL
 
@@ -1122,8 +929,6 @@ struct FilePreviewContent: View {
     var body: some View {
         Group {
             if isDirectory {
-                // A copied folder — show its contents (recursively, capped),
-                // not a bare Finder icon via QuickLook.
                 FolderTreePreview(url: url)
             } else if url.pathExtension.lowercased() == "pdf", let pdf = PDFDocument(url: url) {
                 PDFPreview(document: pdf)
@@ -1139,14 +944,6 @@ struct FilePreviewContent: View {
             } else if FileKindDetector.isHTMLFile(url) {
                 HTMLFilePreview(url: url)
             } else if FileKindDetector.isTextFile(url) {
-                // isTextFile is a cheap extension check — the actual file
-                // read (readableText, up to 200 MB, tries 3 encodings) now
-                // happens off-main inside AsyncTextFilePreview instead of
-                // synchronously here in body. That synchronous read used to
-                // block the ENTIRE view update — including moving the
-                // selection to a different item — until a large file
-                // finished loading. Now navigation is instant; the preview
-                // itself shows a spinner until its text is ready.
                 AsyncTextFilePreview(url: url)
             } else if FileKindDetector.isMediaFile(url) {
                 AVMediaPreview(url: url)
@@ -1157,8 +954,6 @@ struct FilePreviewContent: View {
             } else if FileManager.default.fileExists(atPath: url.path) {
                 QuickLookFilePreview(url: url)
             } else if let docText = FileKindDetector.readableDocumentText(from: url) {
-                // Fallback when the file isn't on disk (e.g. evicted snapshot) but
-                // we cached extractable text from a document (docx, pptx, pages…).
                 ScrollView {
                     Text(docText)
                         .font(.system(size: 13))
@@ -1184,11 +979,6 @@ struct FilePreviewContent: View {
     }
 }
 
-/// Recursive listing of a copied folder's contents — up to 5 levels deep and
-/// capped at 2000 entries — so pressing Space on a folder shows what's inside
-/// instead of a bare Finder icon. The tree is walked OFF the main thread (a
-/// deep/large folder would otherwise block the UI) and re-scanned whenever the
-/// previewed folder changes.
 struct FolderTreePreview: View {
     let url: URL
 
@@ -1295,7 +1085,7 @@ struct FolderTreePreview: View {
                     let sorted = items.sorted { a, b in
                         let ad = (try? a.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
                         let bd = (try? b.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                        if ad != bd { return ad && !bd }   // folders first
+                        if ad != bd { return ad && !bd }
                         return a.lastPathComponent.localizedCaseInsensitiveCompare(b.lastPathComponent) == .orderedAscending
                     }
                     for item in sorted {
@@ -1312,10 +1102,6 @@ struct FolderTreePreview: View {
     }
 }
 
-/// Renders a 3D model as a rotatable/zoomable scene. SceneKit loads .scn/.usd*
-/// natively; everything else (.obj/.stl/.fbx/.gltf/.dae/.ply/.abc/.glb) is
-/// bridged in through Model I/O's MDLAsset → SCNScene importer. Falls back to a
-/// label if a format can't be decoded on this OS.
 struct Model3DPreview: NSViewRepresentable {
     let url: URL
 
@@ -1324,38 +1110,23 @@ struct Model3DPreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SCNView {
         let view = SpinUntilTouchedSCNView()
-        view.allowsCameraControl = true      // drag to rotate, scroll to zoom
+        view.allowsCameraControl = true
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .clear
         view.antialiasingMode = .multisampling4X
         view.scene = Self.loadScene(url)
         context.coordinator.loadedURL = url
-        // The preview panel is non-activating (never key), so mouse-drag rotation
-        // can't reach SceneKit. Auto-spin the whole scene so the model is seen
-        // from all sides without interaction. Drag still works in any window that
-        // CAN become key (the reference panel, the main window) — and there the
-        // spin stops on the first touch, so the camera doesn't fight the drag
-        // (see SpinUntilTouchedSCNView).
         Self.startAutoRotation(in: view)
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
-        // Only re-parse the scene when the URL actually changed — popup-adjacent
-        // views re-render on every keystroke, and loadScene does file I/O +
-        // MDLAsset/SCNScene parsing that would otherwise run (and reset the
-        // spin) on each pass. Matches the guard the sibling previews use.
         guard context.coordinator.loadedURL != url else { return }
         context.coordinator.loadedURL = url
         view.scene = Self.loadScene(url)
         Self.startAutoRotation(in: view)
     }
 
-    /// Auto-spin is a showcase for when the model CAN'T be interacted with —
-    /// the moment the user actually grabs it (drag, scroll-zoom, or pinch in
-    /// a key-capable window like the reference panel), the spin must yield,
-    /// otherwise the pivot keeps rotating underneath the camera drag and the
-    /// model feels like it's fighting the mouse.
     final class SpinUntilTouchedSCNView: SCNView {
         private func stopAutoSpin() {
             scene?.rootNode.childNode(withName: "clipenAutoSpin", recursively: false)?
@@ -1375,15 +1146,12 @@ struct Model3DPreview: NSViewRepresentable {
         }
     }
 
-    /// Wrap the model in a pivot node and spin it slowly around Y. Idempotent —
-    /// re-running on the same scene won't stack multiple rotations.
     private static func startAutoRotation(in view: SCNView) {
         guard let scene = view.scene else { return }
         let pivotName = "clipenAutoSpin"
         if scene.rootNode.childNode(withName: pivotName, recursively: false) != nil { return }
         let pivot = SCNNode()
         pivot.name = pivotName
-        // Re-parent all existing top-level content under the spinning pivot.
         for child in scene.rootNode.childNodes where child.name != pivotName {
             child.removeFromParentNode()
             pivot.addChildNode(child)
@@ -1395,11 +1163,9 @@ struct Model3DPreview: NSViewRepresentable {
     }
 
     private static func loadScene(_ url: URL) -> SCNScene {
-        // Native path: SceneKit reads .scn and USD variants directly.
         if let scene = try? SCNScene(url: url, options: [.checkConsistency: true]) {
             return scene
         }
-        // Bridge path: Model I/O imports OBJ/STL/PLY/DAE/Alembic, etc.
         let asset = MDLAsset(url: url)
         asset.loadTextures()
         let scene = SCNScene(mdlAsset: asset)
@@ -1407,8 +1173,6 @@ struct Model3DPreview: NSViewRepresentable {
     }
 }
 
-/// Plays animated GIFs. SwiftUI's `Image` is static and shows only the first
-/// frame; `NSImageView` with `animates = true` runs the GIF's frame loop.
 struct AnimatedImageView: NSViewRepresentable {
     let data: Data
 
@@ -1424,10 +1188,6 @@ struct AnimatedImageView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSImageView, context: Context) {
-        // Re-decode ONLY when the payload actually changed. This runs on
-        // every SwiftUI render pass — and popup rows re-render on every
-        // keypress (hint flags) — so unconditionally rebuilding NSImage
-        // meant a full GIF decode + animation restart per keystroke.
         guard context.coordinator.lastDataCount != data.count else { return }
         context.coordinator.lastDataCount = data.count
         view.image = NSImage(data: data)
@@ -1446,7 +1206,7 @@ private struct HTMLFilePreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let view = WKWebView()
-        view.allowsMagnification = true // pinch-zoom, like Safari
+        view.allowsMagnification = true
         load(url, in: view)
         return view
     }
@@ -1473,13 +1233,11 @@ private struct AVMediaPreview: NSViewRepresentable {
         view.videoGravity = .resizeAspect
         let player = AVPlayer(url: url)
         view.player = player
-        // Auto-play as soon as the preview opens.
         player.play()
         return view
     }
 
     func updateNSView(_ view: AVPlayerView, context: Context) {
-        // Only swap the player when the URL actually changes to avoid restarting.
         guard (view.player?.currentItem?.asset as? AVURLAsset)?.url != url else { return }
         view.player?.pause()
         let player = AVPlayer(url: url)
@@ -1488,7 +1246,6 @@ private struct AVMediaPreview: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
-        // Called when the panel is hidden — stop playback immediately.
         view.player?.pause()
         view.player = nil
     }
@@ -1499,7 +1256,7 @@ private struct QuickLookFilePreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> QLPreviewView {
         let view = QLPreviewView(frame: .zero, style: .normal)!
-        view.autostarts = true   // Auto-play audio/video inside QuickLook previews.
+        view.autostarts = true
         view.previewItem = url as NSURL
         return view
     }
@@ -1509,7 +1266,6 @@ private struct QuickLookFilePreview: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: QLPreviewView, coordinator: ()) {
-        // Clear the preview item when the panel is hidden so QL stops any playback.
         view.previewItem = nil
     }
 }
@@ -1521,11 +1277,6 @@ struct PDFPreview: NSViewRepresentable {
         let view = InteractivePDFView()
         view.autoScales = true
         view.displayMode = .singlePageContinuous
-        // Interactive zoom: pinch on a trackpad zooms, scrolling pans —
-        // PDFView supports both natively but clamps to autoScales' fit
-        // factor unless the min/max range is opened up. minScaleFactor
-        // pinned to the size-to-fit factor keeps "zoomed all the way out"
-        // meaning "the whole page visible", never a lost-in-space sliver.
         view.minScaleFactor = view.scaleFactorForSizeToFit
         view.maxScaleFactor = 8
         view.document = document
@@ -1539,11 +1290,6 @@ struct PDFPreview: NSViewRepresentable {
         }
     }
 
-    /// Same non-key-window reality as FitOnLayoutScrollView (see its doc
-    /// comment): the preview popover and reference panel never become key,
-    /// so PDFView's own gesture plumbing can't be relied on there. Pinch
-    /// and ⌘-scroll are handled from the raw pointer-routed events, and
-    /// acceptsFirstMouse lets link-clicks/drag-pans land on first click.
     final class InteractivePDFView: PDFView {
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -1563,28 +1309,9 @@ struct PDFPreview: NSViewRepresentable {
     }
 }
 
-/// Zoomable, pannable image preview — one shared component for every place
-/// an image renders large (the floating item preview, the reference panel's
-/// content area, file previews). Pinch (or double-click) to zoom, scroll to
-/// pan while zoomed, double-click again to snap back to fit. Built on
-/// NSScrollView's native magnification so gestures feel identical to
-/// Preview.app rather than a hand-rolled SwiftUI gesture approximation.
 struct ZoomableImagePreview: NSViewRepresentable {
     let image: NSImage
-    /// When set, the image view animates this payload's frame loop (GIFs) —
-    /// SwiftUI's Image and a plain NSImage assignment both show only the
-    /// first frame. Zoom/pan behave identically either way; animation is
-    /// the only difference, so GIFs get the same interactions as stills
-    /// instead of a separate non-zoomable code path.
     var animatedData: Data? = nil
-    /// Full-resolution compressed bytes — when set, the view decodes THESE
-    /// (once) instead of showing `image`, which is only a ≤1024px ring
-    /// thumbnail for image items. The decode MUST happen in here, gated by
-    /// the data-changed check, and never at the call site: this view's
-    /// parent bodies re-evaluate on every @Published change (the popup
-    /// re-renders per keystroke), and a v1.0.144 regression that decoded
-    /// `NSImage(data:)` inline in those bodies re-decoded a multi-MB bitmap
-    /// on every render pass — 18% idle CPU and ~1 GB of memory churn.
     var fullResData: Data? = nil
 
     func makeNSView(context: Context) -> FitOnLayoutScrollView {
@@ -1603,13 +1330,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
             imageView.animates = true
             scrollView.lastImageDataCount = animatedData.count
         } else if let fullResData {
-            // Show the already-decoded ring thumbnail INSTANTLY, then decode the
-            // full-resolution bytes off the main thread and swap them in. The
-            // old code decoded a multi-MB NSImage(data:) synchronously right
-            // here — and the detail pane recreates this view (via .id) on every
-            // selection — so picking a large image blocked the main thread
-            // before anything appeared. That's the "preview takes a moment to
-            // load" lag.
             imageView.image = image
             scrollView.lastImageDataCount = fullResData.count
             Self.decodeFullRes(fullResData, into: imageView, scrollView: scrollView)
@@ -1629,9 +1349,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
     func updateNSView(_ scrollView: FitOnLayoutScrollView, context: Context) {
         guard let imageView = scrollView.documentView as? NSImageView else { return }
         if let animatedData {
-            // Same change-detection AnimatedImageView uses: re-decode only
-            // when the payload actually changed, never per render pass
-            // (updateNSView runs on every SwiftUI render).
             guard scrollView.lastImageDataCount != animatedData.count else { return }
             imageView.image = NSImage(data: animatedData)
             imageView.animates = true
@@ -1639,9 +1356,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
             scrollView.magnification = 1
         } else if let fullResData {
             guard scrollView.lastImageDataCount != fullResData.count else { return }
-            // Same instant-thumbnail-then-full-res swap as makeNSView, for the
-            // reused-view case (selection changed to a different image without
-            // recreating the view).
             imageView.image = image
             scrollView.lastImageDataCount = fullResData.count
             scrollView.magnification = 1
@@ -1652,9 +1366,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
         }
     }
 
-    /// Decode full-resolution image bytes off the main thread and swap them
-    /// into `imageView`, but only if the view is still showing THIS payload
-    /// (guards against a fast selection change landing an obsolete decode).
     private static func decodeFullRes(_ data: Data, into imageView: NSImageView,
                                       scrollView: FitOnLayoutScrollView) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -1666,24 +1377,7 @@ struct ZoomableImagePreview: NSViewRepresentable {
         }
     }
 
-    /// NSScrollView whose document view tracks the visible area while at 1×
-    /// (so "not zoomed" always means "image fits the panel", including after
-    /// a window resize), and stops fighting the user once they've zoomed in.
-    ///
-    /// Every interaction below is handled from RAW pointer-routed events, on
-    /// purpose: this view lives inside non-activating panels and popovers
-    /// (the Space preview, the reference panel, similar-item previews) whose
-    /// windows may NEVER become key — the entire popup UI is deliberately
-    /// non-activating so keyboard focus stays in the app being pasted into.
-    /// In that world, gesture recognizers don't reliably engage and first
-    /// clicks are swallowed, which made zoom look completely dead. Scroll
-    /// and magnify events, however, are delivered to the window under the
-    /// POINTER regardless of key/active state — so pinch and ⌘-scroll are
-    /// handled explicitly, and acceptsFirstMouse makes the first click land.
     final class FitOnLayoutScrollView: NSScrollView {
-        /// Byte count of the animated payload currently decoded into the
-        /// image view — updateNSView's cheap "did the GIF actually change"
-        /// check, mirroring AnimatedImageView's coordinator.
         var lastImageDataCount: Int?
 
         override func layout() {
@@ -1693,27 +1387,8 @@ struct ZoomableImagePreview: NSViewRepresentable {
             }
         }
 
-        /// First click acts immediately (double-click zoom included) even
-        /// while the window isn't key — it never becomes key in the popup.
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-        // Trackpad pinch-to-zoom is NOT hand-rolled here. `allowsMagnification
-        // = true` (set in makeNSView) already gives this scroll view Apple's
-        // own native pinch handling — correctly centered at the pinch
-        // location, momentum-aware, and coexisting cleanly with panning —
-        // for free. A previous version reimplemented this via a raw
-        // `magnify(with:)` override with custom centering math, which is
-        // exactly the kind of thing that can go subtly wrong (reported: pinch
-        // didn't reliably zoom, and panning after zooming didn't work
-        // properly). Deleting the custom override in favor of AppKit's own,
-        // more thoroughly-tested implementation fixes both: native pinch
-        // zoom, AND panning (a magnified NSScrollView pans via drag/scroll
-        // automatically) work the way the platform already guarantees.
-
-        /// ⌘-scroll zooms (mouse-wheel users, and the guaranteed-delivery
-        /// fallback everywhere trackpad pinch isn't available); plain
-        /// scroll/drag pans — NSScrollView's own default behavior once
-        /// magnified, so it's a straight `super` call, not reimplemented.
         override func scrollWheel(with event: NSEvent) {
             guard event.modifierFlags.contains(.command) else {
                 super.scrollWheel(with: event)
@@ -1724,11 +1399,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
             let target = min(maxMagnification, max(minMagnification, magnification * (1 + delta * 0.02)))
             let point = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
             setMagnification(target, centeredAt: point)
-            // Landing back at 1× must re-fit — layout() skips the re-fit
-            // while zoomed, so a resize mid-zoom would otherwise leave a
-            // stale fit frame behind. (Native pinch zoom re-triggers
-            // layout() on every magnification change already, so it gets
-            // this re-fit for free without needing the same explicit call.)
             if target <= 1.001 {
                 documentView?.frame = contentView.bounds
             }
@@ -1741,9 +1411,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
                 context.duration = 0.25
                 animator().setMagnification(target, centeredAt: point)
             }
-            // Zooming back out to 1× must also re-fit the document frame in
-            // case the window was resized while zoomed (layout() skips the
-            // re-fit whenever magnification is above 1).
             if target == 1 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) { [weak self] in
                     guard let self, self.magnification <= 1.001 else { return }
@@ -1765,8 +1432,8 @@ struct HTMLStringPreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let view = WKWebView()
-        view.setValue(false, forKey: "drawsBackground") // Make background transparent
-        view.allowsMagnification = true // pinch-zoom on tables, like Safari
+        view.setValue(false, forKey: "drawsBackground")
+        view.allowsMagnification = true
         loadHTML(view)
         context.coordinator.lastHTML = html
         return view
@@ -1822,9 +1489,6 @@ struct HTMLStringPreview: NSViewRepresentable {
     }
 }
 
-// MARK: - Embedded link extraction + strip
-
-/// A hyperlink pulled out of rich content — the visible label plus its URL.
 struct ExtractedLink: Identifiable {
     let id = UUID()
     let label: String
@@ -1832,9 +1496,6 @@ struct ExtractedLink: Identifiable {
 }
 
 enum LinkExtractor {
-    /// Every distinct `.link` attribute in an attributed string (rich text /
-    /// RTFD), paired with the text it wraps — e.g. a Wikipedia paste keeps the
-    /// URL behind every linked word.
     static func links(from attr: NSAttributedString) -> [ExtractedLink] {
         guard attr.length > 0 else { return [] }
         var out: [ExtractedLink] = []
@@ -1854,8 +1515,6 @@ enum LinkExtractor {
         return out
     }
 
-    /// `<a href>` links from raw HTML (the `.html` content type). Length-capped
-    /// so a huge document doesn't run the regex on the render path.
     static func links(fromHTML html: String) -> [ExtractedLink] {
         guard html.count <= 300_000,
               let re = try? NSRegularExpression(
@@ -1877,9 +1536,6 @@ enum LinkExtractor {
     }
 }
 
-/// Horizontal, scrolling strip of every embedded link, shown under a rich-text
-/// preview — the same "row of chips beneath the content" pattern used
-/// elsewhere. Each chip opens its URL.
 struct LinkStrip: View {
     let links: [ExtractedLink]
 
@@ -1919,7 +1575,6 @@ struct LinkStrip: View {
     }
 }
 
-/// Rich-text preview + the link strip beneath it (only when links are present).
 struct RichLinkedPreview<Content: View>: View {
     let links: [ExtractedLink]
     @ViewBuilder let content: Content
@@ -1945,7 +1600,7 @@ struct AttributedTextPreview: NSViewRepresentable {
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.importsGraphics = true // For RTFD graphics
+        textView.importsGraphics = true
         textView.allowsUndo = false
         textView.textStorage?.setAttributedString(attributedString)
         return scrollView
@@ -1958,8 +1613,6 @@ struct AttributedTextPreview: NSViewRepresentable {
         }
     }
 }
-
-// MARK: - Live website preview (shared with QuickClipPanel)
 
 struct WebsitePreview: NSViewRepresentable {
     let url: URL
@@ -1987,7 +1640,7 @@ struct WebsitePreview: NSViewRepresentable {
 
         let config = WKWebViewConfiguration()
         let webView = WKWebView(frame: .zero, configuration: config)
-        webView.allowsMagnification = true // pinch-zoom, like Safari
+        webView.allowsMagnification = true
         webView.navigationDelegate = context.coordinator
         webView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(webView)

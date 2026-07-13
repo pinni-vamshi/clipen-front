@@ -1,7 +1,5 @@
 import SwiftUI
 
-/// Semantic / structural labels for a clipboard item. Multiple tags per item;
-/// filter chips and tool pools key off these (not a single pasteboard heading).
 enum ClipboardTag: String, Hashable, CaseIterable {
     case image
     case gif
@@ -32,12 +30,8 @@ enum ClipboardTag: String, Hashable, CaseIterable {
     case html
     case richText
 
-    /// Filesystem-safe folder name used by the blob storage layer when
-    /// sharding per-item binary blobs by primary tag.  Stable identifier
-    /// (matches the rawValue) — never change without a migration.
     var folderName: String { rawValue }
 
-    /// Lower = shown first in chips and strip sort order.
     var priority: Int {
         switch self {
         case .image:     return 10
@@ -176,12 +170,8 @@ enum ClipboardTag: String, Hashable, CaseIterable {
     }
 }
 
-// MARK: - Shared tag display (popup, main window, menu bar)
-
 enum ItemTagStripStyle {
-    /// Colored capsule chips with icons.
     case chips
-    /// Comma-separated labels only (popover rows).
     case plainComma
 }
 

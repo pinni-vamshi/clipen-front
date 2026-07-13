@@ -3,21 +3,9 @@ import Combine
 import SwiftUI
 @preconcurrency import PDFKit
 
-// MARK: - Inline page-picker view (rendered inside TransformPanel)
-
-/// Replaces the tool list inside the existing TransformPanel when the user
-/// has picked the "Paste Specific Pages" PDF transform.  Reads its state
-/// from ClipboardManager so all input — typed digits/commas/dashes, manual
-/// page clicks, Space-preview, Enter-commit, Esc-cancel — can be driven
-/// either by mouse (clicks work in non-activating panels) or by the
-/// CGEventTap (which routes keystrokes since the panel can't take focus).
 struct InlinePagePicker: View {
     @ObservedObject private var manager = ClipboardManager.shared
 
-    // No header here — the outer TransformView header already announces
-    // "Paste Specific Pages" with the page count.  Keeping a duplicate
-    // header would make the picker look like a separate panel.  This view
-    // is purely the picker's CONTENT: query row, page grid, selection count.
     var body: some View {
         VStack(spacing: 0) {
             queryRow
@@ -28,7 +16,6 @@ struct InlinePagePicker: View {
         }
     }
 
-    // MARK: Range input (visual only — keystrokes routed via CGEventTap)
     private var queryRow: some View {
         HStack(spacing: 8) {
             Image(systemName: "textformat.123")
@@ -66,10 +53,6 @@ struct InlinePagePicker: View {
         .padding(.vertical, 6)
     }
 
-    // MARK: Page grid — clickable buttons (mouse works in non-activating panel)
-    // Fills available space (no fixed maxHeight) so header / query / footer
-    // never get clipped when the panel is shorter than the picker's natural
-    // content height.  The grid itself scrolls if there are many pages.
     private var grid: some View {
         let pageCount = manager.pageRangePageCount
         let effective = manager.pageRangeEffectiveSelection
@@ -101,7 +84,6 @@ struct InlinePagePicker: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: Selection count row (compact — TransformView's outer footer shows the keybinding hints)
     private var selectionCountRow: some View {
         let count = manager.pageRangeEffectiveSelection.count
         return HStack {
@@ -117,14 +99,6 @@ struct InlinePagePicker: View {
     }
 }
 
-// MARK: - Inline language picker view (rendered inside TransformPanel)
-
-/// Single entry point for "Translate": ONE tool row that, once activated,
-/// shows every supported language in one scrollable menu right here — type
-/// to filter, ↑/↓ to move the highlight, click or ↵ to translate-and-paste.
-/// Replaces an earlier version that listed all 20 languages as separate
-/// top-level transform rows — this is the corrected shape: one action, one
-/// picker, all choices inside it.
 struct InlineLanguagePicker: View {
     @ObservedObject private var manager = ClipboardManager.shared
 
@@ -219,18 +193,7 @@ struct InlineLanguagePicker: View {
     }
 }
 
-// MARK: - Blinking cursor (shared by all non-activating-panel inputs)
-
-/// Fake caret for places where a real `TextField` can't be used — the popup
-/// search bar and the page-picker query input both live inside non-activating
-/// `NSPanel`s that can't receive keyboard focus, so the system-provided
-/// blinking cursor is unavailable.  This view renders a `▌` glyph that
-/// toggles visibility on a 500ms cycle (matches macOS's default cursor
-/// blink rate), so the user can tell at a glance "this is an active input."
 struct BlinkingCursor: View {
-    /// Cycle period in seconds — each tick toggles visibility, so the full
-    /// on→off→on cycle is 2× this value.  0.5s gives a 1s round trip,
-    /// matching NSTextField's default.
     var period: Double = 0.5
 
     @State private var visible: Bool = true
@@ -239,15 +202,12 @@ struct BlinkingCursor: View {
     var body: some View {
         Text("▌")
             .opacity(visible ? 1 : 0)
-            // Render the cursor at the same width whether visible or not
-            // so adjacent text doesn't shift sideways every blink.
             .frame(minWidth: 6, alignment: .leading)
             .onAppear {
                 timer?.invalidate()
                 timer = Timer.scheduledTimer(withTimeInterval: period, repeats: true) { _ in
                     visible.toggle()
                 }
-                // .common mode so the cursor keeps blinking during scroll/tracking.
                 if let t = timer { RunLoop.main.add(t, forMode: .common) }
             }
             .onDisappear {
@@ -257,12 +217,7 @@ struct BlinkingCursor: View {
     }
 }
 
-// MARK: - Range parser (shared utility)
-
 enum PageRangeParser {
-    /// Parse strings like "1-3, 5, 7-9" → set of 0-indexed page numbers.
-    /// Ignores out-of-bounds and malformed tokens silently — better UX than
-    /// a parse-error toast, since the grid shows the live result.
     static func parse(_ text: String, maxPage: Int) -> Set<Int> {
         guard !text.isEmpty, maxPage > 0 else { return [] }
         var result: Set<Int> = []

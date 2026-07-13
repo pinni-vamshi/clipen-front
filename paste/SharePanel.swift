@@ -1,13 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Real system NSPopover for the Share Sheet (S key), anchored through an
-/// invisible helper panel — exact same pattern as TransformPanel and
-/// ItemPreviewPanel (see PreviewOverlayWindow's header comment for the full
-/// rationale). Previously the share stage was just an inline text banner
-/// inside the popup itself; this makes it look and behave like every other
-/// secondary panel (Transforms, Preview) — its own floating box with an
-/// arrow pointing at the highlighted row.
 class SharePanel: NSObject, NSPopoverDelegate {
     private let anchorPanel: NSPanel
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
@@ -76,9 +69,6 @@ class SharePanel: NSObject, NSPopoverDelegate {
             popover.contentViewController = NSHostingController(rootView: content)
         }
 
-        // Same stationary-strip anchoring as TransformPanel — see its show()
-        // for the full rationale (moving the anchor window under a live
-        // popover tears down the attachment and replays the open animation).
         let anchorY = anchorPoint?.y ?? popupFrame.midY
         let stripHeight = max(1, popupFrame.height)
         let desiredStrip = NSRect(x: placeRight ? popupFrame.maxX : popupFrame.minX,
@@ -110,8 +100,6 @@ class SharePanel: NSObject, NSPopoverDelegate {
         shownStrip = nil
     }
 }
-
-// MARK: - SwiftUI content
 
 struct ShareView: View {
     let services: [NSSharingService]

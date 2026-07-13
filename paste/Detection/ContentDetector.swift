@@ -8,7 +8,6 @@ enum ContentDetector {
     static func detectedType(for content: ClipboardContent, color: NSColor?) -> ClipboardContentType {
         guard case .text(let text) = content else { return .plain }
 
-        // Deterministic detectors only — highest-confidence match wins, else plain.
         let traditional = TextTraditionalDetectors.candidates(for: text, color: color)
         return traditional.max(by: { $0.confidence < $1.confidence })?.type ?? .plain
     }

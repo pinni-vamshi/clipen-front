@@ -1,11 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// One-shot educational panel surfaced the first time the user lands on the
-/// fast-paste path (released ⌘ inside `firstOpenDelay`).  Branded SwiftUI
-/// chrome with a single looping animation that demonstrates the gesture +
-/// timer threshold — the threshold visually fills at the user's actual
-/// slider speed so they feel their own setting.
 final class FastPasteHintPanel: NSPanel {
 
     init() {
@@ -23,13 +18,6 @@ final class FastPasteHintPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
 
-    /// Show the panel centered on the active screen.
-    /// - Parameters:
-    ///   - delayMs: the current `firstOpenDelay` in ms.  Used to time the
-    ///     progress ring inside the animation, so the demo feels exactly
-    ///     as snappy (or slow) as the user's own slider setting.
-    ///   - onAdjust: invoked when the user picks "Adjust timer".  The
-    ///     handler should open the main window and pulse the slider card.
     func show(delayMs: Int, onAdjust: @escaping () -> Void) {
         let view = FastPasteHintView(
             delayMs: delayMs,
@@ -49,17 +37,11 @@ final class FastPasteHintPanel: NSPanel {
 
     override func orderOut(_ sender: Any?) {
         super.orderOut(sender)
-        // Tear down the hosted SwiftUI tree once hidden so its self-rescheduling
-        // demo animation stops (fires onDisappear) instead of looping forever
-        // behind the invisible panel. Deferred so the view isn't freed while a
-        // button action inside it is still executing.
         DispatchQueue.main.async { [weak self] in
             if self?.isVisible == false { self?.contentView = nil }
         }
     }
 }
-
-// MARK: - Outer container
 
 struct FastPasteHintView: View {
     let delayMs: Int
@@ -73,9 +55,6 @@ struct FastPasteHintView: View {
                 .padding(.horizontal, 22)
                 .padding(.bottom, 16)
 
-            // One short explanation underneath — labels what the loop is
-            // showing.  Calls out the bit that's easy to miss: ⌘ stays held
-            // while the timer runs.
             Text("Press ⌘V — keep ⌘ held while the timer fills, and the Clipen picker opens.")
                 .font(.system(size: 11.5))
                 .foregroundColor(.secondary)
@@ -140,46 +119,17 @@ struct FastPasteHintView: View {
     }
 }
 
-// MARK: - The single animated demo
-//
-// One continuous loop of the real gesture:
-//
-//   1. ⌘ depresses
-//   2. V depresses (the ⌘V paste)
-//   3. V releases — ⌘ stays held
-//   4. A circular progress ring around ⌘ starts filling.
-//      Its fill duration == max(delayMs, 350 ms) so the user sees their
-//      OWN slider value play out at real speed.
-//   5. Ring completes → a small "Clipen" picker chip pops in beside the keys.
-//   6. Hold for a beat, then reset and loop.
-//
-// One uninterrupted motion — no captions changing mid-flight, no numbered
-// steps, no "phase 1 of 4".  The animation tells the whole story.
 struct AnimatedGestureDemo: View {
     let delayMs: Int
 
-    // Phase state machine, but only used to schedule frames — the user
-    // sees a single continuous motion, not labeled steps.
     @State private var step: Step = .idle
-    /// Driven independently from `step` so the trim can be animated with
-    /// an EXPLICIT `.linear(duration: ringDuration)` animation — exactly
-    /// matching the user's slider value.
     @State private var ringFill: CGFloat = 0
 
-    /// Reference-type liveness flag. The choreography reschedules itself via
-    /// escaping `asyncAfter` closures forever; without this they keep firing
-    /// after the panel is dismissed (the SwiftUI tree isn't torn down on
-    /// `orderOut`). A class lets those already-captured closures observe the
-    /// live value — a captured `Bool` would freeze at its closure-creation value.
     private final class LoopToken { var active = true }
     @State private var loopToken = LoopToken()
 
     private enum Step { case idle, cmdDown, vDown, vUp, ringFull, pickerShown }
 
-    /// The ring's visible fill duration.  We clamp to a minimum 0.35 s so
-    /// extremely small delay values (e.g. 30 ms) are still perceptible —
-    /// otherwise the ring would snap straight to full and the user
-    /// wouldn't see the "timer" beat that's the whole point.
     private var ringDuration: TimeInterval {
         max(0.35, TimeInterval(delayMs) / 1000.0)
     }
@@ -187,9 +137,6 @@ struct AnimatedGestureDemo: View {
     var body: some View {
         ZStack {
             HStack(spacing: 12) {
-                // ⌘ keycap wrapped in the progress ring.  Ring is drawn as
-                // a thick outer circle that trims from 0 → 1 during the
-                // hold beat.
                 ZStack {
                     Circle()
                         .stroke(Color.primary.opacity(0.08), lineWidth: 3)
@@ -215,7 +162,6 @@ struct AnimatedGestureDemo: View {
 
                 Keycap(label: "V", pressed: vPressed)
 
-                // Picker chip — slides in from the right once the ring fills.
                 MiniPickerChip(visible: step == .pickerShown)
             }
             .frame(height: 80)
@@ -240,21 +186,12 @@ struct AnimatedGestureDemo: View {
 
     private func startLoop() {
         guard loopToken.active else { return }
-        // Reset to known idle state.  Ring fill resets WITHOUT animation
-        // so the next loop starts clean (no rewind line).
         var noAnim = Transaction(); noAnim.disablesAnimations = true
         withTransaction(noAnim) {
             step = .idle
             ringFill = 0
         }
 
-        // Choreography.
-        //   t = 0.50  ⌘ depresses
-        //   t = 0.85  V depresses
-        //   t = 1.20  V releases; ring begins linear fill
-        //   t = 1.20 + ringDuration  ring hits 1.0
-        //   t = ... + 0.10  picker chip slides in
-        //   t = ... + 1.30  loop restarts
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
             withAnimation { step = .cmdDown }
         }
@@ -263,7 +200,6 @@ struct AnimatedGestureDemo: View {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.20) {
             withAnimation { step = .vUp }
-            // Start the ring's linear fill at the user's actual rate.
             withAnimation(.linear(duration: ringDuration)) {
                 ringFill = 1
             }
@@ -271,7 +207,6 @@ struct AnimatedGestureDemo: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.20 + ringDuration + 0.05) {
             withAnimation { step = .pickerShown }
         }
-        // Hold the picker on screen, then loop.
         let total = 1.20 + ringDuration + 0.05 + 1.25
         DispatchQueue.main.asyncAfter(deadline: .now() + total) {
             guard loopToken.active else { return }
@@ -279,8 +214,6 @@ struct AnimatedGestureDemo: View {
         }
     }
 }
-
-// MARK: - Keycap
 
 private struct Keycap: View {
     let label: String
@@ -309,8 +242,6 @@ private struct Keycap: View {
             .animation(.spring(response: 0.28, dampingFraction: 0.65), value: pressed)
     }
 }
-
-// MARK: - Mini picker chip
 
 private struct MiniPickerChip: View {
     let visible: Bool

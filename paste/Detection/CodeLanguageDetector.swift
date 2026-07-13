@@ -1,41 +1,18 @@
 import Foundation
 
-/// Detects the programming language of a text snippet (or a code FILE by its
-/// extension), combining several signals into one score rather than relying on
-/// any single heuristic:
-///
-///   1. Shebang line (`#!/usr/bin/env python3`) — near-certain when present.
-///   2. Distinctive keywords/operators, weighted: tokens that are effectively
-///      unique to a language (`println!`, `fmt.Println`, `#include`,
-///      `System.out.println`) count for much more than generic ones shared
-///      across languages (`if`, `for`, `return`).
-///   3. File extension (for actual code files) — treated as strong, but still
-///      cross-checked against the text so a mislabeled file can be corrected.
-///
-/// The language with the highest combined score wins. Names are the app's
-/// display labels; `hljsIdentifier(for:)` maps them to highlight.js ids for
-/// the syntax-highlighted preview.
 enum CodeLanguageDetector {
 
-    // MARK: Public entry points
-
-    /// Best-guess language for a text snippet, or nil if it doesn't look like
-    /// code. `fileExtension` (lowercased, no dot) biases the result when the
-    /// item came from a file.
     static func detect(_ text: String, fileExtension: String? = nil) -> String? {
         guard text.count <= 50_000 else {
-            // Too big to scan cheaply — fall back to the extension alone.
             return fileExtension.flatMap { languageForExtension($0) }
         }
 
         var scores: [String: Double] = [:]
 
-        // 1) Shebang — a very strong signal when it's there.
         if let shebangLang = shebangLanguage(text) {
             scores[shebangLang, default: 0] += 6
         }
 
-        // 2) Weighted keyword / operator hits.
         for (lang, tokens) in weightedTokens {
             var s = 0.0
             for (token, weight) in tokens where text.contains(token) {
@@ -44,32 +21,22 @@ enum CodeLanguageDetector {
             if s > 0 { scores[lang, default: 0] += s }
         }
 
-        // 3) File extension — strong, added on top so it can tip a close call
-        // but can still be overridden by overwhelming textual evidence.
         if let ext = fileExtension, let extLang = languageForExtension(ext) {
             scores[extLang, default: 0] += 4
         }
 
         guard let best = scores.max(by: { $0.value < $1.value }) else { return nil }
-        // Require a minimum confidence so prose/plain text isn't mislabeled —
-        // but an extension match alone (score ≥ 4) is enough on its own.
         return best.value >= 3 ? best.key : nil
     }
 
-    /// Language for a bare file extension (no leading dot), or nil.
     static func languageForExtension(_ ext: String) -> String? {
         extensionMap[ext.lowercased()]
     }
 
-    /// highlight.js language identifier for a display name — the string
-    /// Highlightr expects. Returns nil for names highlight.js can't handle,
-    /// in which case the preview falls back to auto-detection.
     static func hljsIdentifier(for displayName: String?) -> String? {
         guard let displayName else { return nil }
         return hljsMap[displayName]
     }
-
-    // MARK: Signal tables
 
     private static func shebangLanguage(_ text: String) -> String? {
         guard text.hasPrefix("#!") else { return nil }
@@ -83,7 +50,6 @@ enum CodeLanguageDetector {
         return nil
     }
 
-    /// (token, weight) — distinctive tokens score higher than generic ones.
     private static let weightedTokens: [String: [(String, Double)]] = [
         "Swift":      [("import SwiftUI", 4), ("@State", 3), ("guard let", 2), ("func ", 1), ("-> ", 0.5),
                        ("var ", 0.5), ("let ", 0.5), ("struct ", 1), ("?? ", 1), ("@Published", 3)],
@@ -142,8 +108,6 @@ enum CodeLanguageDetector {
         "tex": "LaTeX",
     ]
 
-    /// Display name → highlight.js identifier. Anything missing falls back to
-    /// Highlightr's own auto-detection in the preview.
     private static let hljsMap: [String: String] = [
         "Swift": "swift",
         "Python": "python",

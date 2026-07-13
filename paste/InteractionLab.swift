@@ -2,14 +2,6 @@ import SwiftUI
 import AppKit
 import Combine
 
-// MARK: - Interaction demos
-//
-// Every popup gesture the Settings "INTERACTIONS" list teaches, each paired
-// with a scripted animation that plays in the INTERACTION PREVIEW stage.
-// The scripts are a SwiftUI port of the clipen_interactions.html reference:
-// key caps press, a mock popup panel opens, items cycle/select/mark, side
-// panels (preview / transforms) appear, and a green result line lands.
-
 enum InteractionDemo: String, CaseIterable, Identifiable {
     case cycle, pinnedOpen, multiPaste, search, category
     case spacePreview, pinPreview, transform, moveToFront, delete, reverseCycle
@@ -17,8 +9,6 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Key label shown in the interactions list — spells out HOW the key is
-    /// pressed (tap vs hold), matching the app's real trigger exactly.
     var keyLabel: String {
         switch self {
         case .cycle:        return "⌘ + tap V"
@@ -55,8 +45,6 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Two-line explanation under the stage — written from the app's REAL
-    /// behavior (tap vs hold, what stays open, where the selection goes).
     var caption: String {
         switch self {
         case .cycle:        return "Hold ⌘ and tap V to open the popup; each tap moves to the next item.\nRelease ⌘ to paste the highlighted item."
@@ -75,7 +63,6 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Key caps shown large on the idle stage before Play is pressed.
     var heroKeys: [LabKey] {
         switch self {
         case .cycle:        return [.cmd, .v]
@@ -94,8 +81,6 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         }
     }
 }
-
-// MARK: - Key caps
 
 enum LabKey: String, Identifiable, Hashable {
     case cmd, v, x, f, c, b, p, shift, space, backspace, one
@@ -121,10 +106,6 @@ enum LabKey: String, Identifiable, Hashable {
     var isWide: Bool { self == .space }
 }
 
-// MARK: - Animation controller
-
-/// Drives the interaction stage. Scripts run as a cancellable Task; every
-/// visual bit of the stage is a @Published so SwiftUI animates the change.
 @MainActor
 final class InteractionLabController: ObservableObject {
 
@@ -144,13 +125,11 @@ final class InteractionLabController: ObservableObject {
     @Published var selectedDemo: InteractionDemo = .cycle
     @Published var isPlaying = false
 
-    // Key caps
     @Published var pressedKeys: Set<LabKey> = []
     @Published var stageKeys: [LabKey] = [.cmd, .v]
     @Published var showNumberRow = false
     @Published var pressedNumber: Int? = nil
 
-    // Mock popup panel
     @Published var panelVisible = false
     @Published var items: [LabItem] = InteractionLabController.defaultItems()
     @Published var selectedIndex = 0
@@ -158,23 +137,17 @@ final class InteractionLabController: ObservableObject {
     @Published var searchActive = false
     @Published var activeTab = 0
 
-    // Side panels
     @Published var previewVisible = false
     @Published var transformVisible = false
     @Published var activeTransform: Int? = nil
     @Published var transformLabels = ["Capitalize", "Small Case", "Base64"]
 
-    // Text under the stage
     @Published var resultText: String? = nil
-    /// The HTML reference's floating instruction label ("Release ⌘ to
-    /// paste", "Type to search", …) shown while a script runs.
     @Published var instruction: String? = nil
 
     private var task: Task<Void, Never>? = nil
     private let tabNames = ["Recents", "Image"]
 
-    /// Stage caption — follows the user's reverse-key selection for the
-    /// Reverse Cycle demo instead of the enum's static ⇧V wording.
     var currentCaption: String {
         if selectedDemo == .reverseCycle, ClipboardManager.shared.reverseCycleUsesB {
             return "Hold ⌘ and tap B to move to the previous item.\nHOLD B to mark the item and step back in one go."
@@ -187,10 +160,6 @@ final class InteractionLabController: ObservableObject {
         play()
     }
 
-    /// Runs the selected demo's script on a continuous loop — no manual
-    /// "Play" trigger needed; picking a row in the interactions list is
-    /// itself the trigger, and the animation keeps repeating until a
-    /// different row is picked or the stage disappears.
     func play() {
         task?.cancel()
         resetStage()
@@ -204,7 +173,7 @@ final class InteractionLabController: ObservableObject {
                     try await self.run(demo)
                     try await self.pause(900)
                 } catch {
-                    return // cancelled mid-script — a new play()/stop() already took over
+                    return
                 }
                 guard !Task.isCancelled else { return }
                 self.resetStage()
@@ -238,12 +207,9 @@ final class InteractionLabController: ObservableObject {
         instruction = nil
     }
 
-    /// Show/replace the floating instruction label (HTML instrLabel).
     private func hint(_ text: String?) {
         withAnimation(.easeOut(duration: 0.2)) { instruction = text }
     }
-
-    // MARK: Script plumbing
 
     private func pause(_ ms: UInt64) async throws {
         try await Task.sleep(nanoseconds: ms * 1_000_000)
@@ -275,8 +241,6 @@ final class InteractionLabController: ObservableObject {
     private func finish(_ text: String) {
         withAnimation(.easeOut(duration: 0.25)) { resultText = text }
     }
-
-    // MARK: Scripts (ported from clipen_interactions.html)
 
     private func run(_ demo: InteractionDemo) async throws {
         switch demo {
@@ -331,8 +295,6 @@ final class InteractionLabController: ObservableObject {
         release(.v)
         try await pause(1000)
         release(.cmd)
-        // Pinned: releasing ⌘ does NOT close the panel — it stays open
-        // with the ✕ until the loop restarts, same as the HTML reference.
         finish("Item marked and pinned to tray")
         try await pause(1600)
     }
@@ -345,7 +307,6 @@ final class InteractionLabController: ObservableObject {
         showPanel(true)
         try await tap(.v)
         try await pause(400)
-        // Hold V — mark item 1
         press(.v)
         try await pause(600)
         release(.v)
@@ -357,7 +318,6 @@ final class InteractionLabController: ObservableObject {
         try await tap(.v)
         selectItem(2)
         try await pause(350)
-        // Hold V — mark item 3
         press(.v)
         try await pause(600)
         release(.v)
@@ -456,9 +416,6 @@ final class InteractionLabController: ObservableObject {
         withAnimation(.easeOut(duration: 0.2)) { previewVisible = true }
         try await pause(140)
         try await tap(.space, hold: 140)
-        // The pin: ONLY the popup disappears — the preview panel stays
-        // pinned on screen (that's the whole point of the gesture), until
-        // the loop restarts the demo.
         showPanel(false)
         release(.cmd)
         finish("Pinned “\(items[1].title)” to tray")
@@ -478,9 +435,6 @@ final class InteractionLabController: ObservableObject {
         try await pause(400)
         try await tap(.x)
         withAnimation(.easeOut(duration: 0.25)) { transformVisible = true }
-        // Breathe after the opening tap — without this the open-tap and the
-        // first cycle-tap ran back to back, which read as X being
-        // double-clicked very fast.
         try await pause(500)
         var chosen = 0
         for i in 0..<3 {
@@ -513,8 +467,6 @@ final class InteractionLabController: ObservableObject {
         withAnimation(.easeOut(duration: 0.3)) {
             let moved = items.remove(at: 1)
             items.insert(moved, at: 0)
-            // Matches the real popup: ONLY the item moves — the selection
-            // does not follow it to the front, it lands on the next item.
             selectedIndex = 2
         }
         try await pause(1000)
@@ -546,8 +498,6 @@ final class InteractionLabController: ObservableObject {
     }
 
     private func runReverseCycle() async throws {
-        // The animation follows the user's chosen reverse key (Settings →
-        // Interactions → Reverse Cycle edit): ⇧+V taps, or plain B taps.
         let usesB = ClipboardManager.shared.reverseCycleUsesB
         stageKeys = usesB ? [.cmd, .v, .b] : [.cmd, .shift, .v]
         press(.cmd)
@@ -577,31 +527,21 @@ final class InteractionLabController: ObservableObject {
 
     private func runCyclePinned() async throws {
         stageKeys = [.cmd, .v, .p]
-        // Items 1 and 3 are ALREADY pinned before the popup appears — this
-        // demo is about cycling through EXISTING pins, not creating them, so
-        // the badges are baked in up front (no post-open pin animation) and
-        // simply fade in with the popup.
         items[0].pin = true
         items[2].pin = true
-        // Open the popup the SAME way every other interaction does: hold ⌘,
-        // tap V. P only works once the popup is already open.
         press(.cmd)
         try await pause(400)
         showPanel(true)
         try await tap(.v)
-        // Popup opens ON the first pinned item (item 1). Because P jumps to
-        // the "next" pinned item RELATIVE to where you already are, the very
-        // first P — landing on an item that's already the first pin — stays
-        // put; it's the SECOND P that advances to the next pinned item.
         selectItem(0)
         try await pause(500)
         hint("Tap P to jump between pins")
-        try await tap(.p)          // first P: already on the first pin → stays
+        try await tap(.p)
         try await pause(500)
-        try await tap(.p)          // second P: advance to the next pinned item
+        try await tap(.p)
         selectItem(2)
         try await pause(500)
-        try await tap(.p)          // third P: wrap back to the first pin
+        try await tap(.p)
         selectItem(0)
         try await pause(800)
         release(.cmd)
@@ -612,15 +552,11 @@ final class InteractionLabController: ObservableObject {
 
     private func runPinItem() async throws {
         stageKeys = [.cmd, .v, .p]
-        // Open with ⌘V first (like every other interaction), then use P.
         press(.cmd)
         try await pause(400)
         showPanel(true)
         try await tap(.v)
         try await pause(350)
-        // Cycle onto item 2 with a normal V tap, then HOLD P to pin it —
-        // the badge appears while P is still down, the same moment the real
-        // pin fires.
         try await tap(.v)
         selectItem(1)
         try await pause(450)
@@ -631,7 +567,6 @@ final class InteractionLabController: ObservableObject {
         try await pause(400)
         release(.p)
         try await pause(700)
-        // Hold again on the same item → unpins it, showing the toggle.
         hint("Hold P again to unpin")
         press(.p)
         try await pause(650)
@@ -646,21 +581,12 @@ final class InteractionLabController: ObservableObject {
     }
 }
 
-// MARK: - Stage views
-
-/// One key cap — pressed state sinks it and lights it blue, same as the
-/// HTML reference's .key.pressed.
 struct LabKeyCapView: View {
     let key: LabKey
     let pressed: Bool
     var size: CGFloat = 44
 
     var body: some View {
-        // The key cap's drop-shadow is applied to the BACKGROUND shape only,
-        // never the whole view — an earlier version shadowed the composited
-        // Text, so in light mode the black shadow duplicated the dark glyph
-        // and "SPACE" rendered doubled/muddy. Text now sits as an overlay on
-        // top of a separately-shadowed shape, so only the cap casts a shadow.
         RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
             .fill(pressed ? Color.accent : Color.surfaceHi)
             .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
@@ -676,14 +602,11 @@ struct LabKeyCapView: View {
     }
 }
 
-/// The mock popup panel — search row, category tabs, three history items,
-/// optional ✕ pin-close button and per-item mark badges.
 private struct LabMockPanel: View {
     @ObservedObject var lab: InteractionLabController
 
     var body: some View {
         VStack(spacing: 0) {
-            // Search row
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").font(.system(size: 9))
                 if lab.searchActive {
@@ -702,10 +625,6 @@ private struct LabMockPanel: View {
 
             Divider().background(Color.border)
 
-            // Category tabs — two only, each pinned to a single line. A third
-            // ("⌘3 URL") pushed the row past the panel width, wrapping "⌘2
-            // Image" onto two lines, which read as a distracting layout jump
-            // during the animations.
             HStack(spacing: 5) {
                 ForEach(0..<2, id: \.self) { i in
                     Text("⌘\(i + 1) \(["Recents", "Image"][i])")
@@ -722,7 +641,6 @@ private struct LabMockPanel: View {
 
             Divider().background(Color.border)
 
-            // Items
             VStack(spacing: 3) {
                 ForEach(Array(lab.items.enumerated()), id: \.element.id) { idx, item in
                     HStack {
@@ -772,7 +690,6 @@ private struct LabMockPanel: View {
     }
 }
 
-/// Preview / transform side panel that slides in beside the mock popup.
 private struct LabSidePanel: View {
     @ObservedObject var lab: InteractionLabController
 
@@ -806,23 +723,11 @@ private struct LabSidePanel: View {
     }
 }
 
-/// The whole INTERACTION PREVIEW stage: mock panel area, key caps row,
-/// caption + result. No manual play trigger and no duplicate title — the
-/// selected row in the interactions list already names the gesture, and
-/// the animation itself starts immediately and loops continuously.
 struct InteractionLabStage: View {
     @ObservedObject var lab: InteractionLabController
 
     var body: some View {
-        // FIXED-SLOT layout: every element owns one permanent position —
-        // the mock popup area, the helper text, the green result line, and
-        // the key caps at the bottom. Nothing shifts when the panel opens
-        // or a different interaction is picked; only each slot's CONTENT
-        // and state change.
         VStack(spacing: 14) {
-            // Slot 0 — floating instruction label (HTML instrLabel) in its
-            // OWN fixed slot above the popup area, so it can never overlap
-            // the mock panel.
             Text(lab.instruction ?? " ")
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundColor(.white)
@@ -831,12 +736,6 @@ struct InteractionLabStage: View {
                 .opacity(lab.instruction == nil ? 0 : 1)
                 .frame(height: 20)
 
-            // Slot 1 — mock popup stage. The popup sits dead-center when
-            // it's alone; when a preview/transform side panel appears the
-            // popup slides aside to make room, and the side panel fades in
-            // at its fixed spot. The panels fade independently, so the
-            // preview can stay visible after the popup disappears
-            // (Pin Preview).
             ZStack {
                 LabMockPanel(lab: lab)
                     .opacity(lab.panelVisible ? 1 : 0)
@@ -850,25 +749,18 @@ struct InteractionLabStage: View {
             .frame(height: 190)
             .frame(maxWidth: .infinity)
 
-            // Slot 2 — green result line ON TOP (fades in/out in place)…
             Text(lab.resultText.map { "→ \($0)" } ?? " ")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.green)
                 .opacity(lab.resultText == nil ? 0 : 1)
                 .frame(height: 16)
 
-            // Slot 3 — …helper text BELOW it (changes per interaction,
-            // slot doesn't move).
             Text(lab.currentCaption)
                 .font(.system(size: 11))
                 .foregroundColor(.textSec)
                 .multilineTextAlignment(.center)
                 .frame(height: 30)
 
-            // Slot 4 — the key caps, bottom, one fixed home for every
-            // interaction. The set of keys is constant for the selected
-            // demo; presses animate in place, never repositioning the row.
-            // Nudged further down, clear of the text above.
             VStack(spacing: 8) {
                 HStack(spacing: 10) {
                     ForEach(lab.stageKeys) { key in
@@ -876,8 +768,6 @@ struct InteractionLabStage: View {
                     }
                 }
                 .frame(height: 58)
-                // Number row keeps its space reserved even when hidden so
-                // the caps above never move when it appears.
                 HStack(spacing: 5) {
                     ForEach(1...9, id: \.self) { n in
                         Text("\(n)")
@@ -903,10 +793,6 @@ struct InteractionLabStage: View {
     }
 }
 
-/// Reports a view's natural height up to an enclosing row's PreferenceKey,
-/// so the row can stretch its shorter column/card to match — used to make
-/// the settings rows and the interactions/lab cards end on the same
-/// bottom line instead of drifting to whatever height their own content needs.
 private extension View {
     func measured<K: PreferenceKey>(_ key: K.Type) -> some View where K.Value == CGFloat {
         background(GeometryReader { geo in
@@ -915,22 +801,11 @@ private extension View {
     }
 }
 
-/// Shared height key for the second settings row (interactions list vs the
-/// live-preview card). File-scoped so the isolated `InteractionPreviewCard`
-/// can emit it and `ClipenSettingsView` can read it.
 struct SettingsRow2HeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
-/// Owns the continuously-running interaction animation in ISOLATION. The lab
-/// controller mutates @Published state every animation frame; keeping it here
-/// (its own @StateObject) means those ticks invalidate only this card — not
-/// the entire settings ScrollView, which is what made scrolling stutter when
-/// the lab lived on `ClipenSettingsView` directly. The parent drives it with
-/// a plain `selectedDemo` value plus a `replayToken` that's bumped to re-run
-/// the current demo (e.g. after a speed change), so the parent itself never
-/// subscribes to the per-frame animation.
 struct InteractionPreviewCard: View {
     let selectedDemo: InteractionDemo
     let replayToken: Int
@@ -965,35 +840,18 @@ struct InteractionPreviewCard: View {
     }
 }
 
-// MARK: - Redesigned Settings screen
-
-/// Full Settings view, matching the numbered mockup, laid out as two
-/// height-matched ROWS rather than two independent-height columns:
-///   row 1: (01 RING SIZE + 02 APP SETTINGS)  |  03 MAIN BEHAVIOUR
-///   row 2: 04 INTERACTIONS                   |  05 INTERACTION PREVIEW
-/// Both pairs end on the same bottom line — row 2 only ever starts once
-/// row 1 (settings) has fully finished, never interleaved with it.
-/// Footer: version + links + Reset to Defaults.
 struct ClipenSettingsView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
 
-    /// The interaction the preview card is playing. Plain value state (not the
-    /// lab object) so the per-frame animation — which lives isolated inside
-    /// `InteractionPreviewCard` — never re-renders this scroll view.
     @State private var selectedDemo: InteractionDemo = .cycle
-    /// Bumped to replay the CURRENT demo (e.g. after changing a gesture speed),
-    /// since re-selecting the same demo isn't a value change on its own.
     @State private var labReplayToken = 0
 
     @Binding var showResetConfirm: Bool
 
     @State private var row1Height: CGFloat = 0
     @State private var row2Height: CGFloat = 0
-    /// Inline editor under the Reverse Cycle row (⇧V vs B picker).
     @State private var showReverseKeyEditor = false
-    /// Same inline-editor pattern as showReverseKeyEditor, for the two
-    /// gesture-timing rows (Mark for Multi-Paste / Refer).
     @State private var showMarkSpeedEditor = false
     @State private var showReferSpeedEditor = false
     @State private var showPinnedOpenSpeedEditor = false
@@ -1010,35 +868,18 @@ struct ClipenSettingsView: View {
     }
 
     var body: some View {
-        // Footer OUTSIDE the scroll view — pinned to the window bottom the
-        // same way the Dashboard pins its own footer bar; only the content
-        // above it scrolls/changes when switching tabs.
         VStack(spacing: 0) {
             settingsScrollContent
             Divider().background(Color.border)
-            // Same paddings as the Dashboard's footerBar — the pinned
-            // footer must be the SAME height on both tabs, not jump when
-            // switching between them.
             footer
                 .padding(.horizontal, 14).padding(.vertical, 8)
         }
-        // Pick up any launch-at-login change made in System Settings — read
-        // OFF the main thread, so the daemon call never touches the render
-        // path (that inline read was the ~1s Settings-open hang).
         .onAppear { manager.refreshLaunchAtLoginStatus() }
     }
 
     private var settingsScrollContent: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            // No "SETTINGS" heading here — the Dashboard | Settings switcher
-            // in the top toolbar already shows Settings selected, so a
-            // second, bigger label repeating it was pure redundancy.
-            // 44pt row gap: clear separation between the settings row
-            // (ring size / app settings / behaviour) and the interactions
-            // + lab row below it.
             VStack(alignment: .leading, spacing: 44) {
-                // Row 1 — Ring Size + App Settings (left) vs Main Behaviour
-                // (right), stretched to a shared height so both end flush.
                 HStack(alignment: .top, spacing: 40) {
                     VStack(alignment: .leading, spacing: 34) {
                         ringSizeSection
@@ -1053,11 +894,6 @@ struct ClipenSettingsView: View {
                 }
                 .onPreferenceChange(Row1HeightKey.self) { row1Height = $0 }
 
-                // Row 2 — Interactions list vs Interaction Preview stage,
-                // only begins once row 1 is fully finished. Unlike row 1,
-                // both sides here have a visible bordered card, so the
-                // CARDS themselves (not just their outer frames) are
-                // stretched to match — see interactionsSection/labSection.
                 HStack(alignment: .top, spacing: 40) {
                     interactionsSection.frame(maxWidth: .infinity, alignment: .topLeading)
                     InteractionPreviewCard(selectedDemo: selectedDemo,
@@ -1072,11 +908,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    // MARK: Section chrome
-
-    /// Section heading — title only. (The `number` parameter is kept so the
-    /// call sites read stably, but it is deliberately NOT rendered: the
-    /// headings alone are enough, no 01/02/03 prefixes.)
     private func sectionHeader(_ number: String, _ title: String) -> some View {
         Text(title)
             .font(.system(size: 10, weight: .semibold))
@@ -1084,7 +915,6 @@ struct ClipenSettingsView: View {
             .foregroundColor(.textSec)
     }
 
-    /// Numbered row prefix, mockup-style ("01", "02", …).
     private func rowNumber(_ n: Int) -> some View {
         Text(String(format: "%02d", n))
             .font(.system(size: 9, weight: .semibold, design: .monospaced))
@@ -1094,11 +924,6 @@ struct ClipenSettingsView: View {
 
     private enum RowCardBorder { case leadingLine, allSides }
 
-    /// One continuous card wrapping several rows, divided by thin
-    /// hairlines. Sharp corners, NO fill of its own — the window
-    /// background shows through. Border style per card:
-    ///   .leadingLine — single left edge line (Main Behaviour)
-    ///   .allSides    — full rectangular border (App Settings)
     private func rowCard<C: View>(border: RowCardBorder = .leadingLine,
                                   @ViewBuilder content: () -> C) -> some View {
         VStack(spacing: 0) { content() }
@@ -1127,31 +952,16 @@ struct ClipenSettingsView: View {
             Spacer()
             Toggle("", isOn: isOn).toggleStyle(.switch).controlSize(.mini).tint(.accent)
         }
-        // More breathing room than the other cards — this list is read
-        // top-to-bottom far more often than app settings/interactions, and
-        // 12pt vertical made adjacent toggles feel cramped.
         .padding(.horizontal, 14).padding(.vertical, 16)
-        // Flexible: when the card is stretched to the shared row height,
-        // every row grows by the SAME share, so the whole card fills evenly
-        // instead of the rows clustering at the top over a blank void.
         .frame(maxHeight: .infinity)
     }
 
-    /// Replaces the old single on/off "Always show preview" toggle: which
-    /// content types auto-show the preview panel is now a per-type choice,
-    /// shown as a horizontally-scrolling chip strip (same pattern as the
-    /// main window's "Pasted to" row) with a + button that opens a floating
-    /// checklist to add/remove types. Empty selection = off, matching the
-    /// old toggle's default-off state.
     private func autoPreviewRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
             rowNumber(n)
             Image(systemName: "eye").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Always show preview").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
-            // A single "Configure" pill, identical to the other picker rows
-            // (Open delay, Pin position…). The selected content types live
-            // inside the popover only — no inline chip strip at the toggle.
             Button {
                 showAutoPreviewPicker.toggle()
             } label: {
@@ -1214,11 +1024,6 @@ struct ClipenSettingsView: View {
 
     private static let rememberTimeoutPresets = [1, 3, 5, 10, 15, 30, 60]
 
-    /// "Remember last position" toggle plus a pill that sets how long a
-    /// remembered position stays valid before a reopen starts fresh at the
-    /// top instead — the pill is only interactive while the toggle is on,
-    /// matching the request that the timer is meaningless with the feature
-    /// itself switched off.
     private func rememberLastPositionRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
             rowNumber(n)
@@ -1253,18 +1058,9 @@ struct ClipenSettingsView: View {
         .frame(maxHeight: .infinity)
     }
 
-    /// (label, seconds) — the tap-disambiguation delay before the popup
-    /// opens on a first V tap. Sub-second, unlike the minute-scale presets
-    /// above, since this is purely about telling a deliberate double-tap
-    /// apart from two separate single taps.
     private static let openDelayPresets: [(label: String, seconds: Double)] =
         [("Fast", 0.10), ("Medium", 0.25), ("Slow", 0.50)]
 
-    /// "Popup on second tap" and "Open delay" used to be two separate rows
-    /// (a toggle plus a disabled-while-that-toggle-is-on slider) — merged
-    /// into one row with a "Configure" pill that opens both controls
-    /// together, since they're really one decision: how a first V tap is
-    /// disambiguated from a deliberate double-tap.
     private func openDelayRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
             rowNumber(n)
@@ -1303,9 +1099,6 @@ struct ClipenSettingsView: View {
             Text("Delay speed").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
                 .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
 
-            // "Off" (0s) = popup opens immediately on the first V tap, no
-            // tap-vs-hold delay — the default, and mutually exclusive with
-            // both second-tap mode and the timed presets below.
             openDelayChoice(label: "Off",
                             isOn: !manager.openOnSecondTap && manager.firstOpenDelay == 0) {
                 manager.firstOpenDelay = 0
@@ -1313,15 +1106,6 @@ struct ClipenSettingsView: View {
             }
 
             ForEach(Self.openDelayPresets, id: \.label) { preset in
-                // A delay preset and second-tap mode are mutually
-                // exclusive — cycleNext() checks openOnSecondTap FIRST, so
-                // picking a preset here only takes effect once second-tap
-                // is off, hence turning it off as part of the same tap.
-                // (A genuine rapid second V tap still opens the popup
-                // instantly regardless of which preset is active — that's
-                // pendingFirstOpen's existing "second tap during the delay
-                // window cancels the timer and opens immediately" behavior,
-                // unchanged here.)
                 openDelayChoice(label: preset.label,
                                 isOn: !manager.openOnSecondTap && manager.firstOpenDelay == preset.seconds) {
                     manager.firstOpenDelay = preset.seconds
@@ -1348,11 +1132,6 @@ struct ClipenSettingsView: View {
         .buttonStyle(.plain)
     }
 
-    /// "Pin to top" placement — where pinning an item sends it, in both the
-    /// popup and the main window. Default (1) means the very top; a higher
-    /// value leaves that many of the most-recent UNPINNED items above the
-    /// pinned block instead. Presets stop at maxPinnedItems since a start
-    /// position beyond the pin cap could never actually be reached.
     private func pinPositionRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
             rowNumber(n)
@@ -1381,9 +1160,6 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Starting position").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
 
-            // Plain − N + counter instead of an ordinal list ("2nd slot",
-            // "3rd slot" read as daunting) — just a number 1…5, clamped to
-            // the pin cap on both ends.
             HStack(spacing: 14) {
                 pinCounterButton("minus", enabled: manager.pinStartPosition > 1) {
                     manager.pinStartPosition = max(1, manager.pinStartPosition - 1)
@@ -1420,10 +1196,6 @@ struct ClipenSettingsView: View {
 
     private static let autoDismissPresets: [Double] = [10, 30, 60, 180, 300, 600, 1800]
 
-    /// "Auto-dismiss popup" toggle plus a pill/popover preset picker — same
-    /// pattern as `rememberLastPositionRow` above, replacing the old
-    /// separate slider row entirely. Pill only interactive while the
-    /// toggle is on, same reasoning as the remember-position pill.
     private func autoDismissRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
             rowNumber(n)
@@ -1484,11 +1256,6 @@ struct ClipenSettingsView: View {
             Text("Reopen within").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
                 .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
 
-            // "Until turned off" is its own top-of-list entry, not just
-            // another number in the sequence — it's a fundamentally
-            // different mode (no expiry at all) and the default, so it
-            // gets its own row above a divider instead of being sandwiched
-            // between timed presets.
             rememberTimeoutRow(label: "Until turned off", isOn: manager.rememberLastPositionTimeoutMinutes == 0) {
                 manager.rememberLastPositionTimeoutMinutes = 0
                 showRememberTimeoutPicker = false
@@ -1524,10 +1291,6 @@ struct ClipenSettingsView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: 01 — Ring size
-
-    /// Square minus/plus stepper button flanking the ring-size slider —
-    /// replaces the old vertical chevron-stepper box entirely.
     private func ringStepButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon).font(.system(size: 12, weight: .bold))
@@ -1543,8 +1306,6 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader("01", "RING SIZE")
 
-            // The big counter — horizontally CENTERED in the section's own
-            // stack (not pinned to the left edge), caption centered with it.
             Text("\(manager.maxItems)")
                 .font(.system(size: 64, weight: .black))
                 .foregroundColor(.textPri)
@@ -1555,7 +1316,6 @@ struct ClipenSettingsView: View {
                 .font(.system(size: 11)).foregroundColor(.textSec)
                 .frame(maxWidth: .infinity, alignment: .center)
 
-            // Minus / slider / plus, all one row — no separate stepper box.
             HStack(spacing: 10) {
                 ringStepButton("minus") {
                     withAnimation { manager.setRingSize(manager.maxItems - 5) }
@@ -1569,9 +1329,6 @@ struct ClipenSettingsView: View {
                 }
             }
 
-            // Min / max end labels only — the current value already reads
-            // large at the top of this section, so a second copy here just
-            // duplicated it.
             HStack {
                 Text("10").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
                 Spacer()
@@ -1580,17 +1337,11 @@ struct ClipenSettingsView: View {
         }
     }
 
-    // MARK: 02 — App settings
-
     private var appSettingsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("02", "APP SETTINGS")
 
             rowCard(border: .allSides) {
-                // Every row is maxHeight-flexible: when the card stretches
-                // to the shared row-1 height, the extra space distributes
-                // EQUALLY across the rows so the card fills edge to edge —
-                // no blank void pooling at the bottom.
                 HStack(spacing: 10) {
                     Image(systemName: "power").font(.system(size: 11)).foregroundColor(.accent).frame(width: 16)
                     Text("Launch at Login").font(.system(size: 13)).foregroundColor(.textPri)
@@ -1619,9 +1370,6 @@ struct ClipenSettingsView: View {
 
                 rowDivider(leading: 40)
 
-                // Auto updates lives here (App Settings), not in Main
-                // Behaviour — it's an app-level preference, not a popup
-                // interaction behaviour.
                 HStack(spacing: 10) {
                     Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
                     Text("Auto updates").font(.system(size: 13)).foregroundColor(.textPri)
@@ -1639,8 +1387,6 @@ struct ClipenSettingsView: View {
             }
         }
     }
-
-    // MARK: 03 — Main behaviour
 
     private var mainBehaviourSection: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1665,10 +1411,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    // MARK: 04 — Interactions list (clickable — plays the lab animation)
-
-    /// Interactions CLUSTERED by class, mirroring the cheat-sheet grouping:
-    /// panel open/pin · item navigation/marking · preview · tools.
     private static let interactionGroups: [[InteractionDemo]] = [
         [.cycle, .pinnedOpen],
         [.reverseCycle, .multiPaste],
@@ -1681,13 +1423,8 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("04", "INTERACTIONS")
 
-            // minHeight applied BEFORE background/clipShape so the card's
-            // own fill and border actually stretch to row2Height, instead
-            // of just leaving invisible blank space below a shorter box.
             VStack(spacing: 1) {
                 ForEach(Array(Self.interactionGroups.enumerated()), id: \.offset) { groupIndex, group in
-                    // Divider between interaction classes, breathing room
-                    // on both sides — the clusters read as distinct groups.
                     if groupIndex > 0 {
                         Divider().background(Color.border)
                             .padding(.horizontal, 14)
@@ -1695,7 +1432,6 @@ struct ClipenSettingsView: View {
                     }
                     ForEach(group) { demo in
                         interactionRow(demo)
-                        // Inline editor: pick which key means "back".
                         if demo == .reverseCycle && showReverseKeyEditor {
                             reverseKeyPicker
                         }
@@ -1732,9 +1468,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    /// Plays (or replays) a demo in the isolated preview card. Setting the
-    /// demo value updates the highlight; bumping the token forces the card to
-    /// re-run it even if the same demo was already selected.
     private func playDemo(_ demo: InteractionDemo) {
         selectedDemo = demo
         labReplayToken += 1
@@ -1742,7 +1475,6 @@ struct ClipenSettingsView: View {
 
     private func interactionRow(_ demo: InteractionDemo) -> some View {
         let isActive = selectedDemo == demo
-        // Reverse Cycle's key label follows the user's selection.
         let keyLabel = (demo == .reverseCycle && manager.reverseCycleUsesB) ? "tap B" : demo.keyLabel
         return Button {
             playDemo(demo)
@@ -1757,7 +1489,6 @@ struct ClipenSettingsView: View {
                     .foregroundColor(isActive ? .textPri : .textSec)
                 Spacer()
                 if demo == .reverseCycle {
-                    // Edit — opens the ⇧V / B key picker below this row.
                     Button {
                         withAnimation(.easeOut(duration: 0.15)) { showReverseKeyEditor.toggle() }
                     } label: {
@@ -1769,9 +1500,6 @@ struct ClipenSettingsView: View {
                     .help("Choose the reverse key")
                 }
                 if demo == .multiPaste {
-                    // Edit — opens the Fast/Medium/Slow hold-speed picker
-                    // below this row. Same pattern as Reverse Cycle's key
-                    // picker above.
                     Button {
                         withAnimation(.easeOut(duration: 0.15)) { showMarkSpeedEditor.toggle() }
                     } label: {
@@ -1820,18 +1548,12 @@ struct ClipenSettingsView: View {
                     .foregroundColor(.textDim)
             }
             .padding(.leading, 14).padding(.trailing, 14).padding(.vertical, 10)
-            // Selected row reads as a soft light-grey wash — no blue tint,
-            // no accent bar on the left edge.
             .background(isActive ? Color.white.opacity(0.08) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// ⇧V vs B choice for the Reverse Cycle gesture. Selecting an option
-    /// applies everywhere at once: the real popup shortcut, the popup's
-    /// hint legend, this row's key label, and the lab animation (replayed
-    /// immediately so the change is visible).
     private var reverseKeyPicker: some View {
         HStack(spacing: 8) {
             Text("Reverse key")
@@ -1859,9 +1581,6 @@ struct ClipenSettingsView: View {
         .buttonStyle(.plain)
     }
 
-    /// Same inline-editor layout as reverseKeyPicker, for a Fast/Medium/Slow
-    /// gesture-timing choice instead of a key choice. `onSelect` replays the
-    /// matching lab demo so the new speed is immediately visible.
     private func speedPicker(label: String, selection: Binding<GestureSpeed>,
                              onSelect: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
@@ -1892,13 +1611,6 @@ struct ClipenSettingsView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: 05 — Interaction preview (the lab)
-    // The live-preview card is now `InteractionPreviewCard` (file scope), which
-    // owns the animation in isolation so its per-frame updates don't re-render
-    // this whole scroll view. See its doc comment.
-
-    // MARK: Footer
-
     private static var appVersionString: String {
         let info  = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
@@ -1906,12 +1618,8 @@ struct ClipenSettingsView: View {
         return "v\(short) (\(build))"
     }
 
-    /// Pinned to the window bottom by `body` (divider + padding applied
-    /// there) — this is just the row content, like the Dashboard's footerBar.
     private var footer: some View {
         HStack(spacing: 18) {
-            // Left cluster — byte-for-byte identical to the Dashboard footer:
-            // ♥ Support Clipen · version · Built by, same spacing and colors.
             HStack(spacing: 10) {
                 Button {
                     if let url = URL(string: "https://www.instagram.com/clipen.official") {
@@ -1953,4 +1661,3 @@ struct ClipenSettingsView: View {
             .font(.system(size: 11)).foregroundColor(.textSec)
     }
 }
-

@@ -1,19 +1,7 @@
 import AppKit
 import Foundation
 
-/// Assigns EXACTLY ONE tag per clipboard item.
-///
-/// Rebuilt as a single-tag classifier: each item lands in one — and only one —
-/// category, so the filter chips never smear an item across multiple buckets
-/// (the old multi-tag system put a `.swift` file under Image, a GitHub URL
-/// under Address, etc.).  Detection is purely structural (pasteboard shape) +
-/// deterministic regex/syntax detectors in `TextTraditionalDetectors`.  No
-/// fuzzy/semantic keyword scoring — that was the source of the cross-category
-/// pollution.
 enum TagDetector {
-    /// Public API kept array-shaped so existing call sites (filtering,
-    /// `availableTags`, `ItemTagStrip`) are unchanged — the array always holds
-    /// exactly one element.
     static func tags(for content: ClipboardContent, color: NSColor?) -> [ClipboardTag] {
         [tag(for: content, color: color)]
     }
@@ -22,7 +10,6 @@ enum TagDetector {
         tags.first ?? .text
     }
 
-    /// The single tag for an item.
     static func tag(for content: ClipboardContent, color: NSColor?) -> ClipboardTag {
         switch content {
         case .svg:                return .svg
@@ -49,7 +36,6 @@ enum TagDetector {
             return textTag(for: plain, color: nil) ?? .table
 
         case .text(let s):
-            // A bare path to a real file on disk is tagged by what it points to.
             if let url = resolvedLocalFileURL(from: s) {
                 return fileTag(for: url)
             }
@@ -57,10 +43,6 @@ enum TagDetector {
         }
     }
 
-    // MARK: - Text (deterministic detectors only)
-
-    /// Highest-confidence traditional/regex tag for `plain`, or nil when the
-    /// text is ordinary prose with no structural signature.
     private static func textTag(for plain: String, color: NSColor?) -> ClipboardTag? {
         guard !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         let candidates = TextTraditionalDetectors.candidates(for: plain, color: color)
@@ -69,10 +51,6 @@ enum TagDetector {
         return tag
     }
 
-    // MARK: - Files
-
-    /// Strict per-extension classification for a single file URL.  Each
-    /// extension maps to exactly one tag — no fuzzy fallthrough.
     private static func fileTag(for url: URL) -> ClipboardTag {
         let ext = url.pathExtension.lowercased()
         switch ext {
@@ -97,8 +75,6 @@ enum TagDetector {
         return .file
     }
 
-    /// A multi-file bundle: collapse to the shared type if homogeneous,
-    /// otherwise the generic `.files` tag.
     private static func filesTag(for urls: [URL]) -> ClipboardTag {
         guard !urls.isEmpty else { return .files }
         if urls.allSatisfy({ $0.pathExtension.lowercased() == "pdf" }) { return .pdf }
@@ -116,7 +92,6 @@ enum TagDetector {
         return .files
     }
 
-    /// Returns a URL if `string` is a single local file path that exists on disk.
     private static func resolvedLocalFileURL(from string: String) -> URL? {
         let raw = string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty, !raw.contains("\n") else { return nil }

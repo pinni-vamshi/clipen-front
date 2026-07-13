@@ -1,27 +1,7 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Real system NSPopover, anchored through an invisible helper panel
-//
-// This used to be a hand-drawn NSPanel: a manually clipped RoundedRectangle,
-// a custom NSVisualEffectView wrapper, a hand-painted triangle for the arrow,
-// and no entrance animation. All of that was an approximation of the native
-// Look Up / Quick Look popover chrome — never the real thing.
-//
-// NSPopover IS the real thing: AppKit draws the rounded box, the arrow, the
-// vibrancy, and — the part no amount of custom SwiftUI can replicate — the
-// native pop-in/pop-out animation (NSPopover.animates), for free.
-//
-// The catch: NSPopover.show(relativeTo:of:preferredEdge:) can only anchor to
-// a view inside ONE OF THIS APP'S OWN windows — never to a caret rect living
-// inside a completely different process (Safari, Notes, Mail…). The fix is
-// an invisible, non-activating 1×1 helper panel positioned exactly at the
-// caret point; the popover anchors to a view inside THAT panel, so on screen
-// it still appears exactly where the caret is, in any app.
 final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
-    /// True from show until hide — closes the animating-in race where hide()
-    /// finds popover.isShown still false, skips the close, and the popup
-    /// finishes presenting as an orphan after it was already dismissed.
     private var wantsVisible = false
 
     func popoverDidShow(_ notification: Notification) {
@@ -33,27 +13,11 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
 
     private var visibleRowCount: Int = 5
 
-    /// Invisible, click-through, non-activating helper window. Its only job
-    /// is to sit at the caret's screen location so the popover has a view of
-    /// ours to anchor to. `.nonactivatingPanel` is the same style mask the
-    /// old hand-built panel used — it's what keeps showing this popover from
-    /// stealing keyboard focus away from whatever app you're pasting into.
     private let anchorPanel: NSPanel
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
     private let popover = NSPopover()
 
-    /// `wantsVisible` is ANDed in because NSPopover's close is animated:
-    /// popover.isShown keeps returning true until the close animation
-    /// finishes, ~0.2s after hide() was called. dismissPreview() resets
-    /// @Published state right after hiding, and those didSets check
-    /// `previewWindow.isVisible` — a stale true there re-showed the item
-    /// preview panel that had just been dismissed. Intent flips instantly.
     var isVisible: Bool { wantsVisible && popover.isShown }
-    /// The popup CONTENT's actual on-screen rect once shown — used by
-    /// TransformPanel/ItemPreviewPanel anchoring and by the row-anchor math
-    /// in selectedRowAnchorPoint. Deliberately NOT the popover window's
-    /// frame: that includes AppKit's arrow/shadow chrome padding, which
-    /// shifted every row-anchor calculation by the chrome delta.
     var frame: NSRect {
         if let view = popover.contentViewController?.view, let win = view.window {
             return win.convertToScreen(view.convert(view.bounds, to: nil))
@@ -78,25 +42,11 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
 
         super.init()
 
-        // .applicationDefined: we drive show/close ourselves (⌘ release, Esc,
-        // paste) — the same explicit lifecycle the old panel had. .transient
-        // would auto-close on outside clicks/losing key, which doesn't fit
-        // how the rest of Clipen manages this popup.
         popover.behavior = .applicationDefined
         popover.animates = true
         popover.delegate = self
     }
 
-    /// Show popup anchored at the mouse cursor's current screen position.
-    /// This used to try IMK, then Accessibility-API caret lookup, then fall
-    /// back to the mouse only as a last resort — removed entirely. Both of
-    /// those required cooperation the target app frequently didn't actually
-    /// provide (IMK needs the user to manually enable "Clipen" as an input
-    /// source; AX caret bounds are unreliable or plain unimplemented in a lot
-    /// of custom/Electron/web-rendered text controls), so the popup would
-    /// silently fall back to the cursor anyway in exactly the cases it
-    /// mattered — just with extra unreliable machinery in between. One
-    /// position, always correct by definition: wherever the cursor is.
     func show() {
         wantsVisible = true
         showAnchored(to: NSEvent.mouseLocation)
@@ -107,8 +57,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         if popover.isShown { popover.performClose(nil) }
         anchorPanel.orderOut(nil)
     }
-
-    // MARK: - Positioning
 
     private func showAnchored(to anchor: NSPoint) {
         let rowH: CGFloat    = 72
@@ -128,9 +76,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
 
         visibleRowCount = slots
 
-        // Prefer showing above the cursor (arrow points down at it); fall back
-        // to below if there isn't room above. NSPopover handles the final
-        // on-screen clamping/flip itself once given a preferred edge.
         let aboveFits = (anchor.y - bodyH - 6) >= screen.minY + margin
         let preferredEdge: NSRectEdge = aboveFits ? .maxY : .minY
 
@@ -142,38 +87,16 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
             popover.contentViewController = NSHostingController(rootView: popoverView)
         }
 
-        // In practice show() only runs on popup open (openPopupNow guards on
-        // !isVisible), but enforce the invariant anyway: never move the
-        // anchor window or re-call show() under a live popover — that tears
-        // the attachment down and replays the open/close animation.
         guard !popover.isShown else { return }
 
-        // Position the invisible 1×1 anchor exactly at the cursor, on the
-        // correct screen, then order it front WITHOUT activating the app.
         anchorPanel.setFrame(NSRect(x: anchor.x, y: anchor.y, width: 1, height: 1), display: false)
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
-        // Fast open with a REAL visible animation — see clipenAnimateIn.
-        // animates is restored so the close keeps the native fade-out.
         popover.animates = false
         popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: preferredEdge)
         popover.animates = true
         popover.clipenAnimateIn()
     }
 
-    /// Center Y of the currently-selected visible row — used by sibling panels
-    /// (transform callout, item preview) to anchor their arrows.
-    ///
-    /// Mirrors the REAL scroll behavior in `rowArea`, which calls
-    /// `proxy.scrollTo(id, anchor: .center)` — a continuous, always-recenter
-    /// scroll, not a discrete "window slides one row at a time" model. That
-    /// means: near the top of the list, scrolling clamps at the start (rows
-    /// sit at their natural unscrolled position); near the bottom, it clamps
-    /// at the end (rows sit at their natural from-the-bottom position); but
-    /// everywhere in between, the selected row is ALWAYS exactly centered in
-    /// the viewport, regardless of index. An earlier version of this function
-    /// assumed the discrete model, which only coincidentally matched reality
-    /// for the first few rows (before scrolling starts) and drifted further
-    /// off the further into the list you went.
     func selectedRowAnchorPoint(selectedIndex: Int, totalItems: Int) -> NSPoint {
         guard totalItems > 0 else { return NSPoint(x: frame.maxX, y: frame.midY) }
 
@@ -193,32 +116,18 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
     }
 }
 
-// MARK: - Popup SwiftUI view
-
 struct PopoverPreviewView: View {
 
     let visibleCount: Int
 
     @ObservedObject private var manager = ClipboardManager.shared
-    // Plain reference, NOT @ObservedObject: the only thing read from auth here
-    // is `transformsEnabled`, a hardcoded constant. AuthManager's sole
-    // @Published property is `lastError`, which this view never shows — so
-    // observing it just re-evaluated the whole popup body every time an error
-    // alert toggled, for nothing.
     private let auth = AuthManager.shared
 
-    // Popup always renders from displayItems — the exact same array that
-    // keyboard navigation (V/⌘V) and paste use. One array, one index,
-    // zero mismatch possible.
     private var items: [ClipboardItem] { manager.displayItems }
     private var selectedIndex: Int     { manager.selectedIndex }
 
     private static let rowH: CGFloat = 72
 
-    // No clipShape/background/overlay/shadow/arrow here anymore — this view
-    // is now hosted inside a real NSPopover, which draws the rounded box, the
-    // vibrancy, the arrow, and the entrance animation itself. Adding any of
-    // that here would just double up on what AppKit already provides.
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -232,18 +141,7 @@ struct PopoverPreviewView: View {
         }
     }
 
-    // MARK: Header
-
-    // Hints only — the Clipen icon + name that used to lead this row are
-    // gone (the user knows what app this is; the space is better spent on
-    // shortcuts). The coach-replay tap target went with the branding button;
-    // the coach bubbles themselves still show on their anchor hints.
     private var header: some View {
-        // Horizontally scrollable: 9 hints (7 keyboard + 2 mouse) no longer
-        // fit inside the popup's fixed 420pt width without clipping. A
-        // ScrollView here means an overflow scrolls instead of cutting hints
-        // off invisibly — scope this out further (grouping, or a
-        // "more hints" affordance) if it feels cramped in practice.
         ScrollView(.horizontal, showsIndicators: false) {
             headerContent
         }
@@ -251,11 +149,6 @@ struct PopoverPreviewView: View {
 
     private var headerContent: some View {
         HStack(spacing: 14) {
-            // The "V · Next" hint slot IS the close control once a hold on
-            // the first V press has been confirmed (popupPinnedOpen) — same
-            // slot, not a separate button. A solid filled circle so it
-            // visibly reads as a clickable button, not a stray letter;
-            // icon only, no "Close" label needed next to it.
             if manager.popupPinnedOpen {
                 Button {
                     manager.dismissPreview()
@@ -276,12 +169,6 @@ struct PopoverPreviewView: View {
                     }
             }
 
-            // Once pinned, ⌘ is typically no longer held — and V/C/X are ALL
-            // gated behind `guard cmd` in handleKeyDown, so Mark/Front/
-            // Transform stop actually doing anything at that point. Showing
-            // hints for dead shortcuts would be actively misleading, so
-            // pinned mode strips the header down to only what still works:
-            // the close button above, plus click/double-click below.
             if !manager.popupPinnedOpen {
                 FlatHint(key: manager.reverseCycleUsesB ? "B" : "⇧V",
                          label: "Prev", isActive: manager.popupHintShiftV)
@@ -300,26 +187,13 @@ struct PopoverPreviewView: View {
                         }
                     }
 
-                // Click to preview, double-click to Refer — both are Space-key
-                // gestures, so both use the SAME spacebar-glyph icon language
-                // (single bar = single tap, doubled bar = double tap), not an
-                // unrelated SF Symbol. "Refer" opens the Reference panel; see
-                // its own doc note below for why it isn't called "Pin".
                 SpaceKeyFlatHint(label: "Preview", isActive: manager.popupHintSpace)
 
-                // Renamed from "Pin" — that name already belongs to the
-                // ring's separate keep-from-eviction feature (togglePin/
-                // isPinned), so reusing it here for "send to the Reference
-                // panel" was actively confusing. "Refer" matches what this
-                // actually does.
                 DoubleSpaceKeyFlatHint(label: "Refer", isActive: manager.popupHintSpaceDoubleTap)
 
                 FlatHint(key: "S", label: "Share", isActive: manager.inShareStage)
             }
 
-            // Mouse equivalents of the keyboard hints above — click and
-            // double-click work on any row regardless of what's highlighted,
-            // ⌘ held or not, so these stay visible in BOTH states.
             IconFlatHint(icon: "cursorarrow.click", label: "Preview")
             IconFlatHint(icon: "cursorarrow.click.2", label: "Paste")
 
@@ -328,8 +202,6 @@ struct PopoverPreviewView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
-
-    // MARK: Inline search bar
 
     private var popupSearchBar: some View {
         HStack(spacing: 8) {
@@ -384,12 +256,6 @@ struct PopoverPreviewView: View {
         }
     }
 
-    // MARK: Category strip (popup-only — popupTagFilter, never touches main window)
-
-    /// Stable id for the "All" chip plus every tag chip, used to scroll the
-    /// active one into view. A plain enum instead of ClipboardTag? directly —
-    /// ScrollViewReader needs a Hashable id, and this reads more clearly at
-    /// the scrollTo call site than juggling an Optional.
     private enum CategoryChipID: Hashable {
         case all
         case tag(ClipboardTag)
@@ -416,9 +282,6 @@ struct PopoverPreviewView: View {
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
             }
-            // Keep the active category chip visible (centered) whenever the
-            // filter changes — including via ⌘1-9, not just clicking a chip
-            // that might already be scrolled off-screen.
             .onChange(of: manager.popupTagFilter) { _, newValue in
                 let target: CategoryChipID = newValue.map(CategoryChipID.tag) ?? .all
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -429,8 +292,6 @@ struct PopoverPreviewView: View {
         .frame(height: 36)
         .background(Color.primary.opacity(0.02))
     }
-
-    // MARK: First-cycle hint banner
 
     @ViewBuilder
     private var firstCycleHint: some View {
@@ -448,8 +309,6 @@ struct PopoverPreviewView: View {
             .transition(.opacity)
         }
     }
-
-    // MARK: Row area
 
     private var rowArea: some View {
         normalRingArea
@@ -477,19 +336,9 @@ struct PopoverPreviewView: View {
                                     .contentShape(Rectangle())
                                     .onTapGesture(count: 2) {
                                         manager.uiSelectItem(at: idx)
-                                        // Paste without closing the popup —
-                                        // lets the user double-click several
-                                        // items in a row, pasting each one,
-                                        // instead of the popup closing after
-                                        // the first (⌘-release still commits
-                                        // + closes normally, unaffected).
                                         manager.pasteItemKeepingPopupOpen(id: item.id)
                                     }
                                     .onTapGesture(count: 1) {
-                                        // Finder-style modifiers: NSEvent's current
-                                        // flags at the moment the tap resolves,
-                                        // since SwiftUI's TapGesture doesn't carry
-                                        // modifier state of its own.
                                         let mods = NSEvent.modifierFlags
                                         if mods.contains(.shift) {
                                             manager.uiRangeSelectItem(to: idx)
@@ -500,11 +349,6 @@ struct PopoverPreviewView: View {
                                             return
                                         }
                                         manager.uiSelectItem(at: idx)
-                                        // Single click both selects AND previews —
-                                        // same "peek" intent Space already provides,
-                                        // just reused here instead of requiring a
-                                        // separate keypress. Double-click (above)
-                                        // still pastes, unaffected.
                                         manager.uiPreviewSelectedItem()
                                     }
                                 if idx < items.count - 1 {
@@ -523,12 +367,6 @@ struct PopoverPreviewView: View {
                         guard items.indices.contains(selectedIndex) else { return }
                         proxy.scrollTo(items[selectedIndex].id, anchor: .center)
                     }
-                    // The hosting controller (and this whole view hierarchy,
-                    // including the ScrollView's offset) survives hide/show —
-                    // onAppear above only fires once, ever. Without this,
-                    // scrolling manually then collapsing + reopening the
-                    // popup resumed at the stale offset instead of jumping
-                    // back to the selection. See popupOpenGeneration's doc.
                     .onChange(of: manager.popupOpenGeneration) { _, _ in
                         guard items.indices.contains(selectedIndex) else { return }
                         proxy.scrollTo(items[selectedIndex].id, anchor: .center)
@@ -537,8 +375,6 @@ struct PopoverPreviewView: View {
             }
         }
     }
-
-    // MARK: Footer
 
     private var footer: some View {
         Text(items.isEmpty
@@ -551,11 +387,6 @@ struct PopoverPreviewView: View {
     }
 }
 
-// MARK: - Drag preview
-
-/// Visual badge that appears attached to the cursor during a drag from the popup.
-/// Shows the item's type icon + label for single-item drags, or a stacked chip
-/// with a count badge for multi-item (marked) drags.
 private struct PopoverDragPreview: View {
     let item:        ClipboardItem
     let markedCount: Int
@@ -570,7 +401,6 @@ private struct PopoverDragPreview: View {
                 Text("\(markedCount) items")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.white)
-                // Stack indicator — three offset capsules suggest "multiple"
                 ZStack {
                     ForEach(0..<min(markedCount, 3), id: \.self) { i in
                         RoundedRectangle(cornerRadius: 4)
@@ -588,9 +418,6 @@ private struct PopoverDragPreview: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        // Subtle dark chip (near-black → dark grey), fully opaque — matches
-        // the app's dark chrome instead of the old loud blue→purple/green
-        // gradients.
         .background(
             LinearGradient(
                 colors: [Color(red: 0.11, green: 0.11, blue: 0.12),
@@ -606,12 +433,6 @@ private struct PopoverDragPreview: View {
     }
 }
 
-// MARK: - Multi-item drag source
-
-/// Starts a genuine multi-item AppKit drag session (one `NSDraggingItem` per
-/// marked item) instead of SwiftUI's `.onDrag`, which only ever supports a
-/// single `NSItemProvider` per drag regardless of how it's populated. See
-/// the doc comment on its call site in `PopoverRow` for the bug this fixes.
 private struct MultiItemDragSource: NSViewRepresentable {
     let writers: [NSPasteboardWriting]
 
@@ -629,9 +450,6 @@ private struct MultiItemDragSource: NSViewRepresentable {
         var writers: [NSPasteboardWriting] = []
         private var mouseDownPoint: NSPoint?
 
-        // Report a hit everywhere in bounds so mouseDown/mouseDragged reach
-        // this view instead of falling through to whatever SwiftUI gesture
-        // recognizer sits underneath it in the row.
         override func hitTest(_ point: NSPoint) -> NSView? { self }
 
         override func mouseDown(with event: NSEvent) {
@@ -641,8 +459,6 @@ private struct MultiItemDragSource: NSViewRepresentable {
         override func mouseDragged(with event: NSEvent) {
             guard let start = mouseDownPoint, !writers.isEmpty else { return }
             let current = convert(event.locationInWindow, from: nil)
-            // A small movement threshold so a plain click (select/preview)
-            // doesn't get swallowed as an accidental drag start.
             guard hypot(current.x - start.x, current.y - start.y) > 4 else { return }
             mouseDownPoint = nil
 
@@ -661,26 +477,13 @@ private struct MultiItemDragSource: NSViewRepresentable {
     }
 }
 
-// MARK: - Row
-
 struct PopoverRow: View, Equatable {
     let item:       ClipboardItem
     let index:      Int
     let isSelected: Bool
-    /// 1-based position in the multi-paste mark queue, or nil if unmarked.
     let markOrder:  Int?
-    /// Passed in (not read from the singleton) so the row stays a pure function
-    /// of its inputs — that's what lets `.equatable()` below safely skip it.
     let showColorSwatches: Bool
 
-    /// Skip re-rendering rows whose visible inputs are unchanged. The popup's
-    /// parent re-evaluates on EVERY keystroke (hint flags, selection) and on
-    /// every async enrichment (a full `items` re-publish), which used to
-    /// re-run every visible row's body each time. Comparing exactly the fields
-    /// the body reads — identity, selection, mark order, the async-mutable
-    /// enrichment fields, and the one setting it uses — means cycling and
-    /// scrolling only touch rows that actually changed. Content itself is an
-    /// immutable enum, so id + these covers everything the body can render.
     static func == (l: PopoverRow, r: PopoverRow) -> Bool {
         l.item.id == r.item.id &&
         l.index == r.index &&
@@ -704,17 +507,6 @@ struct PopoverRow: View, Equatable {
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.horizontal, 6)
         .overlay {
-            // SwiftUI's .onDrag below only ever hands the system ONE
-            // NSItemProvider, no matter how many representations get
-            // crammed into it — a drop target still materializes exactly
-            // ONE pasteboard item from it. That's why dragging a multi-mark
-            // selection out only ever produced the first marked item: a
-            // single item literally can't split into several dropped files.
-            // A real multi-item drag needs one NSDraggingItem PER item,
-            // which only AppKit's own beginDraggingSession supports — this
-            // overlay intercepts the drag with that instead, whenever 2+
-            // items are marked (matches the old fallback's "any row drags
-            // the whole marked set" behavior).
             if ClipboardManager.shared.markedItemIDs.count > 1 {
                 MultiItemDragSource(
                     writers: ClipboardManager.shared.orderedMarkedItems.map { $0.makePasteboardWriter() })
@@ -759,13 +551,12 @@ struct PopoverRow: View, Equatable {
             Spacer()
 
             if let order = markOrder {
-                // Ordinal label — shows the item's position in the paste queue
                 Text("\(order). marked")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Color(red: 0.20, green: 0.78, blue: 0.35),   // system green
+                    .background(Color(red: 0.20, green: 0.78, blue: 0.35),
                                 in: Capsule())
                     .help("Marked #\(order) for multi-paste — hold V to toggle")
             } else if isSelected {
@@ -786,8 +577,6 @@ struct PopoverRow: View, Equatable {
     private var rowContent: some View {
         switch item.content {
         case .text(let rawStr):
-            // Trimmed for DISPLAY only — so a copy that happens to start
-            // with blank lines doesn't show an empty-looking row.
             let str = rawStr.displayTrimmedLeading
             if item.tags.contains(.table) {
                 PopoverMiniTable(text: str)
@@ -807,18 +596,7 @@ struct PopoverRow: View, Equatable {
                         .foregroundColor(.primary).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-        // richText / rtfd / html: if the content actually contains a table
-        // (Apple Notes / Pages / Word tables come through as rich text with
-        // NSTextTable blocks; browser/Excel tables as HTML <tr>/<td>), render
-        // a real mini table grid in the row — same visual promise the preview
-        // panel keeps — instead of two lines of flattened text.
         case .richText(_, plain: let rawPlain), .rtfd(_, plain: let rawPlain):
-            // Previously: finding an embedded table replaced the row's text
-            // entirely, so a doc/file that STARTS with normal content and
-            // has a table further down showed only the table — not even the
-            // start of the file. Always show a text snippet (truncated to
-            // fit the row); the compact table glimpse is additive, not a
-            // replacement.
             let plain = rawPlain.displayTrimmedLeading
             VStack(alignment: .leading, spacing: 2) {
                 Text(plain).font(.system(size: 12)).lineLimit(1).foregroundColor(.primary)
@@ -864,12 +642,6 @@ struct PopoverRow: View, Equatable {
             }
         case .image(let img, let data, _):
             VStack(alignment: .leading, spacing: 2) {
-                // Static downsampled first-frame thumbnail for EVERY image,
-                // including GIFs. A live AnimatedImageView per GIF row ran its
-                // own frame-loop continuously for as long as the popup was open
-                // — ongoing CPU/GPU cost just for being scrolled into view, with
-                // several GIFs animating at once. Live playback stays in the
-                // dedicated Space-preview, where only one item is shown.
                 Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
                     .resizable().aspectRatio(contentMode: .fit)
                     .frame(maxWidth: 280, maxHeight: 48, alignment: .leading)
@@ -904,8 +676,6 @@ struct PopoverRow: View, Equatable {
     }
 }
 
-// MARK: - Mini table preview (CSV / TSV)
-
 private struct PopoverMiniTable: View {
     let text: String
 
@@ -921,8 +691,6 @@ private struct PopoverMiniTable: View {
     }
 
     var body: some View {
-        // Compute once per render — `rows` parses the text, and referencing
-        // the computed property twice (isEmpty check + ForEach) parsed twice.
         let rows = self.rows
         if rows.isEmpty {
             Text(text).font(.system(size: 12, design: .monospaced)).lineLimit(2)
@@ -954,8 +722,6 @@ private struct PopoverMiniTable: View {
         }
     }
 }
-
-// MARK: - Category filter chip
 
 struct TagFilterChip: View {
     let tag:     ClipboardTag?
@@ -991,8 +757,6 @@ struct TagFilterChip: View {
     }
 }
 
-// MARK: - Header hint views
-
 struct FlatHint: View {
     private static let activeColor = Color(hex: "#4F8EF7")
 
@@ -1018,9 +782,6 @@ struct FlatHint: View {
     }
 }
 
-/// Icon-based sibling of `FlatHint` — same layout and active-state coloring,
-/// but an SF Symbol instead of a monospaced key label (for actions that read
-/// better as a glyph than as text, e.g. the pin-shaped "Refer" hint).
 struct IconFlatHint: View {
     private static let activeColor = Color(hex: "#4F8EF7")
 
@@ -1073,10 +834,6 @@ struct SpaceKeyFlatHint: View {
     }
 }
 
-/// Double-tap sibling of `SpaceKeyFlatHint` — the SAME spacebar-key glyph,
-/// drawn twice side by side, so "single tap = Preview" and "double tap =
-/// Refer" read as one consistent icon language instead of an unrelated
-/// SF Symbol standing in for "double-tap Space."
 struct DoubleSpaceKeyFlatHint: View {
     private static let activeColor = Color(hex: "#4F8EF7")
 
@@ -1112,8 +869,6 @@ struct DoubleSpaceKeyFlatHint: View {
     }
 }
 
-// MARK: - First-run coach bubble
-
 struct CoachBubble: View {
     let text: String
     @State private var pulse = false
@@ -1148,19 +903,10 @@ struct Triangle: Shape {
 }
 
 extension NSPopover {
-    /// Fast custom appear animation, shared by all three Clipen popovers
-    /// (main popup, transform panel, item preview). NSPopover's built-in
-    /// open animation is private (~0.25s, ignores NSAnimationContext) with
-    /// no duration knob — so the popovers are shown with `animates = false`
-    /// and this runs instead: a quick ease-out fade + subtle center-anchored
-    /// grow, so opening still FEELS animated, just much faster than stock.
     func clipenAnimateIn(duration: TimeInterval = 0.17) {
         guard let view = contentViewController?.view else { return }
         view.wantsLayer = true
         if let layer = view.layer {
-            // AppKit layers anchor at (0,0); re-anchor to the center (and
-            // compensate position) so the scale grows from the middle
-            // instead of the bottom-left corner.
             let frame = layer.frame
             layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
             layer.position = CGPoint(x: frame.midX, y: frame.midY)
@@ -1177,8 +923,6 @@ extension NSPopover {
             group.timingFunction = CAMediaTimingFunction(name: .easeOut)
             layer.add(group, forKey: "clipenPopIn")
         }
-        // Also fade the popover WINDOW (chrome + arrow), so the frame
-        // doesn't pop in fully-formed around still-animating content.
         if let win = view.window {
             win.alphaValue = 0
             NSAnimationContext.runAnimationGroup { context in

@@ -5,46 +5,28 @@ import UniformTypeIdentifiers
 @preconcurrency import PDFKit
 
 extension ClipboardManager {
-    // MARK: - Character injection (Spotlight / Raycast / Alfred)
 
-    /// Apps that have text input fields but don't receive simulated ⌘V from
-    /// external processes.  Spotlight is detected via focusedAppIsSpotlight()
-    /// below, not by a nil frontmost app — see its doc comment.
     static let injectionBundleIDs: Set<String> = [
         "com.raycast.macos",
         "com.runningwithcrayons.Alfred",
     ]
 
-    /// Max characters to inject char-by-char. Beyond this, fall back to ⌘V.
     static let maxInjectionLength = 5_000
 
-    /// True when `app` is known to ignore externally simulated ⌘V.
     func shouldInjectCharacters(to app: NSRunningApplication?) -> Bool {
-        if app == nil { return true } // no frontmost app captured at all
+        if app == nil { return true }
         if Self.focusedAppIsSpotlight() { return true }
         guard let id = app?.bundleIdentifier else { return false }
         return Self.injectionBundleIDs.contains(id)
     }
 
-    /// Opening Spotlight does NOT set `NSWorkspace.frontmostApplication` to
-    /// nil on current macOS — it leaves whatever app was frontmost before
-    /// ⌘-Space still reporting as frontmost, since Spotlight is a system
-    /// overlay, not a normal app switch. That meant `capturedPasteTarget`
-    /// was never nil for Spotlight, `shouldInjectCharacters` returned false,
-    /// and Clipen fired a synthetic ⌘V at the STALE captured app instead of
-    /// injecting into Spotlight's search field — nothing appeared. Asking the
-    /// Accessibility API directly which app is REALLY focused system-wide
-    /// (independent of NSWorkspace's app-switch bookkeeping) is the reliable
-    /// signal instead.
     static func focusedAppIsSpotlight() -> Bool {
         let systemWide = AXUIElementCreateSystemWide()
         var focusedAppRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef) == .success,
               let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID()
         else { return false }
-        // Force cast is provably safe: the CFGetTypeID guard above verified this
-        // is an AXUIElement, and `as!` is the idiomatic conversion for CF types.
-        let axApp = focusedAppRef as! AXUIElement  // swiftlint:disable:this force_cast
+        let axApp = focusedAppRef as! AXUIElement
         var pid: pid_t = 0
         guard AXUIElementGetPid(axApp, &pid) == .success,
               let app = NSRunningApplication(processIdentifier: pid)
@@ -52,38 +34,19 @@ extension ClipboardManager {
         return app.bundleIdentifier == "com.apple.Spotlight"
     }
 
-    /// Extracts the pasteable plain-text string from a clipboard item, or nil
-    /// if the content is not text (files, images, etc. cannot be injected).
     func extractTextForInjection(from item: ClipboardItem) -> String? {
         guard let t = item.content.plainText, !t.isEmpty else { return nil }
         return t
     }
 
-    /// Inserts `text` into the currently focused text field.
-    ///
-    /// Strategy 1 — AX `kAXSelectedTextAttribute`:  Writes text directly into the
-    /// focused element's selection point.  This is how Raycast, Alfred, and any
-    /// standard NSTextField/NSTextView accept programmatic input; it bypasses ⌘V
-    /// routing entirely and works regardless of keyboard layout or event source.
-    ///
-    /// Strategy 2 — HID-level CGEvent:  Posts key-down/up pairs at `.cghidEventTap`
-    /// with the Unicode string override.  Unlike session-level posting, HID events
-    /// travel the full hardware event pipeline and reach even system overlays like
-    /// Spotlight that filter higher-level synthetic events.
-    ///
-    /// `completion` is invoked on the main thread after the text has been sent.
     func injectCharacters(_ text: String, completion: (() -> Void)? = nil) {
-        // ── Strategy 1: AX attribute write ─────────────────────────────────────
-        // Our popup is non-activating, so the REAL focused element in the target
-        // app (Raycast search box, Alfred bar, etc.) is still the AX focused
-        // element throughout the entire interaction.
         let systemWide = AXUIElementCreateSystemWide()
         var focusedRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(systemWide,
                                          kAXFocusedUIElementAttribute as CFString,
                                          &focusedRef) == .success,
            let focusedRef {
-            let focused = focusedRef as! AXUIElement  // swiftlint:disable:this force_cast
+            let focused = focusedRef as! AXUIElement
             if AXUIElementSetAttributeValue(focused,
                                             kAXSelectedTextAttribute as CFString,
                                             text as CFString) == .success {
@@ -92,10 +55,6 @@ extension ClipboardManager {
             }
         }
 
-        // ── Strategy 2: HID-level CGEvent keyboard simulation ──────────────────
-        // Fallback for apps whose AX attribute is read-only or unavailable
-        // (Spotlight, some custom input areas).  HID posting is indistinguishable
-        // from real hardware input to the window server.
         let src = CGEventSource(stateID: .hidSystemState)
         DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.06) {
             for scalar in text.unicodeScalars {
@@ -103,7 +62,6 @@ extension ClipboardManager {
                 if scalar.value <= 0xFFFF {
                     chars = [UniChar(scalar.value)]
                 } else {
-                    // Encode supplementary character as a UTF-16 surrogate pair.
                     let v = scalar.value - 0x10000
                     chars = [UniChar(0xD800 | (v >> 10)), UniChar(0xDC00 | (v & 0x3FF))]
                 }
@@ -123,12 +81,6 @@ extension ClipboardManager {
         }
     }
 
-
-    // MARK: - Paste
-
-    /// Record the current frontmost app as the paste destination on the item
-    /// with the given ID.  Call this right before the synthetic ⌘V fires so
-    /// the popup is still visible (non-activating) and frontmost == target.
     func recordPasteDestination(for itemID: UUID, app: NSRunningApplication? = nil) {
         guard let dest = app ?? NSWorkspace.shared.frontmostApplication else { return }
         recordPaste(itemID: itemID,
@@ -136,10 +88,6 @@ extension ClipboardManager {
                     bundleID: dest.bundleIdentifier)
     }
 
-    /// Single source of truth for "this item was just pasted into `appName`".
-    /// Stamps destination metadata AND bumps the frequency counters the
-    /// predictor reads.  Called from every paste path (plain, transform,
-    /// search overlay, popup search) so no paste escapes the tally.
     func recordPaste(itemID: UUID, appName: String?, bundleID: String?) {
         guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
         items[idx].pastedToAppName  = appName
@@ -148,18 +96,12 @@ extension ClipboardManager {
         items[idx].pasteCount      += 1
         if let bid = bundleID {
             items[idx].pasteCountByApp[bid, default: 0] += 1
-            // Accumulate every destination the item has ever landed in so
-            // the UI can show ALL destination apps, not just the last one.
             if let name = appName {
                 items[idx].pastedToAppNames[bid] = name
             }
         }
     }
 
-    /// The app captured when the popup opened, reactivated first if it's no
-    /// longer frontmost (defensive: showing our own NSPopover shouldn't steal
-    /// focus, but this makes the paste destination correct even if it does).
-    /// Falls back to a fresh frontmost query only if nothing was ever captured.
     func resolvedPasteTarget() -> NSRunningApplication? {
         guard let target = capturedPasteTarget else {
             return NSWorkspace.shared.frontmostApplication
@@ -170,15 +112,6 @@ extension ClipboardManager {
         return target
     }
 
-    /// Paste ONE file out of a multi-file (`.files`) clipboard item — used by
-    /// the per-element preview overlay in the reference/item-preview panels'
-    /// file strip, so a single image/video/etc. from a multi-file set can be
-    /// pasted on its own instead of always pasting the whole set together.
-    /// Mirrors the page-picker's write-then-paste pattern: write just this
-    /// one file, mark the write as our own (so the poll doesn't re-capture
-    /// it as a brand-new ring item), restore focus to the real paste target
-    /// (needed since this can be triggered from the reference panel, which —
-    /// unlike the ring popup — CAN become key and steal focus), then simulate ⌘V.
     func pasteSingleFile(_ url: URL) {
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -191,15 +124,10 @@ extension ClipboardManager {
     }
 
     func commitPaste() {
-        // Share stage (S key) hijacks the commit gesture: ⌘-release sends
-        // via the highlighted service instead of pasting, mirroring how
-        // Stage 2 transforms hijack it for "apply tool, then paste result."
         if inShareStage {
             commitShare()
             return
         }
-        // A V/B/X tap/hold decision in flight when ⌘ is released must not
-        // fire later against a stale target in a popup that's about to close.
         vTapHoldTimer?.invalidate()
         vTapHoldTimer = nil
         bTapHoldTimer?.invalidate()
@@ -210,15 +138,11 @@ extension ClipboardManager {
         sTapHoldTimer = nil
         xTapHoldTimer?.invalidate()
         xTapHoldTimer = nil
-        // Analytics: the paste path closes the popup without going through
-        // dismissPreview — sum this session's duration here.
         if previewWindow.isVisible, let openedAt = popupOpenedAt {
             let ms = max(0, Int(Date().timeIntervalSince(openedAt) * 1000))
             AuthManager.shared.registerActionUsage(actionID: "popup.dur_ms", count: ms)
             popupOpenedAt = nil
         }
-        // Enter commits out of search mode too (handleFlagsChanged suppresses
-        // the normal ⌘-release commit while this is true, so clear it here).
         isSearchActive = false
         guard !items.isEmpty else {
             previewWindow.hide()
@@ -229,8 +153,6 @@ extension ClipboardManager {
         }
         captureRememberedSelection()
 
-        // Stage 2 (marked set): run the selected MARKED tool against the
-        // whole ordered mark queue and paste its single combined result.
         if inTransformStage, transformingMarkedSet {
             let markedItems = orderedMarkedItems
             guard markedItems.count >= 2,
@@ -254,15 +176,12 @@ extension ClipboardManager {
                     self.itemPreviewPanel.hide()
                     self.previewWindow.hide()
                     self.markedItemIDs = []
-                    // Restore the FIRST marked item to the pasteboard after
-                    // pasting, same contract as single-item transforms.
                     self.handleTransformResult(result, restoring: markedItems[0], toolID: toolID)
                 }
             }
             return
         }
 
-        // Stage 2: apply selected transform (sync OR async) and paste result
         if inTransformStage {
             guard displayItems.indices.contains(selectedIndex) else {
                 previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
@@ -279,13 +198,6 @@ extension ClipboardManager {
                 return
             }
 
-            // Interactive transform: "Paste Specific Pages" needs a picker UI
-            // inside the existing TransformPanel.  Instead of running the
-            // tool's runAsync, swap the transform panel into page-range mode
-            // and leave the popup open.  All input (digits, dash, comma,
-            // return, escape, space-preview) flows through the CGEventTap
-            // just like the popup search bar does — the non-activating panel
-            // never has to steal focus from the target app.
             if selectedToolID == "pdf.paste-pages" || selectedToolID == "pdf.paste-pages-as-images" {
                 if let input = PDFTools.pdfInput(for: item) {
                     let mode: PageRangeOutputMode =
@@ -298,9 +210,6 @@ extension ClipboardManager {
                 }
             }
 
-            // Interactive transform: "Translate" needs a language picker,
-            // same pattern as the PDF page picker above — swap the transform
-            // panel content instead of running a single hardcoded target.
             if selectedToolID == "ai.translate" {
                 enterLanguagePickerMode(item: item)
                 return
@@ -309,8 +218,6 @@ extension ClipboardManager {
             let isAsync  = ToolRegistry.isAsync(item: item, toolID: selectedToolID)
 
             if isAsync {
-                // Async path (OCR / PDF / export / optimization tools) — show
-                // "Processing…", run the work, then paste & dismiss.
                 updateTransformPanelProcessing(true)
                 Task { [weak self] in
                     guard let self else { return }
@@ -319,32 +226,20 @@ extension ClipboardManager {
                         self.updateTransformPanelProcessing(false)
                         self.inTransformStage = false
                         self.transformIndex   = 0
-                        // Same reasoning as dismissPreview(): the tool just run
-                        // above bumped its universal usage score in AuthManager,
-                        // but refreshTransformDisplaysCache()'s "same item" cache
-                        // shortcut would otherwise keep showing the PRE-bump sort
-                        // order next time transforms open on this item.
                         self.transformDisplaysCache = []
                         self.lastTransformCacheItemID = nil
                         self.transformingMarkedSet = false
                         self.transformPanel.hide()
                         self.itemPreviewPanel.hide()
                         self.previewWindow.hide()
-                        // This transform path returns early, bypassing the
-                        // marked-items reset the non-transform paste path does
-                        // below — without this, marks made earlier in the same
-                        // session leaked into the NEXT popup open. See report:
-                        // "marked elements are persistent... sometimes".
                         self.markedItemIDs = []
                         self.handleTransformResult(result, restoring: item, toolID: selectedToolID)
                     }
                 }
                 return
             } else {
-                // Sync path — apply immediately
                 let result = applySyncTransform(item: item, toolID: selectedToolID)
                 inTransformStage = false; transformIndex = 0
-                // See the async branch above for why this must be cleared here too.
                 transformDisplaysCache = []
                 lastTransformCacheItemID = nil
                 transformingMarkedSet = false
@@ -359,20 +254,9 @@ extension ClipboardManager {
 
         inTransformStage = false; transformIndex = 0
 
-        // Multi-paste: if any items are marked, paste them ALL — in LIST
-        // order (top to bottom as shown), not marking order. Mark order and
-        // list order coincide for the common hold-V-down-the-list case, but
-        // ⇧-click range-selection and out-of-order ⌘-clicking both rely on
-        // list order to paste in the sequence the user actually sees.
-        // Fires only from stage-1 (item selection) — transforms always paste a
-        // single result.
         if !markedItemIDs.isEmpty {
             let ids = Set(markedItemIDs)
             markedItemIDs = []
-            // Order by displayItems position when the item is currently
-            // visible (the common case); a mark that's fallen out of the
-            // active filter/search still pastes, just after the visible
-            // ones, instead of silently vanishing.
             let displayOrder = Dictionary(uniqueKeysWithValues: displayItems.enumerated().map { ($1.id, $0) })
             let orderedItems = ids.compactMap { id in items.first(where: { $0.id == id }) }
                 .sorted { (displayOrder[$0.id] ?? Int.max) < (displayOrder[$1.id] ?? Int.max) }
@@ -387,8 +271,6 @@ extension ClipboardManager {
             return
         }
 
-        // Resolve by ID — prevents stale-index paste when displayItems was
-        // rebuilt (new capture, filter change) between selection and ⌘ release.
         let item: ClipboardItem
         if let id = pendingPasteItemID, let found = items.first(where: { $0.id == id }) {
             item = found
@@ -399,12 +281,8 @@ extension ClipboardManager {
             return
         }
         pendingPasteItemID = nil
-        // Analytics: which visible row this paste came from + item age.
         recordPasteAnalytics(item: item,
                              displayIndex: displayItems.firstIndex(where: { $0.id == item.id }))
-        // Use the app captured at popup-open time (and reactivate it if
-        // needed) rather than trusting frontmostApplication fresh here — see
-        // capturedPasteTarget's doc comment.
         let pasteTarget = resolvedPasteTarget()
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
         simulatePaste(item, target: pasteTarget) { [weak self] in
@@ -413,14 +291,6 @@ extension ClipboardManager {
         }
     }
 
-    /// Write `item` to the pasteboard and simulate the paste keystroke (or
-    /// character injection for apps that ignore synthetic ⌘V). Extracted from
-    /// commitPaste's tail so the double-click-to-paste path — which must NOT
-    /// close the popup or reset selection — can reuse the exact same,
-    /// already-hardened paste mechanics instead of a second implementation.
-    /// Analytics for a history paste: which row was pasted (bucketed) and
-    /// how old the item was at paste time (bucketed). Also feeds the
-    /// first-ever-session record.
     func recordPasteAnalytics(item: ClipboardItem, displayIndex: Int?) {
         if let idx = displayIndex, idx >= 0 {
             let bucket: String
@@ -452,8 +322,6 @@ extension ClipboardManager {
 
         let token = beginPasteSimulation()
 
-        // Use character injection for Spotlight (nil frontmost), Raycast, Alfred,
-        // and any other app that ignores externally simulated ⌘V.
         if let text = extractTextForInjection(from: item),
            text.count <= Self.maxInjectionLength,
            shouldInjectCharacters(to: target) {
@@ -476,11 +344,6 @@ extension ClipboardManager {
         AuthManager.shared.registerCommandVAction()
     }
 
-    /// Paste this item WITHOUT closing the popup or resetting selection —
-    /// used by double-clicking a row, so the user can paste several items
-    /// back-to-back in one popup session instead of it closing after the
-    /// first double-click. Resolves by ID (not a display-list index, which
-    /// is a different index space than `items`).
     func pasteItemKeepingPopupOpen(id: UUID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
         recordPasteAnalytics(item: item,
@@ -488,12 +351,6 @@ extension ClipboardManager {
         simulatePaste(item, target: resolvedPasteTarget())
     }
 
-    // MARK: - Sequential multi-paste
-
-    /// Paste `items` one at a time in order, with a 250 ms gap between each
-    /// so the target app has time to receive and render each paste before the
-    /// next arrives. Uses the same injection / ⌘V simulation logic as the
-    /// single-item path so every content type works correctly.
     func commitMultiPaste(_ itemList: [ClipboardItem], target: NSRunningApplication?) {
         guard !itemList.isEmpty else {
             isSimulatingPaste = false
@@ -501,13 +358,11 @@ extension ClipboardManager {
             return
         }
         popupSessionPasted = true
-        // Age analytics per pasted item (row index isn't meaningful for a
-        // marked set, so only the age bucket is recorded).
         recordPasteAnalytics(item: itemList[0], displayIndex: nil)
         let item      = itemList[0]
         let remaining = Array(itemList.dropFirst())
 
-        let token = beginPasteSimulation()   // set BEFORE clearContents to block the poll guard immediately
+        let token = beginPasteSimulation()
         recordPasteDestination(for: item.id)
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -548,19 +403,6 @@ extension ClipboardManager {
         }
     }
 
-    // MARK: - Pasteboard write
-    //
-    // Every content type produces exactly ONE NSPasteboardItem with all
-    // representations on that single item.  Mixing the old-style API
-    // (setData/setString/setPropertyList after clearContents without
-    // declareTypes) with writeObjects creates multiple implicit items on the
-    // pasteboard; apps that iterate all items then paste each one, which is
-    // why everything except plain text was pasting twice.
-
-    /// Restore the item's side-car flavors onto the primary pasteboard item,
-    /// skipping any type the primary write already set — so a paste offers
-    /// receiving apps the SAME full set of representations the original copy
-    /// did (private layer data, alternate encodings, everything).
     func applySidecar(_ item: ClipboardItem, to pitem: NSPasteboardItem) {
         guard let sidecar = item.sidecarTypes else { return }
         let existing = Set(pitem.types.map(\.rawValue))
@@ -594,12 +436,6 @@ extension ClipboardManager {
 
         case .richText(let attrStr, let plain):
             let pitem = NSPasteboardItem()
-            // Verbatim-first: the side-car carries the source app's ORIGINAL
-            // rtf bytes (kept at capture — see prunedSidecar). Re-encoding
-            // through NSAttributedString normalizes formatting and drops
-            // anything the parser didn't model; the original bytes are what
-            // a raw macOS paste would have delivered. Re-encode only when no
-            // original survived (items captured by older builds).
             if let originalRTF = item.sidecarTypes?["public.rtf"] {
                 pitem.setData(originalRTF, forType: .rtf)
             } else {
@@ -614,12 +450,8 @@ extension ClipboardManager {
             pb.writeObjects([pitem])
 
         case .rtfd(let rtfdData, let plain):
-            // Write RTFD so apps that support rich tables (Notes, Pages, Word)
-            // receive the full table structure. Also write RTF + plain-text
-            // fallbacks so simpler apps still get readable content.
             let pitem = NSPasteboardItem()
             pitem.setData(rtfdData, forType: .rtfd)
-            // Generate an RTF fallback from the RTFD data (best effort).
             if let attrStr = NSAttributedString(rtfd: rtfdData, documentAttributes: nil) {
                 let range = NSRange(location: 0, length: attrStr.length)
                 if let rtfData = try? attrStr.data(
@@ -634,8 +466,6 @@ extension ClipboardManager {
             pb.writeObjects([pitem])
 
         case .html(let html, let plain):
-            // Write HTML with full table markup so apps receive table structure.
-            // Also write a plain-text fallback for apps that don't read HTML.
             let pitem = NSPasteboardItem()
             pitem.setData(Data(html.utf8), forType: .init("public.html"))
             pitem.setData(Data(html.utf8), forType: .init("Apple HTML pasteboard type"))
@@ -652,8 +482,6 @@ extension ClipboardManager {
             let existing = urls.filter { FileManager.default.fileExists(atPath: $0.path) }
             guard !existing.isEmpty else { return }
             let pitems = existing.map { makeFilePasteboardItem(for: $0) }
-            // Side-car goes on the FIRST item only — pasteboard types apply
-            // per-item, and the extra flavors described the copy as a whole.
             if let first = pitems.first { applySidecar(item, to: first) }
             pb.writeObjects(pitems)
 
@@ -666,8 +494,6 @@ extension ClipboardManager {
             pb.writeObjects([pitem])
 
         case .blob(let typeMap):
-            // Restore all original pasteboard types verbatim so the receiving
-            // app sees exactly what was written by the source app.
             let pitem = NSPasteboardItem()
             for (typeStr, data) in typeMap {
                 pitem.setData(data, forType: .init(typeStr))
@@ -676,16 +502,10 @@ extension ClipboardManager {
         }
     }
 
-    /// Build a single NSPasteboardItem for a file URL with every representation
-    /// on that one item — Finder-standard file URL, legacy path list, typed raw
-    /// data (so PDF viewers, image editors etc. get native format), and extracted
-    /// plain text (so text editors receive readable content for text/document files).
     func makeFilePasteboardItem(for url: URL) -> NSPasteboardItem {
         let item = NSPasteboardItem()
 
-        // Standard file-URL type — how Finder, Mail, Dock etc. reference files.
         item.setData(url.dataRepresentation, forType: .fileURL)
-        // Legacy path list for older apps.
         item.setPropertyList([url.path], forType: .init("NSFilenamesPboardType"))
 
         let maxInlineBytes = Self.maxDataBytes
@@ -694,8 +514,6 @@ extension ClipboardManager {
               let fileSize = values.fileSize, fileSize <= maxInlineBytes,
               let data = try? Data(contentsOf: url) else { return item }
 
-        // Typed raw data so specialised apps (Preview, image editors, etc.) get
-        // their native format instead of just a file reference.
         let ext = url.pathExtension.lowercased()
         switch ext {
         case "pdf":
@@ -717,7 +535,6 @@ extension ClipboardManager {
             }
         }
 
-        // Plain-text representation for apps that accept text (editors, terminals).
         if let text = FileKindDetector.readableText(from: url, maxBytes: maxInlineBytes) {
             item.setString(text, forType: .string)
         } else if let docText = FileKindDetector.readableDocumentText(from: url) {
@@ -732,6 +549,5 @@ extension ClipboardManager {
         selectedIndex = itemsIndex
         commitPaste()
     }
-
 
 }

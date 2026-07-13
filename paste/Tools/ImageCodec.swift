@@ -29,12 +29,6 @@ enum ImageService {
         let label: String
     }
 
-    // Single-slot decode memo. The transform panel renders tools for ONE item
-    // at a time, and building its tool list evaluates every tool's preview()
-    // twice (filter + display) — each of which may call imageInput and decode
-    // the full-res bytes. Without this, opening the panel on one image decoded
-    // it ~11× (once per image tool, per pass). Keyed by id; image bytes never
-    // change after capture, so the cache is always coherent.
     private static let inputCacheLock = NSLock()
     private static var cachedInput: (id: UUID, input: ImageInput)?
 
@@ -57,16 +51,11 @@ enum ImageService {
     private static func decodeImageInput(for item: ClipboardItem) -> ImageInput? {
         switch item.content {
         case .image(let image, let data, let dataType) where !dataType.rawValue.contains("pdf"):
-            // Full-res decode: the stored NSImage is a ≤1024px ring
-            // thumbnail (ClipboardContent.imageContent) — running resize/
-            // convert/background-removal tools against it would silently
-            // produce downsampled outputs.
             return ImageInput(image: NSImage(data: data) ?? image, data: data, dataType: dataType, sourceURL: nil)
         case .file(let url) where FileKindDetector.isImageFile(url):
             guard let data = try? Data(contentsOf: url),
                   let image = decodeImage(from: data) else { return nil }
             return ImageInput(image: image, data: data, dataType: pasteboardType(for: url), sourceURL: url)
-        // One-element files-list of an image — same as a single .file capture.
         case .files(let urls) where urls.count == 1 && FileKindDetector.isImageFile(urls[0]):
             guard let data = try? Data(contentsOf: urls[0]),
                   let image = decodeImage(from: data) else { return nil }
@@ -76,11 +65,6 @@ enum ImageService {
         }
     }
 
-    /// Decode image bytes to an NSImage, with an ImageIO fallback for formats
-    /// `NSImage(data:)` handles unreliably — chiefly camera RAW (CR2/CR3/NEF/
-    /// ARW/DNG/…), which FileKindDetector tags as `.image`. Without the fallback
-    /// a RAW file could be filed under the Image tag yet offer zero image tools
-    /// (imageInput returned nil), which looks like a bug to the user.
     private static func decodeImage(from data: Data) -> NSImage? {
         if let img = NSImage(data: data) { return img }
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
@@ -88,10 +72,6 @@ enum ImageService {
         return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 
-    /// True when the bytes are a multi-frame (animated) GIF. Used to avoid
-    /// silently flattening animation: our encode pipeline draws a single
-    /// `CGImage`, so re-encoding an animated GIF drops every frame but the
-    /// first — a real fidelity loss for a content type the app tags as `.gif`.
     static func isAnimatedGIF(_ data: Data) -> Bool {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
               let type = CGImageSourceGetType(src),
@@ -151,8 +131,6 @@ enum ImageService {
         return lines.joined(separator: "\n")
     }
 
-    // MARK: - Reduce size (same format only)
-
     static func reducedCopy(from item: ClipboardItem) async -> TransformOutput? {
         guard let input = imageInput(for: item) else { return nil }
 
@@ -162,9 +140,6 @@ enum ImageService {
                 let kind = formatKind(for: input)
                 let targetType = pasteboardType(for: kind, fallback: input.dataType)
 
-                // Animated GIFs can't be reduced through the single-frame encode
-                // pipeline without dropping the animation. Keep the original
-                // rather than silently returning a static first frame.
                 if kind == .gif, isAnimatedGIF(input.data) {
                     continuation.resume(returning: .item(
                         ClipboardItem(content: ClipboardContent.imageContent(rawData: input.data, dataType: input.dataType, fallback: input.image)!),
@@ -280,8 +255,6 @@ enum ImageService {
         }
     }
 
-    // MARK: - Convert format (separate tools)
-
     static func convertCopy(from item: ClipboardItem, to target: ConvertTarget) async -> TransformOutput? {
         guard let input = imageInput(for: item) else { return nil }
 
@@ -309,9 +282,6 @@ enum ImageService {
                         result = (data, img, webpPasteboardType, "WebP")
                     } else { result = nil }
                 case .gif:
-                    // Converting an already-animated GIF "to GIF" through the
-                    // single-frame encoder would strip the animation — pass the
-                    // original bytes through instead of flattening them.
                     if isAnimatedGIF(input.data) {
                         result = (input.data, input.image, .init("public.gif"), "GIF (animation preserved)")
                     } else if let (data, img) = encodeGIF(image: input.image) {
@@ -343,8 +313,6 @@ enum ImageService {
             }
         }
     }
-
-    // MARK: - Export file (real .png / .jpg / .webp on disk for Finder & file paste)
 
     static func persistExportFile(
         data: Data,
@@ -447,8 +415,6 @@ enum ImageService {
         return result.isEmpty ? "Converted Image" : String(result.prefix(80))
     }
 
-    // MARK: - Pasteboard helpers
-
     static func compatibilityPasteboardPayload(
         image: NSImage,
         rawData: Data,
@@ -467,10 +433,6 @@ enum ImageService {
         if dataType.rawValue == "public.heic" { return (rawData, .init("public.heic")) }
         if dataType == .tiff { return (rawData, .tiff) }
         if dataType.rawValue.contains("bmp") { return (rawData, dataType) }
-        // Exotic type fallback: re-encode from the RAW BYTES, not the stored
-        // NSImage — that's a ≤1024px ring thumbnail now, and pasting a
-        // thumbnail-resolution PNG where the full image was expected is the
-        // kind of quiet quality loss nobody reports for months.
         if let cg = decodeCGImage(from: rawData), let png = pngData(from: cg) {
             return (png, .init("public.png"))
         }
@@ -483,8 +445,6 @@ enum ImageService {
         let known = ["webp", "jpeg", "jpg", "png", "gif", "heic", "bmp", "tiff"]
         return !known.contains(where: { raw.contains($0) })
     }
-
-    // MARK: - Encoding
 
     private static func encodeWebP(
         image: NSImage,

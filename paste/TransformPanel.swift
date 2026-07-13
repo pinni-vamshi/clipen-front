@@ -1,20 +1,11 @@
 import AppKit
 import SwiftUI
 
-/// Real system NSPopover, anchored through an invisible helper panel — same
-/// pattern as PreviewOverlayWindow and ItemPreviewPanel (see the header
-/// comment on PreviewOverlayWindow for the full rationale). AppKit now draws
-/// the rounded box, vibrancy, arrow, and entrance animation itself, anchored
-/// at the highlighted row's actual screen position via `anchorPoint`
-/// (computed by `PreviewOverlayWindow.selectedRowAnchorPoint`).
 class TransformPanel: NSObject, NSPopoverDelegate {
     private let anchorPanel: NSPanel
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
     private let popover = NSPopover()
     private var cachedPanelHeight: CGFloat = 460
-    /// True from show until hide — closes the animating-in race where hide()
-    /// finds popover.isShown still false, skips the close, and the panel
-    /// finishes presenting as an orphan after the popup is gone.
     private var wantsVisible = false
 
     func popoverDidShow(_ notification: Notification) {
@@ -23,20 +14,10 @@ class TransformPanel: NSObject, NSPopoverDelegate {
             anchorPanel.orderOut(nil)
         }
     }
-    /// The anchor strip's frame for the CURRENT popover session, nil when
-    /// hidden. The strip is placed once per session and never moved while the
-    /// popover is shown — see show() for why that invariant matters.
     private var shownStrip: NSRect? = nil
 
-    /// `wantsVisible` is ANDed in because NSPopover's close is animated:
-    /// popover.isShown stays true until the close animation finishes, so
-    /// guards running right after hide() saw a stale "still visible" and
-    /// could re-present a panel that was being dismissed. Intent flips
-    /// instantly; isShown alone doesn't. (Same fix as the sibling panels.)
     var isVisible: Bool { wantsVisible && popover.isShown }
     var frame: NSRect {
-        // The popover WINDOW's frame includes AppKit chrome (arrow + shadow
-        // padding) — callers doing anchor math need the actual content rect.
         if let view = popover.contentViewController?.view, let win = view.window {
             return win.convertToScreen(view.convert(view.bounds, to: nil))
         }
@@ -105,12 +86,6 @@ class TransformPanel: NSObject, NSPopoverDelegate {
         let leftFits = popupFrame.minX - bubbleW - 8 >= screen.minX + 8
         let placeRight = rightFits || !leftFits
 
-        // When the panel is already visible (cycling with V), skip the
-        // synchronous layout+fittingSize pass — it blocks the main thread
-        // and causes lag when both preview and transform panels are open.
-        // Use the cached height from the last full measurement instead.
-        // On first show the panel is hidden, so we always measure then
-        // (with a throwaway hosting view, created only in that branch).
         let h: CGFloat
         if popover.isShown {
             h = cachedPanelHeight
@@ -129,16 +104,6 @@ class TransformPanel: NSObject, NSPopoverDelegate {
             popover.contentViewController = NSHostingController(rootView: content)
         }
 
-        // The anchor is a stationary 1pt-wide strip spanning the popup's full
-        // height at whichever edge the panel sits on, placed ONCE per popover
-        // session and NEVER moved while the popover is shown. The previous
-        // approach — teleporting a 1×1 anchor window to the new row on every
-        // cycle and re-calling show() — broke AppKit's popover attachment:
-        // moving the anchor window under a live popover tears it down, and
-        // the re-show re-presents it, replaying the full close+open animation
-        // on every single keystroke. Tracking the highlighted row is done the
-        // supported way instead: updating `positioningRect` WITHIN the
-        // stationary strip, which moves the arrow without any re-present.
         let anchorY = anchorPoint?.y ?? popupFrame.midY
         let stripHeight = max(1, popupFrame.height)
         let desiredStrip = NSRect(x: placeRight ? popupFrame.maxX : popupFrame.minX,
@@ -152,14 +117,10 @@ class TransformPanel: NSObject, NSPopoverDelegate {
             return
         }
 
-        // Fresh show — or the popup frame / side changed (rare), which needs
-        // a genuine re-present since the strip itself must move.
         if popover.isShown { popover.performClose(nil) }
         anchorPanel.setFrame(desiredStrip, display: false)
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
         shownStrip = desiredStrip
-        // Fast open with a REAL visible animation — see clipenAnimateIn.
-        // animates is restored so the close keeps the native fade-out.
         popover.animates = false
         popover.show(relativeTo: rowRect, of: anchorView,
                      preferredEdge: placeRight ? .maxX : .minX)
@@ -175,8 +136,6 @@ class TransformPanel: NSObject, NSPopoverDelegate {
     }
 }
 
-// MARK: - SwiftUI view
-
 struct TransformView: View {
     let previewText:            String?
     let item:                   ClipboardItem
@@ -184,15 +143,8 @@ struct TransformView: View {
     let selectedTransformIndex: Int
     let isProcessing:           Bool
     let onDismiss:              () -> Void
-    /// Observed so we can swap the body to the inline page-picker when the
-    /// user activates the "Paste Specific Pages" transform — the panel's
-    /// hosting view is set up once per show(), but the content reacts to
-    /// manager state changes here.
     @ObservedObject private var manager = ClipboardManager.shared
 
-    /// Which of the two PDF page-picker tool IDs the picker should currently
-    /// expand under.  Derived from the manager's output-mode so the inline
-    /// expansion always nests beneath the SAME tool the user activated.
     private var activePagePickerToolID: String {
         switch manager.pageRangeOutputMode {
         case .perPageImages: return "pdf.paste-pages-as-images"
@@ -222,11 +174,6 @@ struct TransformView: View {
     }
 
     var body: some View {
-        // Same outer chrome (header, detected-type badge, background, stroke)
-        // regardless of mode — the panel must always look like the Transforms
-        // panel.  Only the middle section swaps between the tool list and the
-        // inline page picker so the user can see it's the SAME panel, with
-        // one tool just expanded into an interactive form.
         VStack(spacing: 0) {
             outerHeader
             Divider()
@@ -234,15 +181,8 @@ struct TransformView: View {
                 detectedBadge(type: item.detectedType, label: label)
                 Divider()
             }
-            // ── Middle: the tool list is ALWAYS shown.  When the user has
-            // activated "Paste Specific Pages", the picker UI expands
-            // INLINE under that row — every other tool option stays visible
-            // and the user keeps the full transform context.  Same pattern
-            // would apply to any future interactive transform.
             middleToolList
             Divider()
-            // Footer always shows the item's stats — the picker's keybindings
-            // are advertised in the header (top-right) so we don't duplicate.
             Text(stats)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.secondary)
@@ -250,18 +190,9 @@ struct TransformView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
         }
-        // No background/clipShape/overlay here — hosted inside a real
-        // NSPopover now, which draws all of that (plus the arrow) itself.
     }
 
-    // MARK: - Outer chrome (always-on)
-
     private var outerHeader: some View {
-        // Always renders the Transforms label — the picker now lives INLINE
-        // under its tool row, so the header doesn't need to change context.
-        // Hints render on their own full-width row below the title (not
-        // crammed to the right of it), using the same icon + short-label
-        // FlatHint style as the main popup's header hints.
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "wand.and.stars")
@@ -311,8 +242,6 @@ struct TransformView: View {
         .background(type.badgeColor.opacity(0.12))
     }
 
-    // MARK: - Middle: tool list (used when not in page-range mode)
-
     @ViewBuilder
     private var middleToolList: some View {
         if displays.isEmpty {
@@ -349,18 +278,11 @@ struct TransformView: View {
                                 manager.uiSelectTransform(at: idx)
                             }
 
-                            // INLINE picker — nested directly under whichever
-                            // PDF-page tool the user activated.  Two tools
-                            // share the same picker UI; mode is set in
-                            // ClipboardManager.pageRangeOutputMode and drives
-                            // commit/preview behaviour (combined PDF vs.
-                            // individual PNGs).  Other tool rows stay
-                            // visible — no transform context is lost.
                             if (display.id == "pdf.paste-pages" || display.id == "pdf.paste-pages-as-images")
                                && manager.inPageRangeMode
                                && display.id == activePagePickerToolID {
                                 InlinePagePicker()
-                                    .padding(.leading, 36) // align under the tool row's label
+                                    .padding(.leading, 36)
                                     .padding(.trailing, 8)
                                     .padding(.vertical, 6)
                                     .background(
@@ -376,8 +298,6 @@ struct TransformView: View {
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                             }
 
-                            // Same nested-inline-picker pattern as the PDF page
-                            // picker above, for the "Translate" row.
                             if display.id == "ai.translate" && manager.inLanguagePickerMode {
                                 InlineLanguagePicker()
                                     .padding(.leading, 36)
@@ -420,8 +340,6 @@ struct TransformView: View {
         }
     }
 }
-
-// MARK: - Transform row
 
 struct TransformRow: View {
     let display:      TransformDisplay
@@ -495,8 +413,6 @@ struct TransformRow: View {
     }
 }
 
-// MARK: - Shared content type badge
-
 struct ContentTypeBadge: View {
     let type: ClipboardContentType
 
@@ -516,4 +432,3 @@ struct ContentTypeBadge: View {
         }
     }
 }
-

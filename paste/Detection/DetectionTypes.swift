@@ -13,11 +13,6 @@ struct DetectionCandidate {
 
 enum DetectionRegex {
     private static var cache: [String: NSRegularExpression] = [:]
-    // Detection runs from ClipboardItem.init, which is called both on the main
-    // thread (poll capture) and from background queues (PDF merge, file
-    // bundling). Swift's Dictionary is not safe for concurrent mutation, so the
-    // compiled-regex cache is guarded by a lock — the critical section is a
-    // dictionary lookup/insert, so contention is negligible.
     private static let lock = NSLock()
 
     static func matches(_ pattern: String, in text: String, options: NSRegularExpression.Options = []) -> Bool {

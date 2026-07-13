@@ -11,15 +11,7 @@ enum TextTraditionalDetectors {
         return NSColor(hexString: t)
     }
 
-    /// A single small value (an email address, a phone number, a postal
-    /// address) is never a 100 KB log paste. Gating these whole-string
-    /// heuristics keeps every regex/character scan off huge captures — this
-    /// runs synchronously on the capture path, so an unbounded scan there is a
-    /// direct main-thread hitch on large pastes.
     private static let maxSingleValueScanLength = 2_048
-    /// Structured-document heuristics (markdown, LaTeX) can legitimately appear
-    /// in larger text, but still shouldn't run over a multi-megabyte blob;
-    /// matches CodeLanguageDetector's own 50 K cap.
     private static let maxDocumentScanLength = 50_000
 
     static func candidates(for text: String, color: NSColor?) -> [DetectionCandidate] {
@@ -71,12 +63,6 @@ enum TextTraditionalDetectors {
             candidates.append(.init(type: .code(lang), confidence: 0.84, method: .deterministic))
         }
 
-        // Shell / command-line detection. Catches single-line and short blocks
-        // of terminal commands (`git commit -m …`, `brew install …`, a `$`-
-        // prompted paste) that the token-scoring code detector misses because
-        // they're too short to accumulate a language score. Labelled "Shell"
-        // so it reuses the existing code badge + syntax-highlighted preview.
-        // Confidence above generic code/markdown so a clear command wins.
         if scanDocument, isCommand(t) {
             candidates.append(.init(type: .code("Shell"), confidence: 0.88, method: .deterministic))
         }
@@ -88,8 +74,6 @@ enum TextTraditionalDetectors {
         return candidates
     }
 
-    // Commands that are almost never ordinary English words — the first token
-    // alone signals a shell command.
     private static let distinctiveCommands: Set<String> = [
         "sudo","git","npm","npx","yarn","pnpm","brew","curl","wget","docker","kubectl",
         "kubectx","ssh","scp","rsync","xcodebuild","xcrun","cargo","rustc","gradle","mvn",
@@ -102,8 +86,6 @@ enum TextTraditionalDetectors {
         "systemsetup","softwareupdate","networksetup","scutil","pmset",
     ]
 
-    // Common commands that are also English words — need command shape (a flag,
-    // path, or pipe/chain) to count, so "make dinner" or "find them" don't match.
     private static let commonCommands: Set<String> = [
         "cd","ls","cat","cp","mv","rm","rmdir","mkdir","touch","ln","echo","printf",
         "export","source","make","cmake","find","grep","egrep","awk","sed","tar","zip",
@@ -126,7 +108,6 @@ enum TextTraditionalDetectors {
         if startedWithPrompt { return true }
         let cmd = firstToken.lowercased()
         if distinctiveCommands.contains(cmd) { return true }
-        // sudo/env-style leading wrapper: check the next token too.
         let hasFlag  = line.range(of: #"\s-\w"#, options: .regularExpression) != nil
         let hasPath  = line.contains("/") || line.contains("./") || line.contains("~/")
         let hasChain = line.contains(" | ") || line.contains("&&") || line.contains("; ")
@@ -135,7 +116,6 @@ enum TextTraditionalDetectors {
         return false
     }
 
-    /// True when the text is a single terminal command or a short block of them.
     private static func isCommand(_ text: String) -> Bool {
         let lines = text.split(whereSeparator: \.isNewline)
             .map { String($0).trimmingCharacters(in: .whitespaces) }
@@ -187,13 +167,10 @@ enum TextTraditionalDetectors {
         guard !text.contains("\n") else { return false }
         let t = text.trimmingCharacters(in: .whitespaces)
 
-        // Reject IPv4 addresses (192.168.1.1, 10.0.0.1, etc.)
         if DetectionRegex.matches(#"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"#, in: t) { return false }
 
-        // Reject date formats: 2026-05-27, 05/27/2026, 27.05.2026
         if DetectionRegex.matches(#"^\d{1,4}[.\-/]\d{1,2}[.\-/]\d{2,4}$"#, in: t) { return false }
 
-        // Reject version strings: 1.0.10, 2.5.1.3
         if DetectionRegex.matches(#"^\d+\.\d+(\.\d+)+$"#, in: t) { return false }
 
         let allowed = CharacterSet(charactersIn: "+0123456789()-. ")
@@ -202,9 +179,6 @@ enum TextTraditionalDetectors {
         let digits = t.filter(\.isNumber).count
         guard digits >= 7 && digits <= 15 else { return false }
 
-        // Pure-digit strings (no formatting) must be exactly 10 or 11 digits to
-        // qualify — this avoids flagging unix timestamps, numeric IDs, and other
-        // long integer sequences as phone numbers.
         let hasSeparators = t.contains(where: { "+()-. ".contains($0) })
         if !hasSeparators {
             return digits == 10 || digits == 11

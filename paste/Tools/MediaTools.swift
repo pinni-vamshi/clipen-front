@@ -42,9 +42,6 @@ enum MediaService {
         switch item.content {
         case .file(let u):
             url = u
-        // A one-element files-list IS a single file — the registry routes it
-        // to MediaTools, but this resolver only accepted `.file`, so a video
-        // captured as `.files([url])` showed ZERO tools.
         case .files(let urls) where urls.count == 1:
             url = urls[0]
         default:
@@ -101,8 +98,6 @@ enum MediaService {
                     do {
                         cgImage = try generator.copyCGImage(at: .zero, actualTime: nil)
                     } catch {
-                        // Some codecs fail at exact zero; fallback to earliest
-                        // near-zero frame while keeping the label truthful.
                         cgImage = try generator.copyCGImage(
                             at: CMTime(seconds: 0.1, preferredTimescale: 600),
                             actualTime: nil

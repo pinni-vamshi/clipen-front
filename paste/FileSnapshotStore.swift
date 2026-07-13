@@ -23,15 +23,6 @@ enum FileSnapshotStore {
                 try fileManager.copyItem(at: source, to: destination)
                 copiedURLs.append(destination)
             } catch {
-                // Drop it rather than falling back to the original URL.
-                // That fallback used to silently persist a reference to
-                // whatever couldn't be copied — harmless for an ordinary
-                // local file, but a landmine for a transient path (Universal
-                // Clipboard / Continuity staging files, promised-file temp
-                // dirs): those get cleaned up by the OS later, so the "copy"
-                // Clipen kept was really just a dead path that broke the
-                // moment you tried to use it. A capture that couldn't be
-                // copied cleanly shouldn't be preserved at all.
             }
         }
 

@@ -7,17 +7,6 @@ enum ToolRegistry {
         resolved(for: item).map { $0.tool }
     }
 
-    // ── Single-entry resolution cache.
-    //
-    // `displays`, `tools`, and every run/lookup helper below funnel through
-    // `resolved(for:)`. Opening the transform panel and then applying a tool
-    // used to recompute the whole applicable-tools list repeatedly for the
-    // SAME item — and each recompute ran every tool's `preview`, which
-    // executes the real transform over the full text (a big JSON/CSV blob got
-    // fully re-parsed per tool). Content is immutable, so resolution is a pure
-    // function of the item id; cache the most-recent item's result and reuse
-    // it. Lock-guarded because the run helpers can be reached off the main
-    // thread (async apply / capture paths).
     private struct ResolvedTools {
         let itemID: UUID
         let entries: [(tool: ClipboardTool, preview: String?)]
@@ -25,11 +14,6 @@ enum ToolRegistry {
     private static var resolvedCache: ResolvedTools?
     private static let resolvedLock = NSLock()
 
-    /// Applicable tools for `item`, each paired with the preview computed while
-    /// deciding applicability, sorted by importance. Preview and importance
-    /// score are computed EXACTLY ONCE per tool here — the old split
-    /// `applicable` + `displays` ran every preview twice, and the sort
-    /// recomputed each tool's score O(n log n) times.
     private static func resolved(for item: ClipboardItem) -> [(tool: ClipboardTool, preview: String?)] {
         resolvedLock.lock()
         if let cached = resolvedCache, cached.itemID == item.id {
@@ -46,13 +30,12 @@ enum ToolRegistry {
             if tool.id == "image.ocr", !AuthManager.shared.ocrEnabled { continue }
             if (tool.id == "pdf.extract-all-text" || tool.id == "pdf.first-page-text"),
                !AuthManager.shared.pdfTextExtract { continue }
-            // A tool is applicable iff it produces a preview for this item.
             guard let preview = tool.preview(item) else { continue }
             scored.append((tool, preview, AuthManager.shared.toolImportanceScore(for: tool.id), order))
         }
         scored.sort { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score > rhs.score }
-            return lhs.order < rhs.order   // stable catalog order on score ties
+            return lhs.order < rhs.order
         }
         let entries = scored.map { (tool: $0.tool, preview: $0.preview) }
 
@@ -62,8 +45,6 @@ enum ToolRegistry {
         return entries
     }
 
-    /// One primary pool per item so image/PDF/file tools sort among themselves
-    /// (usage scores), not buried under unrelated text tools.
     private static func toolPool(for item: ClipboardItem) -> [ClipboardTool] {
         switch item.content {
         case .image:
@@ -79,9 +60,6 @@ enum ToolRegistry {
             return FileTools.all
 
         case .files(let urls):
-            // A one-element files-list is functionally a single file — give it
-            // the same specialized pool a `.file` capture of that URL would
-            // get (media/PDF/image), not just the generic file tools.
             if urls.count == 1, let first = urls.first {
                 if FileKindDetector.isVideoFile(first) || FileKindDetector.isAudioFile(first) {
                     return MediaTools.all
@@ -99,17 +77,15 @@ enum ToolRegistry {
             return TextTools.all + FileTools.all
 
         case .svg:
-            return TextTools.all  // SVG is text-editable; minify/copy tools apply
+            return TextTools.all
 
         case .blob:
-            return []  // no transforms for opaque private data
+            return []
         }
     }
 
     static func displays(for item: ClipboardItem) -> [TransformDisplay] {
         resolved(for: item).map { entry in
-            // The preview is rendered two lines tall; a transform of a large
-            // blob can produce a huge string, so cap what we hand to SwiftUI.
             let preview: String? = {
                 guard let p = entry.preview, !p.isEmpty else { return nil }
                 return p.count > 200 ? String(p.prefix(200)) : p

@@ -12,11 +12,6 @@ enum FileKindDetector {
         }
     }
 
-    /// True programming-language source files.  Routed to the `.code` tag so
-    /// a `.swift`, `.py`, `.c`, etc. file lands in the Code chip instead of
-    /// the generic File chip.  Markup (html), data (json, yaml) and plain
-    /// text (txt, log) are deliberately NOT in here — they have their own
-    /// dedicated tags (.html, .json, .text).
     nonisolated static func isCodeFile(_ url: URL) -> Bool {
         switch fileExtension(url) {
         case "swift", "py", "rb", "go", "rs", "java", "kt", "kts",
@@ -33,9 +28,6 @@ enum FileKindDetector {
         }
     }
 
-    /// Plain-text-shaped files that don't belong to a more specific tag.
-    /// Routed to `.text` instead of the generic `.file` so the Text chip
-    /// surfaces things like `.txt`, `.log`, `.csv`, `.yml` etc.
     nonisolated static func isPlainTextFile(_ url: URL) -> Bool {
         switch fileExtension(url) {
         case "txt", "text", "log", "csv", "tsv", "xml",
@@ -92,9 +84,6 @@ enum FileKindDetector {
         isVideoFile(url) || isAudioFile(url)
     }
 
-    /// 3D model files SceneKit can load via SCNScene (directly or through its
-    /// Model I/O bridge). Routed to the SceneKit preview so they render as a
-    /// rotatable 3D scene instead of a generic file icon.
     nonisolated static func is3DModelFile(_ url: URL) -> Bool {
         switch fileExtension(url) {
         case "usdz", "usd", "usda", "usdc", "obj", "stl", "ply",
@@ -177,13 +166,6 @@ enum FileKindDetector {
             ?? String(data: data, encoding: .isoLatin1)
     }
 
-    /// Preview-only variant of `readableText`: reads at most `maxPreviewBytes`
-    /// from the START of the file via FileHandle, instead of the whole file —
-    /// so a preview of a huge file loads in bounded time regardless of the
-    /// file's actual size, rather than reading (and decoding) everything and
-    /// only THEN truncating what's displayed. `readableText` itself is left
-    /// untouched since its callers (paste, embeddings) need the real content,
-    /// not a fast approximation.
     nonisolated static func readableTextPreview(
         from url: URL, maxPreviewBytes: Int = 300_000
     ) -> (text: String, isTruncated: Bool)? {
@@ -195,10 +177,6 @@ enum FileKindDetector {
         let isTruncated = size > maxPreviewBytes
         let data = isTruncated ? handle.readData(ofLength: maxPreviewBytes) : handle.readDataToEndOfFile()
 
-        // Preview-only: drop leading blank lines/whitespace so a file that
-        // happens to start with empty space doesn't open on a blank screen.
-        // Applied here (not in readableText) since paste/embeddings must stay
-        // byte-faithful to the actual file — only what's DISPLAYED is trimmed.
         func decode(_ d: Data) -> String? {
             guard let s = String(data: d, encoding: .utf8)
                 ?? String(data: d, encoding: .utf16)
@@ -209,9 +187,6 @@ enum FileKindDetector {
             guard let text = decode(data) else { return nil }
             return (text, false)
         }
-        // A byte-bounded read can stop mid multi-byte UTF-8 sequence — back
-        // off a few bytes at a time until it decodes cleanly, rather than
-        // showing a garbled trailing character.
         var trimmed = data
         for _ in 0..<4 {
             if let text = decode(trimmed) { return (text, true) }
@@ -221,9 +196,6 @@ enum FileKindDetector {
         return nil
     }
 
-    /// Extract readable text from document files (PDF, DOCX, RTF, Pages, etc.).
-    /// Returns nil for unsupported formats or if no readable text is found.
-    /// - Parameter maxChars: Maximum characters to return (default 5 000 — enough for preview + paste context)
     nonisolated static func readableDocumentText(from url: URL, maxChars: Int = 5_000) -> String? {
         let ext = url.pathExtension.lowercased()
         switch ext {

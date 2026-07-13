@@ -1,20 +1,12 @@
 import AppKit
 import Quartz
 
-/// Drives macOS's native Quick Look panel (the same one Finder opens with
-/// Space) for a clipboard item double-clicked in the main window. Quick Look
-/// only understands file URLs, so non-file content (text, images, HTML…) is
-/// first written to a throwaway temp file — the same shape as
-/// `resolvePromisedFiles`'s temp-directory pattern elsewhere in the app.
 @MainActor
 final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
     static let shared = QuickLookController()
 
     private var previewItems: [URL] = []
 
-    /// Toggle Quick Look for this item: opens it if the panel is closed or
-    /// showing something else, closes it if it's already open on this exact
-    /// item (mirrors Finder's Space-to-toggle behavior).
     func toggle(for item: ClipboardItem) {
         guard let panel = QLPreviewPanel.shared() else { return }
         let urls = Self.previewURLs(for: item)
@@ -37,10 +29,6 @@ final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPa
         previewItems.indices.contains(index) ? previewItems[index] as QLPreviewItem : nil
     }
 
-    /// Resolves any clipboard item to one or more Quick-Look-able file URLs.
-    /// Real files pass through untouched; everything else is written to a
-    /// per-item temp directory so Quick Look has something to open. Returns
-    /// empty for content with no meaningful standalone preview (`.blob`).
     private static func previewURLs(for item: ClipboardItem) -> [URL] {
         switch item.content {
         case .file(let url) where FileManager.default.fileExists(atPath: url.path):

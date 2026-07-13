@@ -5,9 +5,6 @@ import UniformTypeIdentifiers
 import Vision
 import webp
 
-/// Subject/background segmentation via Vision's instance-mask request — a
-/// headless equivalent of VisionKit's interactive "lift subject" gesture,
-/// usable as a pure function (no live view/interaction required).
 enum SubjectLiftService {
     static func removeBackground(from image: NSImage) async -> (Data, NSImage)? {
         guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
@@ -83,7 +80,6 @@ enum ImageTools {
             runAsync: { item in
                 guard let input = ImageService.imageInput(for: item) else { return nil }
                 guard let text = await OCRService.extractText(from: input.image) else {
-                    // Analytics: OCR produced nothing for a real image.
                     await MainActor.run {
                         AuthManager.shared.registerActionUsage(actionID: "fail.ocr")
                     }
@@ -177,4 +173,3 @@ enum OCRService {
         }
     }
 }
-

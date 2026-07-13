@@ -2,11 +2,6 @@ import AppKit
 import Foundation
 import PDFKit
 
-
-// MARK: - Marked-set transforms (multi-selection)
-
-/// A transform that operates on the whole ordered mark queue instead of one
-/// item. Async-only — several of these do real work (OCR, PDF assembly, zip).
 struct MarkedTool {
     let id:      String
     let icon:    String
@@ -15,16 +10,10 @@ struct MarkedTool {
     let run:     ([ClipboardItem]) async -> TransformOutput?
 }
 
-/// Which family of multi-item tools applies to a marked set. Homogeneous
-/// sets get their own specialized tools (all text → text merges, all PDFs →
-/// PDF merges…); anything heterogeneous falls into `.mixed`, which only
-/// offers tools that can flatten every content type.
 enum MarkedToolRegistry {
 
     enum MarkedClass: Hashable { case text, image, pdf, file, mixed }
 
-    /// Pure-metadata classification — deliberately no file I/O (this runs on
-    /// every transform-panel rebuild while marks exist).
     static func classify(_ items: [ClipboardItem]) -> MarkedClass {
         func cls(_ item: ClipboardItem) -> MarkedClass {
             switch item.content {
@@ -77,8 +66,6 @@ enum MarkedToolRegistry {
         return await tool.run(items)
     }
 
-    // MARK: Text-repr helpers
-
     private static func plainText(_ item: ClipboardItem) -> String? {
         if case .svg(let s) = item.content { return s }
         return TextTools.input(for: item)
@@ -88,8 +75,6 @@ enum MarkedToolRegistry {
         items.compactMap { plainText($0)?.trimmingCharacters(in: .whitespacesAndNewlines) }
              .filter { !$0.isEmpty }
     }
-
-    // MARK: TEXT class
 
     private static let textTools: [MarkedTool] = [
         MarkedTool(id: "marked.merge-lines", icon: "text.append", label: "Merge as One Text",
@@ -118,8 +103,6 @@ enum MarkedToolRegistry {
             run: { items in
                 let parts = texts(items)
                 guard parts.count >= 2 else { return nil }
-                // Items that are themselves valid JSON stay as real JSON
-                // values; everything else becomes a JSON string.
                 let values: [Any] = parts.map { part in
                     if let data = part.data(using: .utf8),
                        let obj = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
@@ -164,8 +147,6 @@ enum MarkedToolRegistry {
             run: { items in await MarkedToolService.summarizeAll(items) }),
     ]
 
-    // MARK: IMAGE class
-
     private static let imageTools: [MarkedTool] = [
         MarkedTool(id: "marked.images-to-pdf", icon: "doc.richtext", label: "Combine into One PDF",
             preview: { "One PDF, \($0.count) pages, in mark order" },
@@ -181,8 +162,6 @@ enum MarkedToolRegistry {
             run: { items in await MarkedToolService.ocrAll(items) }),
     ]
 
-    // MARK: PDF class
-
     private static let pdfTools: [MarkedTool] = [
         MarkedTool(id: "marked.merge-pdfs", icon: "doc.on.doc", label: "Merge into One PDF",
             preview: { "Concatenate \($0.count) PDFs in mark order" },
@@ -191,8 +170,6 @@ enum MarkedToolRegistry {
             preview: { "All text from \($0.count) PDFs, with headers" },
             run: { items in await MarkedToolService.pdfTextAll(items) }),
     ]
-
-    // MARK: FILE class
 
     private static let fileTools: [MarkedTool] = [
         MarkedTool(id: "marked.zip", icon: "archivebox", label: "Zip Marked Files",
@@ -221,8 +198,6 @@ enum MarkedToolRegistry {
             run: { items in MarkedToolService.combinedFileInfo(items) }),
     ]
 
-    // MARK: MIXED class
-
     private static let mixedTools: [MarkedTool] = [
         MarkedTool(id: "marked.merge-document", icon: "doc.append", label: "Merge as Document",
             preview: { "Flatten \($0.count) items (text, OCR, PDF text, file contents) into one text" },
@@ -240,13 +215,8 @@ enum MarkedToolRegistry {
     ]
 }
 
-// MARK: - Marked-set tool implementations
-
 enum MarkedToolService {
 
-    /// Output directory for generated artifacts — same root the per-item
-    /// tools use ("Clipen/Optimized"), so evictFileSnapshots' cleanup covers
-    /// these files when their ring item is removed.
     private static func outputDir(subfolder: String? = nil) throws -> URL {
         let dir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -256,18 +226,12 @@ enum MarkedToolService {
         return target
     }
 
-    // MARK: Images
-
     static func imagesToPDF(_ items: [ClipboardItem]) async -> TransformOutput? {
         let inputs = items.compactMap { ImageService.imageInput(for: $0) }
         guard inputs.count >= 2 else { return .status("Need at least 2 images.") }
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let pdf = PDFDocument()
-                // Insert at the running page count, not the source-array index —
-                // if any image fails to become a page, using `idx` would either
-                // leave gaps or push the insert index past pageCount (a PDFKit
-                // out-of-bounds crash).
                 for input in inputs {
                     if let page = PDFPage(image: input.image) {
                         pdf.insert(page, at: pdf.pageCount)
@@ -295,17 +259,7 @@ enum MarkedToolService {
         let images = items.compactMap { ImageService.imageInput(for: $0)?.image }
         guard images.count >= 2 else { return .status("Need at least 2 images.") }
         return await withCheckedContinuation { continuation in
-            // Composite OFF the main thread. The old path did the whole draw +
-            // PNG encode inside DispatchQueue.main.async via NSImage.lockFocus,
-            // which froze the UI for the entire stitch — hundreds of ms for a
-            // marked set of large screenshots. lockFocus is the only part that
-            // actually needs the main thread; drawing CGImages into an explicit
-            // CGBitmapContext does not, so it runs here on a background core and
-            // the UI (spinner, cancel) stays live.
             DispatchQueue.global(qos: .userInitiated).async {
-                // Work in each image's NATIVE pixels (its CGImage), not NSImage
-                // points, so a Retina screenshot keeps full detail regardless of
-                // thread or screen backing scale.
                 var cgs: [CGImage] = []
                 cgs.reserveCapacity(images.count)
                 for img in images {
@@ -326,8 +280,6 @@ enum MarkedToolService {
                     continuation.resume(returning: .status("Couldn't stitch the images."))
                     return
                 }
-                // CGContext's origin is bottom-left; both branches place the
-                // first marked item at the top / left, matching the old output.
                 var offset = 0
                 if vertical {
                     for cg in cgs {
@@ -358,10 +310,6 @@ enum MarkedToolService {
     static func ocrAll(_ items: [ClipboardItem]) async -> TransformOutput? {
         let inputs = items.compactMap { ImageService.imageInput(for: $0) }
         guard inputs.count >= 2 else { return .status("Need at least 2 images.") }
-        // OCR every image CONCURRENTLY. Each request is independent and already
-        // runs on a background queue, so the old serial `await` loop made the
-        // total the SUM of every image's OCR time. A task group runs them
-        // across cores; results are reassembled in mark order by index.
         let byIndex: [Int: String] = await withTaskGroup(of: (Int, String?).self) { group in
             for (idx, input) in inputs.enumerated() {
                 let image = input.image
@@ -379,8 +327,6 @@ enum MarkedToolService {
         guard !parts.isEmpty else { return .status("No text found in any image.") }
         return .text(parts.joined(separator: "\n\n"))
     }
-
-    // MARK: PDFs
 
     static func mergePDFs(_ items: [ClipboardItem]) async -> TransformOutput? {
         let inputs = items.compactMap { PDFTools.pdfInput(for: $0) }
@@ -428,8 +374,6 @@ enum MarkedToolService {
         return .text(parts.joined(separator: "\n\n"))
     }
 
-    // MARK: Files
-
     static func zip(_ items: [ClipboardItem]) async -> TransformOutput? {
         let urls = items.flatMap { FileTools.fileURLs(for: $0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
@@ -437,9 +381,6 @@ enum MarkedToolService {
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    // Stage into a folder so `ditto -c -k` produces a zip whose
-                    // entries are the files themselves (handles duplicate
-                    // names by suffixing).
                     let stage = try outputDir(subfolder: "ZipStage-\(UUID().uuidString)")
                     defer { try? FileManager.default.removeItem(at: stage) }
                     var usedNames = Set<String>()
@@ -491,12 +432,6 @@ enum MarkedToolService {
         return .text(lines.joined(separator: "\n"))
     }
 
-    // MARK: Mixed
-
-    /// Flatten every marked item to its best text representation, in mark
-    /// order: text as-is, PDFs via text extraction, images via OCR, files via
-    /// readable contents (falling back to the file name). Shared by
-    /// `mergeAsDocument` and the Apple Intelligence summarize tools.
     static func flattenToText(_ items: [ClipboardItem]) async -> [String] {
         var parts: [String] = []
         for item in items {
@@ -529,9 +464,6 @@ enum MarkedToolService {
         return .text(parts.joined(separator: "\n\n"))
     }
 
-    /// Flatten the marked set to text (reusing the same logic as "Merge as
-    /// Document") and summarize the result with the on-device model. Used
-    /// by both the all-text and mixed-class "Summarize All" tools.
     static func summarizeAll(_ items: [ClipboardItem]) async -> TransformOutput? {
         guard items.count >= 2 else { return nil }
         let parts = await flattenToText(items)
@@ -549,7 +481,6 @@ enum MarkedToolService {
         return .text(summary)
     }
 
-    /// Materialise every marked item as a real file and paste them together.
     static func fileBundle(_ items: [ClipboardItem]) async -> TransformOutput? {
         guard items.count >= 2 else { return nil }
         return await withCheckedContinuation { continuation in

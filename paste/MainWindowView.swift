@@ -2,8 +2,6 @@ import SwiftUI
 import AppKit
 @preconcurrency import PDFKit
 
-// MARK: - Design tokens
-
 extension Color {
     static let bg        = Color(light: "#F5F5F7", dark: "#0F0F0F")
     static let surface   = Color(light: "#FFFFFF", dark: "#1A1A1A")
@@ -13,18 +11,9 @@ extension Color {
     static let accentDim = Color(hex: "#4F8EF7").opacity(0.15)
     static let textPri   = Color(light: "#1A1A1A", dark: "#FFFFFF")
     static let textSec   = Color(light: "#6E6E73", dark: "#888888")
-    // Dark value was #444444 — barely 1.7:1 on the dark surface, which made
-    // the many places that use textDim for real label/description/tool text
-    // (edit-picker labels, lab tool abbreviations, helper lines) unreadable
-    // in dark mode. #707070 lifts those to a legible ~3.8:1 while staying
-    // clearly dimmer than textSec.
     static let textDim   = Color(light: "#9A9AA0", dark: "#707070")
 }
 
-// MARK: - Window minimum-size configurator
-
-/// Enforces the window minimum size directly on the NSWindow so it applies
-/// from the very first launch, not only when openMainWindow() re-fronts it.
 private struct WindowMinSizeConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView { ConfigView() }
     func updateNSView(_ nsView: NSView, context: Context) {}
@@ -36,8 +25,6 @@ private struct WindowMinSizeConfigurator: NSViewRepresentable {
         }
     }
 }
-
-// MARK: - Vibrancy background (whole-window frosted glass, Raycast-style)
 
 private struct VisualEffectBackground: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .sidebar
@@ -55,17 +42,12 @@ private struct VisualEffectBackground: NSViewRepresentable {
     }
 }
 
-// MARK: - Main window
-
 struct MainWindowView: View {
 
     @StateObject private var manager = ClipboardManager.shared
     @StateObject private var auth    = AuthManager.shared
 
     @State private var searchText    = ""
-    /// Search actually applied to the list. Trails `searchText` by ~150 ms so
-    /// hybridSearch (tokenize + score every item) runs once per pause, not
-    /// once per keystroke.
     @State private var debouncedSearchText = ""
     @State private var searchDebounceTask: Task<Void, Never>? = nil
     @State private var mainSelectedID: UUID? = nil
@@ -75,17 +57,8 @@ struct MainWindowView: View {
     @AppStorage("hasSkippedAccessibility") private var hasSkippedAccessibility = false
     @AppStorage("hasSeenTutorial")         private var hasSeenTutorial         = false
 
-    // Main window has its own independent tag filter.
-    // It never reads or writes manager.popupTagFilter.
     @State private var mainTagFilter: ClipboardTag? = nil
 
-    // Dashboard list/detail split width. Persisted explicitly (not left to
-    // HSplitView) because HSplitView reset its divider to the ideal width
-    // every time the detail pane's `.id(item.id)` changed — i.e. on every row
-    // click — so an adjusted split snapped back to "detail fills everything"
-    // the moment you selected an item. A plain width we own can't be reset by
-    // a selection change. `liveListWidth` tracks the drag cheaply; the
-    // persisted value is only written on release.
     @AppStorage("dashboardListWidth") private var listWidth: Double = 300
     @State private var liveListWidth: Double? = nil
     @State private var dragStartListWidth: Double? = nil
@@ -93,9 +66,6 @@ struct MainWindowView: View {
 
     private var mainFilteredItems: [ClipboardItem] {
         let base = mainTagFilter.map { tag in manager.items.filter { $0.tags.contains(tag) } } ?? manager.items
-        // Same pin-block placement as the popup's displayItems — applied
-        // here (not in `filtered` below) so an active search's relevance
-        // ranking is never overridden by pin position.
         return manager.applyPinOrdering(base)
     }
 
@@ -149,20 +119,8 @@ struct MainWindowView: View {
                     .zIndex(2)
             }
         }
-        // Wider floor so the two-column Settings layout (04 INTERACTIONS +
-        // 05 INTERACTION PREVIEW side by side) never collapses into overlap.
         .frame(minWidth: 900, minHeight: 620)
-        // The REAL window toolbar (not a fake row drawn in the content):
-        // macOS owns the strip height, draws the traffic lights vertically
-        // centered in it, and lays these items out on that same line —
-        // wordmark right after the lights, switcher dead center, action
-        // pills at the trailing end. The taller unified style is what
-        // provides the breathing room above and below the whole row.
         .toolbar {
-            // On macOS 26+ every toolbar item gets wrapped in a Liquid
-            // Glass capsule by default — our items are fully self-styled,
-            // so that system glass is explicitly opted out of; older
-            // systems never drew it in the first place.
             if #available(macOS 26.0, *) {
                 ToolbarItem(placement: .navigation) { toolbarWordmark }
                     .sharedBackgroundVisibility(.hidden)
@@ -176,8 +134,6 @@ struct MainWindowView: View {
                 ToolbarItem(placement: .primaryAction) { toolbarActions }
             }
         }
-        // No system material behind the toolbar — the window's own frosted
-        // background shows through, same look as the previous custom row.
         .toolbarBackground(.hidden, for: .windowToolbar)
         .sheet(isPresented: $showTutorial) {
             TutorialSheet(isPresented: $showTutorial, onSeeMore: { showSettings = true })
@@ -194,8 +150,6 @@ struct MainWindowView: View {
             Text("This will erase all clipboard history, settings, and saved data. The app will quit so changes take effect on next launch.")
         }
     }
-
-    // MARK: - Toolbar item styles (used by the window .toolbar above)
 
     private var toolbarWordmark: some View {
         Text("CLIPEN")
@@ -251,13 +205,9 @@ struct MainWindowView: View {
         .help(title)
     }
 
-    // MARK: - Settings (full-window takeover)
-
     private var settingsFullView: some View {
         ClipenSettingsView(showResetConfirm: $showResetConfirm)
     }
-
-    // MARK: - Browsing view (Raycast-style: search on top, split below, footer)
 
     private var browsingView: some View {
         VStack(spacing: 0) {
@@ -267,8 +217,6 @@ struct MainWindowView: View {
             Divider().background(Color.border)
 
             if manager.items.isEmpty {
-                // Nothing copied yet — the split panes would both be empty,
-                // so give the animated onboarding the whole area instead.
                 OnboardingView()
             } else {
                 HStack(spacing: 0) {
@@ -288,7 +236,6 @@ struct MainWindowView: View {
         .onChange(of: searchText) { _, newValue in
             searchDebounceTask?.cancel()
             if newValue.isEmpty {
-                // Clearing search should feel instant — no debounce on the way out.
                 debouncedSearchText = ""
                 return
             }
@@ -302,8 +249,6 @@ struct MainWindowView: View {
         .onChange(of: debouncedSearchText) { _, _ in mainSelectedID = filtered.first?.id }
         .onChange(of: mainTagFilter) { _, _ in mainSelectedID = filtered.first?.id }
     }
-
-    // MARK: Top search bar (full window width, borderless — Raycast style)
 
     private var raycastSearchBar: some View {
         HStack(spacing: 12) {
@@ -321,9 +266,6 @@ struct MainWindowView: View {
                 .accessibilityLabel("Clear search")
             }
 
-            // Ring count at the right end of the search bar, just before the
-            // filter dropdown — quieter here than in the footer, and reads
-            // as a live status next to the "All" filter it relates to.
             Text("\(manager.items.count) / \(manager.maxItems)")
                 .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundColor(.textDim)
@@ -334,8 +276,6 @@ struct MainWindowView: View {
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
 
-    /// Category filter as a compact dropdown at the right end of the search
-    /// bar (replaces the old chip strip — same behavior, Raycast placement).
     private var filterDropdown: some View {
         Menu {
             Button {
@@ -368,15 +308,7 @@ struct MainWindowView: View {
         .fixedSize()
     }
 
-    // MARK: Left list pane (minimal rows — icon + one line)
-
     private var listPane: some View {
-        // Delegated to an `.equatable()` child so the filtered-list build (tag
-        // filter + pin ordering + search intersection) is SKIPPED whenever the
-        // main window's body re-evaluates for a reason the list doesn't care
-        // about — e.g. popup cycling mutating `manager.selectedIndex`/hint
-        // flags while the window is open, or a transient status flashing. The
-        // child re-renders only when one of its actual inputs changes.
         HistoryListPane(
             items:            manager.items,
             itemsRevision:    manager.itemsRevision,
@@ -387,7 +319,6 @@ struct MainWindowView: View {
             manager:          manager
         )
         .equatable()
-        // Enter pastes whichever row is currently selected.
         .onKeyPress(.return) {
             guard let id = mainSelectedID,
                   let i = manager.items.firstIndex(where: { $0.id == id }) else { return .ignored }
@@ -396,10 +327,6 @@ struct MainWindowView: View {
         }
     }
 
-    /// Draggable divider between the list and detail panes. Owns the split
-    /// width via `listWidth`/`liveListWidth` (persisted @AppStorage), so — unlike
-    /// HSplitView — a row selection can never snap it back. Width is committed
-    /// once on release, not per pixel, so the drag pays no UserDefaults cost.
     private var listDetailDivider: some View {
         ZStack {
             Divider().background(Color.border)
@@ -425,10 +352,6 @@ struct MainWindowView: View {
         )
     }
 
-    // MARK: Bottom footer bar
-
-    /// Same "vX.Y.Z (build)" string the Settings footer shows, so both
-    /// footers display the running version identically.
     private static var appVersionString: String {
         let info  = Bundle.main.infoDictionary
         let short = info?["CFBundleShortVersionString"] as? String ?? "?"
@@ -438,8 +361,6 @@ struct MainWindowView: View {
 
     private var footerBar: some View {
         HStack(spacing: 10) {
-            // Left cluster: ♥ Support Clipen · version · Built by — same
-            // shape as the Settings footer's left side.
             Button {
                 if let url = URL(string: "https://www.instagram.com/clipen.official") {
                     NSWorkspace.shared.open(url)
@@ -476,35 +397,21 @@ struct MainWindowView: View {
     }
 
     private func performFactoryReset() {
-        // Wipe clipboard history
         manager.clearAll()
 
-        // Delete the on-disk store DIRECTLY — clearAll only empties the
-        // in-memory ring and relies on the 1-second DEBOUNCED save to
-        // persist that emptiness, but terminate() below runs immediately,
-        // so the debounce never fired and the old encrypted manifest +
-        // blobs survived on disk. Result: "factory reset" brought the
-        // entire clipboard history back on next launch. Removing the
-        // whole Clipen dir (manifest, blobs, file copies, history.key)
-        // is what actually makes the next launch a fresh install.
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory,
                                                   in: .userDomainMask)[0]
         try? FileManager.default.removeItem(at: appSupport.appendingPathComponent("Clipen"))
 
-        // Wipe all UserDefaults for this app
         if let bundleID = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: bundleID)
             UserDefaults.standard.synchronize()
         }
 
-        // Wipe Keychain (any legacy stored secrets)
         Keychain.wipeAll()
 
-        // Quit so next launch feels like a fresh install
         NSApp.terminate(nil)
     }
-
-    // MARK: Accessibility permission screen
 
     private var accessibilityOnboarding: some View {
         VStack(spacing: 0) {
@@ -604,8 +511,6 @@ struct MainWindowView: View {
         .overlay(Rectangle().fill(Color.orange.opacity(0.35)).frame(height: 1), alignment: .bottom)
     }
 
-    // MARK: - Detail pane (selected item)
-
     @ViewBuilder
     private var detailPane: some View {
         if let id = mainSelectedID, let item = manager.items.first(where: { $0.id == id }) {
@@ -622,12 +527,6 @@ struct MainWindowView: View {
     }
 }
 
-/// Chip strip for the "Pasted to" row. A plain `ScrollView(.horizontal)` only
-/// responds to a horizontal-capable scroll input (trackpad two-finger swipe,
-/// or shift+wheel) — a user on a plain vertical-scroll mouse has no way to
-/// reveal chips past the visible edge. This tracks its own drag offset so
-/// click-and-drag panning works with any pointing device, clamped so it
-/// can't be dragged past either end.
 private struct PastedToChipStrip: View {
     let names: [String]
 
@@ -670,16 +569,10 @@ private struct PastedToChipStrip: View {
     }
 }
 
-// MARK: - Item detail view (Raycast-style right pane)
-
 private struct ItemDetailView: View {
     let item: ClipboardItem
 
     @State private var noteText: String
-    /// Last value actually pushed into the manager. Note commits are debounced
-    /// (400 ms) because updateUserNote mutates the @Published items array —
-    /// committing per keystroke re-rendered the entire window and reset the
-    /// disk-save debounce on every character typed.
     @State private var lastCommittedNote: String
     @State private var noteCommitTask: Task<Void, Never>? = nil
     @FocusState private var noteFocused: Bool
@@ -697,27 +590,13 @@ private struct ItemDetailView: View {
         ClipboardManager.shared.updateUserNote(id: item.id, note: value)
     }
 
-    /// User-adjustable pinned-preview height — dragged via the splitter
-    /// under the preview, persisted across launches.
     @AppStorage("detailPreviewHeight") private var previewHeight: Double = 290
     @State private var dragStartHeight: Double? = nil
-    /// Live height while actively dragging. Reading/writing `previewHeight`
-    /// (an @AppStorage) on every pixel of drag movement did two expensive
-    /// things per pixel: a synchronous UserDefaults write, and a full
-    /// re-layout of the pinned preview above (which can be a large image/PDF/
-    /// zoomable view) — the main thread couldn't keep up on a fast or long
-    /// drag, so the visible height fell behind and snapped erratically
-    /// ("vibrating"). This tracks the drag with a plain, cheap @State instead;
-    /// `previewHeight` itself is only written once, when the drag ends.
     @State private var liveDragHeight: Double? = nil
     private var effectiveHeight: Double { liveDragHeight ?? previewHeight }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Pinned preview — fixed at the top of the pane, never scrolls
-            // away, on a darker backdrop. No type header and no extra
-            // rounded boundary around the content: the type already shows
-            // in Properties below, and the darker region IS the frame.
             VStack(alignment: .leading, spacing: 14) {
                 pinnedContent
             }
@@ -727,7 +606,6 @@ private struct ItemDetailView: View {
             .background(Color.black.opacity(0.25))
             .clipped()
 
-            // Draggable splitter — resize the preview area to taste.
             ZStack {
                 Divider().background(Color.border)
                 Capsule().fill(Color.border)
@@ -747,10 +625,6 @@ private struct ItemDetailView: View {
                         liveDragHeight = min(560, max(140, base + Double(value.translation.height)))
                     }
                     .onEnded { _ in
-                        // Commit to @AppStorage exactly once, on release —
-                        // not per pixel — so the drag itself never pays for
-                        // a UserDefaults write or the persisted-value's own
-                        // observers re-running mid-gesture.
                         if let final = liveDragHeight { previewHeight = final }
                         liveDragHeight = nil
                         dragStartHeight = nil
@@ -769,10 +643,6 @@ private struct ItemDetailView: View {
         .background(Color.clear)
     }
 
-    /// Content inside the pinned region. Text-like content gets its own
-    /// scroll view so long text scrolls WITHIN the fixed preview area;
-    /// visual content (images, PDFs, files) fills the area directly since
-    /// those views manage their own zoom/pan.
     @ViewBuilder
     private var pinnedContent: some View {
         switch item.content {
@@ -790,13 +660,6 @@ private struct ItemDetailView: View {
             SelectableTextBlock(text: s.displayTrimmedLeading)
         case .richText(_, plain: let rawP), .html(_, plain: let rawP), .rtfd(_, plain: let rawP):
             let p = rawP.displayTrimmedLeading
-            // Previously: a document with an embedded table (e.g. a markdown
-            // file or Notes/Word doc that has a table alongside other text
-            // or code) showed ONLY the extracted table grid, silently
-            // discarding every other line — the extractor finding a table
-            // ANYWHERE replaced the WHOLE preview instead of supplementing
-            // it. Always show the full content; add the table grid as well
-            // when one was found, rather than instead.
             VStack(alignment: .leading, spacing: 14) {
                 SelectableTextBlock(text: p)
                 if let cells = TableCellExtractor.cells(for: item) {
@@ -804,13 +667,6 @@ private struct ItemDetailView: View {
                 }
             }
         case .image(let img, let data, let dataType):
-            // Same zoom/pan dispatch as ItemPreviewPanel and the reference
-            // panel — the detail pane is one of the four preview surfaces
-            // and gets identical interactions: pinch/double-click zoom,
-            // scroll-pan; image-typed PDFs get a real PDF view; GIFs play.
-            // fullResData decodes ONCE inside the view (data-change gated),
-            // never inline here in body — that inline decode was the
-            // v1.0.144 CPU/memory churn regression.
             Group {
                 if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
                     PDFPreview(document: pdf)
@@ -820,17 +676,8 @@ private struct ItemDetailView: View {
                     ZoomableImagePreview(image: img, fullResData: data)
                 }
             }
-            // No boxed background/border — the darker pinned region already
-            // frames the preview.
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .file(let url):
-            // FilePreviewContent already exists in ItemPreviewPanel.swift and
-            // renders the ACTUAL file — PDF pages, images, HTML, readable
-            // text, media, 3D models, with a QuickLook fallback for
-            // everything else. The main window used to show just an icon
-            // and a filename here; now it shows the same real preview the
-            // popup does, at a fixed size so the layout doesn't jump around
-            // between different file types.
             VStack(alignment: .leading, spacing: 10) {
                 FilePreviewContent(url: url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -891,17 +738,12 @@ private struct ItemDetailView: View {
         return nil
     }
 
-    /// Every destination app this item has ever been pasted into —
-    /// pastedToAppNames accumulates ALL destinations (not just the last one).
     private var pastedToNames: [String] {
         var names = Array(Set(item.pastedToAppNames.values)).sorted()
         if names.isEmpty, let last = item.pastedToAppName { names = [last] }
         return names
     }
 
-    /// "Pasted to" row — the destinations as chips in a HORIZONTALLY
-    /// scrolling strip, so any number of apps fits and the user can scroll
-    /// sideways to reveal them all.
     private var pastedToRow: some View {
         HStack(spacing: 12) {
             Text("Pasted to").font(.system(size: 12)).foregroundColor(.textSec)
@@ -918,13 +760,10 @@ private struct ItemDetailView: View {
                 propertyRow("Type", item.typeLabel)
                 cardDivider()
                 if let appName = item.sourceAppName {
-                    // Where it was copied FROM.
                     propertyRow("Copied from", appName)
                     cardDivider()
                 }
                 if !pastedToNames.isEmpty {
-                    // Where it has been pasted TO — every destination, in a
-                    // horizontally scrollable chip strip.
                     pastedToRow
                     cardDivider()
                 }
@@ -941,8 +780,6 @@ private struct ItemDetailView: View {
                 }
                 if !item.tags.isEmpty {
                     cardDivider()
-                    // Detected tags / categories, same labels the Reference
-                    // panel and category chips use.
                     propertyRow("Tags", item.tags.map(\.label).joined(separator: ", "))
                 }
             }
@@ -986,8 +823,6 @@ private struct ItemDetailView: View {
                         }
                     }
                     .onDisappear {
-                        // Selection switched or window closed mid-debounce —
-                        // flush whatever's pending so no typed note is lost.
                         noteCommitTask?.cancel()
                         commitNote(noteText)
                     }
@@ -1001,11 +836,6 @@ private struct ItemDetailView: View {
 }
 
 private struct SelectableTextBlock: View {
-    /// Raw text — capped for DISPLAY here (never affects paste/search,
-    /// which read the item's actual content directly). A huge pasted blob
-    /// (a JSON dump, a giant log) is already fully in memory, but handing
-    /// it whole to a SwiftUI Text view still costs real per-render layout
-    /// time; this bounds what's actually rendered.
     let text: String
     private var capped: (text: String, isTruncated: Bool) { text.displayCapped() }
 
@@ -1016,8 +846,6 @@ private struct SelectableTextBlock: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.textDim)
             }
-            // Plain text on the pinned region's own darker backdrop — no
-            // boxed background or rounded border of its own.
             Text(capped.text)
                 .font(.system(size: 14, design: .monospaced))
                 .foregroundColor(.textPri)
@@ -1028,16 +856,6 @@ private struct SelectableTextBlock: View {
     }
 }
 
-// MARK: - History list pane (equatable — see listPane for why)
-
-/// The scrollable history list. Split out of `MainWindowView` and made
-/// `Equatable` so SwiftUI can skip rebuilding it (and recomputing `filtered`)
-/// when the parent re-evaluates for reasons unrelated to the list. It observes
-/// nothing — it's a pure function of the values passed in, comparing them in
-/// `==`. `itemsRevision` stands in for "did the ring change" since
-/// `[ClipboardItem]` isn't Equatable. `manager` is held as a plain reference
-/// for actions only (no `@ObservedObject`), so manager churn never re-renders
-/// it; changes that DO matter arrive as changed inputs.
 private struct HistoryListPane: View, Equatable {
     let items:            [ClipboardItem]
     let itemsRevision:    Int
@@ -1055,8 +873,6 @@ private struct HistoryListPane: View, Equatable {
         l.selectedID       == r.selectedID
     }
 
-    /// Same logic as `MainWindowView.filtered` — tag filter, then pin ordering,
-    /// then (if searching) intersect with hybridSearch's ranked hits.
     private var filtered: [ClipboardItem] {
         let base = tagFilter.map { tag in items.filter { $0.tags.contains(tag) } } ?? items
         let pinOrdered = manager.applyPinOrdering(base)
@@ -1091,9 +907,6 @@ private struct HistoryListPane: View, Equatable {
                                 .equatable()
                                 .onTapGesture(count: 1) { selectedID = item.id }
                                 .onTapGesture(count: 2) {
-                                    // Double-click opens the native macOS Quick
-                                    // Look panel (same as Space in Finder) instead
-                                    // of pasting — Enter pastes the selection.
                                     selectedID = item.id
                                     QuickLookController.shared.toggle(for: item)
                                 }
@@ -1120,8 +933,6 @@ private struct HistoryListPane: View, Equatable {
     }
 }
 
-// MARK: - Compact list row (Raycast-style: icon + one line, nothing else)
-
 private struct CompactItemRow: View, Equatable {
     let item:       ClipboardItem
     let isSelected: Bool
@@ -1130,12 +941,6 @@ private struct CompactItemRow: View, Equatable {
 
     @State private var isHovered = false
 
-    // Skip re-rendering unchanged rows when the list re-evaluates (any manager
-    // @Published change, incl. async enrichment re-publishing `items`). Local
-    // hover @State still updates independently — `.equatable()` only short-
-    // circuits parent-driven re-renders, not a view's own state changes.
-    // Compares exactly what title/icon/pin render: identity, selection, and the
-    // mutable fields (isPinned, urlTitle, metadataSummary); content is immutable.
     static func == (l: CompactItemRow, r: CompactItemRow) -> Bool {
         l.item.id == r.item.id &&
         l.isSelected == r.isSelected &&
@@ -1153,14 +958,6 @@ private struct CompactItemRow: View, Equatable {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 8)
-            // Fixed-width trailing zone. The action buttons used to be
-            // CONDITIONALLY INSERTED on hover (`if isHovered { … }`), which
-            // changed the row's layout the instant hover toggled — so the
-            // hover tracking area shifted out from under the cursor right as
-            // you moved toward the pin, dropped `isHovered`, and the buttons
-            // vanished before you could click. Reserving constant space and
-            // fading the buttons in over the pinned indicator keeps the
-            // geometry stable, so hover never flickers.
             ZStack(alignment: .trailing) {
                 if item.isPinned {
                     Image(systemName: "pin.fill")
@@ -1168,8 +965,6 @@ private struct CompactItemRow: View, Equatable {
                         .foregroundColor(.accent)
                         .opacity(isHovered ? 0 : 1)
                 }
-                // Hover-revealed actions — delete (red) and pin/unpin (blue),
-                // the two most common row actions without the context menu.
                 HStack(spacing: 6) {
                     rowActionButton(icon: "xmark", background: .red, action: onDelete)
                         .help("Delete")
@@ -1257,8 +1052,6 @@ private struct CompactItemRow: View, Equatable {
         return trimmed.components(separatedBy: .newlines).first ?? trimmed
     }
 }
-
-// MARK: - Utilities
 
 extension Array {
     subscript(safe index: Int) -> Element? {

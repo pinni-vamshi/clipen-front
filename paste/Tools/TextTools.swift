@@ -76,14 +76,6 @@ enum TextTools {
         },
     ] + aiTools
 
-    // MARK: - Apple Intelligence (on-device Foundation Models)
-    //
-    // Every tool here checks AIService.isModelAvailable() in its preview —
-    // returning nil hides it from the list on macOS <26, with Apple
-    // Intelligence off, or on an ineligible device, same as any other
-    // not-applicable tool. Running the model itself is async-only (it's
-    // real on-device inference, not instant like the string tools above).
-
     private static let aiTools: [ClipboardTool] = [
         makeAI("ai.summarize", icon: "text.line.first.and.arrowtriangle.forward", label: "Summarize", group: "AI",
                minLength: AIService.minSummarizableLength) { text in
@@ -127,11 +119,6 @@ enum TextTools {
                 text: text
             )
         },
-        // "Convert to JSON/Table" only for UNSTRUCTURED text — text that's
-        // already valid JSON has its own deterministic Pretty/Minify tools,
-        // and text that's already comma/tab-delimited has the deterministic
-        // CSV/TSV-to-Markdown tool. Offering the AI version there too would
-        // be a second, redundant "table" option for the same input.
         ClipboardTool(
             id: "ai.convert-json", icon: "curlybraces", label: "Convert to JSON (AI)", group: "AI",
             preview: { item in
@@ -170,15 +157,6 @@ enum TextTools {
                 return .text(result)
             }
         ),
-        // Interactive — like "Paste Specific Pages" for PDFs, runAsync here
-        // is a placeholder that never actually runs. ClipboardManager
-        // intercepts this exact tool ID in commitPaste and swaps the
-        // transform panel into an inline language picker instead: one entry
-        // point, all languages shown together in ONE menu the user searches/
-        // arrows through, translate-and-paste on Enter. (Earlier version of
-        // this tool listed all 20 languages as separate rows in the main
-        // transform list — wrong shape: that's 20 competing entries, not a
-        // single "Translate" action with a language choice inside it.)
         ClipboardTool(
             id: "ai.translate", icon: "character.bubble", label: "Translate", group: "AI",
             preview: { item in
@@ -190,7 +168,6 @@ enum TextTools {
         ),
     ]
 
-    /// Every language the picker offers, in this order. (name, NLLanguage code)
     static let supportedTranslationLanguages: [(name: String, code: String)] = [
         ("English", "en"), ("Spanish", "es"), ("French", "fr"), ("German", "de"),
         ("Italian", "it"), ("Portuguese", "pt"), ("Dutch", "nl"), ("Russian", "ru"),
@@ -229,15 +206,6 @@ enum TextTools {
         )
     }
 
-    /// Opens the reference (Quick Clip) panel with the cursor already in its
-    /// content editor, instead of transforming the text itself. The transform
-    /// popup is deliberately non-activating (so it can float over any app
-    /// without stealing focus) — it can't hold real keyboard focus, so a true
-    /// editable text box has to live in a window that can, which the
-    /// reference panel already is. Offered for any content with a plain-text
-    /// representation (text/richText/html/rtfd, including URLs — those are
-    /// just `.text` under the hood); table-shaped content gets the reference
-    /// panel's cell-grid editor instead of a plain box automatically.
     private static let editTool = ClipboardTool(
         id: "text.edit",
         icon: "square.and.pencil",
@@ -268,13 +236,7 @@ enum TextTools {
         case .text(let s):               return s
         case .richText(_, plain: let s): return s
         case .html(_, plain: let s):     return s
-        // RTFD (Notes/TextEdit with attachments) carries the same plain-text
-        // representation as richText — omitting it here silently gave RTFD
-        // items ZERO text tools (no case/JSON/trim…), only the Edit tool.
         case .rtfd(_, plain: let s):     return s
-        // SVG is text-editable markup — ToolRegistry routes .svg to TextTools,
-        // so the tools' input extractor must handle it or every preview() is nil
-        // and SVG items silently get zero tools.
         case .svg(let s):                return s
         case .file(let url) where url.pathExtension.lowercased() != "pdf":
             return FileKindDetector.readableText(from: url)
