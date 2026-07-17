@@ -63,8 +63,14 @@ extension ClipboardManager {
                 let attrStr = NSAttributedString(rtfd: rtfdData, documentAttributes: nil)
                 DispatchQueue.main.async {
                     if let attrStr, !attrStr.string.isEmpty {
-                        if case .image = fallback?.content, Self.isImageOnlyAttributedString(attrStr) {
-                            self.addCaptured(fallback!, sidecar: sidecarSnapshot)
+                        if Self.isImageOnlyAttributedString(attrStr) {
+                            if case .image = fallback?.content {
+                                self.addCaptured(fallback!, sidecar: sidecarSnapshot)
+                            } else if let extracted = Self.imageItem(fromAttachmentIn: attrStr) {
+                                self.addCaptured(extracted, sidecar: sidecarSnapshot)
+                            } else {
+                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                            }
                         } else {
                             self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: attrStr.string)), sidecar: sidecarSnapshot)
                         }
@@ -131,8 +137,16 @@ extension ClipboardManager {
                 }()
                 DispatchQueue.main.async {
                     if let attrStr, !attrStr.string.isEmpty {
-                        if case .image = fallback?.content, Self.isImageOnlyAttributedString(attrStr) {
-                            self.addCaptured(fallback!, sidecar: sidecarSnapshot)
+                        if Self.isImageOnlyAttributedString(attrStr) {
+                            if case .image = fallback?.content {
+                                self.addCaptured(fallback!, sidecar: sidecarSnapshot)
+                            } else if let extracted = Self.imageItem(fromAttachmentIn: attrStr) {
+                                self.addCaptured(extracted, sidecar: sidecarSnapshot)
+                            } else if let rtfdUpgrade {
+                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                            } else {
+                                self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                            }
                         } else if let rtfdUpgrade {
                             self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: attrStr.string)), sidecar: sidecarSnapshot)
                         } else {
@@ -453,6 +467,36 @@ extension ClipboardManager {
             .replacingOccurrences(of: "\u{FFFC}", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return stripped.isEmpty
+    }
+
+    /// Pulls the actual image out of an `NSTextAttachment` embedded in an
+    /// image-only attributed string, for apps (Notes and similar rich-text
+    /// editors) that put the picture ONLY inside the RTFD attachment and
+    /// don't also duplicate it as a raw public.png/tiff pasteboard type —
+    /// `basicItem(from:)`'s image-type scan finds nothing in that case, so
+    /// without this the item would fall back to being captured as .rtfd
+    /// with no visible image at all.
+    static func imageItem(fromAttachmentIn attrStr: NSAttributedString) -> ClipboardItem? {
+        var found: ClipboardItem?
+        let full = NSRange(location: 0, length: attrStr.length)
+        attrStr.enumerateAttribute(.attachment, in: full, options: []) { value, _, stop in
+            guard found == nil, let attachment = value as? NSTextAttachment else { return }
+            if let wrapperData = attachment.fileWrapper?.regularFileContents,
+               let img = NSImage(data: wrapperData),
+               let content = ClipboardContent.imageContent(rawData: wrapperData,
+                                                            dataType: .init("public.png"), fallback: img) {
+                found = ClipboardItem(content: content)
+                stop.pointee = true
+                return
+            }
+            if let img = attachment.image, let data = img.pngData(),
+               let content = ClipboardContent.imageContent(rawData: data,
+                                                            dataType: .init("public.png"), fallback: img) {
+                found = ClipboardItem(content: content)
+                stop.pointee = true
+            }
+        }
+        return found
     }
 
     static func htmlContainsTable(_ html: String) -> Bool {

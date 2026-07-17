@@ -619,14 +619,28 @@ struct PopoverRow: View, Equatable {
                 }
             }
         case .richText(_, plain: let rawPlain), .rtfd(_, plain: let rawPlain):
-            let plain = rawPlain.displayTrimmedLeading
-            VStack(alignment: .leading, spacing: 2) {
-                Text(plain).font(.system(size: 12)).lineLimit(1).foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let cells = TableCellExtractor.cells(for: item) {
-                    MiniTablePreview(cells: cells)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            let plain = rawPlain
+                .replacingOccurrences(of: "\u{FFFC}", with: "")
+                .displayTrimmedLeading
+            HStack(alignment: .top, spacing: 6) {
+                if let embedded = EmbeddedImageExtractor.firstImage(for: item) {
+                    Image(nsImage: embedded)
+                        .resizable().aspectRatio(contentMode: .fill)
+                        .frame(width: 36, height: 36)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
+                VStack(alignment: .leading, spacing: 2) {
+                    if !plain.isEmpty {
+                        Text(plain).font(.system(size: 12)).lineLimit(1).foregroundColor(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let cells = TableCellExtractor.cells(for: item) {
+                        MiniTablePreview(cells: cells)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .html(_, let rawPlain):
             let plain = rawPlain.displayTrimmedLeading

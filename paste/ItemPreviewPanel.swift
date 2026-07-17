@@ -553,6 +553,57 @@ enum TableCellExtractor {
     }
 }
 
+/// Pulls the first embedded image out of `.richText`/`.rtfd` content that
+/// mixes real text with an image (so isn't pure-image and stays as rich
+/// text) — the compact popup row otherwise has nothing but `Text(plain)` to
+/// show for such an item, which for an attachment run is just the
+/// object-replacement placeholder character rendering as a stray glyph.
+enum EmbeddedImageExtractor {
+    private static let cache: NSCache<NSUUID, NSArray> = {
+        let c = NSCache<NSUUID, NSArray>()
+        c.countLimit = 300
+        return c
+    }()
+
+    static func firstImage(for item: ClipboardItem) -> NSImage? {
+        if let cached = cache.object(forKey: item.id as NSUUID) as? [NSImage] {
+            return cached.first
+        }
+        let result = extract(for: item)
+        cache.setObject((result.map { [$0] } ?? []) as NSArray, forKey: item.id as NSUUID)
+        return result
+    }
+
+    private static func extract(for item: ClipboardItem) -> NSImage? {
+        switch item.content {
+        case .richText(let attr, _):
+            return firstImage(in: attr)
+        case .rtfd(let data, _):
+            guard let attr = NSAttributedString(rtfd: data, documentAttributes: nil) else { return nil }
+            return firstImage(in: attr)
+        default:
+            return nil
+        }
+    }
+
+    private static func firstImage(in attr: NSAttributedString) -> NSImage? {
+        var found: NSImage?
+        let full = NSRange(location: 0, length: attr.length)
+        attr.enumerateAttribute(.attachment, in: full, options: []) { value, _, stop in
+            guard found == nil, let attachment = value as? NSTextAttachment else { return }
+            if let image = attachment.image {
+                found = image
+                stop.pointee = true
+            } else if let wrapperData = attachment.fileWrapper?.regularFileContents,
+                      let image = NSImage(data: wrapperData) {
+                found = image
+                stop.pointee = true
+            }
+        }
+        return found
+    }
+}
+
 struct MiniTablePreview: View {
     let cells: [[String]]
     var maxRows: Int = 2
