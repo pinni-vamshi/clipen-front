@@ -113,6 +113,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         set { updaterController?.updater.automaticallyDownloadsUpdates = newValue }
     }
 
+    var betaUpdatesEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "SUBetaUpdatesEnabled") }
+        set { UserDefaults.standard.set(newValue, forKey: "SUBetaUpdatesEnabled") }
+    }
+
     func checkForUpdatesInBackgroundIfAllowed() {
         guard automaticallyChecksForUpdates,
               let updater = updaterController?.updater,
@@ -173,6 +178,10 @@ extension AppDelegate: SPUStandardUserDriverDelegate {
 }
 
 extension AppDelegate: SPUUpdaterDelegate {
+
+    func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        betaUpdatesEnabled ? ["beta"] : []
+    }
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         NSApp.activate(ignoringOtherApps: true)

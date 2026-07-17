@@ -79,6 +79,16 @@ enum ImageService {
         return CGImageSourceGetCount(src) > 1
     }
 
+    /// True for a multi-page TIFF. Our encode pipeline draws a single CGImage,
+    /// so re-encoding one would silently drop every page but the first — the
+    /// same fidelity loss `isAnimatedGIF` guards against for GIFs.
+    static func isMultiPageTIFF(_ data: Data) -> Bool {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let type = CGImageSourceGetType(src),
+              (type as String) == (UTType.tiff.identifier) else { return false }
+        return CGImageSourceGetCount(src) > 1
+    }
+
     static func formatKind(for input: ImageInput) -> ImageFormatKind {
         if let url = input.sourceURL {
             switch url.pathExtension.lowercased() {
@@ -148,6 +158,14 @@ enum ImageService {
                     return
                 }
 
+                if kind == .tiff, isMultiPageTIFF(input.data) {
+                    continuation.resume(returning: .item(
+                        ClipboardItem(content: ClipboardContent.imageContent(rawData: input.data, dataType: input.dataType, fallback: input.image)!),
+                        message: "Multi-page TIFF kept as-is — reducing would drop pages."
+                    ))
+                    return
+                }
+
                 var best: ImageCandidate?
 
                 func consider(_ data: Data, image: NSImage, label: String) {
@@ -156,11 +174,17 @@ enum ImageService {
                     best = ImageCandidate(data: data, image: image, dataType: targetType, label: label)
                 }
 
+                // Each encode attempt allocates a full-resolution RGBA buffer
+                // (rgbaCGImage) plus an autoreleased NSBitmapImageRep. Draining
+                // per iteration keeps a big image from stacking several of them
+                // before the surrounding queue block's pool would.
                 switch kind {
                 case .jpeg:
                     for (q, label) in [(CGFloat(0.82), "JPEG 82%"), (CGFloat(0.70), "JPEG 70%"), (CGFloat(0.58), "JPEG 58%")] {
-                        if let (data, img) = encodeJPEG(image: input.image, quality: q) {
-                            consider(data, image: img, label: label)
+                        autoreleasepool {
+                            if let (data, img) = encodeJPEG(image: input.image, quality: q) {
+                                consider(data, image: img, label: label)
+                            }
                         }
                     }
                 case .png:
@@ -170,15 +194,19 @@ enum ImageService {
                 case .webp:
                     let encoder = WebPEncoder()
                     for (q, label) in [(Float(80), "WebP 80%"), (Float(70), "WebP 70%"), (Float(60), "WebP 60%")] {
-                        if let data = encodeWebP(image: input.image, quality: q, encoder: encoder),
-                           let img = decodeWebP(data: data) {
-                            consider(data, image: img, label: label)
+                        autoreleasepool {
+                            if let data = encodeWebP(image: input.image, quality: q, encoder: encoder),
+                               let img = decodeWebP(data: data) {
+                                consider(data, image: img, label: label)
+                            }
                         }
                     }
                 case .heic:
                     for (q, label) in [(CGFloat(0.85), "HEIC 85%"), (CGFloat(0.70), "HEIC 70%")] {
-                        if let (data, img) = encodeHEIC(image: input.image, quality: q) {
-                            consider(data, image: img, label: label)
+                        autoreleasepool {
+                            if let (data, img) = encodeHEIC(image: input.image, quality: q) {
+                                consider(data, image: img, label: label)
+                            }
                         }
                     }
                 case .gif:
@@ -199,7 +227,8 @@ enum ImageService {
 
                 if best == nil {
                     for (scale, scaleLabel) in [(CGFloat(0.9), "90%"), (CGFloat(0.8), "80%"), (CGFloat(0.7), "70%")] {
-                        guard let scaled = scaledCopy(of: input.image, factor: scale) else { continue }
+                      autoreleasepool {
+                        guard let scaled = scaledCopy(of: input.image, factor: scale) else { return }
                         switch kind {
                         case .jpeg:
                             if let (data, img) = encodeJPEG(image: scaled, quality: 0.75) {
@@ -234,6 +263,7 @@ enum ImageService {
                         default:
                             break
                         }
+                      }
                     }
                 }
 
@@ -617,19 +647,17 @@ enum ImageService {
 
     private static func scaledCopy(of image: NSImage, factor: CGFloat) -> NSImage? {
         guard factor > 0, factor < 1 else { return nil }
-        let target = NSSize(
-            width: max(1, image.size.width * factor),
-            height: max(1, image.size.height * factor)
-        )
-        let scaled = NSImage(size: target)
-        scaled.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
-        image.draw(in: NSRect(origin: .zero, size: target),
-                   from: NSRect(origin: .zero, size: image.size),
-                   operation: .copy,
-                   fraction: 1.0)
-        scaled.unlockFocus()
-        return scaled
+        // Was NSImage.lockFocus, which is not safe off the main thread — and
+        // reducedCopy calls this from a background queue. rgbaCGImage draws
+        // the source into an explicit CGContext at the target pixel size
+        // (high interpolation), the same thread-agnostic path stitch and the
+        // encoders already use, so scaling no longer touches AppKit's
+        // main-thread graphics state.
+        let (pw, ph) = pixelDimensions(of: image)
+        let tw = max(1, Int((CGFloat(pw) * factor).rounded()))
+        let th = max(1, Int((CGFloat(ph) * factor).rounded()))
+        guard let cg = rgbaCGImage(from: image, pixelWidth: tw, pixelHeight: th) else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: tw, height: th))
     }
 
     private static func pasteboardType(for url: URL) -> NSPasteboard.PasteboardType {

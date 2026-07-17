@@ -516,6 +516,7 @@ extension ClipboardManager {
         if let source { recordPasteDestination(for: source.id, app: pasteTarget) }
         AuthManager.shared.registerCommandVAction()
         popupSessionPasted = true
+        finalizePopupOutcome()
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()
@@ -728,6 +729,8 @@ extension ClipboardManager {
         popupSessionPasted = false
         popupSessionDeleted = false
         popupSessionAutoTimedOut = false
+        popupSessionActive = true
+        popupSessionOutcomeRecorded = false
         startAutoDismissTimer()
         syncItemPreviewWithSelection()
     }
@@ -1098,6 +1101,7 @@ extension ClipboardManager {
     func simulateCommandV() {
         let token = beginPasteSimulation()
         popupSessionPasted = true
+        finalizePopupOutcome()
         let src  = CGEventSource(stateID: .combinedSessionState)
         let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
         let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)

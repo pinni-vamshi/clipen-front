@@ -72,7 +72,7 @@ enum FileTools {
             label: "Paste File Contents",
             group: "TEXT",
             preview: { item in
-                readableFileText(for: item).map { String($0.prefix(120)) }
+                readableFilePreview(for: item).map { String($0.prefix(120)) }
             },
             runSync: { item in
                 readableFileText(for: item).map(TransformOutput.text)
@@ -161,6 +161,20 @@ enum FileTools {
             return nil
         }
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Short preview of a file's text WITHOUT reading the whole file. The old
+    /// preview called readableFileText (which reads up to 200 MB per text file
+    /// via Data(contentsOf:)) and then took prefix(120) — a huge main-thread
+    /// read to show 120 characters when the panel opens on a big log/CSV.
+    /// readableTextPreview streams only the first ~300 KB via FileHandle;
+    /// documents already cap at 5 000 chars in readableDocumentText.
+    private static func readableFilePreview(for item: ClipboardItem) -> String? {
+        guard let url = fileURLs(for: item).first else { return nil }
+        if FileKindDetector.isTextFile(url) {
+            return FileKindDetector.readableTextPreview(from: url)?.text
+        }
+        return FileKindDetector.readableDocumentText(from: url)
     }
 
     private static func readableFileText(for item: ClipboardItem) -> String? {

@@ -227,13 +227,19 @@ enum PDFService {
                     urls.reserveCapacity(backgroundPDF.pageCount)
 
                     for pageIndex in 0..<backgroundPDF.pageCount {
-                        guard let page = backgroundPDF.page(at: pageIndex),
-                              let pngData = render(page: page, scale: 2.0) else { continue }
+                        // Drain per page: each render allocates a full-page RGBA
+                        // bitmap + an autoreleased NSBitmapImageRep for the PNG.
+                        // Without this they accumulate across every page of a
+                        // large PDF before the queue block's pool would drain.
+                        try autoreleasepool {
+                            guard let page = backgroundPDF.page(at: pageIndex),
+                                  let pngData = render(page: page, scale: 2.0) else { return }
 
-                        let filename = String(format: "page-%03d.png", pageIndex + 1)
-                        let url = dir.appendingPathComponent(filename)
-                        try pngData.write(to: url, options: .atomic)
-                        urls.append(url)
+                            let filename = String(format: "page-%03d.png", pageIndex + 1)
+                            let url = dir.appendingPathComponent(filename)
+                            try pngData.write(to: url, options: .atomic)
+                            urls.append(url)
+                        }
                     }
 
                     guard !urls.isEmpty else {

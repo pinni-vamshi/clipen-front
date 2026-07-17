@@ -408,6 +408,16 @@ class ClipboardManager: ObservableObject {
     /// so dismissPreview() can tell a silent timeout apart from an explicit
     /// Escape press or click-away (both of which fall under "escaped").
     var popupSessionAutoTimedOut = false
+    /// True from openPopupNow() until the session's single outcome is
+    /// finalized. Gates finalizePopupOutcome() so a plain ⌘V "fast paste"
+    /// (which never opens the popup) records NO outcome — otherwise the
+    /// paste path would log a "pasted" outcome with no matching popup open,
+    /// breaking the "outcomes sum to opens" invariant.
+    var popupSessionActive = false
+    /// Ensures the per-session outcome is recorded EXACTLY once. Without it,
+    /// the paste path and dismissPreview (or two dismiss calls in a row)
+    /// could each log an outcome for the same session.
+    var popupSessionOutcomeRecorded = false
 
     var historyLoadedCleanly = false
 

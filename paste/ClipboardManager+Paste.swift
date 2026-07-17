@@ -308,6 +308,7 @@ extension ClipboardManager {
     func simulatePaste(_ item: ClipboardItem, target: NSRunningApplication?,
                               completion: (() -> Void)? = nil) {
         popupSessionPasted = true
+        finalizePopupOutcome()
         recordPasteDestination(for: item.id, app: target)
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -352,6 +353,7 @@ extension ClipboardManager {
             return
         }
         popupSessionPasted = true
+        finalizePopupOutcome()
         recordPasteAnalytics(item: itemList[0], displayIndex: nil)
         let item      = itemList[0]
         let remaining = Array(itemList.dropFirst())

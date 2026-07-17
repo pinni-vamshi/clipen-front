@@ -242,13 +242,21 @@ enum TextTools {
         }
     }
 
+    /// Read the pure-paste setting from UserDefaults (thread-safe) rather than
+    /// ClipboardManager.shared, because tool previews are evaluated by
+    /// ToolRegistry on background queues (async apply/capture paths) and the
+    /// manager's @Published property is main-actor state.
+    private static var pastePlainDefault: Bool {
+        UserDefaults.standard.object(forKey: "pastePlainTextByDefault") as? Bool ?? false
+    }
+
     private static let pastePlainTool = ClipboardTool(
         id: "text.paste-plain",
         icon: "textformat",
         label: "Paste as Plain Text",
         group: "PASTE",
         preview: { item in
-            guard !ClipboardManager.shared.pastePlainTextByDefault else { return nil }
+            guard !pastePlainDefault else { return nil }
             return richPlainText(for: item)
         },
         runSync: { item in
@@ -267,7 +275,7 @@ enum TextTools {
         label: "Paste with Formatting",
         group: "PASTE",
         preview: { item in
-            guard ClipboardManager.shared.pastePlainTextByDefault,
+            guard pastePlainDefault,
                   richPlainText(for: item) != nil else { return nil }
             return "Paste with original formatting"
         },

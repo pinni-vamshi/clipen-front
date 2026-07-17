@@ -148,33 +148,42 @@ extension ClipboardManager {
         selectedIndex = min(max(0, selectedIndex), display.count - 1)
     }
 
+    /// Records the single mutually-exclusive outcome for the current popup
+    /// session — pasted / deleted / escaped / blank — exactly once. Called
+    /// from BOTH the paste-completion paths (which hide the window directly
+    /// and never route through dismissPreview) and dismissPreview itself, so
+    /// the `pasted` case is captured; the guard makes it idempotent. "escaped"
+    /// covers the Escape key AND click-away; "blank" is the silent
+    /// auto-dismiss timeout (zero user input); pasted beats deleted beats
+    /// how it was closed.
+    func finalizePopupOutcome() {
+        guard popupSessionActive, !popupSessionOutcomeRecorded else { return }
+        popupSessionOutcomeRecorded = true
+        popupSessionActive = false
+        let outcome: String
+        if popupSessionPasted {
+            outcome = "pasted"
+        } else if popupSessionDeleted {
+            outcome = "deleted"
+        } else if popupSessionAutoTimedOut {
+            outcome = "blank"
+        } else {
+            outcome = "escaped"
+        }
+        TrackingService.shared.recordPopupOutcome(outcome)
+    }
+
     func dismissPreview() {
         if previewWindow.isVisible {
             if let openedAt = popupOpenedAt {
                 let ms = max(0, Int(Date().timeIntervalSince(openedAt) * 1000))
                 AuthManager.shared.registerActionUsage(actionID: "popup.dur_ms", count: ms)
             }
-            // Mutually-exclusive per-session outcome: pasted beats deleted
-            // beats how it was actually closed. "escaped" covers BOTH the
-            // Escape key and clicking away — both are an explicit action to
-            // leave, just not the intended one. "blank" is reserved for the
-            // one case with zero user input all session: the auto-dismiss
-            // timer firing untouched.
-            let outcome: String
-            if popupSessionPasted {
-                outcome = "pasted"
-            } else if popupSessionDeleted {
-                outcome = "deleted"
-            } else if popupSessionAutoTimedOut {
-                outcome = "blank"
-            } else {
-                outcome = "escaped"
-            }
-            TrackingService.shared.recordPopupOutcome(outcome)
             if !popupSessionPasted {
                 AuthManager.shared.registerActionUsage(actionID: "popup.abandon")
             }
         }
+        finalizePopupOutcome()
         popupOpenedAt = nil
         captureRememberedSelection()
         clearPopupHintHighlights()

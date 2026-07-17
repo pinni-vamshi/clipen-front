@@ -497,15 +497,22 @@ struct PopoverRow: View, Equatable {
         l.item.metadataSummary == r.item.metadataSummary
     }
 
+    private static let minRowHeight: CGFloat = 56
+    private static let maxRowHeight: CGFloat = 104
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            rowHeader
-            rowContent.padding(.leading, 30)
+        HStack(alignment: .top, spacing: 8) {
+            verticalRail
+            Divider()
+            rowContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
         .background(isSelected ? Color.accentColor : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.horizontal, 6)
+        .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
             if ClipboardManager.shared.markedItemIDs.count > 1 {
                 MultiItemDragSource(
@@ -520,10 +527,33 @@ struct PopoverRow: View, Equatable {
         }
     }
 
-    private var rowHeader: some View {
-        HStack(spacing: 8) {
-            ItemTagStrip(tags: item.tags, maxVisible: 4, style: .plainComma)
+    /// Slim vertical strip replacing the old horizontal header: pin badge pinned to the top,
+    /// tag name rotated -90° and pushed to the bottom via Spacer, so `rowContent` gets full width/height.
+    private var verticalRail: some View {
+        VStack(spacing: 6) {
+            if item.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 7, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 14, height: 14)
+                    .background(Color.blue, in: Circle())
+                    .help("Pinned — hold P to unpin")
+            }
 
+            Spacer(minLength: 2)
+
+            ItemTagStrip(tags: item.tags, maxVisible: 4, style: .plainComma)
+                .fixedSize()
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 16)
+        .frame(maxHeight: .infinity)
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var trailingIndicators: some View {
+        HStack(spacing: 6) {
             if let badge = item.diffBadge {
                 Text("∆ \(badge)")
                     .font(.system(size: 8, weight: .semibold, design: .monospaced))
@@ -538,17 +568,6 @@ struct PopoverRow: View, Equatable {
                     .foregroundColor(.secondary.opacity(0.6))
                     .help("This item has a note")
             }
-
-            if item.isPinned {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 7, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 14, height: 14)
-                    .background(Color.blue, in: Circle())
-                    .help("Pinned — hold P to unpin")
-            }
-
-            Spacer()
 
             if let order = markOrder {
                 Text("\(order). marked")
@@ -571,6 +590,7 @@ struct PopoverRow: View, Equatable {
                 }
             }
         }
+        .padding(.top, 8).padding(.trailing, 14)
     }
 
     @ViewBuilder
