@@ -767,7 +767,7 @@ struct TagFilterChip: View {
                         .foregroundColor(selected ? .white.opacity(0.85) : .secondary.opacity(0.75))
                 }
                 Image(systemName: icon).font(.system(size: 9, weight: .semibold))
-                Text(label).font(.system(size: 10, weight: .semibold))
+                Text(LocalizedStringKey(label)).font(.system(size: 10, weight: .semibold))
             }
             .foregroundColor(selected ? .white : .secondary)
             .padding(.horizontal, 9).padding(.vertical, 4)

@@ -205,7 +205,7 @@ struct ItemTagStrip: View {
 
     private var plainCommaStrip: some View {
         let visible = Array(tags.prefix(maxVisible))
-        let labels = visible.map(\.label)
+        let labels = visible.map { String(localized: String.LocalizationValue($0.label)) }
         let suffix = tags.count > maxVisible ? ", +\(tags.count - maxVisible)" : ""
         return Text(labels.joined(separator: ", ") + suffix)
             .font(.system(size: 9, weight: .medium))
@@ -222,7 +222,7 @@ struct TagChip: View {
         HStack(spacing: 3) {
             Image(systemName: tag.icon)
                 .font(.system(size: compact ? 8 : 9, weight: .semibold))
-            Text(tag.label)
+            Text(LocalizedStringKey(tag.label))
                 .font(.system(size: compact ? 9 : 10, weight: .semibold))
         }
         .foregroundColor(tag.badgeColor)

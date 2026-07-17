@@ -358,7 +358,7 @@ struct TransformRow: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack {
-                    Text(display.label)
+                    Text(LocalizedStringKey(display.label))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(isSelected ? .white : .primary)
                     Spacer()

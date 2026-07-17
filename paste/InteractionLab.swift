@@ -755,7 +755,7 @@ struct InteractionLabStage: View {
                 .opacity(lab.resultText == nil ? 0 : 1)
                 .frame(height: 16)
 
-            Text(lab.currentCaption)
+            Text(LocalizedStringKey(lab.currentCaption))
                 .font(.system(size: 11))
                 .foregroundColor(.textSec)
                 .multilineTextAlignment(.center)
@@ -867,6 +867,7 @@ struct ClipenSettingsView: View {
     @State private var feedbackSending = false
     @State private var feedbackSendState: FeedbackSendState = .idle
     @State private var pendingLanguage: AppLanguage?
+    @State private var showLanguagePicker = false
 
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
@@ -1100,6 +1101,40 @@ struct ClipenSettingsView: View {
                 }
                 .buttonStyle(.plain)
             }
+            Spacer(minLength: 6)
+        }
+        .frame(width: 200)
+        .padding(.bottom, 4)
+    }
+
+    private var languagePicker: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Language").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+                .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 4)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(AppLanguage.supported) { lang in
+                        let isOn = lang.code == manager.appLanguageCode
+                        Button {
+                            showLanguagePicker = false
+                            guard !isOn else { return }
+                            pendingLanguage = lang
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(lang.displayName).font(.system(size: 12)).foregroundColor(.textPri)
+                                Spacer()
+                                if isOn {
+                                    Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundColor(.accent)
+                                }
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(maxHeight: 240)
             Spacer(minLength: 6)
         }
         .frame(width: 200)
@@ -1489,19 +1524,8 @@ struct ClipenSettingsView: View {
                     Image(systemName: "globe").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
                     Text("Language").font(.system(size: 13)).foregroundColor(.textPri)
                     Spacer()
-                    Menu {
-                        ForEach(AppLanguage.supported) { lang in
-                            Button {
-                                guard lang.code != manager.appLanguageCode else { return }
-                                pendingLanguage = lang
-                            } label: {
-                                if lang.code == manager.appLanguageCode {
-                                    Label(lang.displayName, systemImage: "checkmark")
-                                } else {
-                                    Text(lang.displayName)
-                                }
-                            }
-                        }
+                    Button {
+                        showLanguagePicker.toggle()
                     } label: {
                         Text(AppLanguage.current(for: manager.appLanguageCode).displayName)
                             .font(.system(size: 11, weight: .semibold))
@@ -1509,8 +1533,10 @@ struct ClipenSettingsView: View {
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showLanguagePicker, arrowEdge: .bottom) {
+                        languagePicker
+                    }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
                 .frame(maxHeight: .infinity)
@@ -1663,11 +1689,11 @@ struct ClipenSettingsView: View {
             playDemo(demo)
         } label: {
             HStack(spacing: 12) {
-                Text(keyLabel)
+                Text(LocalizedStringKey(keyLabel))
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(isActive ? .textPri : .textSec)
                     .frame(width: 90, alignment: .leading)
-                Text(demo.title)
+                Text(LocalizedStringKey(demo.title))
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
                     .foregroundColor(isActive ? .textPri : .textSec)
                 Spacer()

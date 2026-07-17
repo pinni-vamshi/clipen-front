@@ -191,7 +191,7 @@ struct MainWindowView: View {
         .buttonStyle(.plain)
     }
 
-    private func toolbarPill(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+    private func toolbarPill(_ title: LocalizedStringKey, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 Image(systemName: icon).font(.system(size: 11, weight: .medium))
