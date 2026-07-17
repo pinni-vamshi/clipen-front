@@ -338,10 +338,10 @@ struct MainWindowView: View {
             if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
         }
         .gesture(
-            DragGesture(minimumDistance: 1)
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
+                    if dragStartListWidth == nil { dragStartListWidth = listWidth }
                     let base = dragStartListWidth ?? listWidth
-                    dragStartListWidth = base
                     liveListWidth = min(400, max(240, base + Double(value.translation.width)))
                 }
                 .onEnded { _ in
@@ -618,10 +618,10 @@ private struct ItemDetailView: View {
                 if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
             }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
+                        if dragStartHeight == nil { dragStartHeight = previewHeight }
                         let base = dragStartHeight ?? previewHeight
-                        dragStartHeight = base
                         liveDragHeight = min(560, max(140, base + Double(value.translation.height)))
                     }
                     .onEnded { _ in
@@ -928,6 +928,7 @@ private struct HistoryListPane: View, Equatable {
                     }
                     .padding(8)
                 }
+                .scrollIndicators(.hidden)
             }
         }
     }
@@ -965,7 +966,7 @@ private struct CompactItemRow: View, Equatable {
                         .foregroundColor(.accent)
                         .opacity(isHovered ? 0 : 1)
                 }
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     rowActionButton(icon: "xmark", background: .red, action: onDelete)
                         .help("Delete")
                     rowActionButton(icon: item.isPinned ? "pin.slash.fill" : "pin.fill",
@@ -975,9 +976,9 @@ private struct CompactItemRow: View, Equatable {
                 .opacity(isHovered ? 1 : 0)
                 .allowsHitTesting(isHovered)
             }
-            .frame(width: 46, alignment: .trailing)
+            .frame(width: 64, alignment: .trailing)
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
+        .padding(.leading, 10).padding(.trailing, 16).padding(.vertical, 8)
         .background(
             isSelected ? Color.white.opacity(0.10)
                        : (isHovered ? Color.white.opacity(0.05) : Color.clear),
@@ -991,9 +992,9 @@ private struct CompactItemRow: View, Equatable {
     private func rowActionButton(icon: String, background: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 8, weight: .bold))
+                .font(.system(size: 9, weight: .bold))
                 .foregroundColor(.white)
-                .frame(width: 16, height: 16)
+                .frame(width: 20, height: 20)
                 .background(background, in: Circle())
         }
         .buttonStyle(.plain)

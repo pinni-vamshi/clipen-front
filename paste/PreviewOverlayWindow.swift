@@ -505,7 +505,7 @@ struct PopoverRow: View, Equatable {
             verticalRail
             Divider()
             rowContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
         .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
@@ -639,12 +639,8 @@ struct PopoverRow: View, Equatable {
         case .file(let url):
             HStack(spacing: 6) {
                 fileThumbnail(url, size: 28)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(url.lastPathComponent).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    Text(item.metadataSummary ?? url.deletingLastPathComponent().path)
-                        .font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(url.lastPathComponent).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .files(let urls):
             HStack(spacing: 6) {
@@ -653,24 +649,16 @@ struct PopoverRow: View, Equatable {
                 } else {
                     Image(systemName: "doc.on.doc").frame(width: 14, height: 14)
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(urls.count) files").font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    Text(item.metadataSummary ?? urls.map(\.lastPathComponent).joined(separator: ", "))
-                        .font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(urls.count) files").font(.system(size: 11, weight: .medium)).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .image(let img, let data, _):
-            VStack(alignment: .leading, spacing: 2) {
-                Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
-                    .resizable().aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 280, maxHeight: 48, alignment: .leading)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let summary = item.metadataSummary {
-                    Text(summary).font(.system(size: 9)).lineLimit(1).foregroundColor(.secondary)
-                }
-            }
+            Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
+                .resizable().aspectRatio(contentMode: .fill)
+                .frame(width: 48, height: 48)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .frame(maxWidth: .infinity, alignment: .leading)
         case .svg(let src):
             Text(src).font(.system(size: 11, design: .monospaced)).lineLimit(2)
                 .foregroundColor(.primary).frame(maxWidth: .infinity, alignment: .leading)
