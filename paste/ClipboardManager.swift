@@ -136,6 +136,14 @@ class ClipboardManager: ObservableObject {
         didSet { UserDefaults.standard.set(showColorSwatches, forKey: "showColorSwatches") }
     }
 
+    /// Empty string = follow the system language. Changing this only takes
+    /// effect after relaunch (Foundation reads "AppleLanguages" once at
+    /// process launch), so the settings UI restarts the app on selection —
+    /// see AppLanguage.apply(_:) below.
+    @Published var appLanguageCode: String = UserDefaults.standard.string(forKey: "appLanguageCode") ?? "" {
+        didSet { UserDefaults.standard.set(appLanguageCode, forKey: "appLanguageCode") }
+    }
+
     @Published var showPopupInteractionHints: Bool = UserDefaults.standard.object(forKey: "showPopupInteractionHints") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showPopupInteractionHints, forKey: "showPopupInteractionHints") }
     }
@@ -1059,6 +1067,60 @@ enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
 
     static func save(_ types: Set<AutoPreviewContentType>) {
         UserDefaults.standard.set(types.map(\.rawValue), forKey: defaultsKey)
+    }
+}
+
+struct AppLanguage: Identifiable, Hashable {
+    /// Empty = follow system language.
+    let code: String
+    let displayName: String
+    var id: String { code }
+
+    static let system = AppLanguage(code: "", displayName: "System")
+
+    static let supported: [AppLanguage] = [
+        system,
+        AppLanguage(code: "en", displayName: "English"),
+        AppLanguage(code: "de", displayName: "Deutsch"),
+        AppLanguage(code: "fr", displayName: "Français"),
+        AppLanguage(code: "es", displayName: "Español"),
+        AppLanguage(code: "ja", displayName: "日本語"),
+        AppLanguage(code: "ko", displayName: "한국어"),
+        AppLanguage(code: "it", displayName: "Italiano"),
+        AppLanguage(code: "nl", displayName: "Nederlands"),
+        AppLanguage(code: "ru", displayName: "Русский"),
+        AppLanguage(code: "tr", displayName: "Türkçe"),
+        AppLanguage(code: "pl", displayName: "Polski"),
+        AppLanguage(code: "sv", displayName: "Svenska"),
+        AppLanguage(code: "id", displayName: "Bahasa Indonesia"),
+        AppLanguage(code: "vi", displayName: "Tiếng Việt"),
+        AppLanguage(code: "pt-BR", displayName: "Português (Brasil)"),
+        AppLanguage(code: "zh-Hans", displayName: "简体中文"),
+        AppLanguage(code: "zh-Hant", displayName: "繁體中文"),
+    ]
+
+    static func current(for code: String) -> AppLanguage {
+        supported.first { $0.code == code } ?? .system
+    }
+
+    /// Sets (or clears, for .system) the "AppleLanguages" default and
+    /// relaunches the app — Foundation only reads that key once at process
+    /// launch, so there's no way to apply a language switch without restarting.
+    static func apply(_ code: String) {
+        if code.isEmpty {
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+        } else {
+            UserDefaults.standard.set([code], forKey: "AppleLanguages")
+        }
+        UserDefaults.standard.synchronize()
+
+        let bundleURL = Bundle.main.bundleURL
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: bundleURL, configuration: config) { _, _ in }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            NSApp.terminate(nil)
+        }
     }
 }
 

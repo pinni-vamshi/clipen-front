@@ -866,6 +866,7 @@ struct ClipenSettingsView: View {
     @State private var feedbackText = ""
     @State private var feedbackSending = false
     @State private var feedbackSendState: FeedbackSendState = .idle
+    @State private var pendingLanguage: AppLanguage?
 
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
@@ -1481,7 +1482,52 @@ struct ClipenSettingsView: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
                 .frame(maxHeight: .infinity)
+
+                rowDivider(leading: 40)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "globe").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                    Text("Language").font(.system(size: 13)).foregroundColor(.textPri)
+                    Spacer()
+                    Menu {
+                        ForEach(AppLanguage.supported) { lang in
+                            Button {
+                                guard lang.code != manager.appLanguageCode else { return }
+                                pendingLanguage = lang
+                            } label: {
+                                if lang.code == manager.appLanguageCode {
+                                    Label(lang.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(lang.displayName)
+                                }
+                            }
+                        }
+                    } label: {
+                        Text(AppLanguage.current(for: manager.appLanguageCode).displayName)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.accent)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .frame(maxHeight: .infinity)
             }
+        }
+        .alert("Restart Clipen to switch language?",
+               isPresented: Binding(get: { pendingLanguage != nil }, set: { if !$0 { pendingLanguage = nil } })) {
+            Button("Restart Now", role: .destructive) {
+                if let lang = pendingLanguage {
+                    manager.appLanguageCode = lang.code
+                    AppLanguage.apply(lang.code)
+                }
+                pendingLanguage = nil
+            }
+            Button("Cancel", role: .cancel) { pendingLanguage = nil }
+        } message: {
+            Text("Clipen needs to restart to switch to \(pendingLanguage?.displayName ?? "").")
         }
     }
 
