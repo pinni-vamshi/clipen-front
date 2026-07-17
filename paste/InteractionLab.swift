@@ -1028,7 +1028,7 @@ struct ClipenSettingsView: View {
         Divider().background(Color.border).padding(.leading, leading)
     }
 
-    private func behaviourRow(_ n: Int, icon: String, _ label: String,
+    private func behaviourRow(_ n: Int, icon: String, _ label: LocalizedStringKey,
                               isOn: Binding<Bool>) -> some View {
         HStack(spacing: 10) {
             rowNumber(n)

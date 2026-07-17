@@ -347,6 +347,11 @@ extension ClipboardManager {
             }
 
             if shift && !opt {
+                // Shift (⇧V) is always a plain "previous item in the main
+                // ring" shortcut — Shift+X is the separate, dedicated way to
+                // step backward within the transform panel (cycleTransformBackward,
+                // handled elsewhere via key == 7 + shift). Only the alternate
+                // "B" reverse-key binding is context-aware about inTransformStage.
                 if !reverseCycleUsesB {
                     DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }
                 }

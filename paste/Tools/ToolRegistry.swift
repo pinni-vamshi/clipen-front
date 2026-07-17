@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import PDFKit
 
 enum ToolRegistry {
     static func tools(for item: ClipboardItem) -> [ClipboardTool] {
@@ -45,43 +44,23 @@ enum ToolRegistry {
         return entries
     }
 
+    /// Every registered tool, from every domain file, considered for every
+    /// item regardless of its content type. There is no outer type-based
+    /// routing here on purpose: each tool's own `preview` closure is already
+    /// the sole authority on whether it applies to a given item (see
+    /// `ImageService.imageInput(for:)`, `PDFTools.pdfInput(for:)`,
+    /// `FileTools.fileURLs(for:)`, `TextTools.input(for:)` — every one of
+    /// them independently inspects the item and returns nil when it doesn't
+    /// apply). A tool is just a tool; it isn't filed under "the image tools"
+    /// or "the text tools" as a precondition for showing up somewhere, and
+    /// ranking (`AuthManager.toolImportanceScore(for: tool.id)`) already
+    /// operates purely per-tool-id, with no notion of which array declared it.
+    private static let allTools: [ClipboardTool] =
+        TextTools.all + ImageTools.all + FileTools.all + PDFTools.all + MediaTools.all
+
     private static func toolPool(for item: ClipboardItem) -> [ClipboardTool] {
-        switch item.content {
-        case .image:
-            return ImageTools.all
-
-        case .file(let url):
-            if FileKindDetector.isVideoFile(url) || FileKindDetector.isAudioFile(url) {
-                return MediaTools.all
-            }
-            if url.pathExtension.lowercased() == "pdf" {
-                return PDFTools.all
-            }
-            return FileTools.all
-
-        case .files(let urls):
-            if urls.count == 1, let first = urls.first {
-                if FileKindDetector.isVideoFile(first) || FileKindDetector.isAudioFile(first) {
-                    return MediaTools.all
-                }
-                if first.pathExtension.lowercased() == "pdf" {
-                    return PDFTools.all
-                }
-                if FileKindDetector.isImageFile(first) {
-                    return ImageTools.all + FileTools.all
-                }
-            }
-            return FileTools.all
-
-        case .text, .richText, .rtfd, .html:
-            return TextTools.all + FileTools.all
-
-        case .svg:
-            return TextTools.all
-
-        case .blob:
-            return []
-        }
+        if case .blob = item.content { return [] }
+        return allTools
     }
 
     static func displays(for item: ClipboardItem) -> [TransformDisplay] {
