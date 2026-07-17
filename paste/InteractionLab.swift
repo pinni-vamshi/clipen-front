@@ -933,7 +933,12 @@ struct ClipenSettingsView: View {
                         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.border, lineWidth: 1))
 
                     HStack {
+                        if feedbackSendState == .failed {
+                            Text("Couldn't send — check your connection and try again.")
+                                .font(.system(size: 10)).foregroundColor(.red.opacity(0.8))
+                        }
                         Spacer()
+                        feedbackReplyHint
                         Button {
                             sendFeedback()
                         } label: {
@@ -947,13 +952,6 @@ struct ClipenSettingsView: View {
                         .disabled(feedbackSending
                                   || feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
-
-                    if feedbackSendState == .sent {
-                        feedbackReplyHint
-                    } else if feedbackSendState == .failed {
-                        Text("Couldn't send — check your connection and try again.")
-                            .font(.system(size: 10)).foregroundColor(.red.opacity(0.8))
-                    }
                 }
                 .padding(14)
             }
@@ -962,19 +960,18 @@ struct ClipenSettingsView: View {
 
     private var feedbackReplyHint: some View {
         HStack(spacing: 4) {
-            Text("Sent. You can see replies on the")
-                .font(.system(size: 10)).foregroundColor(.textDim)
+            Text("You can see replies on the")
+                .font(.system(size: 11)).foregroundColor(.textPri.opacity(0.85))
             Button {
                 if let url = URL(string: "https://www.instagram.com/clipen.official") {
                     NSWorkspace.shared.open(url)
                 }
             } label: {
                 Text("Clipen Instagram page")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.accent)
             }
             .buttonStyle(.plain)
-            Text(".").font(.system(size: 10)).foregroundColor(.textDim)
         }
     }
 

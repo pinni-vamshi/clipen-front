@@ -63,7 +63,11 @@ extension ClipboardManager {
                 let attrStr = NSAttributedString(rtfd: rtfdData, documentAttributes: nil)
                 DispatchQueue.main.async {
                     if let attrStr, !attrStr.string.isEmpty {
-                        self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                        if case .image = fallback?.content, Self.isImageOnlyAttributedString(attrStr) {
+                            self.addCaptured(fallback!, sidecar: sidecarSnapshot)
+                        } else {
+                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                        }
                     } else if let fallback {
                         self.addCaptured(fallback, sidecar: sidecarSnapshot)
                     }
@@ -127,7 +131,9 @@ extension ClipboardManager {
                 }()
                 DispatchQueue.main.async {
                     if let attrStr, !attrStr.string.isEmpty {
-                        if let rtfdUpgrade {
+                        if case .image = fallback?.content, Self.isImageOnlyAttributedString(attrStr) {
+                            self.addCaptured(fallback!, sidecar: sidecarSnapshot)
+                        } else if let rtfdUpgrade {
                             self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: attrStr.string)), sidecar: sidecarSnapshot)
                         } else {
                             self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: attrStr.string)), sidecar: sidecarSnapshot)
@@ -433,6 +439,20 @@ extension ClipboardManager {
         guard html.range(of: "<img", options: .caseInsensitive) != nil else { return false }
         let text = stripHTMLTags(html)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return text.isEmpty
+    }
+
+    /// Notes/Pages/Mail/TextEdit represent a copied image as an RTF(D)
+    /// attributed string with an `NSTextAttachment` run — the "plain text"
+    /// for that run is just the Unicode object-replacement character, never
+    /// truly empty, so a plain `.isEmpty` check on `attrStr.string` doesn't
+    /// catch it. Strip that placeholder out before judging whether there's
+    /// any real text alongside the image.
+    static func isImageOnlyAttributedString(_ attrStr: NSAttributedString) -> Bool {
+        guard attrStr.containsAttachments else { return false }
+        let stripped = attrStr.string
+            .replacingOccurrences(of: "\u{FFFC}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return stripped.isEmpty
     }
 
     static func htmlContainsTable(_ html: String) -> Bool {

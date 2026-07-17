@@ -33,7 +33,15 @@ enum TagDetector {
             return textTag(for: plain, color: nil) ?? .richText
 
         case .rtfd(_, plain: let plain):
-            return textTag(for: plain, color: nil) ?? .table
+            // No blind ".table" default here: an RTFD with an embedded image
+            // attachment (Notes, Pages, Mail, TextEdit) reports its plain
+            // text as just the attachment placeholder character, which never
+            // matches a real detector — that used to fall through to .table
+            // by elimination, mislabeling every copied image as tabular
+            // data. Fall back to .richText instead, matching the sibling
+            // .html/.richText cases; a genuine pasted table still gets its
+            // mini-table preview from TableCellExtractor regardless of tag.
+            return textTag(for: plain, color: nil) ?? .richText
 
         case .text(let s):
             if let url = resolvedLocalFileURL(from: s) {
