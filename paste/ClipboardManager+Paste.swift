@@ -460,12 +460,19 @@ extension ClipboardManager {
             let pitem = NSPasteboardItem()
             pitem.setData(rtfdData, forType: .rtfd)
             if let attrStr = NSAttributedString(rtfd: rtfdData, documentAttributes: nil) {
-                let range = NSRange(location: 0, length: attrStr.length)
-                if let rtfData = try? attrStr.data(
-                    from: range,
-                    documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
-                ) {
-                    pitem.setData(rtfData, forType: .rtf)
+                // Plain .rtf can't carry NSTextAttachment images at all — converting
+                // to it here would silently drop any embedded picture, and since
+                // some apps read .rtf in preference to .rtfd, that lossy copy could
+                // be the one that actually lands on paste. Only offer it when there
+                // are no attachments to lose.
+                if !attrStr.containsAttachments {
+                    let range = NSRange(location: 0, length: attrStr.length)
+                    if let rtfData = try? attrStr.data(
+                        from: range,
+                        documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+                    ) {
+                        pitem.setData(rtfData, forType: .rtf)
+                    }
                 }
             }
             pitem.setString(plain, forType: .string)

@@ -622,17 +622,17 @@ struct PopoverRow: View, Equatable {
             let plain = rawPlain
                 .replacingOccurrences(of: "\u{FFFC}", with: "")
                 .displayTrimmedLeading
-            HStack(alignment: .top, spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
                 if let embedded = EmbeddedImageExtractor.firstImage(for: item) {
                     Image(nsImage: embedded)
                         .resizable().aspectRatio(contentMode: .fill)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 44, height: 44)
                         .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     if !plain.isEmpty {
-                        Text(plain).font(.system(size: 12)).lineLimit(1).foregroundColor(.primary)
+                        Text(plain).font(.system(size: 12)).lineLimit(3).foregroundColor(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if let cells = TableCellExtractor.cells(for: item) {
