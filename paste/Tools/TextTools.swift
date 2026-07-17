@@ -29,9 +29,6 @@ enum TextTools {
         make("text.json-minify", icon: "curlybraces.square", label: "JSON Minify", group: "FORMAT") {
             jsonMinify($0)
         },
-        make("text.csv-markdown", icon: "tablecells", label: "CSV/TSV to Markdown Table", group: "FORMAT") {
-            delimitedTableToMarkdown($0)
-        },
         make("text.url-encode", icon: "link", label: "URL Encode", group: "ENCODE") {
             guard isURL($0) else { return nil }
             return encodeURLComponents($0)
@@ -79,20 +76,6 @@ enum TextTools {
     ] + aiTools
 
     private static let aiTools: [ClipboardTool] = [
-        makeAI("ai.summarize", icon: "text.line.first.and.arrowtriangle.forward", label: "Summarize", group: "AI",
-               minLength: AIService.minSummarizableLength) { text in
-            await AIService.transform(
-                instructions: "You are a concise summarizer. Summarize the given text in 2-4 sentences. Output ONLY the summary, no preamble.",
-                text: text
-            )
-        },
-        makeAI("ai.key-points", icon: "list.bullet.rectangle", label: "Extract Key Points", group: "AI",
-               minLength: AIService.minSummarizableLength) { text in
-            await AIService.transform(
-                instructions: "Extract the key points from the given text as a short bulleted list (max 6 bullets, each one line). Output ONLY the list, no preamble.",
-                text: text
-            )
-        },
         makeAI("ai.proofread", icon: "checkmark.seal", label: "Proofread & Fix Grammar", group: "AI",
                minLength: 4) { text in
             await AIService.transform(
@@ -100,74 +83,6 @@ enum TextTools {
                 text: text
             )
         },
-        makeAI("ai.rewrite-professional", icon: "briefcase", label: "Rewrite Professionally", group: "AI",
-               minLength: 4) { text in
-            await AIService.transform(
-                instructions: "Rewrite the given text in a clear, professional tone suitable for work communication, keeping the same meaning and roughly the same length. This is a REWRITE task: produce a new version of the SAME text, not a response, reply, or answer to it. Output ONLY the rewritten text, no preamble.",
-                text: text
-            )
-        },
-        makeAI("ai.rewrite-friendly", icon: "face.smiling", label: "Rewrite Casually", group: "AI",
-               minLength: 4) { text in
-            await AIService.transform(
-                instructions: "Rewrite the given text in a warm, casual, friendly tone, keeping the same meaning and roughly the same length. This is a REWRITE task: produce a new version of the SAME text, not a response, reply, or answer to it. Output ONLY the rewritten text, no preamble.",
-                text: text
-            )
-        },
-        makeAI("ai.explain", icon: "questionmark.bubble", label: "Explain This", group: "AI",
-               minLength: 4) { text in
-            await AIService.transform(
-                instructions: "Explain the given text simply and clearly, as if to someone unfamiliar with the topic. Keep it under 5 sentences. Output ONLY the explanation, no preamble.",
-                text: text
-            )
-        },
-        ClipboardTool(
-            id: "ai.convert-json", icon: "curlybraces", label: "Convert to JSON (AI)", group: "AI",
-            preview: { item in
-                guard AIService.isModelAvailable(),
-                      let text = input(for: item), AIService.fits(text),
-                      text.count >= 20, !isJSON(text) else { return nil }
-                return "Convert to JSON (AI)"
-            },
-            runAsync: { item in
-                guard let text = input(for: item), AIService.fits(text) else { return nil }
-                guard let result = await AIService.transform(
-                    instructions: "Convert the given text into well-structured JSON, inferring reasonable field names from its content. Output ONLY valid JSON, no markdown code fences, no preamble.",
-                    text: text
-                ) else {
-                    return .status("Apple Intelligence couldn't convert this to JSON.")
-                }
-                return .text(result)
-            }
-        ),
-        ClipboardTool(
-            id: "ai.convert-table", icon: "tablecells", label: "Convert to Table (AI)", group: "AI",
-            preview: { item in
-                guard AIService.isModelAvailable(),
-                      let text = input(for: item), AIService.fits(text),
-                      text.count >= 20, delimitedTableToMarkdown(text) == nil else { return nil }
-                return "Convert to a Markdown table (AI)"
-            },
-            runAsync: { item in
-                guard let text = input(for: item), AIService.fits(text) else { return nil }
-                guard let result = await AIService.transform(
-                    instructions: "Convert the given text into a well-structured Markdown table, inferring reasonable column headers from its content. Output ONLY the Markdown table, no preamble.",
-                    text: text
-                ) else {
-                    return .status("Apple Intelligence couldn't convert this to a table.")
-                }
-                return .text(result)
-            }
-        ),
-        ClipboardTool(
-            id: "ai.translate", icon: "character.bubble", label: "Translate", group: "AI",
-            preview: { item in
-                guard AIService.isModelAvailable(),
-                      let text = input(for: item), AIService.fits(text) else { return nil }
-                return "Pick a language…"
-            },
-            runAsync: { _ in .status("Pick a language in the panel.") }
-        ),
     ]
 
     static let supportedTranslationLanguages: [(name: String, code: String)] = [
@@ -383,76 +298,4 @@ enum TextTools {
         return String(data: out, encoding: .utf8)
     }
 
-    private static func delimitedTableToMarkdown(_ str: String) -> String? {
-        let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        let delimiter: Character
-        if trimmed.contains("\t") {
-            delimiter = "\t"
-        } else if trimmed.contains(",") {
-            delimiter = ","
-        } else {
-            return nil
-        }
-
-        let rows = trimmed
-            .components(separatedBy: .newlines)
-            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .prefix(80)
-            .map { parseDelimitedLine($0, delimiter: delimiter) }
-
-        guard rows.count >= 2,
-              let width = rows.map(\.count).max(),
-              width >= 2 else { return nil }
-
-        let normalized = rows.map { row in
-            row + Array(repeating: "", count: max(0, width - row.count))
-        }
-        let header = normalized[0]
-        let body = normalized.dropFirst()
-
-        func markdownRow(_ row: [String]) -> String {
-            "| " + row.map { $0.replacingOccurrences(of: "|", with: "\\|") }.joined(separator: " | ") + " |"
-        }
-
-        return ([markdownRow(header), markdownRow(Array(repeating: "---", count: width))]
-                + body.map(markdownRow))
-            .joined(separator: "\n")
-    }
-
-    private static func parseDelimitedLine(_ line: String, delimiter: Character) -> [String] {
-        var fields: [String] = []
-        var current = ""
-        var inQuotes = false
-        var iterator = line.makeIterator()
-
-        while let character = iterator.next() {
-            if character == "\"" {
-                if inQuotes, let next = iterator.next() {
-                    if next == "\"" {
-                        current.append("\"")
-                    } else {
-                        inQuotes = false
-                        if next == delimiter {
-                            fields.append(current.trimmingCharacters(in: .whitespaces))
-                            current = ""
-                        } else {
-                            current.append(next)
-                        }
-                    }
-                } else {
-                    inQuotes.toggle()
-                }
-            } else if character == delimiter, !inQuotes {
-                fields.append(current.trimmingCharacters(in: .whitespaces))
-                current = ""
-            } else {
-                current.append(character)
-            }
-        }
-
-        fields.append(current.trimmingCharacters(in: .whitespaces))
-        return fields
-    }
 }

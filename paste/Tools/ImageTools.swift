@@ -62,13 +62,6 @@ enum ImageTools {
                 await ImageService.reducedCopy(from: item)
             }
         ),
-        makeConvertTool(id: "image.convert-png", icon: "photo", label: "Convert to PNG", target: .png, kind: .png),
-        makeConvertTool(id: "image.convert-jpeg", icon: "photo.fill", label: "Convert to JPEG", target: .jpeg, kind: .jpeg),
-        makeConvertTool(id: "image.convert-webp", icon: "photo.badge.arrow.down", label: "Convert to WebP", target: .webp, kind: .webp),
-        makeConvertTool(id: "image.convert-heic", icon: "camera", label: "Convert to HEIC", target: .heic, kind: .heic),
-        makeConvertTool(id: "image.convert-gif", icon: "photo.stack", label: "Convert to GIF", target: .gif, kind: .gif),
-        makeConvertTool(id: "image.convert-tiff", icon: "doc.richtext", label: "Convert to TIFF", target: .tiff, kind: .tiff),
-        makeConvertTool(id: "image.convert-bmp", icon: "rectangle.dashed", label: "Convert to BMP", target: .bmp, kind: .bmp),
         ClipboardTool(
             id: "image.ocr",
             icon: "text.viewfinder",
@@ -130,27 +123,6 @@ enum ImageTools {
         )
     ]
 
-    private static func makeConvertTool(
-        id: String,
-        icon: String,
-        label: String,
-        target: ImageService.ConvertTarget,
-        kind: ImageService.ImageFormatKind
-    ) -> ClipboardTool {
-        ClipboardTool(
-            id: id,
-            icon: icon,
-            label: label,
-            group: "CONVERT",
-            preview: { item in
-                guard let input = ImageService.imageInput(for: item) else { return nil }
-                if ImageService.formatKind(for: input) == kind { return nil }
-                if target == .jpeg, ImageService.hasAlphaChannel(input.image) { return nil }
-                return "Paste as \(ImageService.formatLabel(for: kind)) image"
-            },
-            runAsync: { item in await ImageService.convertCopy(from: item, to: target) }
-        )
-    }
 }
 
 enum OCRService {

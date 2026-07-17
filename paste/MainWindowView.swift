@@ -646,7 +646,12 @@ private struct ItemDetailView: View {
     @ViewBuilder
     private var pinnedContent: some View {
         switch item.content {
-        case .image, .file:
+        case .image, .file, .richText, .html, .rtfd:
+            // ContentPreviewView's renderer for these three (AttributedTextPreview's
+            // NSTextView, HTMLStringPreview's WKWebView) already scrolls internally.
+            // Nesting either inside an outer SwiftUI ScrollView proposes unbounded
+            // height to an NSViewRepresentable with no intrinsic size, which
+            // collapses it to zero height — a blank preview pane.
             contentBlock
         default:
             ScrollView { contentBlock }

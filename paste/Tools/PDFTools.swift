@@ -26,60 +26,7 @@ enum PDFTools {
         make("pdf.reduce-size", icon: "arrow.down.doc", label: "Reduce PDF Size", group: "OPTIMIZE") { pdf, data in
             await PDFService.reducedCopy(from: pdf, originalData: data)
         },
-        ClipboardTool(
-            id: "ai.pdf-summarize",
-            icon: "text.line.first.and.arrowtriangle.forward",
-            label: "Summarize",
-            group: "AI",
-            preview: { item in
-                guard AIService.isModelAvailable(), pdfInput(for: item) != nil else { return nil }
-                return "Summarize this PDF"
-            },
-            runAsync: { item in
-                guard let input = pdfInput(for: item) else { return nil }
-                guard let text = await PDFService.extractAllText(from: input.pdf), AIService.fits(text) else {
-                    return .status("No extractable text found in PDF.")
-                }
-                guard let summary = await AIService.transform(
-                    instructions: "You are a concise summarizer. Summarize the given document text in 2-5 sentences. Output ONLY the summary, no preamble.",
-                    text: text
-                ) else {
-                    return .status("Apple Intelligence couldn't summarize this.")
-                }
-                return .text(summary)
-            }
-        ),
-        ClipboardTool(
-            id: "ai.pdf-describe-pages",
-            icon: "text.below.photo",
-            label: "Describe Each Page (AI)",
-            group: "AI",
-            preview: { item in
-                guard AIService.isImageDescribeAvailable(),
-                      let input = pdfInput(for: item),
-                      (1...Self.maxDescribablePages).contains(input.pdf.pageCount) else { return nil }
-                return "Describe each of \(input.pdf.pageCount) pages"
-            },
-            runAsync: { item in
-                guard let input = pdfInput(for: item),
-                      (1...Self.maxDescribablePages).contains(input.pdf.pageCount) else { return nil }
-                var lines: [String] = []
-                for i in 0..<input.pdf.pageCount {
-                    guard let page = input.pdf.page(at: i),
-                          let cgImage = PDFService.renderCGImage(page: page, scale: 1.5) else {
-                        lines.append("Page \(i + 1): [Couldn't render this page]")
-                        continue
-                    }
-                    let description = await AIService.describeImage(cgImage)
-                    lines.append("Page \(i + 1): \(description ?? "[Couldn't describe this page]")")
-                }
-                guard !lines.isEmpty else { return .status("Couldn't describe any pages.") }
-                return .text(lines.joined(separator: "\n\n"))
-            }
-        ),
     ]
-
-    private static let maxDescribablePages = 10
 
     private static func make(
         _ id: String,

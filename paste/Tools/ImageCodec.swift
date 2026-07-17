@@ -11,10 +11,6 @@ enum ImageService {
         case png, jpeg, webp, gif, tiff, heic, bmp, other
     }
 
-    enum ConvertTarget {
-        case png, jpeg, webp, gif, tiff, heic, bmp
-    }
-
     struct ImageInput {
         let image: NSImage
         let data: Data
@@ -285,65 +281,6 @@ enum ImageService {
         }
     }
 
-    static func convertCopy(from item: ClipboardItem, to target: ConvertTarget) async -> TransformOutput? {
-        guard let input = imageInput(for: item) else { return nil }
-
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result: (Data, NSImage, NSPasteboard.PasteboardType, String)?
-
-                switch target {
-                case .png:
-                    if let (data, img) = encodePNG(image: input.image) {
-                        result = (data, img, .init("public.png"), "PNG")
-                    } else { result = nil }
-                case .jpeg:
-                    if imageHasAlpha(input.image) {
-                        continuation.resume(returning: .status("JPEG cannot keep transparency. Use PNG or WebP."))
-                        return
-                    }
-                    if let (data, img) = encodeJPEG(image: input.image, quality: 0.88) {
-                        result = (data, img, .init("public.jpeg"), "JPEG")
-                    } else { result = nil }
-                case .webp:
-                    let encoder = WebPEncoder()
-                    if let data = encodeWebP(image: input.image, quality: 82, encoder: encoder),
-                       let img = decodeWebP(data: data) {
-                        result = (data, img, webpPasteboardType, "WebP")
-                    } else { result = nil }
-                case .gif:
-                    if isAnimatedGIF(input.data) {
-                        result = (input.data, input.image, .init("public.gif"), "GIF (animation preserved)")
-                    } else if let (data, img) = encodeGIF(image: input.image) {
-                        result = (data, img, .init("public.gif"), "GIF")
-                    } else { result = nil }
-                case .tiff:
-                    if let (data, img) = encodeTIFF(image: input.image) {
-                        result = (data, img, .tiff, "TIFF")
-                    } else { result = nil }
-                case .heic:
-                    if let (data, img) = encodeHEIC(image: input.image, quality: 0.85) {
-                        result = (data, img, .init("public.heic"), "HEIC")
-                    } else { result = nil }
-                case .bmp:
-                    if let (data, img) = encodeBMP(image: input.image) {
-                        result = (data, img, .init("com.microsoft.bmp"), "BMP")
-                    } else { result = nil }
-                }
-
-                guard let (data, img, type, name) = result else {
-                    continuation.resume(returning: .status("Could not convert to \(formatLabel(for: kindForTarget(target)))."))
-                    return
-                }
-
-                continuation.resume(returning: .item(
-                    ClipboardItem(content: ClipboardContent.imageContent(rawData: data, dataType: type, fallback: img)!),
-                    message: "Converted to \(name). Pasting image + file."
-                ))
-            }
-        }
-    }
-
     static func persistExportFile(
         data: Data,
         dataType: NSPasteboard.PasteboardType,
@@ -406,18 +343,6 @@ enum ImageService {
             types.append(.tiff)
         }
         return types
-    }
-
-    private static func kindForTarget(_ target: ConvertTarget) -> ImageFormatKind {
-        switch target {
-        case .png: return .png
-        case .jpeg: return .jpeg
-        case .webp: return .webp
-        case .gif: return .gif
-        case .tiff: return .tiff
-        case .heic: return .heic
-        case .bmp: return .bmp
-        }
     }
 
     private static func pathExtension(for dataType: NSPasteboard.PasteboardType) -> String {
@@ -578,20 +503,6 @@ enum ImageService {
 
     private static func jpegData(from cgImage: CGImage, quality: CGFloat) -> Data? {
         NSBitmapImageRep(cgImage: cgImage).representation(using: .jpeg, properties: [.compressionFactor: quality])
-    }
-
-    static func hasAlphaChannel(_ image: NSImage) -> Bool {
-        imageHasAlpha(image)
-    }
-
-    private static func imageHasAlpha(_ image: NSImage) -> Bool {
-        if let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-            return cgHasAlpha(cg)
-        }
-        if let rep = image.representations.compactMap({ $0 as? NSBitmapImageRep }).first {
-            return rep.hasAlpha
-        }
-        return false
     }
 
     private static func cgHasAlpha(_ cg: CGImage) -> Bool {
