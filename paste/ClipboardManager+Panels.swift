@@ -176,9 +176,10 @@ extension ClipboardManager {
 
     private func updateSharePanel() {
         guard inShareStage else { return }
+        let liveCount = shareCandidateItems.count
         let anchor = selectedRowAnchor()
         sharePanel.show(services: shareServices, selectedIndex: shareIndex,
-                        itemCount: shareTargetItems.count,
+                        itemCount: liveCount > 0 ? liveCount : shareTargetItems.count,
                         near: previewWindow.frame, anchorPoint: anchor)
     }
 
@@ -208,6 +209,7 @@ extension ClipboardManager {
             let services = NSSharingService.sharingServices(forItems: items)
             DispatchQueue.main.async {
                 guard self.inShareStage, self.shareSyncGeneration == gen,
+                      self.markedItemIDs.isEmpty,
                       self.displayItems.indices.contains(self.selectedIndex),
                       self.displayItems[self.selectedIndex].id == targetID else { return }
                 guard !services.isEmpty else {
@@ -242,7 +244,13 @@ extension ClipboardManager {
             return
         }
         let service = shareServices[shareIndex]
-        let items = shareTargetItems.flatMap { shareRepresentations(for: $0) }
+        let liveTargets = shareCandidateItems
+        let targets = liveTargets.isEmpty ? shareTargetItems : liveTargets
+        var seenURLs = Set<String>()
+        let items = targets.flatMap { shareRepresentations(for: $0) }.filter { rep in
+            guard let url = rep as? URL else { return true }
+            return seenURLs.insert(url.absoluteString).inserted
+        }
         AuthManager.shared.registerToolUsage(toolID: Self.shareUsageKey(service))
         exitShareStage()
         markedItemIDs = []
@@ -718,6 +726,8 @@ extension ClipboardManager {
         AuthManager.shared.registerActionUsage(actionID: "popup.open")
         popupOpenedAt = Date()
         popupSessionPasted = false
+        popupSessionDeleted = false
+        popupSessionAutoTimedOut = false
         startAutoDismissTimer()
         syncItemPreviewWithSelection()
     }
@@ -729,6 +739,7 @@ extension ClipboardManager {
         let t = Timer(timeInterval: autoDismissSeconds, repeats: false) { [weak self] _ in
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.previewWindow.isVisible else { return }
+                self.popupSessionAutoTimedOut = true
                 self.dismissPreview()
             }
         }
@@ -915,6 +926,7 @@ extension ClipboardManager {
             return
         }
         let target = languages[languagePickerSelectedIndex]
+        TrackingService.shared.recordToolVariant(id: "ai.translate.\(target.code)")
         exitLanguagePickerMode()
         updateTransformPanelProcessing(true)
         Task { [weak self] in
@@ -1155,6 +1167,30 @@ extension ClipboardManager {
         } else {
             markedItemIDs.append(id)
         }
+        if inShareStage { refreshShareTargetsForMarkChange() }
+    }
+
+    func refreshShareTargetsForMarkChange() {
+        let targets = shareCandidateItems
+        guard !targets.isEmpty else {
+            exitShareStage()
+            return
+        }
+        let reps = targets.flatMap { shareRepresentations(for: $0) }
+        let services = NSSharingService.sharingServices(forItems: reps)
+        guard !services.isEmpty else {
+            flashStatus("No share destinations available for the marked items.")
+            exitShareStage()
+            return
+        }
+        let previousTitle = shareServices.indices.contains(shareIndex)
+            ? shareServices[shareIndex].title : nil
+        shareTargetItems = targets
+        shareServices = Self.rankedShareServices(services)
+        shareIndex = previousTitle.flatMap { title in
+            shareServices.firstIndex(where: { $0.title == title })
+        } ?? 0
+        updateSharePanel()
     }
 
     func markOrder(for id: UUID) -> Int? {

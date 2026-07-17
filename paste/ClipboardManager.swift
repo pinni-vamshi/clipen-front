@@ -114,6 +114,13 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    @Published var pastePlainTextByDefault: Bool = UserDefaults.standard.object(forKey: "pastePlainTextByDefault") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(pastePlainTextByDefault, forKey: "pastePlainTextByDefault")
+            if oldValue != pastePlainTextByDefault { AuthManager.shared.registerActionUsage(actionID: "setting.pure_paste") }
+        }
+    }
+
     @Published var captureFiles: Bool = UserDefaults.standard.object(forKey: "captureFiles") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(captureFiles, forKey: "captureFiles")
@@ -392,6 +399,15 @@ class ClipboardManager: ObservableObject {
 
     var popupOpenedAt: Date? = nil
     var popupSessionPasted = false
+    /// Set when a delete happens during the current popup session, checked
+    /// (and reset) only by dismissPreview() when classifying the session's
+    /// outcome — a delete followed by any close reason still counts as
+    /// "deleted", not "escaped".
+    var popupSessionDeleted = false
+    /// Set immediately before the auto-dismiss timer calls dismissPreview(),
+    /// so dismissPreview() can tell a silent timeout apart from an explicit
+    /// Escape press or click-away (both of which fall under "escaped").
+    var popupSessionAutoTimedOut = false
 
     var historyLoadedCleanly = false
 

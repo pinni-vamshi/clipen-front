@@ -103,6 +103,11 @@ extension ClipboardManager {
     }
 
     func resolvedPasteTarget() -> NSRunningApplication? {
+        if popupPinnedOpen,
+           let front = NSWorkspace.shared.frontmostApplication,
+           front.bundleIdentifier != Bundle.main.bundleIdentifier {
+            return front
+        }
         guard let target = capturedPasteTarget else {
             return NSWorkspace.shared.frontmostApplication
         }
@@ -167,6 +172,9 @@ extension ClipboardManager {
             Task { [weak self] in
                 guard let self else { return }
                 let result = await MarkedToolRegistry.run(items: markedItems, toolID: toolID)
+                if let result, self.transformResultCountsAsUsage(result) {
+                    TrackingService.shared.recordMarkedBatch(id: toolID, size: markedItems.count)
+                }
                 await MainActor.run {
                     self.updateTransformPanelProcessing(false)
                     self.inTransformStage = false
@@ -293,22 +301,8 @@ extension ClipboardManager {
 
     func recordPasteAnalytics(item: ClipboardItem, displayIndex: Int?) {
         if let idx = displayIndex, idx >= 0 {
-            let bucket: String
-            switch idx {
-            case 0...4:   bucket = "\(idx)"
-            case 5...10:  bucket = "5_10"
-            case 11...50: bucket = "11_50"
-            default:      bucket = "50p"
-            }
-            AuthManager.shared.registerActionUsage(actionID: "pidx.\(bucket)")
-            AuthManager.shared.noteFirstSessionHistoryPaste(index: idx)
+            TrackingService.shared.recordPastePosition(idx)
         }
-        let age = Date().timeIntervalSince(item.timestamp)
-        let ageBucket: String = age < 3_600 ? "lt_1h"
-            : age < 86_400 ? "1_24h"
-            : age < 604_800 ? "1_7d"
-            : "7dp"
-        AuthManager.shared.registerActionUsage(actionID: "page.\(ageBucket)")
     }
 
     func simulatePaste(_ item: ClipboardItem, target: NSRunningApplication?,
@@ -317,7 +311,7 @@ extension ClipboardManager {
         recordPasteDestination(for: item.id, app: target)
         let pb = NSPasteboard.general
         pb.clearContents()
-        write(item, to: pb)
+        write(item, to: pb, plainOnly: pastePlainTextByDefault)
         lastChangeCount = pb.changeCount
 
         let token = beginPasteSimulation()
@@ -366,7 +360,7 @@ extension ClipboardManager {
         recordPasteDestination(for: item.id)
         let pb = NSPasteboard.general
         pb.clearContents()
-        write(item, to: pb)
+        write(item, to: pb, plainOnly: pastePlainTextByDefault)
         lastChangeCount = pb.changeCount
 
         if let text = extractTextForInjection(from: item),
@@ -411,7 +405,18 @@ extension ClipboardManager {
         }
     }
 
-    func write(_ item: ClipboardItem, to pb: NSPasteboard) {
+    func write(_ item: ClipboardItem, to pb: NSPasteboard, plainOnly: Bool = false) {
+        if plainOnly {
+            switch item.content {
+            case .richText(_, let plain), .rtfd(_, let plain), .html(_, let plain):
+                let pitem = NSPasteboardItem()
+                pitem.setString(plain, forType: .string)
+                pb.writeObjects([pitem])
+                return
+            default:
+                break
+            }
+        }
         switch item.content {
         case .text(let str):
             let pitem = NSPasteboardItem()

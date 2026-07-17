@@ -71,15 +71,35 @@ extension ClipboardManager {
     }
 
     func deleteSelected() {
+        if !markedItemIDs.isEmpty {
+            deleteMarked()
+            return
+        }
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
         let target = displayItems[selectedIndex]
         guard let realIndex = items.firstIndex(where: { $0.id == target.id }) else { return }
         AuthManager.shared.registerActionUsage(actionID: "action.delete")
+        popupSessionDeleted = true
         items.remove(at: realIndex)
         markBlobPurgeNeeded()
         if displayItems.isEmpty { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
         syncItemPreviewWithSelection()
+    }
+
+    func deleteMarked() {
+        let ids = Set(markedItemIDs)
+        guard !ids.isEmpty else { return }
+        AuthManager.shared.registerActionUsage(actionID: "action.delete", count: ids.count)
+        popupSessionDeleted = true
+        markedItemIDs = []
+        items.removeAll { ids.contains($0.id) }
+        markBlobPurgeNeeded()
+        if displayItems.isEmpty { dismissPreview(); return }
+        selectedIndex = min(selectedIndex, displayItems.count - 1)
+        syncItemPreviewWithSelection()
+        syncTransformPanelWithSelection()
+        flashStatus("Deleted \(ids.count) items.")
     }
 
     func moveSelectedToFront() {
@@ -134,6 +154,23 @@ extension ClipboardManager {
                 let ms = max(0, Int(Date().timeIntervalSince(openedAt) * 1000))
                 AuthManager.shared.registerActionUsage(actionID: "popup.dur_ms", count: ms)
             }
+            // Mutually-exclusive per-session outcome: pasted beats deleted
+            // beats how it was actually closed. "escaped" covers BOTH the
+            // Escape key and clicking away — both are an explicit action to
+            // leave, just not the intended one. "blank" is reserved for the
+            // one case with zero user input all session: the auto-dismiss
+            // timer firing untouched.
+            let outcome: String
+            if popupSessionPasted {
+                outcome = "pasted"
+            } else if popupSessionDeleted {
+                outcome = "deleted"
+            } else if popupSessionAutoTimedOut {
+                outcome = "blank"
+            } else {
+                outcome = "escaped"
+            }
+            TrackingService.shared.recordPopupOutcome(outcome)
             if !popupSessionPasted {
                 AuthManager.shared.registerActionUsage(actionID: "popup.abandon")
             }

@@ -3,6 +3,8 @@ import Foundation
 enum TextTools {
     static let all: [ClipboardTool] = [
         editTool,
+        pastePlainTool,
+        pasteFormattedTool,
         make("text.title-case", icon: "textformat", label: "Title Case", group: "CASE") {
             guard isPlainText($0) else { return nil }
             return $0.titleCased
@@ -228,6 +230,54 @@ enum TextTools {
                 ClipboardManager.shared.openQuickClipPanel(for: item, focusContent: true)
             }
             return .status("Opened in reference panel for editing.")
+        }
+    )
+
+    private static func richPlainText(for item: ClipboardItem) -> String? {
+        switch item.content {
+        case .richText(_, plain: let s), .html(_, plain: let s), .rtfd(_, plain: let s):
+            return s.isEmpty ? nil : s
+        default:
+            return nil
+        }
+    }
+
+    private static let pastePlainTool = ClipboardTool(
+        id: "text.paste-plain",
+        icon: "textformat",
+        label: "Paste as Plain Text",
+        group: "PASTE",
+        preview: { item in
+            guard !ClipboardManager.shared.pastePlainTextByDefault else { return nil }
+            return richPlainText(for: item)
+        },
+        runSync: { item in
+            guard let plain = richPlainText(for: item) else { return nil }
+            return .text(plain)
+        },
+        runAsync: { item in
+            guard let plain = richPlainText(for: item) else { return nil }
+            return .text(plain)
+        }
+    )
+
+    private static let pasteFormattedTool = ClipboardTool(
+        id: "text.paste-formatted",
+        icon: "textformat.alt",
+        label: "Paste with Formatting",
+        group: "PASTE",
+        preview: { item in
+            guard ClipboardManager.shared.pastePlainTextByDefault,
+                  richPlainText(for: item) != nil else { return nil }
+            return "Paste with original formatting"
+        },
+        runSync: { item in
+            guard richPlainText(for: item) != nil else { return nil }
+            return .item(item, message: "Pasted with original formatting.")
+        },
+        runAsync: { item in
+            guard richPlainText(for: item) != nil else { return nil }
+            return .item(item, message: "Pasted with original formatting.")
         }
     )
 

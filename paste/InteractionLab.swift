@@ -1400,13 +1400,17 @@ struct ClipenSettingsView: View {
                              isOn: Binding(get: { manager.advanceAfterMark },
                                            set: { manager.advanceAfterMark = $0 }))
                 rowDivider()
-                autoPreviewRow(3)
+                behaviourRow(3, icon: "textformat", "Pure paste (plain text by default)",
+                             isOn: Binding(get: { manager.pastePlainTextByDefault },
+                                           set: { manager.pastePlainTextByDefault = $0 }))
                 rowDivider()
-                rememberLastPositionRow(4)
+                autoPreviewRow(4)
                 rowDivider()
-                autoDismissRow(5)
+                rememberLastPositionRow(5)
                 rowDivider()
-                pinPositionRow(6)
+                autoDismissRow(6)
+                rowDivider()
+                pinPositionRow(7)
             }
         }
     }
