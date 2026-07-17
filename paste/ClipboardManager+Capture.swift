@@ -251,11 +251,26 @@ extension ClipboardManager {
             "public.utf16-external-plain-text", "NSStringPboardType",
         ]
         switch content {
-        case .richText:
+        case .richText(let attrStr, _):
             excluded.formUnion(["NSRTFPboardType"])
+            // Same reasoning as the .rtfd case: an image-bearing attributed
+            // string must not carry a stale "public.rtf" sidecar forward —
+            // the write path builds RTFD on the fly for these, and a plain
+            // .rtf re-attached here would just be a competing image-less copy.
+            if attrStr.containsAttachments {
+                excluded.formUnion(["public.rtf"])
+            }
         case .rtfd:
+            // Source apps (Notes especially) often put HTML on the pasteboard
+            // alongside RTFD for the same copy — text-only or referencing an
+            // image the source app can resolve but nothing else can. Since
+            // RTFD already carries the real image, that HTML must never ride
+            // along as a sidecar: some destination apps (WebKit/HTML-first
+            // paste handling) prefer public.html over public.rtfd when both
+            // are present, silently pasting the image-less alternative.
             excluded.formUnion(["com.apple.flat-rtfd", "NSRTFDPboardType",
-                                "public.rtf", "NSRTFPboardType"])
+                                "public.rtf", "NSRTFPboardType",
+                                "public.html", "Apple HTML pasteboard type"])
         case .html:
             excluded.formUnion(["public.html", "Apple HTML pasteboard type"])
         case .image(_, _, let dataType):

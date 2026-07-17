@@ -407,6 +407,18 @@ extension ClipboardManager {
         }
     }
 
+    /// RTF bytes for `attrStr`, but only when it's safe — RTF can't carry
+    /// embedded image attachments, so this returns nil rather than silently
+    /// converting one away. Shared by the `.richText` and `.rtfd` write
+    /// cases above, which otherwise each need this exact same check.
+    static func safeRTFData(for attrStr: NSAttributedString, sidecarRTF: Data? = nil) -> Data? {
+        guard !attrStr.containsAttachments else { return nil }
+        if let sidecarRTF { return sidecarRTF }
+        let range = NSRange(location: 0, length: attrStr.length)
+        return try? attrStr.data(from: range,
+                                 documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
+    }
+
     func write(_ item: ClipboardItem, to pb: NSPasteboard, plainOnly: Bool = false) {
         if plainOnly {
             switch item.content {
@@ -443,14 +455,18 @@ extension ClipboardManager {
 
         case .richText(let attrStr, let plain):
             let pitem = NSPasteboardItem()
-            if let originalRTF = item.sidecarTypes?["public.rtf"] {
-                pitem.setData(originalRTF, forType: .rtf)
-            } else {
+            if attrStr.containsAttachments {
+                // Plain .rtf can't carry NSTextAttachment images — build RTFD
+                // on the fly instead so there's a real image-bearing
+                // representation on the pasteboard (there's no pre-existing
+                // .rtfd data to reuse here, unlike the .rtfd case below).
                 let range = NSRange(location: 0, length: attrStr.length)
-                if let rtfData = try? attrStr.data(from: range,
-                                                   documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]) {
-                    pitem.setData(rtfData, forType: .rtf)
+                if let rtfdData = try? attrStr.data(from: range,
+                                                    documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd]) {
+                    pitem.setData(rtfdData, forType: .rtfd)
                 }
+            } else if let rtfData = Self.safeRTFData(for: attrStr, sidecarRTF: item.sidecarTypes?["public.rtf"]) {
+                pitem.setData(rtfData, forType: .rtf)
             }
             pitem.setString(plain, forType: .string)
             applySidecar(item, to: pitem)
@@ -459,21 +475,9 @@ extension ClipboardManager {
         case .rtfd(let rtfdData, let plain):
             let pitem = NSPasteboardItem()
             pitem.setData(rtfdData, forType: .rtfd)
-            if let attrStr = NSAttributedString(rtfd: rtfdData, documentAttributes: nil) {
-                // Plain .rtf can't carry NSTextAttachment images at all — converting
-                // to it here would silently drop any embedded picture, and since
-                // some apps read .rtf in preference to .rtfd, that lossy copy could
-                // be the one that actually lands on paste. Only offer it when there
-                // are no attachments to lose.
-                if !attrStr.containsAttachments {
-                    let range = NSRange(location: 0, length: attrStr.length)
-                    if let rtfData = try? attrStr.data(
-                        from: range,
-                        documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
-                    ) {
-                        pitem.setData(rtfData, forType: .rtf)
-                    }
-                }
+            if let attrStr = NSAttributedString(rtfd: rtfdData, documentAttributes: nil),
+               let rtfData = Self.safeRTFData(for: attrStr) {
+                pitem.setData(rtfData, forType: .rtf)
             }
             pitem.setString(plain, forType: .string)
             applySidecar(item, to: pitem)

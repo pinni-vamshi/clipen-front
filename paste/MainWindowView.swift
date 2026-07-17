@@ -658,14 +658,14 @@ private struct ItemDetailView: View {
         switch item.content {
         case .text(let s):
             SelectableTextBlock(text: s.displayTrimmedLeading)
-        case .richText(_, plain: let rawP), .html(_, plain: let rawP), .rtfd(_, plain: let rawP):
-            let p = rawP.displayTrimmedLeading
-            VStack(alignment: .leading, spacing: 14) {
-                SelectableTextBlock(text: p)
-                if let cells = TableCellExtractor.cells(for: item) {
-                    MiniTablePreview(cells: cells).frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+        case .richText, .html, .rtfd:
+            // Route through the same NSTextView-backed renderer the popup's
+            // larger preview panel uses (ItemPreviewPanel.swift) instead of
+            // a plain Text(plain) — that's the only renderer in the app that
+            // draws embedded NSTextAttachment images inline, and it also
+            // renders real tables via AppKit's own NSTextTableBlock layout
+            // rather than the simplified MiniTablePreview grid.
+            ContentPreviewView(item: item, chrome: .panel)
         case .image(let img, let data, let dataType):
             Group {
                 if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
