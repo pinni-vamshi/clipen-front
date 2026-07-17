@@ -966,7 +966,7 @@ private struct CompactItemRow: View, Equatable {
                         .foregroundColor(.accent)
                         .opacity(isHovered ? 0 : 1)
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: 4) {
                     rowActionButton(icon: "xmark", background: .red, action: onDelete)
                         .help("Delete")
                     rowActionButton(icon: item.isPinned ? "pin.slash.fill" : "pin.fill",
@@ -976,9 +976,9 @@ private struct CompactItemRow: View, Equatable {
                 .opacity(isHovered ? 1 : 0)
                 .allowsHitTesting(isHovered)
             }
-            .frame(width: 64, alignment: .trailing)
+            .frame(width: 50, alignment: .trailing)
         }
-        .padding(.leading, 10).padding(.trailing, 16).padding(.vertical, 8)
+        .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 8)
         .background(
             isSelected ? Color.white.opacity(0.10)
                        : (isHovered ? Color.white.opacity(0.05) : Color.clear),

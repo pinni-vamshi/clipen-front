@@ -130,7 +130,9 @@ struct PopoverPreviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            if manager.showPopupInteractionHints {
+                header
+            }
             popupSearchBar
             categoryStrip
             firstCycleHint

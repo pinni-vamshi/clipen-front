@@ -430,6 +430,30 @@ final class TrackingService {
         }.resume()
     }
 
+    // MARK: - Feedback (user -> developer, one-way; replies happen on Instagram)
+
+    func sendFeedback(_ message: String, completion: @escaping (Bool) -> Void) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { DispatchQueue.main.async { completion(false) }; return }
+
+        var request = URLRequest(url: Self.baseURL.appendingPathComponent("clipen/feedback"),
+                                 timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "hardware_uuid": DeviceIdentity.installKey,
+            "message": trimmed,
+            "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            let ok = error == nil
+                && (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } == true
+            DispatchQueue.main.async { completion(ok) }
+        }.resume()
+    }
+
     // MARK: - Update-check cadence (every N pastes, unchanged behaviour)
 
     private func maybeTriggerUpdateCheck(totalPastes: Int) {

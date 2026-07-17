@@ -862,6 +862,11 @@ struct ClipenSettingsView: View {
     @State private var showOpenDelayPicker = false
     @State private var showPinPositionPicker = false
 
+    private enum FeedbackSendState { case idle, sent, failed }
+    @State private var feedbackText = ""
+    @State private var feedbackSending = false
+    @State private var feedbackSendState: FeedbackSendState = .idle
+
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -902,9 +907,90 @@ struct ClipenSettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .onPreferenceChange(SettingsRow2HeightKey.self) { row2Height = $0 }
+
+                feedbackSection
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 22)
+        }
+    }
+
+    private var feedbackSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("05", "FEEDBACK")
+
+            rowCard(border: .allSides) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Send a message straight to the developer.")
+                        .font(.system(size: 11)).foregroundColor(.textSec)
+
+                    TextEditor(text: $feedbackText)
+                        .font(.system(size: 12))
+                        .scrollContentBackground(.hidden)
+                        .frame(height: 80)
+                        .padding(6)
+                        .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.border, lineWidth: 1))
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            sendFeedback()
+                        } label: {
+                            Text(feedbackSending ? "Sending…" : "Send")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 14).padding(.vertical, 6)
+                                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(feedbackSending
+                                  || feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+
+                    if feedbackSendState == .sent {
+                        feedbackReplyHint
+                    } else if feedbackSendState == .failed {
+                        Text("Couldn't send — check your connection and try again.")
+                            .font(.system(size: 10)).foregroundColor(.red.opacity(0.8))
+                    }
+                }
+                .padding(14)
+            }
+        }
+    }
+
+    private var feedbackReplyHint: some View {
+        HStack(spacing: 4) {
+            Text("Sent. You can see replies on the")
+                .font(.system(size: 10)).foregroundColor(.textDim)
+            Button {
+                if let url = URL(string: "https://www.instagram.com/clipen.official") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Text("Clipen Instagram page")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.accent)
+            }
+            .buttonStyle(.plain)
+            Text(".").font(.system(size: 10)).foregroundColor(.textDim)
+        }
+    }
+
+    private func sendFeedback() {
+        let trimmed = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !feedbackSending else { return }
+        feedbackSending = true
+        feedbackSendState = .idle
+        TrackingService.shared.sendFeedback(trimmed) { success in
+            feedbackSending = false
+            if success {
+                feedbackText = ""
+                feedbackSendState = .sent
+            } else {
+                feedbackSendState = .failed
+            }
         }
     }
 
@@ -1414,19 +1500,39 @@ struct ClipenSettingsView: View {
                              isOn: Binding(get: { manager.advanceAfterMark },
                                            set: { manager.advanceAfterMark = $0 }))
                 rowDivider()
-                behaviourRow(3, icon: "textformat", "Pure paste (plain text by default)",
-                             isOn: Binding(get: { manager.pastePlainTextByDefault },
-                                           set: { manager.pastePlainTextByDefault = $0 }))
+                autoPreviewRow(3)
                 rowDivider()
-                autoPreviewRow(4)
+                rememberLastPositionRow(4)
                 rowDivider()
-                rememberLastPositionRow(5)
+                autoDismissRow(5)
                 rowDivider()
-                autoDismissRow(6)
+                pinPositionRow(6)
                 rowDivider()
-                pinPositionRow(7)
+                purePasteRow(7)
             }
         }
+    }
+
+    private func purePasteRow(_ n: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                rowNumber(n)
+                Image(systemName: "textformat").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                Text("Pure paste").font(.system(size: 13)).foregroundColor(.textPri)
+                Spacer()
+                Toggle("", isOn: Binding(get: { manager.pastePlainTextByDefault },
+                                          set: { manager.pastePlainTextByDefault = $0 }))
+                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+            }
+            Text(manager.pastePlainTextByDefault
+                 ? "Paste with formatting is available via Transform (X)"
+                 : "Paste without formatting is available via Transform (X)")
+                .font(.system(size: 10))
+                .foregroundColor(.textDim.opacity(0.6))
+                .padding(.leading, 44)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 16)
+        .frame(maxHeight: .infinity)
     }
 
     private static let interactionGroups: [[InteractionDemo]] = [
@@ -1439,7 +1545,23 @@ struct ClipenSettingsView: View {
 
     private var interactionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("04", "INTERACTIONS")
+            HStack(spacing: 8) {
+                sectionHeader("04", "INTERACTIONS")
+
+                Button {
+                    manager.showPopupInteractionHints.toggle()
+                } label: {
+                    Text(manager.showPopupInteractionHints ? "Hide in popup" : "Show in popup")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.accent)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Color.accentDim, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(manager.showPopupInteractionHints
+                      ? "Hide the interaction hint strip at the top of the popup"
+                      : "Show the interaction hint strip at the top of the popup")
+            }
 
             VStack(spacing: 1) {
                 ForEach(Array(Self.interactionGroups.enumerated()), id: \.offset) { groupIndex, group in

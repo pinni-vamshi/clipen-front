@@ -136,6 +136,10 @@ class ClipboardManager: ObservableObject {
         didSet { UserDefaults.standard.set(showColorSwatches, forKey: "showColorSwatches") }
     }
 
+    @Published var showPopupInteractionHints: Bool = UserDefaults.standard.object(forKey: "showPopupInteractionHints") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(showPopupInteractionHints, forKey: "showPopupInteractionHints") }
+    }
+
     @Published var isCapturingPaused: Bool = false
 
     @Published var transientStatus: String? = nil
