@@ -9,6 +9,7 @@ struct pasteApp: App {
     var body: some Scene {
         Window("Clipen", id: "main") {
             MainWindowView()
+                .background(WindowOpenBridge())
         }
         .defaultSize(width: 820, height: 680)
         .windowResizability(.contentMinSize)
@@ -25,8 +26,30 @@ struct pasteApp: App {
     }
 }
 
+/// Invisible helper hosted inside the main window. It captures SwiftUI's
+/// `openWindow` action so `AppDelegate.openMainWindow` can re-create the
+/// window scene after it has been closed.
+private struct WindowOpenBridge: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        Color.clear
+            .onAppear { AppDelegate.requestOpenMainWindow = { openWindow(id: "main") } }
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var shared: AppDelegate?
+
+    /// Cross-process signal so a second launch (user clicking the app while
+    /// it's already running in the menu bar) tells the live instance to
+    /// reopen its main window instead of just silently activating.
+    static let reopenNotification = Notification.Name("com.clipen.app.reopenMainWindow")
+
+    /// Set by a hidden SwiftUI bridge view once the main window scene exists,
+    /// so `openMainWindow` can re-create the SwiftUI `Window` after it's been
+    /// closed/torn down (AppKit `makeKeyAndOrderFront` only works while the
+    /// NSWindow is still alive).
+    static var requestOpenMainWindow: (() -> Void)?
 
     private var updaterController: SPUStandardUpdaterController?
 
@@ -40,9 +63,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
             .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
         if let existing = others.first {
+            // Ask the already-running instance to reopen its main window, then
+            // hand over and quit. Just activating it (old behaviour) left the
+            // window closed, so clicking the app did nothing visible.
+            DistributedNotificationCenter.default().postNotificationName(
+                Self.reopenNotification, object: nil, userInfo: nil, deliverImmediately: true)
             existing.activate(options: [])
             NSApp.terminate(nil)
             return
+        }
+
+        DistributedNotificationCenter.default().addObserver(
+            forName: Self.reopenNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.openMainWindow()
         }
 
         AuthManager.shared.registerActionUsage(actionID: "session.open")
@@ -82,11 +116,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         _ = AuthManager.isFirstSessionEver
 
-        if !UserDefaults.standard.bool(forKey: "hasLaunchedBefore") {
-            UserDefaults.standard.set(true, forKey: "hasLaunchedBefore")
+        let firstLaunch = !UserDefaults.standard.bool(forKey: "hasLaunchedBefore")
+        if firstLaunch { UserDefaults.standard.set(true, forKey: "hasLaunchedBefore") }
+
+        // Open the main window when the USER launches the app. A user launch
+        // (first-ever, or a double-click after quitting) makes the app become
+        // active within a moment; a background launch-at-login start never
+        // does, so it stays quiet in the menu bar. Poll briefly rather than
+        // checking a single instant, so activation timing can't be missed.
+        if firstLaunch {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.openMainWindow()
             }
+        } else {
+            openMainWindowIfUserLaunched(attemptsLeft: 12)
+        }
+    }
+
+    private func openMainWindowIfUserLaunched(attemptsLeft: Int) {
+        if NSApp.isActive {
+            openMainWindow()
+            return
+        }
+        guard attemptsLeft > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.openMainWindowIfUserLaunched(attemptsLeft: attemptsLeft - 1)
         }
     }
 
@@ -128,23 +182,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func checkForUpdates() {
         NSApp.activate(ignoringOtherApps: true)
-        guard let updaterController else {
-            openLatestReleaseDownload()
-            return
-        }
-        guard updaterController.updater.canCheckForUpdates else {
-            openLatestReleaseDownload()
-            return
-        }
-        updaterController.checkForUpdates(nil)
+        // Always go through Sparkle — it checks the appcast and downloads/installs
+        // in place. Never fall back to opening a browser DMG download.
+        updaterController?.checkForUpdates(nil)
     }
 
-    private func openLatestReleaseDownload() {
-        guard let url = URL(string: "https://github.com/pinni-vamshi/clipen-releases/releases/latest/download/Clipen.dmg") else { return }
-        NSWorkspace.shared.open(url)
-    }
-
-    func openMainWindow(retriesLeft: Int = 6) {
+    func openMainWindow(retriesLeft: Int = 8) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
@@ -152,8 +195,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             existing.makeKeyAndOrderFront(nil)
             return
         }
+        // No live NSWindow — the SwiftUI Window scene was closed/torn down.
+        // Ask SwiftUI to re-create it, then retry to bring it forward.
+        AppDelegate.requestOpenMainWindow?()
         guard retriesLeft > 0 else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
             self?.openMainWindow(retriesLeft: retriesLeft - 1)
         }
     }

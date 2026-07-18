@@ -317,7 +317,7 @@ final class TrackingService {
         lock.lock()
         let body: [String: Any] = [
             "schema_version": Self.schemaVersion,
-            "uuid": DeviceIdentity.installKey,
+            "hardware_uuid": DeviceIdentity.installKey,
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
             "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
             "first_seen": store.firstSeen,
