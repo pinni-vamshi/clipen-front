@@ -2252,17 +2252,20 @@ struct ClipenSettingsView: View {
         /// keyboard tile to visibly depress in sync with the popup's own
         /// animated keycap, instead of only the popup animating on its own.
         let isPressed: Bool
-        /// True while any demo is actively playing (a popup's "Show
-        /// animation" is on). Freezes the ambient idle pulse across the
-        /// WHOLE keyboard so it doesn't visually fight the specific key
-        /// that's actually being pressed in sync.
-        let suppressIdlePulse: Bool
+        /// True while some OTHER demo is playing and this key isn't part of
+        /// it. Its blue/gold interactive styling disappears completely (not
+        /// just dims) for the duration — only the keys actually involved in
+        /// the current gesture stay highlighted, so the keyboard doesn't
+        /// look like a dozen things are happening at once.
+        let dimmed: Bool
         let unitWidth: CGFloat
         let keyHeight: CGFloat
         @State private var pulse = false
         @State private var hovered = false
 
-        private var isInteractive: Bool { !key.demos.isEmpty }
+        private var hasDemo: Bool { !key.demos.isEmpty }
+        private var showBlue: Bool { hasDemo && !dimmed }
+        private var showGold: Bool { key.isCommand && !dimmed }
         private static let interactiveColor = Color(hex: "#4F8EF7")
         private static let commandColor = Color(hex: "#D4AF37")
 
@@ -2270,32 +2273,32 @@ struct ClipenSettingsView: View {
             Text(key.label)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundColor(isPressed ? .white
-                                  : (key.isCommand ? Self.commandColor
-                                     : (isInteractive ? Self.interactiveColor : .textSec)))
+                                  : (showGold ? Self.commandColor
+                                     : (showBlue ? Self.interactiveColor : .textSec)))
                 .frame(width: key.width * unitWidth, height: keyHeight)
                 .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(isPressed ? Color.accent
                           : (isActive ? Color.accentDim
-                             : (hovered && isInteractive ? Self.interactiveColor.opacity(0.18) : Color.surfaceHi.opacity(0.6)))))
+                             : (hovered && showBlue ? Self.interactiveColor.opacity(0.18) : Color.surfaceHi.opacity(0.6)))))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(
-                            key.isCommand ? Self.commandColor
-                                : (isInteractive ? Self.interactiveColor.opacity(
-                                    isActive || hovered || isPressed ? 1 : (suppressIdlePulse ? 0.4 : (pulse ? 1 : 0.4))) : Color.border),
-                            lineWidth: (key.isCommand || isInteractive) ? (isActive || isPressed ? 2.5 : 1.6) : 1)
+                            showGold ? Self.commandColor
+                                : (showBlue ? Self.interactiveColor.opacity(isActive || hovered || isPressed ? 1 : (pulse ? 1 : 0.4)) : Color.border),
+                            lineWidth: (showGold || showBlue) ? (isActive || isPressed ? 2.5 : 1.6) : 1)
                 )
                 .scaleEffect(isActive ? 1.08 : 1.0)
                 .offset(y: isPressed ? 2 : 0)
                 .animation(.easeOut(duration: 0.15), value: isActive)
                 .animation(.easeOut(duration: 0.12), value: hovered)
                 .animation(.easeOut(duration: 0.1), value: isPressed)
+                .animation(.easeOut(duration: 0.15), value: dimmed)
                 .onHover { hovering in
-                    guard isInteractive else { return }
+                    guard hasDemo else { return }
                     hovered = hovering
                 }
                 .onAppear {
-                    guard isInteractive else { return }
+                    guard hasDemo else { return }
                     withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
                 }
         }
@@ -2495,6 +2498,13 @@ struct ClipenSettingsView: View {
             GeometryReader { geo in
                 let totalWidth = geo.size.width
                 let pressedRealIDs = lab.syncRealKeyboard ? Set(lab.pressedKeys.flatMap { $0.kbKeyIDs }) : []
+                // While a demo plays, only the real keys it actually uses
+                // (plus the key whose popover is open) stay lit — every
+                // other interactive key's blue border disappears entirely
+                // for the duration instead of just quieting its pulse.
+                let involvedRealIDs: Set<String> = lab.isPlaying
+                    ? Set(lab.selectedDemo.heroKeys.flatMap { $0.kbKeyIDs }).union(activeKeyID.map { [$0] } ?? [])
+                    : []
 
                 VStack(spacing: keySpacing) {
                     ForEach(Array(KBLayout.rows.enumerated()), id: \.offset) { _, row in
@@ -2510,7 +2520,7 @@ struct ClipenSettingsView: View {
                                 } else {
                                     KeyCapView(key: key, isActive: activeKeyID == key.id,
                                                isPressed: pressedRealIDs.contains(key.id),
-                                               suppressIdlePulse: lab.isPlaying && lab.syncRealKeyboard,
+                                               dimmed: lab.isPlaying && !involvedRealIDs.contains(key.id),
                                                unitWidth: unitW, keyHeight: keyHeight)
                                         .onTapGesture {
                                             guard !key.demos.isEmpty else { return }

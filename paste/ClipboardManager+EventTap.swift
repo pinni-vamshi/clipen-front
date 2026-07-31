@@ -668,6 +668,7 @@ extension ClipboardManager {
         hintKeyVDown = false
         hintKeyXDown = false
         hintKeyCDown = false
+        hintKeyGDown = false
         hintKeySpaceDown = false
         hintCmdHeld = false
         hintShiftHeld = false
@@ -678,6 +679,7 @@ extension ClipboardManager {
         popupHintShiftX = false
         popupHintXHold = false
         popupHintC = false
+        popupHintG = false
         popupHintSpace = false
         popupHintSpaceDoubleTap = false
         popupHintCmd = false
@@ -702,6 +704,7 @@ extension ClipboardManager {
         case 7 where cmd:  hintKeyXDown = true
         case 8 where cmd:  hintKeyCDown = true
         case 11 where cmd: hintKeyBDown = true
+        case 5:           hintKeyGDown = true
         case 49:          hintKeySpaceDown = true
         default: break
         }
@@ -714,6 +717,7 @@ extension ClipboardManager {
         case 7:  hintKeyXDown = false
         case 8:  hintKeyCDown = false
         case 11: hintKeyBDown = false
+        case 5:  hintKeyGDown = false
         case 49: hintKeySpaceDown = false
         default: break
         }
@@ -753,6 +757,7 @@ extension ClipboardManager {
             shiftX = hintShiftHeld
         }
         let c = hintKeyCDown && cmd && visible
+        let g = hintKeyGDown && visible
         let space = hintKeySpaceDown && visible
 
         if popupHintCmd    != cmd    { popupHintCmd = cmd }
@@ -761,6 +766,7 @@ extension ClipboardManager {
         if popupHintX      != x      { popupHintX = x }
         if popupHintShiftX != shiftX { popupHintShiftX = shiftX }
         if popupHintC      != c      { popupHintC = c }
+        if popupHintG      != g      { popupHintG = g }
         if popupHintSpace  != space  { popupHintSpace = space }
     }
 

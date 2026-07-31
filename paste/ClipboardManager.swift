@@ -79,6 +79,7 @@ class ClipboardManager: ObservableObject {
     @Published var popupHintXHold = false
     @Published var popupHintC = false
     @Published var popupHintCategory = false
+    @Published var popupHintG = false
     @Published var popupHintSpace = false
     @Published var popupHintSpaceDoubleTap = false
     @Published var popupHintCmd = false
@@ -377,6 +378,7 @@ class ClipboardManager: ObservableObject {
     var hintKeyXDown = false
     var hintKeyCDown = false
     var hintKeyBDown = false
+    var hintKeyGDown = false
     var hintKeySpaceDown = false
     var hintCmdHeld = false
     var hintShiftHeld = false

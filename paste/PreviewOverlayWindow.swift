@@ -865,22 +865,30 @@ struct DynamicHint: Identifiable, Equatable {
 struct DynamicHintText: View {
     let key: String
     let label: String
+    /// True for the instant the real key this hint describes is actually
+    /// held down — flashes the pill blue so it reads as "you're doing that
+    /// right now", not just a static legend.
+    var isPressed: Bool = false
 
     var body: some View {
         HStack(spacing: 3) {
             Text(key)
                 .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                .foregroundColor(.primary.opacity(0.85))
+                .foregroundColor(isPressed ? .white : .primary.opacity(0.85))
                 .lineLimit(1).fixedSize()
             Text(label)
                 .font(.system(size: 8, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(isPressed ? .white.opacity(0.9) : .secondary)
                 .lineLimit(1).fixedSize()
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(Color.primary.opacity(0.07), in: Capsule())
-        .overlay(Capsule().stroke(Color.primary.opacity(0.12), lineWidth: 1))
+        // Solid, not translucent — the overlay panel itself has no window
+        // backing (isOpaque = false), so a low-opacity fill here let the
+        // desktop/whatever's behind Clipen show straight through the pill.
+        .background(isPressed ? Color.accent : Color.surfaceHi, in: Capsule())
+        .overlay(Capsule().stroke(isPressed ? Color.clear : Color.border, lineWidth: 1))
+        .animation(.easeOut(duration: 0.1), value: isPressed)
     }
 }
 
@@ -982,7 +990,7 @@ private struct PopupHintRow: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
                 ForEach(hints) { hint in
-                    DynamicHintText(key: hint.key, label: hint.label)
+                    DynamicHintText(key: hint.key, label: hint.label, isPressed: isPressed(hint))
                         .transition(.asymmetric(
                             insertion: .opacity.combined(with: .scale(scale: 0.85)),
                             removal: .opacity.combined(with: .scale(scale: 0.85))))
@@ -993,6 +1001,23 @@ private struct PopupHintRow: View {
             .padding(.vertical, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    /// Maps each hint back to the real, live key-state the event tap already
+    /// tracks (`popupHintV`/`popupHintX`/… synced from actual keydown/keyup),
+    /// so the pill lights up in step with the real keystroke instead of only
+    /// existing as a static legend.
+    private func isPressed(_ hint: DynamicHint) -> Bool {
+        switch hint.id {
+        case "g-group":       return manager.popupHintG
+        case "space2-pin",
+             "space-close",
+             "space-preview": return manager.popupHintSpace || manager.popupHintSpaceDoubleTap
+        case "x-transform":   return manager.popupHintX || manager.popupHintXHold
+        case "holdv-mark":    return manager.popupHintVMark
+        case "v-next":        return manager.popupHintV
+        default:              return false
+        }
     }
 }
 
