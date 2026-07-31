@@ -2239,6 +2239,11 @@ struct ClipenSettingsView: View {
         /// keyboard tile to visibly depress in sync with the popup's own
         /// animated keycap, instead of only the popup animating on its own.
         let isPressed: Bool
+        /// True while any demo is actively playing (a popup's "Show
+        /// animation" is on). Freezes the ambient idle pulse across the
+        /// WHOLE keyboard so it doesn't visually fight the specific key
+        /// that's actually being pressed in sync.
+        let suppressIdlePulse: Bool
         let unitWidth: CGFloat
         let keyHeight: CGFloat
         @State private var pulse = false
@@ -2263,7 +2268,8 @@ struct ClipenSettingsView: View {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(
                             key.isCommand ? Self.commandColor
-                                : (isInteractive ? Self.interactiveColor.opacity(isActive || hovered || isPressed ? 1 : (pulse ? 1 : 0.4)) : Color.border),
+                                : (isInteractive ? Self.interactiveColor.opacity(
+                                    isActive || hovered || isPressed ? 1 : (suppressIdlePulse ? 0.4 : (pulse ? 1 : 0.4))) : Color.border),
                             lineWidth: (key.isCommand || isInteractive) ? (isActive || isPressed ? 2.5 : 1.6) : 1)
                 )
                 .scaleEffect(isActive ? 1.08 : 1.0)
@@ -2290,6 +2296,12 @@ struct ClipenSettingsView: View {
         @ObservedObject var lab: InteractionLabController
 
         @State private var selected: InteractionDemo
+        // The InteractionLabStage animation (and, with it, the shared lab's
+        // pressedKeys that drive the real keyboard's synced key-press glow)
+        // starts hidden — nothing runs until this is explicitly opened, so
+        // the real keyboard's idle interactive pulse is the only thing
+        // moving until you ask to see the demo.
+        @State private var showAnimation = false
         @ObservedObject private var manager = ClipboardManager.shared
 
         init(key: KBKey, lab: InteractionLabController) {
@@ -2305,7 +2317,7 @@ struct ClipenSettingsView: View {
                         ForEach(key.demos, id: \.self) { demo in
                             Button {
                                 selected = demo
-                                lab.select(demo)
+                                if showAnimation { lab.select(demo) }
                             } label: {
                                 Text(LocalizedStringKey(demo.title))
                                     .font(.system(size: 9, weight: .semibold))
@@ -2321,12 +2333,32 @@ struct ClipenSettingsView: View {
                         .font(.system(size: 11, weight: .semibold)).foregroundColor(.textPri)
                 }
 
-                // No separate caption Text here — InteractionLabStage already
-                // renders the caption itself (lab.currentCaption), and giving
-                // it a fixed height shorter than its real content (instruction
-                // pill + mock panel + result line + caption + key row) made
-                // everything overflow and overlap in the popover.
-                InteractionLabStage(lab: lab)
+                if showAnimation {
+                    // No separate caption Text here — InteractionLabStage
+                    // already renders the caption itself (lab.currentCaption).
+                    InteractionLabStage(lab: lab)
+                }
+
+                Button {
+                    showAnimation.toggle()
+                    if showAnimation {
+                        lab.select(selected)
+                    } else {
+                        lab.stop()
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: showAnimation ? "eye.slash" : "play.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(showAnimation ? "Hide animation" : "Show animation")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.accent)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
 
                 if let binding = speedBinding(for: selected) {
                     HStack(spacing: 8) {
@@ -2335,7 +2367,7 @@ struct ClipenSettingsView: View {
                         ForEach(GestureSpeed.allCases) { speed in
                             Button {
                                 binding.wrappedValue = speed
-                                lab.select(selected)
+                                if showAnimation { lab.select(selected) }
                             } label: {
                                 Text(LocalizedStringKey(speed.label))
                                     .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -2357,11 +2389,11 @@ struct ClipenSettingsView: View {
                         Text("Reverse key").font(.system(size: 9)).foregroundColor(.textDim)
                         reverseKeyChoice(label: "Shift + V", isOn: !manager.reverseCycleUsesB) {
                             manager.reverseCycleUsesB = false
-                            lab.select(selected)
+                            if showAnimation { lab.select(selected) }
                         }
                         reverseKeyChoice(label: "B", isOn: manager.reverseCycleUsesB) {
                             manager.reverseCycleUsesB = true
-                            lab.select(selected)
+                            if showAnimation { lab.select(selected) }
                         }
                     }
                 }
@@ -2372,7 +2404,6 @@ struct ClipenSettingsView: View {
             // together span ~320pt once their offsets are accounted for; a
             // narrower popup clipped the side panel's right edge.
             .frame(width: 380)
-            .onAppear { lab.select(selected) }
             .onDisappear { lab.stop() }
         }
 
@@ -2466,6 +2497,7 @@ struct ClipenSettingsView: View {
                                 } else {
                                     KeyCapView(key: key, isActive: activeKeyID == key.id,
                                                isPressed: pressedRealIDs.contains(key.id),
+                                               suppressIdlePulse: lab.isPlaying,
                                                unitWidth: unitW, keyHeight: keyHeight)
                                         .onTapGesture {
                                             guard !key.demos.isEmpty else { return }
