@@ -2518,13 +2518,21 @@ struct ClipenSettingsView: View {
 
                 VStack(spacing: keySpacing) {
                     ForEach(Array(KBLayout.rows.enumerated()), id: \.offset) { _, row in
+                        let segments = Self.segments(for: row)
+                        // Must match what's actually RENDERED (one gap per
+                        // segment boundary), not the ungrouped key count —
+                        // grouping several keys (e.g. the whole 1–9 row) into
+                        // one cluster removes their internal gaps, so
+                        // counting 13 gaps for a row that only draws 5 made
+                        // every row's units come out too small and rows
+                        // stopped lining up with the ones above/below them.
                         let rowUnits = row.reduce(CGFloat(0)) { $0 + $1.width }
-                        let rowGaps = CGFloat(row.count - 1)
+                        let rowGaps = CGFloat(segments.count - 1)
                         let rowAvail = totalWidth - horizontalPadding * 2 - rowGaps * keySpacing
                         let unitW = max(16, rowAvail / rowUnits)
 
                         HStack(spacing: keySpacing) {
-                            ForEach(Array(Self.segments(for: row).enumerated()), id: \.offset) { _, segment in
+                            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                                 if segment.count == 1, segment[0].id == "ARROWS" {
                                     ArrowKeysCluster(totalWidth: segment[0].width * unitW, keyHeight: keyHeight)
                                 } else if segment.count == 1 {
