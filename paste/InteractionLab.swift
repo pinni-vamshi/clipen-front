@@ -2308,7 +2308,11 @@ struct ClipenSettingsView: View {
                 }
             }
             .padding(14)
-            .frame(width: 300)
+            // Wide enough for demos that slide the mock popup aside and show
+            // a side panel (Transform, Space-preview) — those two panels
+            // together span ~320pt once their offsets are accounted for; a
+            // narrower popup clipped the side panel's right edge.
+            .frame(width: 380)
             .onAppear { lab.select(selected) }
             .onDisappear { lab.stop() }
         }
@@ -2364,9 +2368,9 @@ struct ClipenSettingsView: View {
     private struct KeyboardInteractionPanel: View {
         @State private var activeKeyID: String? = nil
 
-        private let keySpacing: CGFloat = 6
+        private let keySpacing: CGFloat = 7
         private let horizontalPadding: CGFloat = 14
-        private let keyHeight: CGFloat = 38
+        private let keyHeight: CGFloat = 46
 
         var body: some View {
             GeometryReader { geo in
@@ -2404,7 +2408,7 @@ struct ClipenSettingsView: View {
                 .padding(.vertical, 14)
                 .frame(width: totalWidth, alignment: .center)
             }
-            .frame(minHeight: 250)
+            .frame(minHeight: 300)
         }
     }
 
