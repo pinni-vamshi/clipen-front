@@ -2279,12 +2279,12 @@ struct ClipenSettingsView: View {
                         .font(.system(size: 11, weight: .semibold)).foregroundColor(.textPri)
                 }
 
-                Text(LocalizedStringKey(selected.caption))
-                    .font(.system(size: 10)).foregroundColor(.textSec)
-                    .fixedSize(horizontal: false, vertical: true)
-
+                // No separate caption Text here — InteractionLabStage already
+                // renders the caption itself (lab.currentCaption), and giving
+                // it a fixed height shorter than its real content (instruction
+                // pill + mock panel + result line + caption + key row) made
+                // everything overflow and overlap in the popover.
                 InteractionLabStage(lab: lab)
-                    .frame(height: 150)
 
                 if let binding = speedBinding(for: selected) {
                     HStack(spacing: 8) {
@@ -2366,7 +2366,7 @@ struct ClipenSettingsView: View {
 
         private let keySpacing: CGFloat = 6
         private let horizontalPadding: CGFloat = 14
-        private let keyHeight: CGFloat = 32
+        private let keyHeight: CGFloat = 38
 
         var body: some View {
             GeometryReader { geo in
@@ -2404,7 +2404,7 @@ struct ClipenSettingsView: View {
                 .padding(.vertical, 14)
                 .frame(width: totalWidth, alignment: .center)
             }
-            .frame(minHeight: 210)
+            .frame(minHeight: 250)
         }
     }
 
