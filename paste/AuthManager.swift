@@ -28,7 +28,10 @@ final class TrackingService {
         var toolUses: [String: Int] = [:]       // tool id (incl. share.*, ai.translate.<lang>) -> count
         var markedBatches: [String: [Int]] = [:]// marked tool id -> batch sizes
         var captures: [String: Int] = [:]       // capture type -> count
-        var popup: [String: Int] = [:]          // opens/abandons/searches/nav/ms
+        var popup: [String: Int] = [:]          // opens/abandons/searches/nav
+        // One entry per popup session: how long it stayed open, in ms. RAW —
+        // the backend sums these; the client never aggregates durations.
+        var popupDurationsMs: [Int] = []
         /// Every popup-open session classified into exactly one mutually
         /// exclusive outcome: pasted / deleted / escaped / blank (silent
         /// auto-dismiss timeout). Sums to `popup.opens` for the same date.
@@ -40,8 +43,8 @@ final class TrackingService {
         var isEmpty: Bool {
             cmdVPastes == 0 && fastPastes == 0 && positions.isEmpty && hours.isEmpty
                 && toolUses.isEmpty && markedBatches.isEmpty && captures.isEmpty
-                && popup.isEmpty && popupOutcomes.isEmpty && actions.isEmpty
-                && settingsChanged.isEmpty && failures.isEmpty
+                && popup.isEmpty && popupDurationsMs.isEmpty && popupOutcomes.isEmpty
+                && actions.isEmpty && settingsChanged.isEmpty && failures.isEmpty
         }
 
         init() {}
@@ -55,7 +58,8 @@ final class TrackingService {
         // backward-compatible with files written before it existed.
         enum CodingKeys: String, CodingKey {
             case cmdVPastes, fastPastes, positions, hours, toolUses, markedBatches,
-                 captures, popup, popupOutcomes, actions, settingsChanged, failures
+                 captures, popup, popupDurationsMs, popupOutcomes, actions,
+                 settingsChanged, failures
         }
 
         init(from decoder: Decoder) throws {
@@ -68,6 +72,7 @@ final class TrackingService {
             markedBatches = try c.decodeIfPresent([String: [Int]].self, forKey: .markedBatches) ?? [:]
             captures = try c.decodeIfPresent([String: Int].self, forKey: .captures) ?? [:]
             popup = try c.decodeIfPresent([String: Int].self, forKey: .popup) ?? [:]
+            popupDurationsMs = try c.decodeIfPresent([Int].self, forKey: .popupDurationsMs) ?? []
             popupOutcomes = try c.decodeIfPresent([String: Int].self, forKey: .popupOutcomes) ?? [:]
             actions = try c.decodeIfPresent([String: Int].self, forKey: .actions) ?? [:]
             settingsChanged = try c.decodeIfPresent([String: Int].self, forKey: .settingsChanged) ?? [:]
@@ -146,6 +151,13 @@ final class TrackingService {
     /// One call per popup session, at close time — `outcome` is one of
     /// "pasted", "deleted", "escaped", "blank" (see ClipboardManager+Search
     /// .dismissPreview, the single place this is called from).
+    /// One raw entry per popup session: how long it was open, in ms.
+    func recordPopupDuration(ms: Int) {
+        guard ms >= 0 else { return }
+        mutateToday { $0.popupDurationsMs.append(ms) }
+        persistSoon()
+    }
+
     func recordPopupOutcome(_ outcome: String) {
         guard !outcome.isEmpty else { return }
         mutateToday { $0.popupOutcomes[outcome, default: 0] += 1 }
@@ -195,7 +207,6 @@ final class TrackingService {
         case id == "popup.open":            day.popup["opens", default: 0] += count
         case id == "popup.abandon":         day.popup["abandons", default: 0] += count
         case id == "popup.nav":             day.popup["nav", default: 0] += count
-        case id == "popup.dur_ms":          day.popup["ms", default: 0] += count
         case id == "action.popup-search":   day.popup["searches", default: 0] += count
         case id == "action.mark":           day.actions["marked", default: 0] += count
         case id == "action.delete":         day.actions["deleted", default: 0] += count
@@ -236,6 +247,14 @@ final class TrackingService {
     var totalFastPastes: Int {
         lock.lock(); defer { lock.unlock() }
         return store.totalFastPastes
+    }
+
+    /// Lifetime ⌘V pastes. Persisted in tracking.json and back-filled from the
+    /// legacy `backendFeatureFlagsClickCount` default, so a long-time user's
+    /// real history counts toward the Pro trial rather than restarting at 0.
+    var totalPastes: Int {
+        lock.lock(); defer { lock.unlock() }
+        return store.totalPastes
     }
 
     // MARK: - Day bookkeeping
@@ -307,6 +326,7 @@ final class TrackingService {
             if !day.markedBatches.isEmpty { d["marked_batches"] = day.markedBatches }
             if !day.captures.isEmpty { d["captures"] = day.captures }
             if !day.popup.isEmpty { d["popup"] = day.popup }
+            if !day.popupDurationsMs.isEmpty { d["popup_durations"] = day.popupDurationsMs }
             if !day.popupOutcomes.isEmpty { d["popup_outcomes"] = day.popupOutcomes }
             if !day.actions.isEmpty { d["actions"] = day.actions }
             if !day.settingsChanged.isEmpty { d["settings_changed"] = day.settingsChanged }
@@ -320,18 +340,18 @@ final class TrackingService {
             "hardware_uuid": DeviceIdentity.installKey,
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
             "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
+            // Which of the 16 shipped languages this device is actually
+            // running in — the app's own UI language, not just the region.
+            // Nothing upstream of this call reads/sends locale today.
+            "locale": Bundle.main.preferredLocalizations.first ?? Locale.current.identifier,
             "first_seen": store.firstSeen,
             "versions": store.versions,
             "settings": Self.settingsSnapshot(),
-            "lifetime": [
-                "total_pastes": store.totalPastes,
-                "total_fast_pastes": store.totalFastPastes,
-                "active_days": store.activeDays.count,
-                "history_size": ClipboardManager.shared.items.count,
-                "pinned_now": ClipboardManager.shared.items.filter(\.isPinned).count,
-                "tool_totals": store.toolTotals,
-                "tool_last_used": store.toolLastUsed.mapValues { Self.dateKey(Date(timeIntervalSince1970: $0)) },
-            ] as [String: Any],
+            // Raw STATE snapshots only — no client-computed aggregates. All
+            // lifetime totals (total_pastes, tool_totals, active_days, …) are
+            // derived by the backend from the daily payloads; the local
+            // toolTotals/toolLastUsed stay on-device purely for tool ranking.
+            "lifetime": Self.stateSnapshot(),
             "days": daysJSON,
         ]
         lock.unlock()
@@ -360,6 +380,27 @@ final class TrackingService {
                 DispatchQueue.global(qos: .utility).async { self.persistNow() }
             }
         }.resume()
+    }
+
+    /// Raw facts about the ring as it looks right now — counts only, never
+    /// content, never names. Must be called on the main thread.
+    private static func stateSnapshot() -> [String: Any] {
+        let m = ClipboardManager.shared
+        let groupCount = m.items.filter {
+            if case .group = $0.content { return true }
+            return false
+        }.count
+        return [
+            "history_size": m.items.count,
+            "pinned_now": m.items.filter(\.isPinned).count,
+            "groups_now": groupCount,
+            "collections_count": m.collections.count,
+            // Elements per collection, in slot order — counts only, the
+            // user-chosen collection names never leave the device.
+            "collection_item_counts": m.collections.map { name in
+                m.items.filter { $0.collections.contains(name) }.count
+            },
+        ]
     }
 
     /// Current value of every user-facing setting, one key per setting.
@@ -391,7 +432,21 @@ final class TrackingService {
             "launch_at_login":         m.launchAtLoginEnabled,
             "auto_update_check":       AppDelegate.shared?.automaticallyChecksForUpdates ?? true,
             "auto_update_download":    AppDelegate.shared?.automaticallyDownloadsUpdates ?? false,
-            "onboarding_step":         UserDefaults.standard.integer(forKey: "popupCoachStep"),
+            "interaction_sounds":      m.interactionSoundsEnabled,
+            "show_popup_hints":        m.showPopupInteractionHints,
+            "beta_updates":            UserDefaults.standard.bool(forKey: "SUBetaUpdatesEnabled"),
+            // Explicit in-app language override — "" means "follow system",
+            // which the top-level `locale` field already reports separately.
+            "app_language_override":   m.appLanguageCode.isEmpty ? "system" : m.appLanguageCode,
+            // Count only, not the bundle IDs themselves — the actual app list
+            // can reveal what a user runs (banking apps, etc.), which has no
+            // place leaving the device. The count alone still answers "how
+            // many people use per-app exclusion."
+            "excluded_apps_count":     m.excludedCaptureBundleIDs.count,
+            // Onboarding-lesson funnel: how many of the 5 taught gestures
+            // this device has completed. Previously tracked only locally
+            // (to decide which lesson to show next) and never reported.
+            "nudges_learned_count":    m.nudgesLearnedCount,
         ]
     }
 
@@ -579,11 +634,13 @@ final class AuthManager: ObservableObject {
             DispatchQueue.main.async {
                 TrackingService.shared.flushToBackend()
                 TrackingService.shared.checkForRemoteMessage()
+                ProGate.shared.refresh()
             }
         }
         DispatchQueue.main.async {
             TrackingService.shared.flushToBackend()
             TrackingService.shared.checkForRemoteMessage()
+            ProGate.shared.refresh()
         }
     }
 

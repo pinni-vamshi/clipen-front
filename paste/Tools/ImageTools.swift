@@ -5,9 +5,22 @@ import UniformTypeIdentifiers
 import Vision
 import webp
 
+/// Distinguishes WHY a Vision-based tool produced nothing, instead of
+/// collapsing "the engine threw an error" and "the engine ran cleanly and
+/// found nothing" into the same silent nil — that collapse is exactly what
+/// made OCR failures unattributable before.
+enum VisionOutcome<T> {
+    case success(T)
+    case decodeFailed
+    case visionError
+    case empty
+}
+
 enum SubjectLiftService {
-    static func removeBackground(from image: NSImage) async -> (Data, NSImage)? {
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+    static func removeBackground(from image: NSImage) async -> VisionOutcome<(Data, NSImage)> {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return .decodeFailed
+        }
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let request = VNGenerateForegroundInstanceMaskRequest()
@@ -15,7 +28,7 @@ enum SubjectLiftService {
                 do {
                     try handler.perform([request])
                     guard let observation = request.results?.first else {
-                        continuation.resume(returning: nil)
+                        continuation.resume(returning: .empty)
                         return
                     }
                     let masked = try observation.generateMaskedImage(
@@ -27,12 +40,12 @@ enum SubjectLiftService {
                     let out = NSImage(size: rep.size)
                     out.addRepresentation(rep)
                     guard let png = out.pngData() else {
-                        continuation.resume(returning: nil)
+                        continuation.resume(returning: .visionError)
                         return
                     }
-                    continuation.resume(returning: (png, out))
+                    continuation.resume(returning: .success((png, out)))
                 } catch {
-                    continuation.resume(returning: nil)
+                    continuation.resume(returning: .visionError)
                 }
             }
         }
@@ -72,13 +85,19 @@ enum ImageTools {
             },
             runAsync: { item in
                 guard let input = ImageService.imageInput(for: item) else { return nil }
-                guard let text = await OCRService.extractText(from: input.image) else {
-                    await MainActor.run {
-                        AuthManager.shared.registerActionUsage(actionID: "fail.ocr")
-                    }
+                switch await OCRService.extractText(from: input.image) {
+                case .success(let text):
+                    return .text(text)
+                case .decodeFailed:
+                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.image_decode") }
+                    return .status("Couldn't read this image.")
+                case .visionError:
+                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.ocr_vision_error") }
+                    return .status("No text found in image.")
+                case .empty:
+                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.ocr") }
                     return .status("No text found in image.")
                 }
-                return .text(text)
             }
         ),
         ClipboardTool(
@@ -91,13 +110,22 @@ enum ImageTools {
             },
             runAsync: { item in
                 guard let input = ImageService.imageInput(for: item) else { return nil }
-                guard let (png, image) = await SubjectLiftService.removeBackground(from: input.image) else {
+                switch await SubjectLiftService.removeBackground(from: input.image) {
+                case .success(let (png, image)):
+                    return .item(
+                        ClipboardItem(content: ClipboardContent.imageContent(rawData: png, dataType: .init("public.png"), fallback: image)!),
+                        message: "Removed background."
+                    )
+                case .decodeFailed:
+                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.image_decode") }
+                    return .status("Couldn't find a clear subject to cut out.")
+                case .visionError:
+                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.remove_background_vision_error") }
+                    return .status("Couldn't find a clear subject to cut out.")
+                case .empty:
+                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.remove_background") }
                     return .status("Couldn't find a clear subject to cut out.")
                 }
-                return .item(
-                    ClipboardItem(content: ClipboardContent.imageContent(rawData: png, dataType: .init("public.png"), fallback: image)!),
-                    message: "Removed background."
-                )
             }
         ),
         ClipboardTool(
@@ -113,9 +141,11 @@ enum ImageTools {
             runAsync: { item in
                 guard let input = ImageService.imageInput(for: item) else { return nil }
                 guard let cgImage = input.image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.image_decode") }
                     return .status("Couldn't read this image.")
                 }
                 guard let description = await AIService.describeImage(cgImage) else {
+                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.ai_describe_image") }
                     return .status("Apple Intelligence couldn't describe this image.")
                 }
                 return .text(description)
@@ -126,8 +156,14 @@ enum ImageTools {
 }
 
 enum OCRService {
-    static func extractText(from img: NSImage) async -> String? {
-        guard let cgImage = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+    /// Was `try?`, which swallowed any thrown Vision error (corrupt image,
+    /// unsupported color space, internal Vision failure) and made it
+    /// indistinguishable from "ran cleanly, genuinely no text in the image."
+    /// Now `try`, in a real do/catch, so those two causes report separately.
+    static func extractText(from img: NSImage) async -> VisionOutcome<String> {
+        guard let cgImage = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return .decodeFailed
+        }
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let request = VNRecognizeTextRequest()
@@ -136,11 +172,16 @@ enum OCRService {
                 let preferred = Locale.preferredLanguages.prefix(3).map { String($0) }
                 request.recognitionLanguages = preferred.isEmpty ? ["en-US"] : preferred
                 let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-                try? handler.perform([request])
+                do {
+                    try handler.perform([request])
+                } catch {
+                    continuation.resume(returning: .visionError)
+                    return
+                }
                 let lines = (request.results ?? [])
                     .compactMap { $0.topCandidates(1).first?.string }
                     .joined(separator: "\n")
-                continuation.resume(returning: lines.isEmpty ? nil : lines)
+                continuation.resume(returning: lines.isEmpty ? .empty : .success(lines))
             }
         }
     }

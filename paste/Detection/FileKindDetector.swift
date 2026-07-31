@@ -84,12 +84,29 @@ enum FileKindDetector {
         isVideoFile(url) || isAudioFile(url)
     }
 
+    /// glTF/GLB specifically — these still count as 3D model files for
+    /// tagging/icon purposes (`is3DModelFile` below), but are NOT routed to
+    /// Model3DPreview: GLTFKit2's shared concurrent loader queue was causing
+    /// real hangs/crashes, so the preview panel shows "No preview available"
+    /// for these instead. Native SceneKit/ModelIO formats are unaffected.
+    nonisolated static func isGLTFModelFile(_ url: URL) -> Bool {
+        switch fileExtension(url) {
+        case "gltf", "glb": return true
+        default: return false
+        }
+    }
+
     nonisolated static func is3DModelFile(_ url: URL) -> Bool {
         switch fileExtension(url) {
-        case "usdz", "usd", "usda", "usdc", "obj", "stl", "ply",
-             "dae", "abc", "scn", "fbx", "gltf", "glb",
-             "blend", "dwg", "dxf":
+        // Actually renderable in the preview: native SceneKit/ModelIO formats.
+        // gltf/glb are still recognized as 3D models (tagging/icon) below,
+        // but see isGLTFModelFile — they're excluded from actual rendering.
+        case "usdz", "usd", "usda", "usdc",
+             "obj", "stl", "ply", "dae", "abc", "scn",
+             "gltf", "glb":
             return true
+        // fbx/blend/dwg/dxf have no viewer library on Apple platforms; they
+        // used to be listed here and always fell back to a black panel.
         default:
             return false
         }

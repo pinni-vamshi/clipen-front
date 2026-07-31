@@ -31,7 +31,7 @@ enum MarkedToolRegistry {
                 return .file
             case .text, .richText, .html, .rtfd, .svg:
                 return .text
-            case .blob:
+            case .blob, .group:
                 return .mixed
             }
         }
@@ -41,13 +41,56 @@ enum MarkedToolRegistry {
 
     static func tools(for items: [ClipboardItem]) -> [MarkedTool] {
         guard items.count >= 2 else { return [] }
+        let base: [MarkedTool]
         switch classify(items) {
-        case .text:  return textTools
-        case .image: return imageTools
-        case .pdf:   return pdfTools
-        case .file:  return fileTools
-        case .mixed: return mixedTools
+        case .text:  base = textTools
+        case .image: base = imageTools
+        case .pdf:   base = pdfTools
+        case .file:  base = fileTools
+        case .mixed: base = mixedTools
         }
+        return base + collectionTools(for: items)
+    }
+
+    /// File the whole marked set into another collection, mirroring the
+    /// single-item collection transforms.
+    private static func collectionTools(for items: [ClipboardItem]) -> [MarkedTool] {
+        let manager = ClipboardManager.shared
+        let active  = manager.activeCollection
+        var tools: [MarkedTool] = []
+
+        for name in manager.collections {
+            // Skip a destination every marked item already belongs to.
+            guard !items.allSatisfy({ $0.collections.contains(name) }) else { continue }
+            let ids = items.map(\.id)
+
+            if let active, active != name {
+                tools.append(MarkedTool(
+                    id: "collection.move.\(name)", icon: "arrow.right.circle",
+                    label: String(localized: "Move to \(name)"),
+                    preview: { _ in String(localized: "Leave \(active), file under \(name)") },
+                    run: { _ in
+                        await MainActor.run {
+                            for id in ids { ClipboardManager.shared.moveItem(id, toCollection: name) }
+                        }
+                        return .status(String(localized: "Moved to \(name)"))
+                    }
+                ))
+            }
+
+            tools.append(MarkedTool(
+                id: "collection.share.\(name)", icon: "plus.circle",
+                label: String(localized: "Also in \(name)"),
+                preview: { _ in String(localized: "Keep here and file under \(name) too") },
+                run: { _ in
+                    await MainActor.run {
+                        for id in ids { ClipboardManager.shared.shareItem(id, toCollection: name) }
+                    }
+                    return .status(String(localized: "Added to \(name)"))
+                }
+            ))
+        }
+        return tools
     }
 
     static func displays(for items: [ClipboardItem]) -> [TransformDisplay] {
@@ -238,6 +281,7 @@ enum MarkedToolService {
                     }
                 }
                 guard pdf.pageCount >= 2, let data = pdf.dataRepresentation() else {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.marked_images_to_pdf")
                     continuation.resume(returning: .status("Couldn't build the PDF."))
                     return
                 }
@@ -249,6 +293,7 @@ enum MarkedToolService {
                         message: "Combined \(pdf.pageCount) images into one PDF."
                     ))
                 } catch {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.marked_images_to_pdf")
                     continuation.resume(returning: .status("Couldn't write the PDF file."))
                 }
             }
@@ -265,6 +310,7 @@ enum MarkedToolService {
                 for img in images {
                     var rect = NSRect(origin: .zero, size: img.size)
                     guard let cg = img.cgImage(forProposedRect: &rect, context: nil, hints: nil) else {
+                        AuthManager.shared.registerActionUsage(actionID: "fail.marked_stitch")
                         continuation.resume(returning: .status("Couldn't stitch the images."))
                         return
                     }
@@ -277,6 +323,7 @@ enum MarkedToolService {
                                           bitsPerComponent: 8, bytesPerRow: 0,
                                           space: CGColorSpaceCreateDeviceRGB(),
                                           bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.marked_stitch")
                     continuation.resume(returning: .status("Couldn't stitch the images."))
                     return
                 }
@@ -295,6 +342,7 @@ enum MarkedToolService {
                 }
                 guard let stitched = ctx.makeImage(),
                       let png = NSBitmapImageRep(cgImage: stitched).representation(using: .png, properties: [:]) else {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.marked_stitch")
                     continuation.resume(returning: .status("Couldn't encode the stitched image."))
                     return
                 }
@@ -313,7 +361,12 @@ enum MarkedToolService {
         let byIndex: [Int: String] = await withTaskGroup(of: (Int, String?).self) { group in
             for (idx, input) in inputs.enumerated() {
                 let image = input.image
-                group.addTask { (idx, await OCRService.extractText(from: image)) }
+                group.addTask {
+                    switch await OCRService.extractText(from: image) {
+                    case .success(let text): return (idx, text)
+                    default: return (idx, nil)
+                    }
+                }
             }
             var out: [Int: String] = [:]
             for await (idx, text) in group where text != nil {
@@ -324,7 +377,10 @@ enum MarkedToolService {
         let parts = inputs.indices.compactMap { idx in
             byIndex[idx].map { "===== image \(idx + 1) =====\n\($0)" }
         }
-        guard !parts.isEmpty else { return .status("No text found in any image.") }
+        guard !parts.isEmpty else {
+            AuthManager.shared.registerActionUsage(actionID: "fail.marked_ocr_all")
+            return .status("No text found in any image.")
+        }
         return .text(parts.joined(separator: "\n\n"))
     }
 
@@ -344,6 +400,7 @@ enum MarkedToolService {
                     }
                 }
                 guard merged.pageCount > 0, let data = merged.dataRepresentation() else {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.marked_merge_pdfs")
                     continuation.resume(returning: .status("Couldn't merge the PDFs."))
                     return
                 }
@@ -355,6 +412,7 @@ enum MarkedToolService {
                         message: "Merged \(inputs.count) PDFs (\(merged.pageCount) pages)."
                     ))
                 } catch {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.marked_merge_pdfs")
                     continuation.resume(returning: .status("Couldn't write the merged PDF."))
                 }
             }
@@ -370,7 +428,10 @@ enum MarkedToolService {
                 parts.append("===== PDF \(idx + 1) =====\n\(text)")
             }
         }
-        guard !parts.isEmpty else { return .status("No text found in any PDF.") }
+        guard !parts.isEmpty else {
+            AuthManager.shared.registerActionUsage(actionID: "fail.marked_pdf_text_all")
+            return .status("No text found in any PDF.")
+        }
         return .text(parts.joined(separator: "\n\n"))
     }
 
@@ -404,6 +465,7 @@ enum MarkedToolService {
                     process.waitUntilExit()
                     guard process.terminationStatus == 0,
                           FileManager.default.fileExists(atPath: zipURL.path) else {
+                        AuthManager.shared.registerActionUsage(actionID: "fail.marked_zip")
                         continuation.resume(returning: .status("Couldn't create the zip archive."))
                         return
                     }
@@ -412,6 +474,7 @@ enum MarkedToolService {
                         message: "Zipped \(urls.count) files."
                     ))
                 } catch {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.marked_zip")
                     continuation.resume(returning: .status("Couldn't create the zip archive."))
                 }
             }
@@ -438,7 +501,7 @@ enum MarkedToolService {
             if let pdf = PDFTools.pdfInput(for: item) {
                 if let text = await PDFService.extractAllText(from: pdf.pdf) { parts.append(text) }
             } else if let input = ImageService.imageInput(for: item) {
-                if let text = await OCRService.extractText(from: input.image) {
+                if case .success(let text) = await OCRService.extractText(from: input.image) {
                     parts.append(text)
                 } else {
                     parts.append("[Image \(Int(input.image.size.width))×\(Int(input.image.size.height))]")
@@ -460,22 +523,30 @@ enum MarkedToolService {
     static func mergeAsDocument(_ items: [ClipboardItem]) async -> TransformOutput? {
         guard items.count >= 2 else { return nil }
         let parts = await flattenToText(items)
-        guard parts.count >= 2 else { return .status("Couldn't flatten the marked items to text.") }
+        guard parts.count >= 2 else {
+            AuthManager.shared.registerActionUsage(actionID: "fail.marked_merge_document")
+            return .status("Couldn't flatten the marked items to text.")
+        }
         return .text(parts.joined(separator: "\n\n"))
     }
 
     static func summarizeAll(_ items: [ClipboardItem]) async -> TransformOutput? {
         guard items.count >= 2 else { return nil }
         let parts = await flattenToText(items)
-        guard !parts.isEmpty else { return .status("Couldn't flatten the marked items to text.") }
+        guard !parts.isEmpty else {
+            AuthManager.shared.registerActionUsage(actionID: "fail.marked_merge_document")
+            return .status("Couldn't flatten the marked items to text.")
+        }
         let combined = parts.joined(separator: "\n\n")
         guard AIService.fits(combined) else {
+            AuthManager.shared.registerActionUsage(actionID: "fail.ai_summarize_too_long")
             return .status("Combined text is too long to summarize at once.")
         }
         guard let summary = await AIService.transform(
             instructions: "You are a concise summarizer. Summarize the given text (assembled from multiple clipboard items) in one clear paragraph, 3-6 sentences. Output ONLY the summary, no preamble.",
             text: combined
         ) else {
+            AuthManager.shared.registerActionUsage(actionID: "fail.ai_summarize")
             return .status("Apple Intelligence couldn't summarize this.")
         }
         return .text(summary)
@@ -513,11 +584,13 @@ enum MarkedToolService {
                         }
                     }
                     guard urls.count >= 2 else {
+                        AuthManager.shared.registerActionUsage(actionID: "fail.marked_file_bundle")
                         continuation.resume(returning: .status("Couldn't materialise the marked items as files."))
                         return
                     }
                     continuation.resume(returning: .files(urls, message: "Bundled \(urls.count) files."))
                 } catch {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.marked_file_bundle")
                     continuation.resume(returning: .status("Couldn't create the file bundle."))
                 }
             }

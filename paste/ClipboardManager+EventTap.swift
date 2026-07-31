@@ -82,6 +82,14 @@ extension ClipboardManager {
             return Unmanaged.passUnretained(event)
         }
 
+        // NOTE: deliberately NO "pass everything through while the nudge
+        // lesson is open" guard here. That was tried and was exactly wrong:
+        // it disabled ⌘V globally for as long as the lesson was up, so the
+        // ring popup could not open and the gesture being taught was the one
+        // gesture that could not be practiced. The practice field takes
+        // keyboard focus on its own now (the lesson is a real titled window,
+        // so it becomes key normally) and Clipen's synthesized paste lands in
+        // it like any other text field — the tap must keep working as usual.
         if type == .flagsChanged { return handleFlagsChanged(event) }
         if type == .keyUp        { return handleKeyUp(event) }
         if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
@@ -141,10 +149,29 @@ extension ClipboardManager {
 
     func handleKeyUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
+
+        // Trial spent. Every branch below is a tap-hold timer firing its action
+        // on key-UP (cycle, transform, share, pin), so the key-DOWN gate never
+        // sees them — this is what let V keep walking the ring behind the
+        // subscribe prompt. Cancel the timers and run none of them.
+        if previewWindow.isVisible && !ProGate.shared.isUnlocked {
+            vTapHoldTimer?.invalidate();      vTapHoldTimer = nil
+            firstOpenHoldTimer?.invalidate(); firstOpenHoldTimer = nil
+            xTapHoldTimer?.invalidate();      xTapHoldTimer = nil
+            bTapHoldTimer?.invalidate();      bTapHoldTimer = nil
+            pTapHoldTimer?.invalidate();      pTapHoldTimer = nil
+            sTapHoldTimer?.invalidate();      sTapHoldTimer = nil
+            if key == 49 { spaceKeyIsDown = false }
+            return Unmanaged.passUnretained(event)
+        }
+
         if key == 9, let timer = vTapHoldTimer {
             timer.invalidate()
             vTapHoldTimer = nil
-            DispatchQueue.main.async { [weak self] in self?.cycleNext() }
+            DispatchQueue.main.async { [weak self] in
+                self?.playInteractionSoundIfEnabled(.cycle)
+                self?.cycleNext()
+            }
         }
         if key == 9, let timer = firstOpenHoldTimer {
             timer.invalidate()
@@ -156,6 +183,7 @@ extension ClipboardManager {
             let shift = event.flags.contains(.maskShift)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.playInteractionSoundIfEnabled(.transform)
                 if self.inTransformStage {
                     if shift { self.cycleTransformBackward() }
                     else      { self.cycleTransform() }
@@ -168,24 +196,24 @@ extension ClipboardManager {
             timer.invalidate()
             bTapHoldTimer = nil
             DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if self.inTransformStage {
-                    self.cycleTransformBackward()
-                } else {
-                    self.cyclePrevious()
-                }
+                self?.playInteractionSoundIfEnabled(.cycle)
+                self?.cyclePrevious()
             }
         }
         if key == 35, let timer = pTapHoldTimer {
             timer.invalidate()
             pTapHoldTimer = nil
-            DispatchQueue.main.async { [weak self] in self?.cyclePinnedItems() }
+            DispatchQueue.main.async { [weak self] in
+                self?.playInteractionSoundIfEnabled(.pin)
+                self?.cyclePinnedItems()
+            }
         }
         if key == 1, let timer = sTapHoldTimer {
             timer.invalidate()
             sTapHoldTimer = nil
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.playInteractionSoundIfEnabled(.share)
                 if self.inShareStage { self.cycleShare() } else { self.enterShareStage() }
             }
         }
@@ -211,6 +239,13 @@ extension ClipboardManager {
             resetAutoDismissTimer()
         }
 
+        // While the inline editor is up, keys must reach its NSTextView
+        // untouched — including Esc (which the editor turns into cancel) and
+        // Return (save). Blanket passthrough is safer than an allowlist here.
+        if isInlineEditing {
+            return Unmanaged.passUnretained(event)
+        }
+
         if inPageRangeMode && !cmd {
             return handlePageRangeKeyDown(key: key, event: event)
         }
@@ -234,6 +269,16 @@ extension ClipboardManager {
                 }
                 self.escapeWillDismiss = false
             }
+            return nil
+        }
+
+        // Trial spent: the popup is showing the subscribe prompt, so every
+        // interaction below this point — cycling with V, Space preview, X
+        // transforms, search, marking, delete — must be dead. Esc is handled
+        // just above so there's always a way out. Swallowing (returning nil)
+        // rather than passing through keeps these keystrokes from leaking into
+        // whatever app is frontmost.
+        if previewWindow.isVisible && !ProGate.shared.isUnlocked {
             return nil
         }
 
@@ -272,11 +317,15 @@ extension ClipboardManager {
                 lastSpaceKeyTime = isDoubleTap ? .distantPast : Date()
                 if isDoubleTap {
                     DispatchQueue.main.async { [weak self] in
+                        self?.playInteractionSoundIfEnabled(.preview)
                         self?.flashSpaceDoubleTapHint()
                         self?.openQuickClipPanelForSelection()
                     }
                 } else {
-                    DispatchQueue.main.async { [weak self] in self?.toggleSelectedItemPreview() }
+                    DispatchQueue.main.async { [weak self] in
+                        self?.playInteractionSoundIfEnabled(.preview)
+                        self?.toggleSelectedItemPreview()
+                    }
                 }
                 return nil
             }
@@ -309,6 +358,12 @@ extension ClipboardManager {
 
         if key == 9 {
             if isSimulatingPaste { return Unmanaged.passUnretained(event) }
+            // ⌘⌥V is macOS's own "Move here" shortcut (Finder + others). When
+            // Clipen's popup is CLOSED we should never claim it — reserving
+            // opt+V for the in-popup "jump 5" action only.
+            if opt && !previewWindow.isVisible {
+                return Unmanaged.passUnretained(event)
+            }
             ClipenSignpost.event("v.keydown")
             let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
 
@@ -326,13 +381,14 @@ extension ClipboardManager {
                             self.popupHintShiftV = false
                             guard let id = pendingID,
                                   self.items.contains(where: { $0.id == id }) else { return }
-                            self.toggleMark(id: id)
-                            AuthManager.shared.registerActionUsage(actionID: "action.mark")
+                            self.playInteractionSoundIfEnabled(.mark)
+                            if self.toggleMark(id: id) {
+                                AuthManager.shared.registerActionUsage(actionID: "action.mark")
+                            }
                             if self.advanceAfterMark, self.previewWindow.isVisible,
                                !self.displayItems.isEmpty {
                                 self.selectedIndex = (self.selectedIndex + 1) % self.displayItems.count
-                                self.syncItemPreviewWithSelection()
-                                self.syncTransformPanelWithSelection()
+                                self.selectionDidChange()
                             }
                         }
                     }
@@ -350,17 +406,20 @@ extension ClipboardManager {
                 // Shift (⇧V) is always a plain "previous item in the main
                 // ring" shortcut — Shift+X is the separate, dedicated way to
                 // step backward within the transform panel (cycleTransformBackward,
-                // handled elsewhere via key == 7 + shift). Only the alternate
-                // "B" reverse-key binding is context-aware about inTransformStage.
+                // handled elsewhere via key == 7 + shift). The alternate "B"
+                // reverse-key binding is likewise always a plain "previous
+                // item" shortcut — it never touches the transform panel.
                 if !reverseCycleUsesB {
                     DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }
                 }
                 return nil
             }
 
-            if opt {
-                DispatchQueue.main.async { [weak self] in self?.jumpForward(by: 5) }
-                return nil
+            if opt && previewWindow.isVisible {
+             DispatchQueue.main.async { [weak self] in
+             self?.jumpForward(by: 5)
+             }
+             return nil
             }
 
             if !isAutorepeat {
@@ -376,7 +435,10 @@ extension ClipboardManager {
                 RunLoop.main.add(t, forMode: .common)
                 firstOpenHoldTimer = t
             }
-            DispatchQueue.main.async { [weak self] in self?.cycleNext() }
+            DispatchQueue.main.async { [weak self] in
+                self?.playInteractionSoundIfEnabled(.cycle)
+                self?.cycleNext()
+            }
             return nil
         }
 
@@ -392,7 +454,7 @@ extension ClipboardManager {
                     self.popupHintXHold = true
                     self.popupHintX = false
                     self.popupHintShiftX = false
-                    if self.inTransformStage { self.exitTransformStage() }
+                    self.setSidePanelStage(.none)
                 }
             }
             RunLoop.main.add(t, forMode: .common)
@@ -407,7 +469,7 @@ extension ClipboardManager {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.sTapHoldTimer = nil
-                    if self.inShareStage { self.exitShareStage() }
+                    self.setSidePanelStage(.none)
                 }
             }
             RunLoop.main.add(t, forMode: .common)
@@ -419,7 +481,73 @@ extension ClipboardManager {
 
         if key == 8 && previewWindow.isVisible {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
-            DispatchQueue.main.async { [weak self] in self?.moveSelectedToFront() }
+            DispatchQueue.main.async { [weak self] in
+                self?.playInteractionSoundIfEnabled(.moveFront)
+                self?.moveSelectedToFront()
+            }
+            return nil
+        }
+
+        // E — inline edit on the selected item (text only). Opens the editor
+        // in the side-preview slot; popup stays open until commit/cancel.
+        if key == 14 && previewWindow.isVisible && !isSearchActive
+           && !inTransformStage && !isInlineEditing {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in
+                self?.beginInlineEditForSelection()
+            }
+            return nil
+        }
+
+        // L — instant lowercase transform on the selected item. Toggle.
+        if key == 37 && previewWindow.isVisible && !isSearchActive
+           && !inTransformStage && !isInlineEditing {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in
+                self?.applyCaseTransformForSelection(.lowercase)
+            }
+            return nil
+        }
+
+        // U — instant uppercase transform on the selected item. Toggle.
+        if key == 32 && previewWindow.isVisible && !isSearchActive
+           && !inTransformStage && !isInlineEditing {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in
+                self?.applyCaseTransformForSelection(.uppercase)
+            }
+            return nil
+        }
+
+        // ` (grave) — step to the next category one tap at a time.
+        if key == 50 && previewWindow.isVisible && !isSearchActive {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in
+                self?.playInteractionSoundIfEnabled(.category)
+                self?.cycleCategoryForward()
+            }
+            return nil
+        }
+
+        // 1–9 — jump straight to that view while ⌘ is still held. 1 is always
+        // All (unfiltered); 2 onward are the collections in creation order.
+        if let slot = Self.numberRowKeycodeToCollectionSlot[key],
+           previewWindow.isVisible, !isSearchActive, slot <= highestCollectionSlot {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in
+                self?.playInteractionSoundIfEnabled(.category)
+                self?.selectCollection(slot: slot)
+            }
+            return nil
+        }
+
+        // G — fold the marked items into one group (only when ≥2 are marked).
+        if key == 5 && previewWindow.isVisible && !isSearchActive && markedItemIDs.count >= 2 {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            DispatchQueue.main.async { [weak self] in
+                self?.playInteractionSoundIfEnabled(.moveFront)
+                self?.groupMarkedItems()
+            }
             return nil
         }
 
@@ -434,9 +562,13 @@ extension ClipboardManager {
                     self.pTapHoldTimer = nil
                     guard let id = pendingID,
                           self.items.contains(where: { $0.id == id }) else { return }
+                    self.playInteractionSoundIfEnabled(.pin)
                     self.togglePin(id: id)
                     self.resetAutoDismissTimer()
-                    self.syncItemPreviewWithSelection()
+                    // Pinning reorders displayItems (applyPinOrdering), so the
+                    // same selectedIndex now points at a different item — every
+                    // panel has to re-target, not just the preview.
+                    self.selectionDidChange()
                     AuthManager.shared.registerActionUsage(actionID: "action.pin")
                 }
             }
@@ -457,13 +589,14 @@ extension ClipboardManager {
                     self.popupHintVMark = true
                     guard let id = pendingID,
                           self.items.contains(where: { $0.id == id }) else { return }
-                    self.toggleMark(id: id)
-                    AuthManager.shared.registerActionUsage(actionID: "action.mark")
+                    self.playInteractionSoundIfEnabled(.mark)
+                    if self.toggleMark(id: id) {
+                        AuthManager.shared.registerActionUsage(actionID: "action.mark")
+                    }
                     if self.advanceAfterMark, self.previewWindow.isVisible,
                        !self.displayItems.isEmpty {
                         self.selectedIndex = (self.selectedIndex - 1 + self.displayItems.count) % self.displayItems.count
-                        self.syncItemPreviewWithSelection()
-                        self.syncTransformPanelWithSelection()
+                        self.selectionDidChange()
                     }
                 }
             }
@@ -472,15 +605,10 @@ extension ClipboardManager {
             return nil
         }
 
-        if let target = Self.numberRowKeycodeToIndex[key],
-           previewWindow.isVisible || pendingFirstOpen {
-            DispatchQueue.main.async { [weak self] in self?.selectCategoryByIndex(target) }
-            return nil
-        }
-
         if key == 51 && previewWindow.isVisible {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                self.playInteractionSoundIfEnabled(.delete)
                 self.deleteSelected()
             }
             return nil

@@ -42,9 +42,19 @@ enum TextTraditionalDetectors {
             candidates.append(.init(type: .phone, confidence: 0.9, method: .deterministic))
         }
 
-        if t.hasPrefix("{") || t.hasPrefix("["),
-           (try? JSONSerialization.jsonObject(with: Data(t.utf8))) != nil {
-            candidates.append(.init(type: .json, confidence: 0.99, method: .deterministic))
+        // JSON: fully parsing to validate is O(n) and blows up on large
+        // payloads (a multi-MB JSON copy would parse the whole thing just to
+        // label it). Cap the real parse to document scan size; above that,
+        // accept it as JSON from a cheap structural check so huge JSON is still
+        // labelled — and highlighted/previewed — without parsing megabytes.
+        if t.hasPrefix("{") || t.hasPrefix("[") {
+            if scanDocument {
+                if (try? JSONSerialization.jsonObject(with: Data(t.utf8))) != nil {
+                    candidates.append(.init(type: .json, confidence: 0.99, method: .deterministic))
+                }
+            } else if t.hasSuffix("}") || t.hasSuffix("]") {
+                candidates.append(.init(type: .json, confidence: 0.8, method: .deterministic))
+            }
         }
 
         if let table = detectDelimitedTable(t) {

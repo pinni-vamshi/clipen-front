@@ -15,6 +15,8 @@
 		B10000000000000000000029 /* ClipboardManager+Panels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* ClipboardManager+Panels.swift */; };
 		B1000000000000000000002A /* ClipboardManager+Paste.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002A /* ClipboardManager+Paste.swift */; };
 		B1000000000000000000002B /* ClipboardManager+Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* ClipboardManager+Search.swift */; };
+		B10000000000000000000035 /* ClipboardManager+Nudges.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* ClipboardManager+Nudges.swift */; };
+		B10000000000000000000036 /* ProGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000036 /* ProGate.swift */; };
 		B1000000000000000000002C /* ClipboardManager+Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* ClipboardManager+Persistence.swift */; };
 		B1000000000000000000002D /* OnboardingAndTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002D /* OnboardingAndTutorial.swift */; };
 		B10000000000000000000003 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* Color+Hex.swift */; };
@@ -42,6 +44,7 @@
 		B10000000000000000000016 /* ImageTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000016 /* ImageTools.swift */; };
 		B10000000000000000000017 /* MediaTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000017 /* MediaTools.swift */; };
 		B10000000000000000000018 /* PDFTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000018 /* PDFTools.swift */; };
+		B10000000000000000000034 /* InteractionToneGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* InteractionToneGenerator.swift */; };
 		B1000000000000000000002E /* ImageCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002E /* ImageCodec.swift */; };
 		B1000000000000000000002F /* MarkedToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002F /* MarkedToolRegistry.swift */; };
 		B10000000000000000000026 /* AIToolsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000026 /* AIToolsService.swift */; };
@@ -66,6 +69,8 @@
 		A10000000000000000000029 /* ClipboardManager+Panels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Panels.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002A /* ClipboardManager+Paste.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Paste.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002B /* ClipboardManager+Search.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Search.swift"; sourceTree = "<group>"; };
+		A10000000000000000000035 /* ClipboardManager+Nudges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Nudges.swift"; sourceTree = "<group>"; };
+		A10000000000000000000036 /* ProGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProGate.swift; sourceTree = "<group>"; };
 		A1000000000000000000002C /* ClipboardManager+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Persistence.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002D /* OnboardingAndTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "OnboardingAndTutorial.swift"; sourceTree = "<group>"; };
 		A10000000000000000000003 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
@@ -93,6 +98,7 @@
 		A10000000000000000000016 /* ImageTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageTools.swift; sourceTree = "<group>"; };
 		A10000000000000000000017 /* MediaTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaTools.swift; sourceTree = "<group>"; };
 		A10000000000000000000018 /* PDFTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFTools.swift; sourceTree = "<group>"; };
+		A10000000000000000000034 /* InteractionToneGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionToneGenerator.swift; sourceTree = "<group>"; };
 		A1000000000000000000002E /* ImageCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ImageCodec.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002F /* MarkedToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MarkedToolRegistry.swift"; sourceTree = "<group>"; };
 		A10000000000000000000026 /* AIToolsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolsService.swift; sourceTree = "<group>"; };
@@ -143,6 +149,7 @@
 				A10000000000000000000016 /* ImageTools.swift */,
 				A10000000000000000000017 /* MediaTools.swift */,
 				A10000000000000000000018 /* PDFTools.swift */,
+				A10000000000000000000034 /* InteractionToneGenerator.swift */,
 				A1000000000000000000002E /* ImageCodec.swift */,
 				A1000000000000000000002F /* MarkedToolRegistry.swift */,
 				A10000000000000000000026 /* AIToolsService.swift */,
@@ -184,6 +191,8 @@
 				A10000000000000000000029 /* ClipboardManager+Panels.swift */,
 				A1000000000000000000002A /* ClipboardManager+Paste.swift */,
 				A1000000000000000000002B /* ClipboardManager+Search.swift */,
+				A10000000000000000000035 /* ClipboardManager+Nudges.swift */,
+				A10000000000000000000036 /* ProGate.swift */,
 				A1000000000000000000002C /* ClipboardManager+Persistence.swift */,
 				A1000000000000000000002D /* OnboardingAndTutorial.swift */,
 				A10000000000000000000003 /* Color+Hex.swift */,
@@ -311,6 +320,8 @@
 				B10000000000000000000029 /* ClipboardManager+Panels.swift in Sources */,
 				B1000000000000000000002A /* ClipboardManager+Paste.swift in Sources */,
 				B1000000000000000000002B /* ClipboardManager+Search.swift in Sources */,
+				B10000000000000000000035 /* ClipboardManager+Nudges.swift in Sources */,
+				B10000000000000000000036 /* ProGate.swift in Sources */,
 				B1000000000000000000002C /* ClipboardManager+Persistence.swift in Sources */,
 				B1000000000000000000002D /* OnboardingAndTutorial.swift in Sources */,
 				B10000000000000000000003 /* Color+Hex.swift in Sources */,
@@ -340,6 +351,7 @@
 				B10000000000000000000016 /* ImageTools.swift in Sources */,
 				B10000000000000000000017 /* MediaTools.swift in Sources */,
 				B10000000000000000000018 /* PDFTools.swift in Sources */,
+				B10000000000000000000034 /* InteractionToneGenerator.swift in Sources */,
 				B1000000000000000000002E /* ImageCodec.swift in Sources */,
 				B1000000000000000000002F /* MarkedToolRegistry.swift in Sources */,
 				B10000000000000000000026 /* AIToolsService.swift in Sources */,
@@ -480,7 +492,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 205;
+				CURRENT_PROJECT_VERSION = 326;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -498,7 +510,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.205;
+				MARKETING_VERSION = 1.3.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -519,7 +531,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 205;
+				CURRENT_PROJECT_VERSION = 326;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -537,7 +549,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.205;
+				MARKETING_VERSION = 1.3.8;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

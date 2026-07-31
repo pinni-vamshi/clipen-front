@@ -22,6 +22,14 @@ private struct WindowMinSizeConfigurator: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             window?.minSize = NSSize(width: 900, height: 620)
+            // The window itself defaults to an opaque backing, so the native
+            // toolbar strip (which sits above our SwiftUI content, not inside
+            // it) has nothing translucent behind it and its .regularMaterial
+            // renders as flat solid instead of a real blur. Making the window
+            // non-opaque lets that material actually blend with what's behind
+            // it, matching the body's own VisualEffectBackground.
+            window?.isOpaque = false
+            window?.backgroundColor = .clear
         }
     }
 }
@@ -46,6 +54,7 @@ struct MainWindowView: View {
 
     @StateObject private var manager = ClipboardManager.shared
     @StateObject private var auth    = AuthManager.shared
+    @StateObject private var proGate = ProGate.shared
 
     @State private var searchText    = ""
     @State private var debouncedSearchText = ""
@@ -62,6 +71,8 @@ struct MainWindowView: View {
     @AppStorage("dashboardListWidth") private var listWidth: Double = 300
     @State private var liveListWidth: Double? = nil
     @State private var dragStartListWidth: Double? = nil
+    @State private var dividerHovered = false
+    @State private var dividerDragging = false
     private var effectiveListWidth: CGFloat { CGFloat(liveListWidth ?? listWidth) }
 
     private var mainFilteredItems: [ClipboardItem] {
@@ -81,6 +92,13 @@ struct MainWindowView: View {
         ZStack(alignment: .top) {
             VisualEffectBackground().ignoresSafeArea()
             WindowMinSizeConfigurator().frame(width: 0, height: 0)
+                .onDisappear {
+                    // The window can be hidden/reordered without its SwiftUI
+                    // state being torn down, so clear the search field here
+                    // rather than relying on a fresh view instance.
+                    searchText = ""
+                    debouncedSearchText = ""
+                }
 
             Group {
                 if !manager.hasAccessibilityPermission && !hasSkippedAccessibility && !showSettings {
@@ -134,7 +152,12 @@ struct MainWindowView: View {
                 ToolbarItem(placement: .primaryAction) { toolbarActions }
             }
         }
-        .toolbarBackground(.hidden, for: .windowToolbar)
+        // Give the toolbar its own real, opaque material — one tier lighter
+        // than the body's translucency, not the fully-hidden/see-through
+        // chrome it had before, so it reads as slightly less solid than the
+        // body while never becoming transparent.
+        .toolbarBackground(.regularMaterial, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
         .sheet(isPresented: $showTutorial) {
             TutorialSheet(isPresented: $showTutorial, onSeeMore: { showSettings = true })
         }
@@ -152,11 +175,40 @@ struct MainWindowView: View {
     }
 
     private var toolbarWordmark: some View {
-        Text("CLIPEN")
-            .font(.system(size: 13, weight: .heavy))
-            .tracking(3)
-            .foregroundStyle(LinearGradient(colors: [Color(hex: "#FFB088"), Color(hex: "#FF8A80")],
-                                            startPoint: .leading, endPoint: .trailing))
+        HStack(spacing: 0) {
+            Text("CLIPEN")
+                .font(.system(size: 13, weight: .heavy))
+                .tracking(3)
+                .foregroundStyle(Color(hex: "#4E8DF7"))
+
+            // Plan badge is deliberately gated, not shown unconditionally for
+            // everyone — the paywall itself is inert for real users right now,
+            // and there's no plan to display until it isn't. Visible whenever
+            // EITHER this machine is actually paywall-gated (shows FREE) OR the
+            // server has confirmed a real paid plan (shows PRO) — checking only
+            // paywallApplies would hide the badge for a genuine subscriber,
+            // since a paid plan makes their own paywall check read false too.
+            if proGate.paywallApplies || proGate.isPro {
+                // Oversized dot as the separator between the wordmark and the
+                // plan. Nudged down so its optical centre sits on the cap-height
+                // baseline of CLIPEN rather than riding low like a period.
+                Text(".")
+                    .font(.system(size: 26, weight: .heavy))
+                    .foregroundStyle(Color(hex: "#4E8DF7"))
+                    .baselineOffset(-2)
+                    .padding(.trailing, 4)
+
+                Text(proGate.isPro ? "PRO" : "FREE")
+                    .font(.system(size: 9, weight: .heavy))
+                    .tracking(1.2)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2.5)
+                    .background(proGate.isPro ? Color(hex: "#4E8DF7") : Color.textDim,
+                                in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+        }
+        .fixedSize()
     }
 
     private var toolbarSwitcher: some View {
@@ -179,11 +231,11 @@ struct MainWindowView: View {
         }
     }
 
-    private func toolbarSegment(_ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+    private func toolbarSegment(_ title: LocalizedStringKey, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 12, weight: active ? .semibold : .medium))
-                .foregroundColor(active ? Color(hex: "#FFB088") : .textSec)
+                .foregroundColor(active ? Color(hex: "#4E8DF7") : .textSec)
                 .padding(.horizontal, 14).padding(.vertical, 5)
                 .background(active ? Color.white.opacity(0.08) : Color.clear,
                             in: RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -217,7 +269,17 @@ struct MainWindowView: View {
             Divider().background(Color.border)
 
             if manager.items.isEmpty {
-                OnboardingView()
+                if manager.hasLoadedHistoryOnce {
+                    // Truly empty history — new install or user cleared it.
+                    OnboardingView()
+                } else {
+                    // History load still in flight — this used to be a bare
+                    // Color.clear (chosen so onboarding animations wouldn't
+                    // flash on every ordinary launch), but on a large/older
+                    // history the load itself can take real time, and a blank
+                    // window read as the app being broken rather than working.
+                    historyLoadingView
+                }
             } else {
                 HStack(spacing: 0) {
                     listPane
@@ -233,17 +295,21 @@ struct MainWindowView: View {
             footerBar
         }
         .onAppear { if mainSelectedID == nil { mainSelectedID = filtered.first?.id } }
-        .onChange(of: searchText) { _, newValue in
+        .onChange(of: searchText) { oldValue, newValue in
             searchDebounceTask?.cancel()
             if newValue.isEmpty {
                 debouncedSearchText = ""
                 return
             }
+            // Count a SEARCH SESSION (typing into an empty field), not every
+            // debounce pause — one mental search used to log 2–3 events.
+            if oldValue.isEmpty {
+                AuthManager.shared.registerActionUsage(actionID: "action.window-search")
+            }
             searchDebounceTask = Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 150_000_000)
                 guard !Task.isCancelled else { return }
                 debouncedSearchText = newValue
-                AuthManager.shared.registerActionUsage(actionID: "action.window-search")
             }
         }
         .onChange(of: debouncedSearchText) { _, _ in mainSelectedID = filtered.first?.id }
@@ -328,18 +394,26 @@ struct MainWindowView: View {
     }
 
     private var listDetailDivider: some View {
-        ZStack {
-            Divider().background(Color.border)
+        let active = dividerHovered || dividerDragging
+        return ZStack {
+            Rectangle()
+                .fill(active ? Color.accentColor.opacity(0.7) : Color.border)
+                .frame(width: active ? 2 : 1)
+            Capsule().fill(Color.border)
+                .frame(width: 4, height: 36)
         }
-        .frame(width: 8)
+        .frame(width: 9)
         .frame(maxHeight: .infinity)
         .contentShape(Rectangle())
+        .animation(.easeOut(duration: 0.12), value: active)
         .onHover { inside in
+            dividerHovered = inside
             if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
         }
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { value in
+                    dividerDragging = true
                     if dragStartListWidth == nil { dragStartListWidth = listWidth }
                     let base = dragStartListWidth ?? listWidth
                     liveListWidth = min(400, max(240, base + Double(value.translation.width)))
@@ -348,6 +422,7 @@ struct MainWindowView: View {
                     if let w = liveListWidth { listWidth = w }
                     liveListWidth = nil
                     dragStartListWidth = nil
+                    dividerDragging = false
                 }
         )
     }
@@ -485,6 +560,17 @@ struct MainWindowView: View {
         }
     }
 
+    private var historyLoadingView: some View {
+        VStack(spacing: 10) {
+            ProgressView().scaleEffect(0.8)
+            Text("Loading your clipboard history…")
+                .font(.system(size: 13, weight: .medium)).foregroundColor(.textPri)
+            Text("A large or older history can take a little while the first time.")
+                .font(.system(size: 11)).foregroundColor(.textDim)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var cyclingUnavailableBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -593,6 +679,8 @@ private struct ItemDetailView: View {
     @AppStorage("detailPreviewHeight") private var previewHeight: Double = 290
     @State private var dragStartHeight: Double? = nil
     @State private var liveDragHeight: Double? = nil
+    @State private var previewDividerHovered = false
+    @State private var previewDividerDragging = false
     private var effectiveHeight: Double { liveDragHeight ?? previewHeight }
 
     var body: some View {
@@ -607,19 +695,25 @@ private struct ItemDetailView: View {
             .clipped()
 
             ZStack {
-                Divider().background(Color.border)
+                Rectangle()
+                    .fill((previewDividerHovered || previewDividerDragging)
+                          ? Color.accentColor.opacity(0.7) : Color.border)
+                    .frame(height: (previewDividerHovered || previewDividerDragging) ? 2 : 1)
                 Capsule().fill(Color.border)
                     .frame(width: 36, height: 4)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 11)
             .contentShape(Rectangle())
+            .animation(.easeOut(duration: 0.12), value: previewDividerHovered || previewDividerDragging)
             .onHover { inside in
+                previewDividerHovered = inside
                 if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
             }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
+                        previewDividerDragging = true
                         if dragStartHeight == nil { dragStartHeight = previewHeight }
                         let base = dragStartHeight ?? previewHeight
                         liveDragHeight = min(560, max(140, base + Double(value.translation.height)))
@@ -628,11 +722,13 @@ private struct ItemDetailView: View {
                         if let final = liveDragHeight { previewHeight = final }
                         liveDragHeight = nil
                         dragStartHeight = nil
+                        previewDividerDragging = false
                     }
             )
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    appsFlowCard
                     propertiesCard
                     notesBlock
                 }
@@ -646,10 +742,11 @@ private struct ItemDetailView: View {
     @ViewBuilder
     private var pinnedContent: some View {
         switch item.content {
-        case .image, .file, .richText, .html, .rtfd:
-            // ContentPreviewView's renderer for these three (AttributedTextPreview's
-            // NSTextView, HTMLStringPreview's WKWebView) already scrolls internally.
-            // Nesting either inside an outer SwiftUI ScrollView proposes unbounded
+        case .text, .image, .file, .richText, .html, .rtfd:
+            // These content types now render through renderers that scroll
+            // internally (RichTextContentPreview's ScrollView / CodeSyntaxPreview /
+            // AttributedTextPreview's NSTextView / HTMLStringPreview's WKWebView).
+            // Nesting them inside an outer SwiftUI ScrollView proposes unbounded
             // height to an NSViewRepresentable with no intrinsic size, which
             // collapses it to zero height — a blank preview pane.
             contentBlock
@@ -661,8 +758,12 @@ private struct ItemDetailView: View {
     @ViewBuilder
     private var contentBlock: some View {
         switch item.content {
-        case .text(let s):
-            SelectableTextBlock(text: s.displayTrimmedLeading)
+        case .text:
+            // Route through ContentPreviewView so detected types (.json /
+            // .code(lang) / .latex / .markdown / .table) get the same real
+            // renderers the popup preview uses — plain unstyled text was a
+            // regression for anything the detector identified.
+            ContentPreviewView(item: item, chrome: .panel)
         case .richText, .html, .rtfd:
             // Route through the same NSTextView-backed renderer the popup's
             // larger preview panel uses (ItemPreviewPanel.swift) instead of
@@ -712,6 +813,15 @@ private struct ItemDetailView: View {
                     Text(key).font(.system(size: 11, design: .monospaced)).foregroundColor(.textDim)
                 }
             }
+        case .group(let items):
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(items) { child in
+                        GroupChildPreviewCard(child: child)
+                    }
+                }
+                .padding(12)
+            }
         }
     }
 
@@ -732,6 +842,14 @@ private struct ItemDetailView: View {
             bytes = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
         case .files(let urls):
             bytes = urls.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0) }
+        case .group(let items):
+            bytes = items.reduce(0) { acc, child in
+                switch child.content {
+                case .image(_, let d, _): return acc + d.count
+                case .text(let s), .svg(let s): return acc + s.utf8.count
+                default: return acc
+                }
+            }
         }
         return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
@@ -749,13 +867,60 @@ private struct ItemDetailView: View {
         return names
     }
 
-    private var pastedToRow: some View {
-        HStack(spacing: 12) {
-            Text("Pasted to").font(.system(size: 12)).foregroundColor(.textSec)
-            Spacer(minLength: 8)
-            PastedToChipStrip(names: pastedToNames).frame(maxWidth: 280)
+    @ViewBuilder
+    private var appsFlowCard: some View {
+        let source = item.sourceAppName
+        let destinations = pastedToNames
+        if source != nil || !destinations.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .center, spacing: 0) {
+                    if let source = source {
+                        HStack(spacing: 0) {
+                            appChip(source)
+                            Spacer(minLength: 0)
+                            Text("copied from")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.textDim)
+                        }
+                        .padding(.horizontal, 12).padding(.vertical, 10)
+                    }
+                    if source != nil && !destinations.isEmpty {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.textDim.opacity(0.6))
+                            .padding(.vertical, 2)
+                    }
+                    if !destinations.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 0) {
+                                Text("pasted to")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(.textDim)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            FlowLayout(spacing: 6) {
+                                ForEach(destinations, id: \.self) { name in
+                                    appChip(name)
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                        }
+                        .padding(.vertical, 10)
+                    }
+                }
+                .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
+            }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private func appChip(_ name: String) -> some View {
+        Text(name)
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .foregroundColor(.textPri)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.white.opacity(0.08), in: Capsule())
     }
 
     private var propertiesCard: some View {
@@ -764,14 +929,6 @@ private struct ItemDetailView: View {
             VStack(spacing: 0) {
                 propertyRow("Type", item.typeLabel)
                 cardDivider()
-                if let appName = item.sourceAppName {
-                    propertyRow("Copied from", appName)
-                    cardDivider()
-                }
-                if !pastedToNames.isEmpty {
-                    pastedToRow
-                    cardDivider()
-                }
                 propertyRow("Size", sizeString)
                 if let dims = dimensionsString {
                     cardDivider()
@@ -786,6 +943,10 @@ private struct ItemDetailView: View {
                 if !item.tags.isEmpty {
                     cardDivider()
                     propertyRow("Tags", item.tags.map(\.label).joined(separator: ", "))
+                }
+                if !item.collections.isEmpty {
+                    cardDivider()
+                    propertyRow("Collections", item.collections.sorted().joined(separator: ", "))
                 }
             }
             .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
@@ -836,6 +997,97 @@ private struct ItemDetailView: View {
                         .padding(.horizontal, 10).padding(.vertical, 12).allowsHitTesting(false)
                 }
             }
+        }
+    }
+}
+
+/// One member of a group, rendered with its real content — not just a
+/// truncated one-line label — so scrolling the group's preview actually shows
+/// what each item holds. Deliberately does NOT reuse ZoomableImagePreview for
+/// image members: that view always kicks off a second full-resolution decode
+/// of the same bytes on a background queue (see ItemPreviewPanel.swift's
+/// decodeFullRes), and doing that for up to `maxGroupItems` members at once
+/// would be the exact redundant-decode cost this file's detail pane already
+/// pays once, multiplied by the group size. A cached downsampled thumbnail is
+/// enough for a compact card; the user can still open the member on its own
+/// to zoom.
+private struct GroupChildPreviewCard: View {
+    let child: ClipboardItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().opacity(0.3)
+            content
+                .padding(10)
+        }
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Image(systemName: child.iconName)
+                .font(.system(size: 11, weight: .semibold)).foregroundColor(.indigo)
+            Text(child.typeLabel)
+                .font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 7)
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch child.content {
+        case .text, .richText, .html, .rtfd:
+            ContentPreviewView(item: child, chrome: .panel)
+                .frame(maxWidth: .infinity)
+                .frame(height: 160)
+                .clipped()
+
+        case .image(let img, let data, _):
+            let thumb = ItemThumbnailCache.shared.thumbnail(forData: data, key: child.id.uuidString) ?? img
+            Image(nsImage: thumb)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .frame(height: 160)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+        case .file(let url):
+            HStack(spacing: 10) {
+                Image(nsImage: ClipenIconCache.shared.fileIcon(for: url)).resizable().frame(width: 22, height: 22)
+                Text(url.lastPathComponent).font(.system(size: 12)).foregroundColor(.textPri).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+
+        case .files(let urls):
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(urls, id: \.self) { url in
+                    HStack(spacing: 10) {
+                        Image(nsImage: ClipenIconCache.shared.fileIcon(for: url)).resizable().frame(width: 18, height: 18)
+                        Text(url.lastPathComponent).font(.system(size: 12)).foregroundColor(.textPri).lineLimit(1)
+                    }
+                }
+            }
+
+        case .svg(let src):
+            SelectableTextBlock(text: src)
+                .frame(maxHeight: 160)
+
+        case .blob(let typeMap):
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Private clipboard data").font(.system(size: 12, weight: .medium)).foregroundColor(.textPri)
+                ForEach(typeMap.keys.sorted(), id: \.self) { key in
+                    Text(key).font(.system(size: 10, design: .monospaced)).foregroundColor(.textDim)
+                }
+            }
+
+        case .group:
+            // Groups are flattened one level on creation (groupMarkedItems) —
+            // a member is never itself a group. Kept only as a defensive
+            // fallback so an unexpected nested group still renders something.
+            Text(child.previewText).font(.system(size: 12)).foregroundColor(.textPri).lineLimit(2)
         }
     }
 }
@@ -947,6 +1199,12 @@ private struct CompactItemRow: View, Equatable {
 
     @State private var isHovered = false
 
+    // Exact footprint of the trailing icon zone (pin badge / delete+pin hover
+    // buttons: 20pt circle, or two 20pt circles with 4pt spacing) plus its own
+    // trailing padding — the text is capped to stop exactly before this zone
+    // starts, regardless of row width, instead of an arbitrary percentage.
+    private static let iconZoneWidth: CGFloat = 20 + 4 + 20 + 12
+
     static func == (l: CompactItemRow, r: CompactItemRow) -> Bool {
         l.item.id == r.item.id &&
         l.isSelected == r.isSelected &&
@@ -956,42 +1214,53 @@ private struct CompactItemRow: View, Equatable {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            leadingIcon
-            Text(title)
-                .font(.system(size: 13))
-                .foregroundColor(isSelected ? .textPri : .textSec)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 8)
-            ZStack(alignment: .trailing) {
-                if item.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(.accent)
-                        .opacity(isHovered ? 0 : 1)
-                }
-                HStack(spacing: 4) {
-                    rowActionButton(icon: "xmark", background: .red, action: onDelete)
-                        .help("Delete")
-                    rowActionButton(icon: item.isPinned ? "pin.slash.fill" : "pin.fill",
-                                    background: .blue, action: onTogglePin)
-                        .help(item.isPinned ? "Unpin" : "Pin to top")
-                }
-                .opacity(isHovered ? 1 : 0)
-                .allowsHitTesting(isHovered)
+        GeometryReader { geo in
+            HStack(spacing: 10) {
+                leadingIcon
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundColor(isSelected ? .textPri : .textSec)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: (isHovered || item.isPinned)
+                           ? max(20, geo.size.width - Self.iconZoneWidth - 10 - 10 - 18 - 12)
+                           : .infinity,
+                           alignment: .leading)
+                Spacer(minLength: 0)
             }
-            .frame(width: 50, alignment: .trailing)
+            .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 8)
+            .background(
+                isSelected ? Color.white.opacity(0.10)
+                           : (isHovered ? Color.white.opacity(0.05) : Color.clear),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
+            .overlay(alignment: .trailing) {
+                ZStack(alignment: .trailing) {
+                    if item.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 20, height: 20)
+                            .background(Color.blue, in: Circle())
+                            .opacity(isHovered ? 0 : 1)
+                    }
+                    HStack(spacing: 4) {
+                        rowActionButton(icon: "xmark", background: .red, action: onDelete)
+                            .help("Delete")
+                        rowActionButton(icon: item.isPinned ? "pin.slash.fill" : "pin.fill",
+                                        background: .blue, action: onTogglePin)
+                            .help(item.isPinned ? "Unpin" : "Pin to top")
+                    }
+                    .opacity(isHovered ? 1 : 0)
+                    .allowsHitTesting(isHovered)
+                }
+                .padding(.trailing, 12)
+            }
+            .contentShape(Rectangle())
+            .onHover { isHovered = $0 }
+            .onDrag { item.makeItemProvider() }
         }
-        .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 8)
-        .background(
-            isSelected ? Color.white.opacity(0.10)
-                       : (isHovered ? Color.white.opacity(0.05) : Color.clear),
-            in: RoundedRectangle(cornerRadius: 8)
-        )
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-        .onDrag { item.makeItemProvider() }
+        .frame(height: 34)
     }
 
     private func rowActionButton(icon: String, background: Color, action: @escaping () -> Void) -> some View {
@@ -1030,6 +1299,7 @@ private struct CompactItemRow: View, Equatable {
         case .files:                  return "doc.on.doc"
         case .svg:                    return "chevron.left.forwardslash.chevron.right"
         case .blob:                   return "lock.doc"
+        case .group:                  return "square.stack.3d.up.fill"
         }
     }
 
@@ -1050,6 +1320,8 @@ private struct CompactItemRow: View, Equatable {
             return "SVG"
         case .blob:
             return "Private clipboard data"
+        case .group(let items):
+            return "Group · \(items.count) items"
         }
     }
 
@@ -1062,5 +1334,44 @@ private struct CompactItemRow: View, Equatable {
 extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
+    }
+}
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxW = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowH: CGFloat = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x + size.width > maxW && x > 0 {
+                y += rowH + spacing
+                x = 0
+                rowH = 0
+            }
+            x += size.width + spacing
+            rowH = max(rowH, size.height)
+        }
+        return CGSize(width: maxW, height: y + rowH)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x: CGFloat = bounds.minX
+        var y: CGFloat = bounds.minY
+        var rowH: CGFloat = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX && x > bounds.minX {
+                y += rowH + spacing
+                x = bounds.minX
+                rowH = 0
+            }
+            sub.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowH = max(rowH, size.height)
+        }
     }
 }

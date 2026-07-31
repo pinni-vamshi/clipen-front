@@ -12,6 +12,7 @@ enum TagDetector {
 
     static func tag(for content: ClipboardContent, color: NSColor?) -> ClipboardTag {
         switch content {
+        case .group:              return .group
         case .svg:                return .svg
         case .blob:               return .blob
 

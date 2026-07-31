@@ -6,6 +6,11 @@ class TransformPanel: NSObject, NSPopoverDelegate {
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
     private let popover = NSPopover()
     private var cachedPanelHeight: CGFloat = 460
+    // Keyed on the tool-list shape (its count) rather than only "while
+    // shown" — re-measuring a throwaway NSHostingView on every single X
+    // press was doing a full SwiftUI layout pass just to discard it,
+    // even when the panel's height couldn't have changed.
+    private var cachedHeightSignature: Int? = nil
     private var wantsVisible = false
 
     func popoverDidShow(_ notification: Notification) {
@@ -64,6 +69,7 @@ class TransformPanel: NSObject, NSPopoverDelegate {
             case .image:                     return nil
             case .svg(let src):              return src
             case .blob:                      return nil
+            case .group:                     return nil
             }
         }()
 
@@ -86,8 +92,9 @@ class TransformPanel: NSObject, NSPopoverDelegate {
         let leftFits = popupFrame.minX - bubbleW - 8 >= screen.minX + 8
         let placeRight = rightFits || !leftFits
 
+        let heightSignature = displays.count
         let h: CGFloat
-        if popover.isShown {
+        if popover.isShown || cachedHeightSignature == heightSignature {
             h = cachedPanelHeight
         } else {
             let hv = NSHostingView(rootView: content)
@@ -95,6 +102,7 @@ class TransformPanel: NSObject, NSPopoverDelegate {
             let measured = hv.fittingSize.height
             h = min(max(measured > 0 ? measured : 460, 360), 620)
             cachedPanelHeight = h
+            cachedHeightSignature = heightSignature
         }
 
         popover.contentSize = NSSize(width: bubbleW, height: h)
@@ -130,7 +138,14 @@ class TransformPanel: NSObject, NSPopoverDelegate {
 
     func hide() {
         wantsVisible = false
-        if popover.isShown { popover.performClose(nil) }
+        if popover.isShown {
+            // Snap-close, not animated. Otherwise the ~150ms fade-out visually
+            // overlaps whatever panel we're switching to (share, item preview),
+            // making it look like Clipen shows two panels at once.
+            popover.animates = false
+            popover.performClose(nil)
+            popover.animates = true
+        }
         anchorPanel.orderOut(nil)
         shownStrip = nil
     }
@@ -177,10 +192,6 @@ struct TransformView: View {
         VStack(spacing: 0) {
             outerHeader
             Divider()
-            if let label = item.detectedType.badgeLabel {
-                detectedBadge(type: item.detectedType, label: label)
-                Divider()
-            }
             middleToolList
             Divider()
             Text(stats)
@@ -225,23 +236,6 @@ struct TransformView: View {
         .padding(.bottom, 8)
     }
 
-    private func detectedBadge(type: ClipboardContentType, label: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: type.sfIcon)
-                .font(.system(size: 10, weight: .semibold))
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-            Spacer()
-            Text("detected")
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
-        }
-        .foregroundColor(type.badgeColor)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(type.badgeColor.opacity(0.12))
-    }
-
     @ViewBuilder
     private var middleToolList: some View {
         if displays.isEmpty {
@@ -269,6 +263,7 @@ struct TransformView: View {
                                 isSelected: idx == selectedTransformIndex,
                                 isProcessing: idx == selectedTransformIndex && isProcessing
                             )
+                            .equatable()
                             .id(idx)
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) {
@@ -328,23 +323,41 @@ struct TransformView: View {
                 }
                 .onChange(of: selectedTransformIndex) { _, newIdx in
                     guard displays.indices.contains(newIdx) else { return }
+                    // Row 0 with .center anchor scrolls its top edge above the
+                    // ScrollView's origin (under the header). Pin it to .top
+                    // for the first row so it stays fully visible.
+                    let anchor: UnitPoint = newIdx == 0 ? .top : .center
                     withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(newIdx, anchor: .center)
+                        proxy.scrollTo(newIdx, anchor: anchor)
                     }
                 }
                 .onAppear {
                     guard displays.indices.contains(selectedTransformIndex) else { return }
-                    proxy.scrollTo(selectedTransformIndex, anchor: .center)
+                    // On fresh open we always start at row 0. The ScrollView's
+                    // natural position is already there, so scrolling further
+                    // would only tuck the row under the header — skip it.
+                    if selectedTransformIndex > 0 {
+                        proxy.scrollTo(selectedTransformIndex, anchor: .center)
+                    }
                 }
             }
         }
     }
 }
 
-struct TransformRow: View {
+struct TransformRow: View, Equatable {
     let display:      TransformDisplay
     let isSelected:   Bool
     let isProcessing: Bool
+
+    // `@State private var isHovered` isn't part of the equality contract —
+    // SwiftUI preserves it across renders based on view identity, and hover
+    // changes trigger a re-render on their own regardless of `.equatable()`.
+    static func == (lhs: TransformRow, rhs: TransformRow) -> Bool {
+        lhs.display == rhs.display
+            && lhs.isSelected == rhs.isSelected
+            && lhs.isProcessing == rhs.isProcessing
+    }
 
     @State private var isHovered = false
 

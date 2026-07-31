@@ -31,6 +31,8 @@ final class QuickLookController: NSObject, QLPreviewPanelDataSource, QLPreviewPa
 
     private static func previewURLs(for item: ClipboardItem) -> [URL] {
         switch item.content {
+        case .group(let items):
+            return items.flatMap { previewURLs(for: $0) }
         case .file(let url) where FileManager.default.fileExists(atPath: url.path):
             return [url]
         case .files(let urls):

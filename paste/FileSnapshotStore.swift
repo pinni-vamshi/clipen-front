@@ -19,14 +19,39 @@ enum FileSnapshotStore {
 
         for source in urls {
             let destination = uniqueDestination(for: source, in: groupDirectory)
-            do {
-                try fileManager.copyItem(at: source, to: destination)
+            if cloneOrCopy(from: source, to: destination) {
                 copiedURLs.append(destination)
-            } catch {
             }
         }
 
         return copiedURLs
+    }
+
+    /// Snapshot `source` into `destination` as fast as possible.
+    ///
+    /// On APFS (every modern Mac's internal disk) `copyfile` with COPYFILE_CLONE
+    /// makes a copy-on-write clone: near-instant regardless of size, even for a
+    /// huge folder tree, yet still a fully independent snapshot that survives the
+    /// original being changed or deleted. COPYFILE_CLONE already falls back to a
+    /// real byte copy when cloning isn't possible (e.g. an external/non-APFS
+    /// volume); if even that C path fails, we fall back to FileManager.
+    private static func cloneOrCopy(from source: URL, to destination: URL) -> Bool {
+        let flags = copyfile_flags_t(COPYFILE_CLONE | COPYFILE_RECURSIVE)
+        let cloned = source.withUnsafeFileSystemRepresentation { src -> Int32 in
+            guard let src else { return -1 }
+            return destination.withUnsafeFileSystemRepresentation { dst -> Int32 in
+                guard let dst else { return -1 }
+                return copyfile(src, dst, nil, flags)
+            }
+        }
+        if cloned == 0 { return true }
+        // Last-resort fallback if the clone/copy syscall itself errored.
+        do {
+            try FileManager.default.copyItem(at: source, to: destination)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private static var baseDirectory: URL {

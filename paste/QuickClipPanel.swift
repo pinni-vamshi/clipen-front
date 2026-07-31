@@ -1066,7 +1066,7 @@ private struct DiffHighlightText: View {
     }
 }
 
-private struct EditableTableGrid: View {
+struct EditableTableGrid: View {
     @Binding var rows: [[String]]
 
     var body: some View {

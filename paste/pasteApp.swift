@@ -58,19 +58,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
+        Self.refreshLaunchServicesIfNewBuild()
 
+        // Second-instance guard. After a Sparkle-installed update, the old
+        // process's kernel record can linger in the running-apps list for up
+        // to a second after the process itself has exited — during which the
+        // new binary would see a "sibling", self-terminate, and give the user
+        // a phantom crash. Wait until the sibling either proves it's alive
+        // (a re-check where it's still not terminated) or drops from the list.
         let bundleID = Bundle.main.bundleIdentifier ?? "com.clipen.app"
-        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
-            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
-        if let existing = others.first {
-            // Ask the already-running instance to reopen its main window, then
-            // hand over and quit. Just activating it (old behaviour) left the
-            // window closed, so clicking the app did nothing visible.
-            DistributedNotificationCenter.default().postNotificationName(
-                Self.reopenNotification, object: nil, userInfo: nil, deliverImmediately: true)
-            existing.activate(options: [])
-            NSApp.terminate(nil)
-            return
+        func liveSibling() -> NSRunningApplication? {
+            NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .first { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+                         && $0.isTerminated == false }
+        }
+        if let candidate = liveSibling() {
+            // Give the OS ~500 ms to release a process record left over from
+            // an in-flight update install; only self-terminate if the sibling
+            // is still live after that grace period.
+            Thread.sleep(forTimeInterval: 0.5)
+            if let stillAlive = liveSibling(), stillAlive.processIdentifier == candidate.processIdentifier {
+                DistributedNotificationCenter.default().postNotificationName(
+                    Self.reopenNotification, object: nil, userInfo: nil, deliverImmediately: true)
+                stillAlive.activate(options: [])
+                NSApp.terminate(nil)
+                return
+            }
         }
 
         DistributedNotificationCenter.default().addObserver(
@@ -187,12 +200,59 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updaterController?.checkForUpdates(nil)
     }
 
+    /// A future rename (CFBundleDisplayName/CFBundleName changing) would leave
+    /// CFBundleName in Info.plist, but Sparkle's in-place update only
+    /// overwrites the bundle's CONTENTS — it never renames the installed
+    /// .app folder on disk, and it never nudges Launch Services to re-read
+    /// the new metadata. Result: Dock hover tooltips (and sometimes Finder's
+    /// Get Info panel) kept showing the OLD name until something forced a
+    /// re-scan. `lsregister -f` on our own bundle path does exactly that —
+    /// safe, non-destructive, touches no user data, doesn't rename any file.
+    /// Runs at most once per build (tracked via the build number so it
+    /// doesn't re-run needlessly on every ordinary launch).
+    private static func refreshLaunchServicesIfNewBuild() {
+        let currentBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        guard !currentBuild.isEmpty else { return }
+        let key = "lastLaunchServicesRefreshBuild"
+        let d = UserDefaults.standard
+        guard d.string(forKey: key) != currentBuild else { return }
+
+        let lsregister = "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister"
+        guard FileManager.default.fileExists(atPath: lsregister) else { return }
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: lsregister)
+        task.arguments = ["-f", Bundle.main.bundlePath]
+        task.standardOutput = nil
+        task.standardError = nil
+        do {
+            try task.run()
+            // Don't block launch waiting on this — best-effort, fire and forget.
+        } catch {
+            return
+        }
+        d.set(currentBuild, forKey: key)
+    }
+
     func openMainWindow(retriesLeft: Int = 8) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         if let existing = NSApp.windows.first(where: { $0.identifier?.rawValue == "main" }) {
             existing.minSize = NSSize(width: 900, height: 620)
             existing.makeKeyAndOrderFront(nil)
+            // On cold launch, the app was `.accessory` a moment ago and macOS
+            // often silently ignores `activate(...)` after such a policy flip,
+            // leaving the window layered behind other apps. `orderFrontRegardless`
+            // is the OS-level escape hatch that forces the window above every
+            // other app's windows regardless of who owns the frontmost slot.
+            existing.orderFrontRegardless()
+            // A second nudge one runloop tick later covers the case where the
+            // policy change wasn't yet visible to the window server on the
+            // first try — a common cold-launch race.
+            DispatchQueue.main.async { [weak existing] in
+                existing?.orderFrontRegardless()
+                NSApp.activate(ignoringOtherApps: true)
+            }
             return
         }
         // No live NSWindow — the SwiftUI Window scene was closed/torn down.
@@ -236,6 +296,11 @@ extension AppDelegate: SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater,
                  willInstallUpdateOnQuit item: SUAppcastItem,
                  immediateInstallationBlock: @escaping () -> Void) -> Bool {
+        // The closest hook to "this update WILL be installed" — pairs with the
+        // app_version person property (already forwarded on every usage ping)
+        // to make version-adoption after a release visible: this event marks
+        // the moment of transition, app_version on the NEXT ping confirms landing.
+        AuthManager.shared.registerActionUsage(actionID: "action.sparkle_update_installed")
         pendingUpdateInstall = immediateInstallationBlock
         installPendingUpdateWhenIdle()
         return true
@@ -270,7 +335,32 @@ extension AppDelegate: SPUUpdaterDelegate {
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) { }
 
+    /// The overwhelming majority of aborts here are the Mac simply having no
+    /// internet at the exact moment Sparkle's silent background timer fires
+    /// (asleep, lid closed, wifi reconnecting, VPN hiccup) — not anything
+    /// wrong with Clipen. Every laptop drops offline dozens of times a day,
+    /// so counting every one of those as a "failure" buried the rare, actually
+    /// actionable errors (bad signature, corrupt appcast, install failure)
+    /// under a wall of noise. Only report what's left after filtering out
+    /// plain connectivity failures.
+    private static let benignNetworkErrorCodes: Set<Int> = [
+        NSURLErrorNotConnectedToInternet,
+        NSURLErrorNetworkConnectionLost,
+        NSURLErrorTimedOut,
+        NSURLErrorCannotConnectToHost,
+        NSURLErrorCannotFindHost,
+        NSURLErrorDNSLookupFailed,
+        NSURLErrorInternationalRoamingOff,
+        NSURLErrorDataNotAllowed,
+        NSURLErrorSecureConnectionFailed,
+        NSURLErrorResourceUnavailable,
+    ]
+
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, Self.benignNetworkErrorCodes.contains(nsError.code) {
+            return
+        }
         AuthManager.shared.registerActionUsage(actionID: "fail.sparkle_check")
     }
 }

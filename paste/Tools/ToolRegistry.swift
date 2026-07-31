@@ -8,14 +8,32 @@ enum ToolRegistry {
 
     private struct ResolvedTools {
         let itemID: UUID
+        /// Collection state folded into the key: the destination tools are
+        /// built from it, so a rename/add/switch must not serve a stale list.
+        let collectionSignature: String
         let entries: [(tool: ClipboardTool, preview: String?)]
     }
     private static var resolvedCache: ResolvedTools?
     private static let resolvedLock = NSLock()
 
+    private static func collectionSignature(for item: ClipboardItem) -> String {
+        let manager = ClipboardManager.shared
+        // Includes anything a tool's `preview` closure reads outside the item
+        // itself. The paste-plain toggle flips which of the two mutually-
+        // exclusive paste tools surfaces (see TextTools.pastePlainDefault) —
+        // stale cache here made the transform panel ignore that setting.
+        let plainDefault = UserDefaults.standard.bool(forKey: "pastePlainTextByDefault")
+        return manager.collections.joined(separator: "\u{1}")
+            + "\u{2}" + (manager.activeCollection ?? "")
+            + "\u{3}" + item.collections.sorted().joined(separator: "\u{1}")
+            + "\u{4}" + (plainDefault ? "1" : "0")
+    }
+
     private static func resolved(for item: ClipboardItem) -> [(tool: ClipboardTool, preview: String?)] {
+        let signature = collectionSignature(for: item)
         resolvedLock.lock()
-        if let cached = resolvedCache, cached.itemID == item.id {
+        if let cached = resolvedCache, cached.itemID == item.id,
+           cached.collectionSignature == signature {
             let entries = cached.entries
             resolvedLock.unlock()
             return entries
@@ -39,7 +57,9 @@ enum ToolRegistry {
         let entries = scored.map { (tool: $0.tool, preview: $0.preview) }
 
         resolvedLock.lock()
-        resolvedCache = ResolvedTools(itemID: item.id, entries: entries)
+        resolvedCache = ResolvedTools(itemID: item.id,
+                                      collectionSignature: signature,
+                                      entries: entries)
         resolvedLock.unlock()
         return entries
     }
@@ -56,11 +76,16 @@ enum ToolRegistry {
     /// ranking (`AuthManager.toolImportanceScore(for: tool.id)`) already
     /// operates purely per-tool-id, with no notion of which array declared it.
     private static let allTools: [ClipboardTool] =
-        TextTools.all + ImageTools.all + FileTools.all + PDFTools.all + MediaTools.all
+        TextTools.all + ImageTools.all + FileTools.all + PDFTools.all + MediaTools.all + GroupTools.all
 
     private static func toolPool(for item: ClipboardItem) -> [ClipboardTool] {
         if case .blob = item.content { return [] }
-        return allTools
+        // A group only ever offers the group tools (ungroup / type-specific
+        // paste) — not the per-type text/image transforms, which don't apply
+        // to the bundle as a whole.
+        // Collection filing applies to every content type, groups included.
+        if case .group = item.content { return GroupTools.all + CollectionTools.all(for: item) }
+        return allTools + CollectionTools.all(for: item)
     }
 
     static func displays(for item: ClipboardItem) -> [TransformDisplay] {
@@ -117,6 +142,12 @@ enum ToolRegistry {
         let tools = tools(for: item)
         guard tools.indices.contains(index) else { return nil }
         return tools[index].id
+    }
+
+    static func invalidateCache() {
+        resolvedLock.lock()
+        resolvedCache = nil
+        resolvedLock.unlock()
     }
 
     private static func tool(for item: ClipboardItem, toolID: String) -> ClipboardTool? {

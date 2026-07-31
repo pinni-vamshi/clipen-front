@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum ClipboardTag: String, Hashable, CaseIterable {
+    case group
     case image
     case gif
     case pdf
@@ -34,6 +35,7 @@ enum ClipboardTag: String, Hashable, CaseIterable {
 
     var priority: Int {
         switch self {
+        case .group:     return 5
         case .image:     return 10
         case .gif:       return 11
         case .pdf:       return 12
@@ -65,6 +67,7 @@ enum ClipboardTag: String, Hashable, CaseIterable {
 
     var label: String {
         switch self {
+        case .group:    return "Group"
         case .image:    return "Image"
         case .gif:      return "GIF"
         case .pdf:      return "PDF"
@@ -98,6 +101,7 @@ enum ClipboardTag: String, Hashable, CaseIterable {
 
     var icon: String {
         switch self {
+        case .group:    return "square.stack.3d.up.fill"
         case .image:    return "photo"
         case .gif:      return "photo.stack"
         case .pdf:      return "doc.richtext"
@@ -131,6 +135,7 @@ enum ClipboardTag: String, Hashable, CaseIterable {
 
     var badgeColor: Color {
         switch self {
+        case .group:            return .indigo
         case .json:             return .green
         case .latex:            return .purple
         case .markdown:         return .indigo

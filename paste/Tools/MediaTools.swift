@@ -108,6 +108,7 @@ enum MediaService {
                         size: NSSize(width: cgImage.width, height: cgImage.height)
                     )
                     guard let pngData = image.pngData() else {
+                        AuthManager.shared.registerActionUsage(actionID: "fail.video_first_frame")
                         continuation.resume(returning: .status("Couldn't create video frame image."))
                         return
                     }
@@ -116,6 +117,7 @@ enum MediaService {
                         message: "Created first frame image."
                     ))
                 } catch {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.video_first_frame")
                     continuation.resume(returning: .status("Couldn't extract the first video frame."))
                 }
             }

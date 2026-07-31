@@ -2,6 +2,7 @@ import AppKit
 import AVKit
 import Highlightr
 import ModelIO
+import NaturalLanguage
 import Quartz
 import SceneKit
 import SceneKit.ModelIO
@@ -15,6 +16,15 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private var shownStrip: NSRect? = nil
     private var wantsVisible = false
+
+    /// Fires whenever `wantsVisible` actually changes — the one place that
+    /// happens is inside `present(...)`/`hide()` below, so this is a single
+    /// choke point rather than something every one of this panel's 20+
+    /// external call sites would need to remember to report separately.
+    /// Lets ClipboardManager mirror this into a real `@Published` property
+    /// (`isItemPreviewVisible`) for SwiftUI to react to — this class itself
+    /// isn't an ObservableObject, so nothing here is reactive on its own.
+    var onVisibilityChange: ((Bool) -> Void)?
 
     var isVisible: Bool { wantsVisible && popover.isShown }
     var frame: NSRect {
@@ -65,6 +75,70 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
                 near: popupFrame, anchorPoint: anchorPoint)
     }
 
+    /// Opens the inline editor at the item's position, side-by-side with the
+    /// popup — replaces the old QuickClip-panel edit flow entirely.
+    func showEditor(for item: ClipboardItem,
+                    initialText: String,
+                    near popupFrame: NSRect,
+                    anchorPoint: NSPoint? = nil,
+                    onCommit: @escaping (String) -> Void,
+                    onCommitAndPaste: @escaping (String) -> Void,
+                    onCancel: @escaping () -> Void) {
+        present(AnyView(InlineEditView(item: item,
+                                       initialText: initialText,
+                                       onCommit: onCommit,
+                                       onCommitAndPaste: onCommitAndPaste,
+                                       onCancel: onCancel)),
+                width: 520, height: 420,
+                near: popupFrame, anchorPoint: anchorPoint)
+    }
+
+    /// Table content (a real table structure — richText/RTFD/HTML — not a
+    /// plain-text blob) gets edited cell-by-cell instead of being flattened
+    /// through the flat text editor above, which would destroy the table
+    /// structure by replacing the whole rich container with a plain string.
+    func showTableEditor(initialRows: [[String]],
+                         near popupFrame: NSRect,
+                         anchorPoint: NSPoint? = nil,
+                         onCommit: @escaping ([[String]]) -> Void,
+                         onCommitAndPaste: @escaping ([[String]]) -> Void,
+                         onCancel: @escaping () -> Void) {
+        present(AnyView(InlineTableEditView(initialRows: initialRows,
+                                            onCommit: onCommit,
+                                            onCommitAndPaste: onCommitAndPaste,
+                                            onCancel: onCancel)),
+                width: 520, height: 420,
+                near: popupFrame, anchorPoint: anchorPoint)
+    }
+
+    func showMixedEditor(initialSegments: [ContentSegment],
+                         near popupFrame: NSRect,
+                         anchorPoint: NSPoint? = nil,
+                         onCommit: @escaping ([ContentSegment]) -> Void,
+                         onCommitAndPaste: @escaping ([ContentSegment]) -> Void,
+                         onCancel: @escaping () -> Void) {
+        present(AnyView(InlineMixedEditView(initialSegments: initialSegments,
+                                            onCommit: onCommit,
+                                            onCommitAndPaste: onCommitAndPaste,
+                                            onCancel: onCancel)),
+                width: 520, height: 480,
+                near: popupFrame, anchorPoint: anchorPoint)
+    }
+
+    func showRichEditor(initialAttributedString: NSAttributedString,
+                        near popupFrame: NSRect,
+                        anchorPoint: NSPoint? = nil,
+                        onCommit: @escaping (NSAttributedString) -> Void,
+                        onCommitAndPaste: @escaping (NSAttributedString) -> Void,
+                        onCancel: @escaping () -> Void) {
+        present(AnyView(InlineRichEditView(initialAttributedString: initialAttributedString,
+                                           onCommit: onCommit,
+                                           onCommitAndPaste: onCommitAndPaste,
+                                           onCancel: onCancel)),
+                width: 520, height: 420,
+                near: popupFrame, anchorPoint: anchorPoint)
+    }
+
     func show(forItems items: [ClipboardItem], currentItemID: UUID? = nil,
               near popupFrame: NSRect, anchorPoint: NSPoint? = nil) {
         guard !items.isEmpty else { hide(); return }
@@ -94,7 +168,9 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         let localY = max(0, min(stripHeight - 1, anchorY - desiredStrip.minY))
         let rowRect = NSRect(x: 0, y: localY, width: 1, height: 1)
 
+        let wasVisible = wantsVisible
         wantsVisible = true
+        if !wasVisible { onVisibilityChange?(true) }
         if popover.isShown, shownStrip == desiredStrip {
             popover.positioningRect = rowRect
             return
@@ -112,11 +188,19 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     }
 
     func hide() {
+        let wasVisible = wantsVisible
         wantsVisible = false
+        if wasVisible { onVisibilityChange?(false) }
         if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
             hostingController.rootView = AnyView(EmptyView())
         }
-        if popover.isShown { popover.performClose(nil) }
+        if popover.isShown {
+            // Snap-close to avoid the animated fade visually overlapping
+            // whatever panel replaces it (transform, share).
+            popover.animates = false
+            popover.performClose(nil)
+            popover.animates = true
+        }
         anchorPanel.orderOut(nil)
         shownStrip = nil
     }
@@ -164,7 +248,7 @@ private struct MultiItemPreviewView: View {
                                     .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 3))
                             }
                         }
-                        .padding(.leading, 8)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(isCurrent ? Color.accentColor.opacity(0.08) : Color.clear)
                     }
                 }
@@ -255,25 +339,31 @@ struct ContentPreviewView: View {
             if let url = Self.validWebURL(text) {
                 WebsitePreview(url: url)
             } else {
-                RichTextContentPreview(text: text, detectedType: item.detectedType)
+                RichLinkedPreview(computeLinks: { LinkExtractor.links(fromPlainText: text) }, plainText: text,
+                                  insightID: item.id, diff: item.diffDetail) {
+                    RichTextContentPreview(text: text, detectedType: item.detectedType)
+                }
             }
         case .richText(let attrStr, _):
             let adjusted = attrStr.adjustingColorsForCurrentAppearance()
-            RichLinkedPreview(links: LinkExtractor.links(from: adjusted)) {
+            RichLinkedPreview(computeLinks: { LinkExtractor.links(from: adjusted) }, plainText: adjusted.string,
+                              insightID: item.id) {
                 AttributedTextPreview(attributedString: adjusted)
             }
         case .html(let html, let plain):
             if plain.isEmpty && html.isEmpty {
                 textPreview(plain, monospaced: false)
             } else {
-                RichLinkedPreview(links: LinkExtractor.links(fromHTML: html)) {
+                RichLinkedPreview(computeLinks: { LinkExtractor.links(fromHTML: html) }, plainText: plain,
+                                  insightID: item.id) {
                     HTMLStringPreview(html: html)
                 }
             }
         case .rtfd(let data, let plain):
-            if let attrStr = NSAttributedString(rtfd: data, documentAttributes: nil) {
-                let adjusted = attrStr.adjustingColorsForCurrentAppearance()
-                RichLinkedPreview(links: LinkExtractor.links(from: adjusted)) {
+            let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            if let adjusted = AdjustedAttrCache.shared.adjustedRTFD(itemID: item.id, data: data, isDark: isDark) {
+                RichLinkedPreview(computeLinks: { LinkExtractor.links(from: adjusted) }, plainText: plain,
+                                  insightID: item.id) {
                     AttributedTextPreview(attributedString: adjusted)
                 }
             } else {
@@ -288,8 +378,11 @@ struct ContentPreviewView: View {
         case .svg(let src):
             textPreview(src, monospaced: true)
         case .blob(let typeMap):
-            textPreview(typeMap.keys.sorted().map { "· \($0)" }.joined(separator: "\n"),
-                        monospaced: true)
+            BlobContentPreview(typeMap: typeMap)
+        case .group(let items):
+            // A grouped item previews its members individually, same view the
+            // popup uses when previewing a marked set.
+            MultiItemPreviewView(items: items)
         }
     }
 
@@ -479,12 +572,24 @@ struct ContentPreviewView: View {
     }
 }
 
+enum ContentSegment: Equatable {
+    case text(String)
+    case table([[String]])
+}
+
 enum TableCellExtractor {
     private static let cache: NSCache<NSUUID, NSArray> = {
         let c = NSCache<NSUUID, NSArray>()
         c.countLimit = 500
         return c
     }()
+
+    /// Must be called after any edit that changes an item's table content —
+    /// otherwise re-opening the item to edit again would show the stale,
+    /// pre-edit cells instead of what was just saved.
+    static func invalidate(itemID: UUID) {
+        cache.removeObject(forKey: itemID as NSUUID)
+    }
 
     static func cells(for item: ClipboardItem) -> [[String]]? {
         if let cached = cache.object(forKey: item.id as NSUUID) as? [[String]] {
@@ -493,6 +598,25 @@ enum TableCellExtractor {
         let result = extract(for: item) ?? []
         cache.setObject(result as NSArray, forKey: item.id as NSUUID)
         return result.isEmpty ? nil : result
+    }
+
+    /// An un-styled re-serialization of a real table — same grid this file
+    /// already reads for editing/preview, with every bit of visual styling
+    /// (bold, color, font, borders) dropped. "Paste without formatting" needs
+    /// this instead of flat tab-separated text: tab/newline text only reads
+    /// back as real columns in a spreadsheet. Pasted into anything else
+    /// (Word, Pages, Notes, Mail) it shows as bare text with visible tab
+    /// gaps — the table itself is gone. An HTML table with no inline style
+    /// still renders as an actual table grid everywhere, carrying none of
+    /// the original formatting. Returns nil for content that isn't really a
+    /// table, so callers fall back to their existing flat-text behavior.
+    static func plainTableHTML(for item: ClipboardItem) -> (html: String, plain: String)? {
+        guard let rows = cells(for: item) else { return nil }
+        let html = "<table>" + rows.map { row in
+            "<tr>" + row.map { "<td>\($0.htmlEscaped)</td>" }.joined() + "</tr>"
+        }.joined() + "</table>"
+        let plain = rows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
+        return (html, plain)
     }
 
     private static func extract(for item: ClipboardItem) -> [[String]]? {
@@ -509,7 +633,19 @@ enum TableCellExtractor {
         }
     }
 
-    private static func cells(from attr: NSAttributedString) -> [[String]]? {
+    /// Tab-separated, row-per-line rendering of an attributed string's table
+    /// (if it has one) — nil when there's no real `NSTextTableBlock` to read.
+    /// A table's cells are separate paragraphs in `NSAttributedString.string`
+    /// with no column-boundary character at all, so anything that reads the
+    /// raw `.string` off a copied Pages/Numbers/Mail/TextEdit table sees every
+    /// cell run together on its own line — column structure gone entirely.
+    /// This is what capture uses to build the `plain` fallback instead.
+    static func tabSeparatedPlainText(from attr: NSAttributedString) -> String? {
+        guard let rows = cells(from: attr) else { return nil }
+        return rows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
+    }
+
+    static func cells(from attr: NSAttributedString) -> [[String]]? {
         var grid: [Int: [Int: String]] = [:]
         let full = NSRange(location: 0, length: attr.length)
         attr.enumerateAttribute(.paragraphStyle, in: full) { value, range, _ in
@@ -550,6 +686,114 @@ enum TableCellExtractor {
             if !cells.isEmpty { rows.append(cells) }
         }
         return rows.isEmpty ? nil : rows
+    }
+
+    // MARK: - Mixed-content segmentation
+
+    static func segments(for item: ClipboardItem) -> [ContentSegment]? {
+        let result: [ContentSegment]?
+        switch item.content {
+        case .richText(let attr, _):
+            result = segments(from: attr)
+        case .rtfd(let data, _):
+            guard let attr = NSAttributedString(rtfd: data, documentAttributes: nil) else { return nil }
+            result = segments(from: attr)
+        case .html(let html, _):
+            result = segmentsFromHTML(html)
+        default:
+            return nil
+        }
+        guard let segs = result, segs.count > 1,
+              segs.contains(where: { if case .text = $0 { return true }; return false }),
+              segs.contains(where: { if case .table = $0 { return true }; return false })
+        else { return nil }
+        return segs
+    }
+
+    private static func segmentsFromHTML(_ html: String) -> [ContentSegment]? {
+        let tablePattern = "<table[^>]*>.*?</table>"
+        guard let tableRe = try? NSRegularExpression(
+            pattern: tablePattern,
+            options: [.caseInsensitive, .dotMatchesLineSeparators])
+        else { return nil }
+        let ns = html as NSString
+        let matches = tableRe.matches(in: html, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return nil }
+
+        var segments: [ContentSegment] = []
+        var cursor = 0
+        for m in matches {
+            if m.range.location > cursor {
+                let chunk = ns.substring(with: NSRange(location: cursor, length: m.range.location - cursor))
+                let plain = Self.stripHTMLTags(chunk).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !plain.isEmpty { segments.append(.text(plain)) }
+            }
+            let tableHTML = ns.substring(with: m.range)
+            if let rows = cells(fromHTML: tableHTML), !rows.isEmpty {
+                segments.append(.table(rows))
+            }
+            cursor = m.range.location + m.range.length
+        }
+        if cursor < ns.length {
+            let chunk = ns.substring(with: NSRange(location: cursor, length: ns.length - cursor))
+            let plain = Self.stripHTMLTags(chunk).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !plain.isEmpty { segments.append(.text(plain)) }
+        }
+        return segments.isEmpty ? nil : segments
+    }
+
+    private static func segments(from attr: NSAttributedString) -> [ContentSegment]? {
+        guard attr.length > 0 else { return nil }
+        let full = NSRange(location: 0, length: attr.length)
+        struct Run { let range: NSRange; let block: NSTextTableBlock? }
+        var runs: [Run] = []
+        attr.enumerateAttribute(.paragraphStyle, in: full) { value, range, _ in
+            let block = (value as? NSParagraphStyle)?
+                .textBlocks.first(where: { $0 is NSTextTableBlock }) as? NSTextTableBlock
+            runs.append(Run(range: range, block: block))
+        }
+        guard runs.contains(where: { $0.block != nil }) else { return nil }
+
+        var segments: [ContentSegment] = []
+        var i = 0
+        while i < runs.count {
+            if let firstBlock = runs[i].block {
+                let currentTable = firstBlock.table
+                var grid: [Int: [Int: String]] = [:]
+                while i < runs.count, let b = runs[i].block, b.table === currentTable {
+                    let text = (attr.string as NSString).substring(with: runs[i].range)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let existing = grid[b.startingRow]?[b.startingColumn] ?? ""
+                    grid[b.startingRow, default: [:]][b.startingColumn] =
+                        existing.isEmpty ? text : existing + " " + text
+                    i += 1
+                }
+                if !grid.isEmpty {
+                    let rows = grid.keys.sorted().map { r in
+                        let cols = grid[r]!
+                        return cols.keys.sorted().map { cols[$0] ?? "" }
+                    }
+                    segments.append(.table(rows))
+                }
+            } else {
+                var parts: [String] = []
+                while i < runs.count, runs[i].block == nil {
+                    parts.append((attr.string as NSString).substring(with: runs[i].range))
+                    i += 1
+                }
+                let combined = parts.joined().trimmingCharacters(in: .whitespacesAndNewlines)
+                if !combined.isEmpty { segments.append(.text(combined)) }
+            }
+        }
+        return segments.isEmpty ? nil : segments
+    }
+
+    private static func stripHTMLTags(_ html: String) -> String {
+        html.replacingOccurrences(of: "<br[^>]*>", with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: "</p>", with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "</div>", with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .htmlDecoded
     }
 }
 
@@ -652,18 +896,14 @@ struct RichTextContentPreview: View {
                 case .markdown:
                     MarkdownTextPreview(text: text)
                 case .table:
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            Text(text)
-                                .font(.system(size: 13, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            DelimitedTablePreview(text: text)
-                                .frame(maxHeight: 320)
-                        }
-                    }
+                    DelimitedTablePreview(text: text)
+                        .padding(10)
                 case .code(let language):
                     CodeSyntaxPreview(text: text, language: language)
+                case .json:
+                    CodeSyntaxPreview(text: text, language: "json")
+                case .latex:
+                    CodeSyntaxPreview(text: text, language: "latex")
                 default:
                     ScrollView {
                         Text(text)
@@ -741,13 +981,13 @@ struct MarkdownTextPreview: View {
             } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
                 let content = String(trimmed.dropFirst(2))
                 blocks.append(Block(view: AnyView(
-                    HStack(alignment: .top, spacing: 6) { Text("\u{2022}"); inlineText(content) })))
+                    HStack(alignment: .top, spacing: 6) { Text("\u{2022}").font(.system(size: 13)); inlineText(content) })))
             } else if let range = trimmed.range(of: #"^\d+\.\s"#, options: .regularExpression) {
                 let marker = String(trimmed[trimmed.startIndex..<range.upperBound])
                 let listContent = String(trimmed[range.upperBound...])
                 blocks.append(Block(view: AnyView(
                     HStack(alignment: .top, spacing: 6) {
-                        Text(marker.trimmingCharacters(in: .whitespaces)); inlineText(listContent)
+                        Text(marker.trimmingCharacters(in: .whitespaces)).font(.system(size: 13)); inlineText(listContent)
                     })))
             } else if trimmed.isEmpty {
                 blocks.append(Block(view: AnyView(Spacer().frame(height: 4))))
@@ -770,42 +1010,105 @@ struct MarkdownTextPreview: View {
     }
 }
 
-struct DelimitedTablePreview: View {
-    let text: String
-
-    private var rows: [[String]] {
-        let lines = text.components(separatedBy: .newlines).filter { !$0.isEmpty }
-        guard !lines.isEmpty else { return [] }
-        let delimiter = lines[0].contains("\t") ? "\t" : ","
-        return lines.map { $0.components(separatedBy: delimiter) }
+/// Quote-aware CSV/TSV parsing — the previous version just did
+/// `components(separatedBy: delimiter)`, which silently corrupts any file
+/// with a quoted field containing the delimiter itself (e.g. `"Smith, John"`
+/// in a comma-separated file, extremely common in real Excel/Numbers
+/// exports) or an embedded newline inside a quoted field. This walks the
+/// text character-by-character tracking quote state, per RFC 4180.
+enum DelimitedTableParser {
+    static func detectDelimiter(_ text: String) -> Character {
+        let firstLine = text.prefix(while: { $0 != "\n" && $0 != "\r" })
+        return firstLine.contains("\t") ? "\t" : ","
     }
 
-    var body: some View {
-        let data = rows
-        ScrollView([.horizontal, .vertical]) {
-            if data.isEmpty {
-                Text("No table data").foregroundColor(.secondary)
+    static func parse(_ text: String, delimiter: Character) -> [[String]] {
+        var rows: [[String]] = []
+        var currentRow: [String] = []
+        var field = ""
+        var inQuotes = false
+        let chars = Array(text)
+        var i = 0
+
+        func endField() { currentRow.append(field); field = "" }
+        func endRow() { endField(); rows.append(currentRow); currentRow = [] }
+
+        while i < chars.count {
+            let c = chars[i]
+            if inQuotes {
+                if c == "\"" {
+                    if i + 1 < chars.count, chars[i + 1] == "\"" {
+                        field.append("\""); i += 1
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    field.append(c)
+                }
+            } else if c == "\"" {
+                inQuotes = true
+            } else if c == delimiter {
+                endField()
+            } else if c == "\n" {
+                endRow()
+            } else if c == "\r" {
+                if i + 1 < chars.count, chars[i + 1] == "\n" { i += 1 }
+                endRow()
             } else {
-                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
-                    ForEach(Array(data.enumerated()), id: \.offset) { rowIdx, row in
-                        GridRow {
+                field.append(c)
+            }
+            i += 1
+        }
+        if !field.isEmpty || !currentRow.isEmpty { endRow() }
+
+        // Drop fully-blank trailing/interstitial lines (a common artifact of
+        // a trailing newline in the source file).
+        return rows.filter { !($0.count == 1 && $0[0].isEmpty) }
+    }
+}
+
+/// Read-only bordered grid — visually matches EditableTableGrid (the table
+/// EDITOR's look) so a table reads the same whether you're viewing or
+/// editing it, instead of two unrelated visual languages for the same data.
+struct StyledTablePreview: View {
+    let rows: [[String]]
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            if rows.isEmpty {
+                Text("No table data").font(.system(size: 13)).foregroundColor(.secondary)
+                    .padding(20)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { r, row in
+                        HStack(spacing: 1) {
                             ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
                                 Text(cell.trimmingCharacters(in: .whitespaces))
-                                    .font(.system(size: 12,
-                                                 weight: rowIdx == 0 ? .semibold : .regular,
-                                                 design: .monospaced))
-                                    .foregroundColor(rowIdx == 0 ? .primary : .primary.opacity(0.85))
+                                    .font(.system(size: 11, weight: r == 0 ? .semibold : .regular))
+                                    .foregroundColor(r == 0 ? .primary : .primary.opacity(0.85))
                                     .lineLimit(1)
+                                    .padding(.horizontal, 8).padding(.vertical, 5)
+                                    .frame(minWidth: 90, alignment: .leading)
+                                    .background(Color.primary.opacity(r == 0 ? 0.06 : 0.02))
+                                    .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
                             }
-                        }
-                        if rowIdx == 0 {
-                            Divider().gridCellColumns(row.count)
                         }
                     }
                 }
-                .padding(10)
+                .padding(4)
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.15), lineWidth: 1))
+    }
+}
+
+struct DelimitedTablePreview: View {
+    let text: String
+
+    var body: some View {
+        let delimiter = DelimitedTableParser.detectDelimiter(text)
+        StyledTablePreview(rows: DelimitedTableParser.parse(text, delimiter: delimiter))
     }
 }
 
@@ -860,18 +1163,47 @@ final class CodeHighlighter {
     private var highlightr: Highlightr?
     private var didInit = false
     private var currentTheme: String?
+    // Revisiting a clip (or switching away and back) used to redo the full
+    // highlight.js pass from scratch every time — nothing here remembered a
+    // result across calls, only the CALLER's `.task(id:)` avoided repeating
+    // the work within a single still-alive view instance. Same fingerprint-
+    // keyed NSCache approach TextInsightService/TableCellExtractor already
+    // use elsewhere in this file.
+    private let cache = NSCache<NSString, NSAttributedString>()
 
-    private init() {}
+    private init() { cache.countLimit = 200 }
+
+    private static func cacheKey(_ code: String, languageDisplayName: String?, dark: Bool) -> NSString {
+        "\(code.count)|\(code.prefix(48))|\(code.suffix(48))|\(languageDisplayName ?? "-")|\(dark ? "d" : "l")" as NSString
+    }
 
     func highlight(_ code: String, languageDisplayName: String?, dark: Bool) async -> NSAttributedString? {
-        await withCheckedContinuation { continuation in
+        let key = Self.cacheKey(code, languageDisplayName: languageDisplayName, dark: dark)
+        // Fast path: a cache hit never has to hop onto the highlighter's
+        // serial queue at all.
+        if let hit = cache.object(forKey: key) { return hit }
+        return await withCheckedContinuation { continuation in
             queue.async { [weak self] in
-                continuation.resume(returning: self?.highlightOnQueue(code, languageDisplayName: languageDisplayName, dark: dark))
+                if let hit = self?.cache.object(forKey: key) {
+                    continuation.resume(returning: hit)
+                    return
+                }
+                let result = self?.highlightOnQueue(code, languageDisplayName: languageDisplayName, dark: dark)
+                if let result { self?.cache.setObject(result, forKey: key) }
+                continuation.resume(returning: result)
             }
         }
     }
 
+    /// Highlightr runs highlight.js through JavaScriptCore — tokenizing multiple
+    /// MB of code/JSON through a JS engine takes seconds. Above this cap we skip
+    /// highlighting entirely (returns nil) so the preview shows the plain-text
+    /// fallback instantly instead of hanging. Highlighting a 5 MB file adds no
+    /// real value anyway.
+    static let maxHighlightLength = 100_000
+
     private func highlightOnQueue(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
+        guard code.count <= Self.maxHighlightLength else { return nil }
         if !didInit {
             highlightr = Highlightr()
             didInit = true
@@ -901,16 +1233,79 @@ struct HighlightedCodeTextView: NSViewRepresentable {
             tv.drawsBackground = false
             tv.textContainerInset = NSSize(width: 6, height: 6)
             tv.isHorizontallyResizable = true
+            tv.isVerticallyResizable = true
+            // maxSize is what actually lets the text view grow wider than its
+            // visible frame — without it, long code lines were clipped and the
+            // horizontal scroller had nothing to scroll to. Combined with a
+            // non-wrapping container, lines now extend and scroll sideways.
+            tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                height: CGFloat.greatestFiniteMagnitude)
             tv.textContainer?.widthTracksTextView = false
+            tv.textContainer?.heightTracksTextView = false
             tv.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                                      height: CGFloat.greatestFiniteMagnitude)
         }
+        scroll.autohidesScrollers = true
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let tv = scroll.documentView as? NSTextView else { return }
         tv.textStorage?.setAttributedString(attributed)
+        // Re-layout so the text view's frame expands to the widest line, which
+        // is what makes the horizontal scroller appear when needed.
+        tv.layoutManager?.ensureLayout(for: tv.textContainer!)
+        tv.sizeToFit()
+    }
+}
+
+/// CSV/TSV FILES specifically — previously these fell into `isTextFile` and
+/// rendered as flat monospaced text like any other text file, with no grid
+/// at all, even though the exact same delimited content pasted as plain text
+/// (not file-backed) already got a table view via `RichTextContentPreview`'s
+/// `.table` case. This closes that gap so a copied .csv/.tsv FILE gets the
+/// same treatment.
+struct AsyncDelimitedFilePreview: View {
+    let url: URL
+    @State private var rows: [[String]]?
+    @State private var isTruncated = false
+    @State private var loadFailed = false
+
+    var body: some View {
+        Group {
+            if let rows {
+                VStack(alignment: .leading, spacing: 0) {
+                    if isTruncated {
+                        Text("Showing the first part of a large file")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.primary.opacity(0.06))
+                    }
+                    StyledTablePreview(rows: rows)
+                        .padding(10)
+                }
+            } else if loadFailed {
+                QuickLookFilePreview(url: url)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: url) {
+            rows = nil
+            isTruncated = false
+            loadFailed = false
+            let loaded = await Task.detached(priority: .userInitiated) {
+                FileKindDetector.readableTextPreview(from: url)
+            }.value
+            guard !Task.isCancelled else { return }
+            guard let loaded else { loadFailed = true; return }
+            let delimiter = DelimitedTableParser.detectDelimiter(loaded.text)
+            rows = DelimitedTableParser.parse(loaded.text, delimiter: delimiter)
+            isTruncated = loaded.isTruncated
+        }
     }
 }
 
@@ -981,25 +1376,42 @@ struct FilePreviewContent: View {
         Group {
             if isDirectory {
                 FolderTreePreview(url: url)
-            } else if url.pathExtension.lowercased() == "pdf", let pdf = PDFDocument(url: url) {
-                PDFPreview(document: pdf)
-            } else if url.pathExtension.lowercased() == "gif", let data = try? Data(contentsOf: url),
-                      let gifImage = NSImage(data: data) {
-                ZoomableImagePreview(image: gifImage, animatedData: data)
+            } else if url.pathExtension.lowercased() == "pdf" {
+                AsyncPDFFilePreview(url: url)
+            } else if url.pathExtension.lowercased() == "gif" {
+                AsyncGIFFilePreview(url: url)
+            // Known-not-an-image extensions MUST short-circuit before the
+            // greedy `NSImage(contentsOf:)` probe below — that call reads the
+            // WHOLE file on main to try image detection, which for a 50 MB
+            // GLB / video / etc. is a 2-10 s beach-ball freeze before we ever
+            // reach the correct branch.
+            } else if FileKindDetector.isGLTFModelFile(url) {
+                // glTF/GLB rendering (via GLTFKit2's shared concurrent loader
+                // queue) was causing hangs and crashes in practice — removed
+                // rather than left half-working. The file itself still
+                // copies/pastes normally; it just doesn't render a preview.
+                NoPreviewAvailableView(url: url)
+            } else if FileKindDetector.is3DModelFile(url) {
+                Model3DPreview(url: url)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            } else if FileKindDetector.isMediaFile(url) {
+                AVMediaPreview(url: url)
+            } else if FileKindDetector.isHTMLFile(url) {
+                HTMLFilePreview(url: url)
+            } else if ["csv", "tsv"].contains(url.pathExtension.lowercased()) {
+                AsyncDelimitedFilePreview(url: url)
+            } else if FileKindDetector.isTextFile(url) {
+                AsyncTextFilePreview(url: url)
+            } else if FileKindDetector.isImageFile(url) {
+                // Loads via NSImage on a background queue rather than the
+                // main-thread NSImage(contentsOf:) below — a 20 MB HEIC used
+                // to hitch main for 100-500 ms before the preview appeared.
+                AsyncImageFilePreview(url: url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             } else if let image = NSImage(contentsOf: url) {
                 ZoomableImagePreview(image: image)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            } else if FileKindDetector.isHTMLFile(url) {
-                HTMLFilePreview(url: url)
-            } else if FileKindDetector.isTextFile(url) {
-                AsyncTextFilePreview(url: url)
-            } else if FileKindDetector.isMediaFile(url) {
-                AVMediaPreview(url: url)
-            } else if FileKindDetector.is3DModelFile(url) {
-                Model3DPreview(url: url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             } else if FileManager.default.fileExists(atPath: url.path) {
@@ -1027,6 +1439,29 @@ struct FilePreviewContent: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+}
+
+/// Default empty state for a file whose type is recognized but has no
+/// working preview renderer. The file itself is unaffected — this only
+/// affects what shows in the preview panel.
+struct NoPreviewAvailableView: View {
+    let url: URL
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
+                .resizable()
+                .frame(width: 72, height: 72)
+            Text(url.lastPathComponent)
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+            Text("No preview available")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -1156,7 +1591,10 @@ struct FolderTreePreview: View {
 struct Model3DPreview: NSViewRepresentable {
     let url: URL
 
-    final class Coordinator { var loadedURL: URL? }
+    final class Coordinator {
+        var loadedURL: URL?
+        var loadToken: UUID?
+    }
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> SCNView {
@@ -1165,17 +1603,31 @@ struct Model3DPreview: NSViewRepresentable {
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .clear
         view.antialiasingMode = .multisampling4X
-        view.scene = Self.loadScene(url)
-        context.coordinator.loadedURL = url
-        Self.startAutoRotation(in: view)
+        view.scene = SCNScene() // placeholder until async load lands
+        Self.loadSceneAsync(url, into: view, coordinator: context.coordinator)
         return view
     }
 
     func updateNSView(_ view: SCNView, context: Context) {
         guard context.coordinator.loadedURL != url else { return }
-        context.coordinator.loadedURL = url
-        view.scene = Self.loadScene(url)
-        Self.startAutoRotation(in: view)
+        Self.loadSceneAsync(url, into: view, coordinator: context.coordinator)
+    }
+
+    /// Loads on a background queue and swaps in on the main thread. A UUID
+    /// token guards against a stale load winning after the view was reused
+    /// for a different URL.
+    private static func loadSceneAsync(_ url: URL, into view: SCNView, coordinator: Coordinator) {
+        let token = UUID()
+        coordinator.loadToken = token
+        coordinator.loadedURL = url
+        DispatchQueue.global(qos: .userInitiated).async {
+            let scene = loadScene(url)
+            DispatchQueue.main.async { [weak view] in
+                guard let view, coordinator.loadToken == token else { return }
+                view.scene = scene
+                startAutoRotation(in: view)
+            }
+        }
     }
 
     final class SpinUntilTouchedSCNView: SCNView {
@@ -1213,6 +1665,8 @@ struct Model3DPreview: NSViewRepresentable {
         pivot.runAction(spin)
     }
 
+    // Native SceneKit/ModelIO formats only — glTF/GLB never reach here
+    // (routed to NoPreviewAvailableView instead; see FileKindDetector.isGLTFModelFile).
     private static func loadScene(_ url: URL) -> SCNScene {
         if let scene = try? SCNScene(url: url, options: [.checkConsistency: true]) {
             return scene
@@ -1440,6 +1894,19 @@ struct ZoomableImagePreview: NSViewRepresentable {
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+        // Explicitly handle trackpad pinch. The preview lives in a
+        // non-activating panel, so NSScrollView's built-in magnification can't
+        // be relied on to receive the gesture — overriding magnify(with:)
+        // guarantees pinch-to-zoom works even while ⌘ is held for the popup.
+        override func magnify(with event: NSEvent) {
+            let target = min(maxMagnification, max(minMagnification, magnification * (1 + event.magnification)))
+            let point = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
+            setMagnification(target, centeredAt: point)
+            if target <= 1.001 {
+                documentView?.frame = contentView.bounds
+            }
+        }
+
         override func scrollWheel(with event: NSEvent) {
             guard event.modifierFlags.contains(.command) else {
                 super.scrollWheel(with: event)
@@ -1472,6 +1939,20 @@ struct ZoomableImagePreview: NSViewRepresentable {
     }
 }
 
+/// One shared WKWebView reused across every HTMLStringPreview mount. Building
+/// a WebKit view is 100-200 ms (WebKit process, JS context, layout engine);
+/// cycling through HTML items used to pay that cost per item. Because only
+/// one HTML preview is visible at any time (the popover shows one item and
+/// swaps rootView on change), reuse is safe.
+private enum HTMLWebViewPool {
+    static let shared: WKWebView = {
+        let view = WKWebView()
+        view.setValue(false, forKey: "drawsBackground")
+        view.allowsMagnification = true
+        return view
+    }()
+}
+
 struct HTMLStringPreview: NSViewRepresentable {
     final class Coordinator {
         var lastHTML: String?
@@ -1482,11 +1963,14 @@ struct HTMLStringPreview: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView()
-        view.setValue(false, forKey: "drawsBackground")
-        view.allowsMagnification = true
-        loadHTML(view)
-        context.coordinator.lastHTML = html
+        let view = HTMLWebViewPool.shared
+        // Reparent if AppKit tore off from a previous host — cheap when it's
+        // already the child of nothing (fresh) or the same superview.
+        view.removeFromSuperview()
+        if context.coordinator.lastHTML != html {
+            loadHTML(view)
+            context.coordinator.lastHTML = html
+        }
         return view
     }
 
@@ -1547,7 +2031,21 @@ struct ExtractedLink: Identifiable {
 }
 
 enum LinkExtractor {
-    static func links(from attr: NSAttributedString) -> [ExtractedLink] {
+    /// Built once, reused forever. Constructing an NSDataDetector loads the
+    /// system's data-detection resources and an NSRegularExpression compiles
+    /// its pattern — both used to happen on EVERY SwiftUI body evaluation of
+    /// the preview (i.e. every selection), on the main thread. Both classes
+    /// are documented as thread-safe for concurrent matching, so a single
+    /// shared instance is safe to share across the main and worker queues.
+    private nonisolated static let linkDetector: NSDataDetector? =
+        try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
+    private nonisolated static let htmlAnchorRegex: NSRegularExpression? =
+        try? NSRegularExpression(
+            pattern: #"<a\b[^>]*?href\s*=\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators])
+
+    nonisolated static func links(from attr: NSAttributedString) -> [ExtractedLink] {
         guard attr.length > 0 else { return [] }
         var out: [ExtractedLink] = []
         var seen = Set<String>()
@@ -1566,11 +2064,8 @@ enum LinkExtractor {
         return out
     }
 
-    static func links(fromHTML html: String) -> [ExtractedLink] {
-        guard html.count <= 300_000,
-              let re = try? NSRegularExpression(
-                pattern: #"<a\b[^>]*?href\s*=\s*[\"']([^\"']+)[\"'][^>]*>(.*?)</a>"#,
-                options: [.caseInsensitive, .dotMatchesLineSeparators]) else { return [] }
+    nonisolated static func links(fromHTML html: String) -> [ExtractedLink] {
+        guard html.count <= 300_000, let re = htmlAnchorRegex else { return [] }
         let ns = html as NSString
         var out: [ExtractedLink] = []
         var seen = Set<String>()
@@ -1585,59 +2080,447 @@ enum LinkExtractor {
         }
         return out
     }
+
+    /// URLs that appear as bare text (not markup) inside plain-text copies.
+    nonisolated static func links(fromPlainText text: String, cap: Int = 12) -> [ExtractedLink] {
+        guard text.count <= 300_000, let detector = linkDetector else { return [] }
+        let ns = text as NSString
+        var out: [ExtractedLink] = []
+        var seen = Set<String>()
+        detector.enumerateMatches(in: text, range: NSRange(location: 0, length: ns.length)) { match, _, stop in
+            guard let url = match?.url, url.scheme != nil, seen.insert(url.absoluteString).inserted else { return }
+            out.append(ExtractedLink(label: url.host ?? url.absoluteString, url: url))
+            if out.count >= cap { stop.pointee = true }
+        }
+        return out
+    }
 }
 
-struct LinkStrip: View {
-    let links: [ExtractedLink]
+/// Parses a plain-text representation of any copied content for things worth
+/// surfacing at a glance without opening the full preview: person names,
+/// email addresses, code-shaped lines, and lines that repeat verbatim
+/// (useful for spotting duplicated rows in pasted lists/logs).
+/// The result of one text-insight scan. A reference type so `NSCache` can hold
+/// it; every stored property is immutable.
+nonisolated final class TextInsights {
+    struct RepeatedLine {
+        let line: String
+        let count: Int
+    }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 4) {
-                Image(systemName: "link").font(.system(size: 9, weight: .semibold))
-                Text("\(links.count) LINK\(links.count == 1 ? "" : "S")")
-                    .font(.system(size: 9, weight: .semibold)).tracking(1)
-            }
-            .foregroundColor(.secondary)
-            .padding(.horizontal, 12)
+    let emails: [String]
+    let names: [String]
+    let codeLines: [String]
+    let repeatedLines: [RepeatedLine]
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(links) { link in
-                        Button { NSWorkspace.shared.open(link.url) } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "link").font(.system(size: 9))
-                                Text(link.label).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                            }
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(Color.accentColor.opacity(0.12), in: Capsule())
-                            .overlay(Capsule().stroke(Color.accentColor.opacity(0.25), lineWidth: 1))
-                            .foregroundColor(.accentColor)
-                        }
-                        .buttonStyle(.plain)
-                        .help(link.url.absoluteString)
-                    }
+    init(emails: [String], names: [String], codeLines: [String], repeatedLines: [RepeatedLine]) {
+        self.emails = emails
+        self.names = names
+        self.codeLines = codeLines
+        self.repeatedLines = repeatedLines
+    }
+
+    var isEmpty: Bool {
+        emails.isEmpty && names.isEmpty && codeLines.isEmpty && repeatedLines.isEmpty
+    }
+}
+
+/// Runs the insight scan off the main thread and memoizes it per clip.
+///
+/// This scan (an NLTagger named-entity pass plus several regex/line scans) used
+/// to run synchronously inside `RichLinkedPreview.body` — so it re-ran on every
+/// SwiftUI body evaluation, on the main thread, for every text-ish clip, and
+/// the cost was paid even when the result was empty. That was the bulk of the
+/// delay between clicking an item and seeing its preview.
+final class TextInsightService {
+    static let shared = TextInsightService()
+
+    private let queue = DispatchQueue(label: "com.clipen.textinsights", qos: .userInitiated)
+    private let cache = NSCache<NSString, TextInsights>()
+    // [ExtractedLink] is a value type, so it's boxed as NSArray for NSCache —
+    // same pattern TableCellExtractor already uses for [[String]] above.
+    private let linkCache = NSCache<NSString, NSArray>()
+
+    private init() {
+        cache.countLimit = 400
+        linkCache.countLimit = 400
+    }
+
+    /// Keyed on the clip id AND a content fingerprint, so editing a clip in
+    /// place (same id, new text) recomputes instead of serving stale insights.
+    /// Shared by both the insights cache and the link cache below — the same
+    /// fingerprint invalidates both correctly on edit.
+    static func cacheKey(id: UUID?, text: String?) -> String {
+        let t = text ?? ""
+        return "\(id?.uuidString ?? "-")|\(t.count)|\(t.prefix(48))|\(t.suffix(48))"
+    }
+
+    func cached(forKey key: String) -> TextInsights? {
+        cache.object(forKey: key as NSString)
+    }
+
+    func insights(forKey key: String, text: String) async -> TextInsights {
+        await withCheckedContinuation { continuation in
+            queue.async { [weak self] in
+                if let hit = self?.cache.object(forKey: key as NSString) {
+                    continuation.resume(returning: hit)
+                    return
                 }
-                .padding(.horizontal, 12)
+                let result = TextInsightExtractor.computeInsights(in: text)
+                self?.cache.setObject(result, forKey: key as NSString)
+                continuation.resume(returning: result)
             }
         }
+    }
+
+    func cachedLinks(forKey key: String) -> [ExtractedLink]? {
+        linkCache.object(forKey: key as NSString) as? [ExtractedLink]
+    }
+
+    /// `compute` is whichever `LinkExtractor` variant matches the clip's
+    /// content type (plain text / attributed string / HTML) — this service
+    /// doesn't need to know which; it only owns the off-thread + cache
+    /// mechanics, exactly like `insights(forKey:text:)` above.
+    func links(forKey key: String, compute: @escaping () -> [ExtractedLink]) async -> [ExtractedLink] {
+        await withCheckedContinuation { continuation in
+            queue.async { [weak self] in
+                if let hit = self?.linkCache.object(forKey: key as NSString) as? [ExtractedLink] {
+                    continuation.resume(returning: hit)
+                    return
+                }
+                let result = compute()
+                self?.linkCache.setObject(result as NSArray, forKey: key as NSString)
+                continuation.resume(returning: result)
+            }
+        }
+    }
+}
+
+enum TextInsightExtractor {
+    nonisolated static let maxLabelLength = 42
+
+    private nonisolated static let emailRegex: NSRegularExpression? =
+        try? NSRegularExpression(pattern: #"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#,
+                                 options: .caseInsensitive)
+
+    /// The whole scan, in one call — always invoked from a background queue
+    /// (see TextInsightService), never from a view body.
+    nonisolated static func computeInsights(in text: String) -> TextInsights {
+        TextInsights(emails: emails(in: text),
+                     names: personNames(in: text),
+                     codeLines: codeLikeLines(in: text),
+                     repeatedLines: repeatedLines(in: text))
+    }
+
+    nonisolated static func truncate(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count > maxLabelLength else { return t }
+        return String(t.prefix(maxLabelLength)) + "…"
+    }
+
+    nonisolated static func emails(in text: String, cap: Int = 6) -> [String] {
+        guard text.count <= 300_000, let re = emailRegex else { return [] }
+        let ns = text as NSString
+        var seen = Set<String>()
+        var out: [String] = []
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let s = ns.substring(with: m.range)
+            guard seen.insert(s.lowercased()).inserted else { continue }
+            out.append(s)
+            if out.count >= cap { break }
+        }
+        return out
+    }
+
+    /// Named-entity recognition is by far the heaviest thing in this file's
+    /// analysis path — NLTagger loads an ML model and runs inference. The cap
+    /// used to be 50 k characters, which is a lot of inference to sit behind a
+    /// chip strip; a few thousand characters is more than enough to surface
+    /// the names worth showing.
+    nonisolated static func personNames(in text: String, cap: Int = 6) -> [String] {
+        guard !text.isEmpty, text.count <= 5_000 else { return [] }
+        let tagger = NLTagger(tagSchemes: [.nameType])
+        tagger.string = text
+        var seen = Set<String>()
+        var out: [String] = []
+        tagger.enumerateTags(in: text.startIndex..<text.endIndex, unit: .word, scheme: .nameType,
+                              options: [.omitPunctuation, .omitWhitespace, .joinNames]) { tag, range in
+            if tag == .personalName {
+                let name = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if name.count > 1, seen.insert(name).inserted {
+                    out.append(name)
+                }
+            }
+            return out.count < cap
+        }
+        return out
+    }
+
+    private nonisolated static let codeKeywords = [
+        "func ", "def ", "class ", "import ", "return ", "const ", "let ", "var ",
+        "public ", "private ", "#include", "=>", "select ", "function ",
+    ]
+
+    nonisolated static func codeLikeLines(in text: String, cap: Int = 6) -> [String] {
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        var out: [String] = []
+        for line in lines {
+            let lower = line.lowercased()
+            let looksLikeCode = codeKeywords.contains { lower.contains($0) }
+                || (line.contains("{") && line.contains("}"))
+                || (line.hasSuffix(";") && line.count > 4)
+            if looksLikeCode {
+                out.append(line)
+                if out.count >= cap { break }
+            }
+        }
+        return out
+    }
+
+    nonisolated static func repeatedLines(in text: String, cap: Int = 6) -> [TextInsights.RepeatedLine] {
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.count >= 4 }
+        guard lines.count <= 5_000 else { return [] }
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for l in lines {
+            if counts[l] == nil { order.append(l) }
+            counts[l, default: 0] += 1
+        }
+        return order.compactMap { line -> TextInsights.RepeatedLine? in
+            guard let c = counts[line], c > 1 else { return nil }
+            return TextInsights.RepeatedLine(line: line, count: c)
+        }
+        .sorted { $0.count > $1.count }
+        .prefix(cap)
+        .map { $0 }
+    }
+}
+
+struct PreviewInsightChip: Identifiable {
+    enum Kind { case link(URL), email, name, code, repeated(Int), added, removed }
+    /// Assigned by `uniqued(_:)` from the chip's own content. It used to be a
+    /// fresh `UUID()` per chip per build, which meant every rebuild produced
+    /// entirely new identities and `ForEach` in InsightsStrip could never diff
+    /// — it tore down and relaid out the whole strip each time.
+    var id: String = ""
+    let kind: Kind
+    let icon: String
+    let label: String
+    let color: Color
+    var helpText: String? = nil
+
+    /// Content-derived identity. Stable across rebuilds for the same chip.
+    private var stableKey: String {
+        switch kind {
+        case .link(let url):   return "link|\(url.absoluteString)"
+        case .email:           return "email|\(label)"
+        case .name:            return "name|\(label)"
+        case .code:            return "code|\(label)"
+        case .repeated(let n): return "repeated|\(n)|\(label)"
+        case .added:           return "added|\(label)"
+        case .removed:         return "removed|\(label)"
+        }
+    }
+
+    /// Stamps stable ids, disambiguating the rare genuine duplicate (e.g. the
+    /// same code-shaped line appearing twice) so SwiftUI never sees a repeated
+    /// ForEach id.
+    static func uniqued(_ chips: [PreviewInsightChip]) -> [PreviewInsightChip] {
+        var seen = Set<String>()
+        return chips.map { chip in
+            var copy = chip
+            let base = chip.stableKey
+            var candidate = base
+            var n = 2
+            while !seen.insert(candidate).inserted {
+                candidate = "\(base)#\(n)"
+                n += 1
+            }
+            copy.id = candidate
+            return copy
+        }
+    }
+
+    /// The concrete added (green) / removed (red) lines from a small edit,
+    /// shown first in the strip so "what exactly changed" is obvious.
+    static func diffChips(_ detail: DiffDetail?) -> [PreviewInsightChip] {
+        guard let detail else { return [] }
+        var chips: [PreviewInsightChip] = []
+        chips += detail.added.map {
+            PreviewInsightChip(kind: .added, icon: "plus",
+                                label: TextInsightExtractor.truncate($0), color: .green,
+                                helpText: "Added vs #\(detail.fromRank)")
+        }
+        chips += detail.removed.map {
+            PreviewInsightChip(kind: .removed, icon: "minus",
+                                label: TextInsightExtractor.truncate($0), color: .red,
+                                helpText: "Removed vs #\(detail.fromRank)")
+        }
+        return chips
+    }
+
+    /// Cheap — link extraction already happened at the call site.
+    static func linkChips(_ links: [ExtractedLink]) -> [PreviewInsightChip] {
+        links.map {
+            PreviewInsightChip(kind: .link($0.url), icon: "link",
+                                label: TextInsightExtractor.truncate($0.label), color: .accentColor,
+                                helpText: $0.url.absoluteString)
+        }
+    }
+
+    /// Pure formatting of an already-computed (off-main, cached) scan — no
+    /// analysis happens here, so this is safe to call from a view body.
+    static func textChips(_ insights: TextInsights?) -> [PreviewInsightChip] {
+        guard let insights else { return [] }
+        var chips: [PreviewInsightChip] = []
+        chips += insights.emails.map {
+            PreviewInsightChip(kind: .email, icon: "envelope.fill",
+                                label: TextInsightExtractor.truncate($0), color: .orange)
+        }
+        chips += insights.names.map {
+            PreviewInsightChip(kind: .name, icon: "person.fill",
+                                label: TextInsightExtractor.truncate($0), color: .purple)
+        }
+        chips += insights.codeLines.map {
+            PreviewInsightChip(kind: .code, icon: "curlybraces",
+                                label: TextInsightExtractor.truncate($0), color: .cyan)
+        }
+        chips += insights.repeatedLines.map {
+            PreviewInsightChip(kind: .repeated($0.count), icon: "repeat",
+                                label: "\($0.count)× " + TextInsightExtractor.truncate($0.line), color: .pink)
+        }
+        return chips
+    }
+}
+
+struct InsightsStrip: View {
+    let chips: [PreviewInsightChip]
+
+    /// Alternates chips into two independent rows (1st→row A, 2nd→row B,
+    /// 3rd→row A, …) rather than a shared-column grid — a grid would match
+    /// each row's column width to its widest paired item, leaving gaps
+    /// around shorter chips. Two plain, independently-packed `HStack`s keep
+    /// every chip flush against its neighbor.
+    private var rowA: [PreviewInsightChip] { chips.enumerated().filter { $0.offset % 2 == 0 }.map(\.element) }
+    private var rowB: [PreviewInsightChip] { chips.enumerated().filter { $0.offset % 2 == 1 }.map(\.element) }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach(rowA) { chip in chipView(chip) }
+                }
+                HStack(spacing: 8) {
+                    ForEach(rowB) { chip in chipView(chip) }
+                }
+            }
+            .padding(.horizontal, 12)
+        }
         .padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.04))
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func chipView(_ chip: PreviewInsightChip) -> some View {
+        if case .link(let url) = chip.kind {
+            Button { NSWorkspace.shared.open(url) } label: { chipLabel(chip) }
+                .buttonStyle(.plain)
+                .help(chip.helpText ?? "")
+        } else {
+            chipLabel(chip)
+        }
+    }
+
+    private func chipLabel(_ chip: PreviewInsightChip) -> some View {
+        // Diff chips are tinted with their add/remove color; everything else
+        // keeps the neutral gray look.
+        let isDiff: Bool = { if case .added = chip.kind { return true }
+                             if case .removed = chip.kind { return true }
+                             return false }()
+        return HStack(spacing: 4) {
+            Image(systemName: chip.icon).font(.system(size: 8, weight: isDiff ? .bold : .regular))
+            Text(chip.label).font(.system(size: 9, weight: .semibold)).lineLimit(1)
+        }
+        .padding(.horizontal, 9).padding(.vertical, 6)
+        .background((isDiff ? chip.color.opacity(0.16) : Color.gray.opacity(0.16)),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .foregroundColor(isDiff ? chip.color : .secondary)
     }
 }
 
 struct RichLinkedPreview<Content: View>: View {
-    let links: [ExtractedLink]
+    /// How to find this clip's links — deferred, not run yet. Every call site
+    /// used to compute its `LinkExtractor.links(...)` eagerly as a plain
+    /// argument expression, meaning the NSDataDetector/regex scan ran
+    /// synchronously on the main thread on EVERY body evaluation (every
+    /// selection, every re-render), uncached — the same class of stutter the
+    /// insights scan below used to cause before it was moved off-thread.
+    /// Wrapping it in a closure lets this view run it exactly like insights:
+    /// off the main thread, once per clip, cached after that.
+    let computeLinks: () -> [ExtractedLink]
+    var plainText: String? = nil
+    /// Identity of the clip these insights describe — the cache key, so the
+    /// scan runs once per clip rather than on every body evaluation.
+    var insightID: UUID? = nil
+    var diff: DiffDetail? = nil
     @ViewBuilder let content: Content
 
+    @State private var insights: TextInsights? = nil
+    @State private var links: [ExtractedLink] = []
+
+    private var taskKey: String { TextInsightService.cacheKey(id: insightID, text: plainText) }
+
     var body: some View {
+        let chips = PreviewInsightChip.uniqued(
+            PreviewInsightChip.diffChips(diff)
+                + PreviewInsightChip.linkChips(links)
+                + PreviewInsightChip.textChips(insights))
         VStack(spacing: 0) {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if !links.isEmpty {
+            if !chips.isEmpty {
                 Divider()
-                LinkStrip(links: links)
+                InsightsStrip(chips: chips)
             }
+        }
+        // The content renders immediately; the insight/link chips appear a
+        // beat later on a cache miss. Previously the insights scan ran
+        // inline in `body` (same for link extraction until now), so the
+        // preview couldn't paint at all until it finished.
+        .task(id: taskKey) {
+            let key = taskKey
+
+            // Links: cache hit is synchronous, same reasoning as insights
+            // below — revisiting a clip shows its link chips immediately.
+            if let hit = TextInsightService.shared.cachedLinks(forKey: key) {
+                links = hit
+            } else {
+                links = []
+                let computeLinks = computeLinks
+                let computed = await TextInsightService.shared.links(forKey: key, compute: computeLinks)
+                if !Task.isCancelled { links = computed }
+            }
+
+            guard let plainText, !plainText.isEmpty else {
+                insights = nil
+                return
+            }
+            // Cache hit is synchronous — revisiting a clip shows its chips
+            // immediately, with no flash of the strip appearing late.
+            if let hit = TextInsightService.shared.cached(forKey: key) {
+                insights = hit
+                return
+            }
+            // Drop the previous clip's chips while the new scan runs, so they
+            // can't linger next to unrelated content.
+            insights = nil
+            let computed = await TextInsightService.shared.insights(forKey: key, text: plainText)
+            guard !Task.isCancelled else { return }
+            insights = computed
         }
     }
 }
@@ -1665,6 +2548,18 @@ struct AttributedTextPreview: NSViewRepresentable {
     }
 }
 
+/// One shared WKWebView reused across every WebsitePreview mount — same
+/// rationale as HTMLWebViewPool above (constructing a WKWebView is 100-200 ms
+/// and only one URL preview is ever visible at a time).
+private enum WebsitePreviewPool {
+    static let shared: WKWebView = {
+        let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        view.allowsMagnification = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+}
+
 struct WebsitePreview: NSViewRepresentable {
     let url: URL
 
@@ -1689,11 +2584,11 @@ struct WebsitePreview: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
 
-        let config = WKWebViewConfiguration()
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.allowsMagnification = true
+        let webView = WebsitePreviewPool.shared
+        // Reparent from whatever previous mount last hosted it, same as
+        // HTMLStringPreview does with its own pool.
+        webView.removeFromSuperview()
         webView.navigationDelegate = context.coordinator
-        webView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(webView)
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: container.topAnchor),
@@ -1725,27 +2620,1111 @@ struct WebsitePreview: NSViewRepresentable {
     }
 }
 
+// Cache adjusted attributed strings. Two keying schemes because the two call
+// sites have different identity guarantees:
+//   - .richText holds ONE stable NSAttributedString instance in the enum case
+//     across every render, so ObjectIdentifier keying already dedupes.
+//   - .rtfd holds raw Data — `NSAttributedString(rtfd:)` allocates a BRAND
+//     NEW instance every render, so ObjectIdentifier keying never hits.
+//     That path needs to key on the stable ClipboardItem.id instead, and
+//     cache the decode itself (not just the color pass) since decoding RTFD
+//     is often the heavier half of the work.
+final class AdjustedAttrCache {
+    static let shared = AdjustedAttrCache()
+    private let lock = NSLock()
+    private var byObject: [ObjectIdentifier: (isDark: Bool, adjusted: NSAttributedString)] = [:]
+    private var byItemID: [UUID: (isDark: Bool, adjusted: NSAttributedString)] = [:]
+
+    func adjusted(for source: NSAttributedString, isDark: Bool,
+                  compute: () -> NSAttributedString) -> NSAttributedString {
+        let key = ObjectIdentifier(source)
+        lock.lock()
+        if let hit = byObject[key], hit.isDark == isDark {
+            let value = hit.adjusted
+            lock.unlock()
+            return value
+        }
+        lock.unlock()
+        let computed = compute()
+        lock.lock()
+        byObject[key] = (isDark, computed)
+        if byObject.count > 64, let stale = byObject.first?.key { byObject.removeValue(forKey: stale) }
+        lock.unlock()
+        return computed
+    }
+
+    /// Decodes RTFD `data` into an appearance-adjusted NSAttributedString
+    /// exactly once per (itemID, isDark) — both the decode and the color
+    /// pass are skipped on every subsequent render for that item.
+    func adjustedRTFD(itemID: UUID, data: Data, isDark: Bool) -> NSAttributedString? {
+        lock.lock()
+        if let hit = byItemID[itemID], hit.isDark == isDark {
+            let value = hit.adjusted
+            lock.unlock()
+            return value
+        }
+        lock.unlock()
+        guard let decoded = NSAttributedString(rtfd: data, documentAttributes: nil) else { return nil }
+        let adjusted = decoded.adjustingColorsForCurrentAppearance()
+        lock.lock()
+        byItemID[itemID] = (isDark, adjusted)
+        if byItemID.count > 64, let stale = byItemID.first?.key { byItemID.removeValue(forKey: stale) }
+        lock.unlock()
+        return adjusted
+    }
+
+    func invalidate(itemID: UUID) {
+        lock.lock()
+        byItemID.removeValue(forKey: itemID)
+        lock.unlock()
+    }
+}
+
 extension NSAttributedString {
     func adjustingColorsForCurrentAppearance() -> NSAttributedString {
         let isDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let mutable = NSMutableAttributedString(attributedString: self)
-
-        mutable.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: mutable.length), options: []) { value, range, _ in
-            if let color = value as? NSColor {
-                if let rgbColor = color.usingColorSpace(.deviceRGB) {
-                    let r = rgbColor.redComponent
-                    let g = rgbColor.greenComponent
-                    let b = rgbColor.blueComponent
-                    let luminance = 0.299 * r + 0.587 * g + 0.114 * b
-
-                    if isDarkMode && luminance < 0.25 {
-                        mutable.addAttribute(.foregroundColor, value: NSColor.white, range: range)
-                    } else if !isDarkMode && luminance > 0.85 {
-                        mutable.addAttribute(.foregroundColor, value: NSColor.textColor, range: range)
-                    }
+        return AdjustedAttrCache.shared.adjusted(for: self, isDark: isDarkMode) {
+            // Fast path: scan once to decide whether ANY color needs changing.
+            // If not (the common case for plain-ish rich text), return self.
+            var needsWork = false
+            self.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: self.length), options: []) { value, _, stop in
+                guard let color = value as? NSColor,
+                      let rgb = color.usingColorSpace(.deviceRGB) else { return }
+                let lum = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+                if (isDarkMode && lum < 0.25) || (!isDarkMode && lum > 0.85) {
+                    needsWork = true
+                    stop.pointee = true
                 }
             }
+            guard needsWork else { return self }
+
+            let mutable = NSMutableAttributedString(attributedString: self)
+            mutable.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: mutable.length), options: []) { value, range, _ in
+                guard let color = value as? NSColor,
+                      let rgb = color.usingColorSpace(.deviceRGB) else { return }
+                let lum = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+                if isDarkMode && lum < 0.25 {
+                    mutable.addAttribute(.foregroundColor, value: NSColor.white, range: range)
+                } else if !isDarkMode && lum > 0.85 {
+                    mutable.addAttribute(.foregroundColor, value: NSColor.textColor, range: range)
+                }
+            }
+            return mutable
         }
-        return mutable
+    }
+}
+
+// ============================================================================
+// Inline editor — E on the popup opens this. Positioned like ItemPreviewView
+// (side of the popup, anchored to the selected row), NSTextView-backed, with
+// Enter to save, Shift+Enter for a literal newline, Esc to cancel.
+// ============================================================================
+
+private struct InlineRichEditView: View {
+    let initialAttributedString: NSAttributedString
+    let onCommit: (NSAttributedString) -> Void
+    let onCommitAndPaste: (NSAttributedString) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.accentColor)
+                Text("Edit")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                HStack(spacing: 12) {
+                    Text("↩ Save").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("⇧↩ Newline").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("↩↩ Save & Paste").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("Esc Cancel").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            RichEditableTextArea(
+                attributedString: initialAttributedString,
+                onCommit: onCommit,
+                onCommitAndPaste: onCommitAndPaste,
+                onCancel: onCancel
+            )
+            .padding(14)
+        }
+    }
+}
+
+private struct RichEditableTextArea: NSViewRepresentable {
+    let attributedString: NSAttributedString
+    let onCommit: (NSAttributedString) -> Void
+    let onCommitAndPaste: (NSAttributedString) -> Void
+    let onCancel: () -> Void
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.inlineEditScrollableTextView()
+        guard let tv = scroll.documentView as? InlineEditTextView else { return scroll }
+        tv.isRichText = true
+        tv.allowsUndo = true
+        tv.isAutomaticQuoteSubstitutionEnabled = false
+        tv.isAutomaticDashSubstitutionEnabled = false
+        tv.isAutomaticSpellingCorrectionEnabled = false
+        tv.textContainerInset = NSSize(width: 4, height: 6)
+        tv.usesFontPanel = false
+        tv.usesRuler = false
+        tv.textStorage?.setAttributedString(attributedString)
+
+        tv.commitHandler = { [weak tv] in
+            guard let tv, let storage = tv.textStorage else { return }
+            onCommit(NSAttributedString(attributedString: storage))
+        }
+        tv.commitAndPasteHandler = { [weak tv] in
+            guard let tv, let storage = tv.textStorage else { return }
+            onCommitAndPaste(NSAttributedString(attributedString: storage))
+        }
+        tv.cancelHandler = onCancel
+
+        DispatchQueue.main.async {
+            if let win = tv.window { win.makeFirstResponder(tv) }
+            let end = tv.textStorage?.length ?? 0
+            tv.setSelectedRange(NSRange(location: end, length: 0))
+        }
+        return scroll
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let tv = nsView.documentView as? InlineEditTextView else { return }
+        tv.commitHandler = { [weak tv] in
+            guard let tv, let storage = tv.textStorage else { return }
+            onCommit(NSAttributedString(attributedString: storage))
+        }
+        tv.commitAndPasteHandler = { [weak tv] in
+            guard let tv, let storage = tv.textStorage else { return }
+            onCommitAndPaste(NSAttributedString(attributedString: storage))
+        }
+        tv.cancelHandler = onCancel
+    }
+
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: ()) {
+        (nsView.documentView as? InlineEditTextView)?.commitHandler = nil
+        (nsView.documentView as? InlineEditTextView)?.commitAndPasteHandler = nil
+        (nsView.documentView as? InlineEditTextView)?.cancelHandler = nil
+    }
+}
+
+private struct EditorKeyMonitor: NSViewRepresentable {
+    let onCommit: () -> Void
+    let onCommitAndPaste: () -> Void
+    let onCancel: () -> Void
+
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.onCommit = onCommit
+        context.coordinator.onCommitAndPaste = onCommitAndPaste
+        context.coordinator.onCancel = onCancel
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator {
+        var onCommit: (() -> Void)?
+        var onCommitAndPaste: (() -> Void)?
+        var onCancel: (() -> Void)?
+        private var monitor: Any?
+        private var pendingCommit: DispatchWorkItem?
+        private static let doubleEnterWindow: TimeInterval = 0.35
+
+        init() {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self else { return event }
+                if event.keyCode == 36 || event.keyCode == 76 {
+                    if event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.option) {
+                        return event
+                    }
+                    if let pending = pendingCommit {
+                        pending.cancel()
+                        pendingCommit = nil
+                        onCommitAndPaste?()
+                        return nil
+                    }
+                    let work = DispatchWorkItem { [weak self] in
+                        self?.pendingCommit = nil
+                        self?.onCommit?()
+                    }
+                    pendingCommit = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + Self.doubleEnterWindow, execute: work)
+                    return nil
+                }
+                if event.keyCode == 53 {
+                    pendingCommit?.cancel()
+                    pendingCommit = nil
+                    onCancel?()
+                    return nil
+                }
+                return event
+            }
+        }
+
+        deinit {
+            pendingCommit?.cancel()
+            if let m = monitor { NSEvent.removeMonitor(m) }
+        }
+    }
+}
+
+private struct InlineMixedEditView: View {
+    let initialSegments: [ContentSegment]
+    let onCommit: ([ContentSegment]) -> Void
+    let onCommitAndPaste: ([ContentSegment]) -> Void
+    let onCancel: () -> Void
+
+    @State private var segments: [ContentSegment] = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.accentColor)
+                Text("Edit")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                HStack(spacing: 12) {
+                    Text("↩ Save").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("⇧↩ Newline").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("↩↩ Save & Paste").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("Esc Cancel").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(Array(segments.enumerated()), id: \.offset) { idx, seg in
+                        switch seg {
+                        case .text:
+                            MixedTextSegment(text: Binding(
+                                get: { if case .text(let t) = segments[idx] { return t }; return "" },
+                                set: { segments[idx] = .text($0) }
+                            ))
+                        case .table:
+                            MixedTableSegment(rows: Binding(
+                                get: { if case .table(let r) = segments[idx] { return r }; return [] },
+                                set: { segments[idx] = .table($0) }
+                            ))
+                        }
+                    }
+                }
+                .padding(14)
+            }
+        }
+        .onAppear { segments = initialSegments }
+        .background(EditorKeyMonitor(
+            onCommit: { onCommit(segments) },
+            onCommitAndPaste: { onCommitAndPaste(segments) },
+            onCancel: onCancel
+        ))
+    }
+}
+
+private struct MixedTextSegment: View {
+    @Binding var text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Text").font(.system(size: 9, weight: .medium)).foregroundColor(.secondary)
+            PlainTextSegmentEditor(text: $text)
+                .frame(minHeight: 44, maxHeight: 220)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15), lineWidth: 1))
+        }
+    }
+}
+
+private struct MixedTableSegment: View {
+    @Binding var rows: [[String]]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Table").font(.system(size: 9, weight: .medium)).foregroundColor(.secondary)
+            EditableTableGrid(rows: $rows)
+        }
+    }
+}
+
+private struct PlainTextSegmentEditor: NSViewRepresentable {
+    @Binding var text: String
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: PlainTextSegmentEditor
+        init(_ p: PlainTextSegmentEditor) { parent = p }
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            parent.text = tv.string
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+
+        let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+
+        let layoutManager = NSLayoutManager()
+        layoutManager.addTextContainer(container)
+
+        let storage = NSTextStorage()
+        storage.addLayoutManager(layoutManager)
+
+        let tv = NSTextView(frame: .zero, textContainer: container)
+        tv.isRichText = false
+        tv.allowsUndo = true
+        tv.font = .systemFont(ofSize: 11)
+        tv.isAutomaticQuoteSubstitutionEnabled = false
+        tv.isAutomaticDashSubstitutionEnabled = false
+        tv.isAutomaticSpellingCorrectionEnabled = false
+        tv.textContainerInset = NSSize(width: 4, height: 6)
+        tv.drawsBackground = false
+        tv.delegate = context.coordinator
+        tv.string = text
+
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.autoresizingMask = [.width]
+
+        scroll.documentView = tv
+        return scroll
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let tv = nsView.documentView as? NSTextView else { return }
+        if tv.string != text { tv.string = text }
+    }
+}
+
+private struct InlineTableEditView: View {
+    let initialRows: [[String]]
+    let onCommit: ([[String]]) -> Void
+    let onCommitAndPaste: ([[String]]) -> Void
+    let onCancel: () -> Void
+
+    @State private var rows: [[String]] = []
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "tablecells")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.accentColor)
+                Text("Edit Table")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                HStack(spacing: 12) {
+                    Text("↩ Save").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("↩↩ Save & Paste").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("Esc Cancel").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            EditableTableGrid(rows: $rows)
+                .padding(14)
+        }
+        .onAppear { rows = initialRows }
+        .background(EditorKeyMonitor(
+            onCommit: { onCommit(rows) },
+            onCommitAndPaste: { onCommitAndPaste(rows) },
+            onCancel: onCancel
+        ))
+    }
+}
+
+/// A standalone, centered window that teaches one gesture at a time.
+/// Deliberately NOT built on the shared popover/`present(...)` machinery every
+/// other panel in this file uses — those are all anchored to and torn down
+/// with the ring popup, which is exactly the coupling that made the old
+/// nudge design unusable (see ClipboardManager+Nudges.swift): a fluent user's
+/// popup session could end, and take the lesson down with it, before there
+/// was ever a real chance to read it. This panel owns its own NSPanel,
+/// floats above every space, and only closes via its own "Learned"/"Later"
+/// buttons or automatic natural-use detection — it does not know or care
+/// whether the ring popup is open.
+final class NudgeLessonPanel: NSObject, NSWindowDelegate {
+    private let panel: NSWindow
+    private static let size = NSSize(width: 820, height: 500)
+    private var onLater: (() -> Void)?
+
+    // Retained so the "Learned!" confirmation can rebuild the same lesson
+    // view with the success overlay on, instead of the window just blinking
+    // out of existence the moment the gesture lands.
+    private var shownFeature: NudgeFeature?
+    private var shownTotal = 0
+    private var shownOnLearned: (() -> Void)?
+    private var shownOnLater: (() -> Void)?
+
+    override init() {
+        // An ordinary titled window — nothing custom. That is what gives the
+        // standard rounded corners, the normal title bar to drag by, the
+        // system close button, and (crucially) automatic key-window status,
+        // which is what lets the practice text field actually take keyboard
+        // focus. The previous borderless build had to fake all four and got
+        // every one of them wrong.
+        panel = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Self.size),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.isReleasedWhenClosed = false
+        super.init()
+        panel.delegate = self
+    }
+
+    /// The title bar's close button is a third way out of the lesson, on top
+    /// of the two buttons — treat it exactly like "Later" so a lesson closed
+    /// this way retries instead of silently vanishing forever.
+    func windowWillClose(_ notification: Notification) {
+        onLater?()
+    }
+
+    var isVisible: Bool { panel.isVisible }
+
+    func show(feature: NudgeFeature, learnedCount: Int, total: Int,
+              onLearned: @escaping () -> Void, onLater: @escaping () -> Void) {
+        self.onLater = onLater
+        shownFeature = feature
+        shownTotal = total
+        shownOnLearned = onLearned
+        shownOnLater = onLater
+        let content = NudgeCalloutView(
+            demo: feature.demo,
+            learnedCount: learnedCount,
+            total: total,
+            justLearned: false,
+            onLearned: onLearned,
+            onLater: onLater
+        )
+        if let hostingController = panel.contentViewController as? NSHostingController<NudgeCalloutView> {
+            hostingController.rootView = content
+        } else {
+            panel.contentViewController = NSHostingController(rootView: content)
+        }
+        panel.title = "Tip: \(feature.demo.title)"
+        panel.subtitle = "\(learnedCount) of \(total) learned"
+        panel.setContentSize(Self.size)
+        centerOnMainScreen()
+        // Clipen is a menu-bar accessory, so it is normally not the active
+        // app — a key window in an inactive app still receives no typing.
+        // Activating is what actually routes keystrokes into the practice
+        // field, and is exactly what FastPasteHintPanel does for the same
+        // reason. The lesson is a deliberate, dismiss-to-continue
+        // interruption, so taking focus here is correct.
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Marks the lesson visibly complete — a checkmark + "Learned!" over the
+    /// panel, with the progress count already advanced — and only then hands
+    /// back so the caller can close it. Without this the window vanished the
+    /// instant the gesture fired, so the user never saw that the thing they
+    /// just did was the thing being taught.
+    func flashLearnedThenHide(learnedCount: Int, onDone: @escaping () -> Void) {
+        guard let feature = shownFeature,
+              let hostingController = panel.contentViewController as? NSHostingController<NudgeCalloutView>
+        else { onDone(); return }
+        hostingController.rootView = NudgeCalloutView(
+            demo: feature.demo,
+            learnedCount: learnedCount,
+            total: shownTotal,
+            justLearned: true,
+            onLearned: shownOnLearned ?? {},
+            onLater: shownOnLater ?? {}
+        )
+        panel.subtitle = "\(learnedCount) of \(shownTotal) learned"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { onDone() }
+    }
+
+    func hide() {
+        // orderOut, not close — close would fire windowWillClose and count a
+        // programmatic hide (e.g. "Learned") as a "Later" retry.
+        onLater = nil
+        panel.orderOut(nil)
+    }
+
+    private func centerOnMainScreen() {
+        guard let screen = NSScreen.main else { return }
+        let screenFrame = screen.visibleFrame
+        let origin = NSPoint(
+            x: screenFrame.midX - Self.size.width / 2,
+            y: screenFrame.midY - Self.size.height / 2
+        )
+        panel.setFrameOrigin(origin)
+    }
+}
+
+private struct NudgeCalloutView: View {
+    let demo: InteractionDemo
+    let learnedCount: Int
+    let total: Int
+    let justLearned: Bool
+    let onLearned: () -> Void
+    let onLater: () -> Void
+
+    @StateObject private var lab = InteractionLabController()
+    @State private var practiceText: String = ""
+    @FocusState private var practiceFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // No hand-rolled header row — this is an ordinary titled window
+            // now, so the real title bar carries the tip name and the
+            // "X of 5 learned" progress as its subtitle.
+            //
+            // Side by side, matching the "How to Use" paste-practice page:
+            // the practice target on the left, the live animation + key
+            // legend on the right — not stacked, so both are visible and
+            // legible at once instead of the practice field being squeezed
+            // in as an afterthought below the animation.
+            HStack(alignment: .top, spacing: 44) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("PRACTICE HERE")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.5)
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.primary.opacity(0.25), lineWidth: 1)
+                        if practiceText.isEmpty {
+                            Text("Try the gesture, then paste or type here…")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 8)
+                        }
+                        TextEditor(text: $practiceText)
+                            .font(.system(size: 13))
+                            .scrollContentBackground(.hidden)
+                            .padding(4)
+                            .focused($practiceFocused)
+                    }
+                    .frame(height: 160)
+                    Text("Keep using the app to see more interactions.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                InteractionLabStage(lab: lab)
+                    .frame(width: 300)
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
+
+            Divider()
+
+            HStack(spacing: 10) {
+                Button("Later") { onLater() }
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Button("Learned") { onLearned() }
+                    .buttonStyle(.borderedProminent)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+        }
+        // A titled window paints its own standard background — no custom
+        // fill needed (and a custom one would square off the system's
+        // rounded corners).
+        .overlay {
+            if justLearned { NudgeLearnedOverlay() }
+        }
+        .onAppear {
+            lab.select(demo)
+            // Next runloop turn — the panel isn't key yet during onAppear,
+            // and focus set before the window is key doesn't stick.
+            DispatchQueue.main.async { practiceFocused = true }
+        }
+        // The hosting controller reuses one NSHostingController across every
+        // nudge (only `rootView` is reassigned — see NudgeLessonPanel.show),
+        // so onAppear only ever fires once, for the very first lesson shown.
+        // Without this, every later nudge kept replaying that first demo's
+        // animation regardless of which feature was actually being taught.
+        .onChange(of: demo) { newDemo in
+            lab.select(newDemo)
+            practiceText = ""
+            DispatchQueue.main.async { practiceFocused = true }
+        }
+        .onDisappear { lab.stop() }
+    }
+}
+
+/// The "you just did it" confirmation. Shown for ~1.6s over the lesson after
+/// the real gesture fires (or "Learned" is clicked) before the window closes,
+/// so completing a lesson reads as an accomplishment instead of the panel
+/// silently disappearing mid-interaction.
+private struct NudgeLearnedOverlay: View {
+    @State private var shown = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.4)
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 56, weight: .semibold))
+                    .foregroundColor(.green)
+                Text("Learned!")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            .scaleEffect(shown ? 1 : 0.6)
+            .opacity(shown ? 1 : 0)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { shown = true }
+        }
+    }
+}
+
+private struct InlineEditView: View {
+    let item: ClipboardItem
+    let initialText: String
+    let onCommit: (String) -> Void
+    let onCommitAndPaste: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var draft: String = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.accentColor)
+                Text("Edit")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                HStack(spacing: 12) {
+                    Text("↩ Save").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("⇧↩ Newline").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("↩↩ Save & Paste").font(.system(size: 9)).foregroundColor(.secondary)
+                    Text("Esc Cancel").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            EditableTextArea(text: $draft,
+                             onCommit: { onCommit(draft) },
+                             onCommitAndPaste: { onCommitAndPaste(draft) },
+                             onCancel: onCancel)
+                .padding(14)
+        }
+        .onAppear { draft = initialText }
+    }
+}
+
+private struct EditableTextArea: NSViewRepresentable {
+    @Binding var text: String
+    let onCommit: () -> Void
+    let onCommitAndPaste: () -> Void
+    let onCancel: () -> Void
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: EditableTextArea
+        init(_ p: EditableTextArea) { parent = p }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            parent.text = tv.string
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.inlineEditScrollableTextView()
+        guard let tv = scroll.documentView as? InlineEditTextView else { return scroll }
+        tv.delegate = context.coordinator
+        tv.string = text
+        tv.font = .systemFont(ofSize: 13)
+        tv.isRichText = false
+        tv.allowsUndo = true
+        tv.isAutomaticQuoteSubstitutionEnabled = false
+        tv.isAutomaticDashSubstitutionEnabled = false
+        tv.isAutomaticSpellingCorrectionEnabled = false
+        tv.textContainerInset = NSSize(width: 4, height: 6)
+        tv.commitHandler = onCommit
+        tv.commitAndPasteHandler = onCommitAndPaste
+        tv.cancelHandler = onCancel
+
+        DispatchQueue.main.async {
+            if let win = tv.window { win.makeFirstResponder(tv) }
+            // Cursor placed at the end, not a select-all — pressing E should
+            // drop the user straight into typing/appending, with the blinking
+            // caret already live, no extra click needed to start writing.
+            let end = (tv.string as NSString).length
+            tv.setSelectedRange(NSRange(location: end, length: 0))
+        }
+        return scroll
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let tv = nsView.documentView as? InlineEditTextView else { return }
+        if tv.string != text { tv.string = text }
+        tv.commitHandler = onCommit
+        tv.commitAndPasteHandler = onCommitAndPaste
+        tv.cancelHandler = onCancel
+    }
+
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        (nsView.documentView as? InlineEditTextView)?.commitHandler = nil
+        (nsView.documentView as? InlineEditTextView)?.commitAndPasteHandler = nil
+        (nsView.documentView as? InlineEditTextView)?.cancelHandler = nil
+    }
+}
+
+private final class InlineEditTextView: NSTextView {
+    var commitHandler: (() -> Void)?
+    var commitAndPasteHandler: (() -> Void)?
+    var cancelHandler: (() -> Void)?
+
+    /// A bare Return doesn't commit right away — it waits this long for a
+    /// second Return. If one lands in time, that's "Save & Paste"; if not,
+    /// the pending commit fires on its own as a plain Save. This is the only
+    /// way to detect a double-tap at all, since a naive immediate-commit
+    /// would tear the editor down on the first Return and leave nothing
+    /// alive to catch the second.
+    private static let doubleEnterWindow: TimeInterval = 0.35
+    private var pendingCommit: DispatchWorkItem?
+
+    // NSTextView's default class isn't overridable through
+    // scrollableTextView() — but the constructor stores an NSTextView, which
+    // we replace with a real InlineEditTextView subclass instance via a swap
+    // in scrollableTextView (see the extension below).
+
+    override func keyDown(with event: NSEvent) {
+        // Return alone commits (or commits+pastes on a fast double-tap);
+        // Shift/Option+Return inserts a literal newline.
+        if event.keyCode == 36 || event.keyCode == 76 {
+            if event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.option) {
+                super.keyDown(with: event)
+                return
+            }
+            if let pending = pendingCommit {
+                pending.cancel()
+                pendingCommit = nil
+                commitAndPasteHandler?()
+                return
+            }
+            let work = DispatchWorkItem { [weak self] in
+                self?.pendingCommit = nil
+                self?.commitHandler?()
+            }
+            pendingCommit = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.doubleEnterWindow, execute: work)
+            return
+        }
+        // Escape cancels — NSTextView's default cancelOperation would only
+        // dismiss the completion window if any, so we override outright.
+        if event.keyCode == 53 {
+            pendingCommit?.cancel()
+            pendingCommit = nil
+            cancelHandler?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        pendingCommit?.cancel()
+        pendingCommit = nil
+        cancelHandler?()
+    }
+}
+
+// Route NSTextView.scrollableTextView() through our subclass so the returned
+// scroll view already contains an InlineEditTextView document view.
+private extension NSTextView {
+    static func inlineEditScrollableTextView() -> NSScrollView {
+        let scroll = NSScrollView()
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = false
+        scroll.autohidesScrollers = true
+        scroll.borderType = .noBorder
+        scroll.drawsBackground = false
+
+        let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        container.widthTracksTextView = true
+        container.heightTracksTextView = false
+
+        let layoutManager = NSLayoutManager()
+        let storage = NSTextStorage()
+        storage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(container)
+
+        let tv = InlineEditTextView(frame: .zero, textContainer: container)
+        tv.autoresizingMask = [.width]
+        tv.isVerticallyResizable = true
+        tv.isHorizontallyResizable = false
+        tv.minSize = NSSize(width: 0, height: 0)
+        tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                            height: CGFloat.greatestFiniteMagnitude)
+        tv.drawsBackground = false
+        scroll.documentView = tv
+        return scroll
+    }
+}
+
+// ============================================================================
+// Blob preview — the ".blob(typeMap)" content case used to just list the
+// pasteboard type names. Freeform, Notes canvas fragments, WebKit-custom
+// clipboards, private-app copies etc. all land here. When any of the blob's
+// types map to a renderer we already have, use it — the shape/data on the
+// clipboard is the same bytes the destination app would receive on paste, so
+// this preview matches what pasting produces.
+// ============================================================================
+
+struct BlobContentPreview: View {
+    let typeMap: [String: Data]
+
+    var body: some View {
+        Group {
+            if let (image, data, dataType) = firstImage() {
+                if dataType.contains("pdf"), let pdf = PDFDocument(data: data) {
+                    PDFPreview(document: pdf)
+                } else if dataType.contains("gif") {
+                    ZoomableImagePreview(image: image, animatedData: data)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                } else {
+                    ZoomableImagePreview(image: image, fullResData: data)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                }
+            } else if let pdf = firstPDF() {
+                PDFPreview(document: pdf)
+            } else if let attr = firstRichText() {
+                let adjusted = attr.adjustingColorsForCurrentAppearance()
+                AttributedTextPreview(attributedString: adjusted)
+            } else if let svg = firstSVG() {
+                let plain = String(data: svg, encoding: .utf8) ?? ""
+                if !plain.isEmpty { textPreview(plain, monospaced: true) }
+                else { fallbackTypeList }
+            } else if let html = firstHTML() {
+                HTMLStringPreview(html: html)
+            } else if let text = firstUTF8Text() {
+                textPreview(text, monospaced: shouldMonospace(text))
+            } else {
+                fallbackTypeList
+            }
+        }
+    }
+
+    // MARK: - Type resolvers
+
+    private static let imageTypes: [String] = [
+        "public.png", "public.tiff", "public.jpeg", "public.heic",
+        "public.gif", "com.compuserve.gif", "com.adobe.pdf"
+    ]
+
+    private func firstImage() -> (NSImage, Data, String)? {
+        for type in Self.imageTypes {
+            guard let data = typeMap[type], let img = NSImage(data: data) else { continue }
+            return (img, data, type)
+        }
+        return nil
+    }
+
+    private func firstPDF() -> PDFDocument? {
+        guard let data = typeMap["com.adobe.pdf"] else { return nil }
+        return PDFDocument(data: data)
+    }
+
+    private func firstRichText() -> NSAttributedString? {
+        for type in ["com.apple.flat-rtfd", "public.rtfd", "NSRTFDPboardType"] {
+            if let data = typeMap[type],
+               let attr = NSAttributedString(rtfd: data, documentAttributes: nil),
+               !attr.string.isEmpty { return attr }
+        }
+        for type in ["public.rtf", "NSRTFPboardType"] {
+            if let data = typeMap[type],
+               let attr = NSAttributedString(rtf: data, documentAttributes: nil),
+               !attr.string.isEmpty { return attr }
+        }
+        return nil
+    }
+
+    private func firstSVG() -> Data? {
+        for type in ["public.svg-image", "com.adobe.illustrator.svg", "org.w3.svg"] {
+            if let data = typeMap[type], !data.isEmpty { return data }
+        }
+        return nil
+    }
+
+    private func firstHTML() -> String? {
+        for type in ["public.html", "Apple HTML pasteboard type"] {
+            guard let data = typeMap[type] else { continue }
+            let s = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .utf16)
+                ?? String(data: data, encoding: .isoLatin1)
+            if let s, !s.isEmpty { return s }
+        }
+        return nil
+    }
+
+    private static let plainTextPreferred = [
+        "public.utf8-plain-text", "public.plain-text", "public.text", "NSStringPboardType"
+    ]
+
+    private func firstUTF8Text() -> String? {
+        for type in Self.plainTextPreferred {
+            if let data = typeMap[type],
+               let s = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
+               !s.isEmpty { return s }
+        }
+        // Some private types are actually plain UTF-8 payloads; opportunistic
+        // decode as a last resort before giving up on the whole clipping.
+        for (_, data) in typeMap where data.count < 128_000 {
+            if let s = String(data: data, encoding: .utf8),
+               !s.isEmpty, s.allSatisfy({ $0.isASCII || $0.isLetter || $0.isNumber || $0.isPunctuation || $0.isWhitespace }) {
+                return s
+            }
+        }
+        return nil
+    }
+
+    private func shouldMonospace(_ s: String) -> Bool {
+        s.contains("{") || s.contains("[") || s.contains("\t") || s.contains("<?xml")
+    }
+
+    // MARK: - Fallback
+
+    private var fallbackTypeList: some View {
+        textPreview(typeMap.keys.sorted().map { "· \($0)" }.joined(separator: "\n"),
+                    monospaced: true)
+    }
+
+    private func textPreview(_ text: String, monospaced: Bool) -> some View {
+        ScrollView {
+            Text(text)
+                .font(.system(size: 13, design: monospaced ? .monospaced : .default))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// Loads a file-URL image with NSImage on a background queue, shows a spinner
+/// until the image lands. Cycling to a big HEIC/PNG file in the preview no
+/// longer freezes main while NSImage reads and decodes the whole file.
+struct AsyncImageFilePreview: View {
+    let url: URL
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                ZoomableImagePreview(image: image)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: url) {
+            image = nil
+            let loaded = await Task.detached(priority: .userInitiated) {
+                NSImage(contentsOf: url)
+            }.value
+            guard !Task.isCancelled else { return }
+            image = loaded
+        }
+    }
+}
+
+/// `PDFDocument(url:)` reads and parses the whole file — for a large PDF
+/// that's a real main-thread stall. Same async-decode pattern as
+/// AsyncImageFilePreview above.
+struct AsyncPDFFilePreview: View {
+    let url: URL
+    @State private var document: PDFDocument?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let document {
+                PDFPreview(document: document)
+            } else if failed {
+                QuickLookFilePreview(url: url)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: url) {
+            document = nil
+            failed = false
+            let loaded = await Task.detached(priority: .userInitiated) {
+                PDFDocument(url: url)
+            }.value
+            guard !Task.isCancelled else { return }
+            if let loaded { document = loaded } else { failed = true }
+        }
+    }
+}
+
+/// `Data(contentsOf:)` + `NSImage(data:)` for a large animated GIF is real
+/// main-thread I/O + decode work. Same async pattern as the image/PDF cases.
+struct AsyncGIFFilePreview: View {
+    let url: URL
+    @State private var loaded: (image: NSImage, data: Data)?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let loaded {
+                ZoomableImagePreview(image: loaded.image, animatedData: loaded.data)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            } else if failed {
+                QuickLookFilePreview(url: url)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: url) {
+            loaded = nil
+            failed = false
+            let result = await Task.detached(priority: .userInitiated) { () -> (NSImage, Data)? in
+                guard let data = try? Data(contentsOf: url), let image = NSImage(data: data) else { return nil }
+                return (image, data)
+            }.value
+            guard !Task.isCancelled else { return }
+            if let result { loaded = result } else { failed = true }
+        }
     }
 }

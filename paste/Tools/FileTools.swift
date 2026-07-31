@@ -3,6 +3,24 @@ import UniformTypeIdentifiers
 
 enum FileTools {
     static let all: [ClipboardTool] = [
+        // Only surfaces on an EDITED file item (its `preview` returns nil for
+        // everything else). Deletes the edited copy and restores the original.
+        ClipboardTool(
+            id: "file.revert-edit",
+            icon: "arrow.uturn.backward",
+            label: "Revert to Original",
+            group: "FILE",
+            preview: { item in
+                item.originalFileURL != nil ? "Discard your edit, restore the original file" : nil
+            },
+            runSync: { item in
+                // Ring operation (not a paste): mutate on main, report status
+                // so the transform panel closes cleanly.
+                DispatchQueue.main.async { ClipboardManager.shared.revertFileEdit(id: item.id) }
+                return .status("Reverted to original.")
+            },
+            runAsync: { _ in nil }
+        ),
         ClipboardTool(
             id: "file.show-in-finder",
             icon: "finder",
@@ -75,10 +93,14 @@ enum FileTools {
                 readableFilePreview(for: item).map { String($0.prefix(120)) }
             },
             runSync: { item in
-                readableFileText(for: item).map(TransformOutput.text)
+                let text = readableFileText(for: item)
+                if text == nil { AuthManager.shared.registerActionUsage(actionID: "fail.file_contents") }
+                return text.map(TransformOutput.text)
             },
             runAsync: { item in
-                readableFileText(for: item).map(TransformOutput.text)
+                let text = readableFileText(for: item)
+                if text == nil { AuthManager.shared.registerActionUsage(actionID: "fail.file_contents") }
+                return text.map(TransformOutput.text)
             }
         ),
         ClipboardTool(
@@ -103,6 +125,34 @@ enum FileTools {
             }
         ),
         ClipboardTool(
+            id: "file.flatten-folder",
+            icon: "square.stack.3d.up",
+            label: "Paste Individual Files",
+            group: "FILE",
+            preview: { item in
+                let folders = fileURLs(for: item).filter(isDirectory)
+                guard !folders.isEmpty else { return nil }
+                let count = flattenedFiles(in: folders).count
+                guard count > 0 else { return nil }
+                return "Extract \(count) individual file\(count == 1 ? "" : "s"), subfolders included"
+            },
+            runAsync: { item in
+                let folders = fileURLs(for: item).filter(isDirectory)
+                guard !folders.isEmpty else { return nil }
+                return await withCheckedContinuation { continuation in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let files = flattenedFiles(in: folders)
+                        guard !files.isEmpty else {
+                            continuation.resume(returning: .status("No files found inside."))
+                            return
+                        }
+                        continuation.resume(returning: .files(
+                            files, message: "Extracted \(files.count) individual file\(files.count == 1 ? "" : "s")."))
+                    }
+                }
+            }
+        ),
+        ClipboardTool(
             id: "file.copy-as-new-file",
             icon: "doc.on.doc",
             label: "Paste File Copy",
@@ -119,6 +169,7 @@ enum FileTools {
                     DispatchQueue.global(qos: .userInitiated).async {
                         let copied = FileSnapshotStore.snapshot(urls)
                         guard !copied.isEmpty else {
+                            AuthManager.shared.registerActionUsage(actionID: "fail.file_copy")
                             continuation.resume(returning: .status("Couldn't create file copy."))
                             return
                         }
@@ -147,6 +198,32 @@ enum FileTools {
         default:
             return []
         }
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+    }
+
+    /// Walks into each folder (and every subfolder, however deep) and
+    /// collects only the leaf files — never directories themselves — so the
+    /// result can be pasted as one flat run of individual files instead of
+    /// the original nested folder structure. Hidden/system files are skipped.
+    private static func flattenedFiles(in folders: [URL], cap: Int = 2000) -> [URL] {
+        var out: [URL] = []
+        let fm = FileManager.default
+        for folder in folders {
+            guard let enumerator = fm.enumerator(
+                at: folder,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else { continue }
+            for case let url as URL in enumerator {
+                guard !isDirectory(url) else { continue }
+                out.append(url)
+                if out.count >= cap { return out }
+            }
+        }
+        return out
     }
 
     private static func localFileURL(from string: String) -> URL? {

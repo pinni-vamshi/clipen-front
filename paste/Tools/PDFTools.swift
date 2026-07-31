@@ -58,6 +58,7 @@ enum PDFTools {
                 guard let result = await apply(input.pdf, input.data) else {
                     switch id {
                     case "pdf.extract-all-text", "pdf.first-page-text":
+                        AuthManager.shared.registerActionUsage(actionID: "fail.\(id.replacingOccurrences(of: ".", with: "_"))")
                         return .status("No text found in PDF.")
                     default:
                         return nil
@@ -151,6 +152,7 @@ enum PDFService {
                         message: "Reduced PDF: \(before) → \(after)"
                     ))
                 } catch {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.pdf_reduce_size")
                     continuation.resume(returning: .status("Couldn't create optimized PDF copy."))
                 }
             }
@@ -190,6 +192,7 @@ enum PDFService {
                     }
 
                     guard !urls.isEmpty else {
+                        AuthManager.shared.registerActionUsage(actionID: "fail.pdf_pages_as_png")
                         continuation.resume(returning: .status("Couldn't render PDF pages as images."))
                         return
                     }
@@ -197,6 +200,7 @@ enum PDFService {
                     let label = urls.count == 1 ? "1 page image" : "\(urls.count) page images"
                     continuation.resume(returning: .files(urls, message: "Created \(label) from PDF."))
                 } catch {
+                    AuthManager.shared.registerActionUsage(actionID: "fail.pdf_pages_as_png")
                     continuation.resume(returning: .status("Couldn't create page image files."))
                 }
             }

@@ -8,7 +8,12 @@ extension ClipboardManager {
 
     func startPolling() {
         lastChangeCount = NSPasteboard.general.changeCount
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+        // Poll fast (100ms) so a copy is noticed almost immediately and two
+        // quick copies in a row aren't collapsed into one missed capture. The
+        // idle check is just an integer compare, so a tight interval is cheap;
+        // the actual (heavy) capture work runs off the main thread — see
+        // pollClipboard / processCapturedPasteboard.
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.pollClipboard()
         }
         RunLoop.main.add(pollTimer!, forMode: .common)
@@ -26,7 +31,16 @@ extension ClipboardManager {
             return
         }
 
-        if !remoteClipboardDataReady(pb) {
+        // App-level exclusion — a coarser, user-managed safety net alongside
+        // the concealed-type check above, for sources (e.g. a browser on a
+        // banking page) that never mark their own copies as sensitive.
+        if let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+           excludedCaptureBundleIDs.contains(bundleID) {
+            lastChangeCount = pb.changeCount
+            return
+        }
+
+        if !pasteboardDataReady(pb) {
             remoteClipboardRetryCount += 1
             if remoteClipboardRetryCount < Self.maxRemoteClipboardRetries {
                 return
@@ -36,6 +50,17 @@ extension ClipboardManager {
         remoteClipboardRetryCount = 0
         lastChangeCount = pb.changeCount
 
+        // Hand the heavy half (reading every representation + content detection)
+        // to a serial background queue. The copy is already "claimed" above
+        // (lastChangeCount advanced), so the main thread returns instantly and
+        // the actual work never blocks the UI or the next poll.
+        captureQueue.async { [weak self] in self?.processCapturedPasteboard(pb) }
+    }
+
+    /// Heavy half of capture — runs OFF the main thread (on `captureQueue`).
+    /// Reads every pasteboard representation, builds the item (which runs
+    /// content detection), and hops back to the main thread only to insert.
+    func processCapturedPasteboard(_ pb: NSPasteboard) {
         let sidecarSnapshot = Self.allPasteboardTypes(from: pb)
 
         if captureFiles {
@@ -63,16 +88,22 @@ extension ClipboardManager {
                 let attrStr = NSAttributedString(rtfd: rtfdData, documentAttributes: nil)
                 DispatchQueue.main.async {
                     if let attrStr, !attrStr.string.isEmpty {
+                        // A table's cells are separate paragraphs in `.string`
+                        // with no column-boundary character — reading it raw
+                        // collapses every copied table (Pages/Numbers/Mail/
+                        // TextEdit) into one column. Tab-separate real table
+                        // rows; fall back to the raw string otherwise.
+                        let plainText = TableCellExtractor.tabSeparatedPlainText(from: attrStr) ?? attrStr.string
                         if Self.isImageOnlyAttributedString(attrStr) {
                             if case .image = fallback?.content {
                                 self.addCaptured(fallback!, sidecar: sidecarSnapshot)
                             } else if let extracted = Self.imageItem(fromAttachmentIn: attrStr) {
                                 self.addCaptured(extracted, sidecar: sidecarSnapshot)
                             } else {
-                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: plainText)), sidecar: sidecarSnapshot)
                             }
                         } else {
-                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: plainText)), sidecar: sidecarSnapshot)
                         }
                     } else if let fallback {
                         self.addCaptured(fallback, sidecar: sidecarSnapshot)
@@ -97,7 +128,11 @@ extension ClipboardManager {
             guard let html, !html.isEmpty else { continue }
             let fallback = basicItem(from: pb)
             if case .image = fallback?.content, Self.isImageOnlyHTML(html) {
-                if let fallback { addCaptured(fallback, sidecar: sidecarSnapshot) }
+                if let fallback {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.addCaptured(fallback, sidecar: sidecarSnapshot)
+                    }
+                }
                 return
             }
             let pasteboardPlain = pb.string(forType: .string)?
@@ -137,20 +172,22 @@ extension ClipboardManager {
                 }()
                 DispatchQueue.main.async {
                     if let attrStr, !attrStr.string.isEmpty {
+                        // Same table-collapse risk as the RTFD path above.
+                        let plainText = TableCellExtractor.tabSeparatedPlainText(from: attrStr) ?? attrStr.string
                         if Self.isImageOnlyAttributedString(attrStr) {
                             if case .image = fallback?.content {
                                 self.addCaptured(fallback!, sidecar: sidecarSnapshot)
                             } else if let extracted = Self.imageItem(fromAttachmentIn: attrStr) {
                                 self.addCaptured(extracted, sidecar: sidecarSnapshot)
                             } else if let rtfdUpgrade {
-                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: plainText)), sidecar: sidecarSnapshot)
                             } else {
-                                self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                                self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: plainText)), sidecar: sidecarSnapshot)
                             }
                         } else if let rtfdUpgrade {
-                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: plainText)), sidecar: sidecarSnapshot)
                         } else {
-                            self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: attrStr.string)), sidecar: sidecarSnapshot)
+                            self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: plainText)), sidecar: sidecarSnapshot)
                         }
                     } else if let fallback {
                         self.addCaptured(fallback, sidecar: sidecarSnapshot)
@@ -180,17 +217,47 @@ extension ClipboardManager {
         }
 
         if let item = basicItem(from: pb) {
-            addCaptured(item, sidecar: sidecarSnapshot)
-        } else {
-            AuthManager.shared.registerActionUsage(actionID: "fail.capture")
+            DispatchQueue.main.async { [weak self] in
+                self?.addCaptured(item, sidecar: sidecarSnapshot)
+            }
+        } else if !(pb.types ?? []).isEmpty {
+            // basicItem() already falls back to wrapping ANY non-empty type
+            // as `.blob`, so reaching here with real types present means
+            // something genuinely couldn't be read — worth knowing about.
+            // But when `pb.types` itself is empty, nothing was ever offered
+            // (some apps momentarily declare-then-clear, or write only a
+            // concealed marker with no payload) — that's not a capture
+            // failure, there was nothing to capture, and logging it just
+            // buried the rare, real gaps in type coverage under noise.
+            DispatchQueue.main.async {
+                AuthManager.shared.registerActionUsage(actionID: "fail.capture")
+            }
         }
     }
 
     static let remoteClipboardMarker = NSPasteboard.PasteboardType("com.apple.is-remote-clipboard")
 
-    func remoteClipboardDataReady(_ pb: NSPasteboard) -> Bool {
-        guard let types = pb.types, types.contains(Self.remoteClipboardMarker) else { return true }
-        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+    /// True once at least one declared pasteboard type actually has bytes
+    /// behind it — not just once the type NAME is announced. A source can
+    /// declare types before the payload exists: Continuity/Universal
+    /// Clipboard (a copy made on another Apple device) announces itself
+    /// immediately while the real transfer is still in flight, and — the
+    /// same race, different cause — Photos.app copying an iCloud-only photo,
+    /// or Finder copying an iCloud Drive file that hasn't downloaded locally,
+    /// declares its types up front while iCloud fetches the actual bytes in
+    /// the background. Reading on the very next 100ms poll used to see
+    /// "types present, no data yet" as a genuine failure and fall straight
+    /// into the "Private clipboard data" blob catch-all — this is the retry
+    /// gate `pollClipboard` uses (`Self.maxRemoteClipboardRetries`, ~9s
+    /// budget) so that download has time to actually finish first.
+    func pasteboardDataReady(_ pb: NSPasteboard) -> Bool {
+        guard let types = pb.types, !types.isEmpty else { return true }
+
+        // Continuity/Universal Clipboard specifically rewrites a growing
+        // file promise as the transfer completes — file-size stability
+        // (not just non-empty data) is the only reliable "done" signal.
+        if types.contains(Self.remoteClipboardMarker),
+           let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
            !urls.isEmpty {
             var allStable = true
             for url in urls {
@@ -207,8 +274,9 @@ extension ClipboardManager {
             }
             return allStable
         }
-        if let s = pb.string(forType: .string), !s.isEmpty { return true }
-        for t in types where t != Self.remoteClipboardMarker {
+
+        // General case: at least one declared type must actually have data.
+        for t in types {
             if let data = pb.data(forType: t), !data.isEmpty { return true }
         }
         return false
@@ -279,7 +347,7 @@ extension ClipboardManager {
             excluded.formUnion(["public.svg-image", "com.adobe.illustrator.svg", "org.w3.svg"])
         case .file, .files:
             excluded.formUnion(["public.file-url", "NSFilenamesPboardType"])
-        case .text, .blob:
+        case .text, .blob, .group:
             break
         }
         let pruned = all.filter { !excluded.contains($0.key) }
@@ -541,9 +609,23 @@ extension ClipboardManager {
                                    with: " ", options: .regularExpression)
         s = s.replacingOccurrences(of: "</(p|div|br|li|tr|h[1-6])[^>]*>",
                                    with: "\n", options: [.regularExpression, .caseInsensitive])
+        // Table cells: `<td>`/`<th>` boundaries become tabs so a multi-column
+        // row survives as tab-separated plain text — the same convention
+        // Excel/Sheets/TextEdit use, and what lets a spreadsheet app read the
+        // column structure back on paste. Without this, the generic tag-to-
+        // space catchall below swallows every cell boundary, so a
+        // multi-column "paste without formatting" lands as a single column.
+        s = s.replacingOccurrences(of: "<t[dh][^>]*>", with: "",
+                                   options: [.regularExpression, .caseInsensitive])
+        s = s.replacingOccurrences(of: "</t[dh][^>]*>", with: "\t",
+                                   options: [.regularExpression, .caseInsensitive])
         s = s.replacingOccurrences(of: "<br[^>]*>", with: "\n",
                                    options: [.regularExpression, .caseInsensitive])
         s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        // The last cell in a row leaves a dangling tab before the newline
+        // </tr> produced above — drop it so rows don't end in an empty
+        // phantom column.
+        s = s.replacingOccurrences(of: "\t\n", with: "\n")
         let entities: [(String, String)] = [
             ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
             ("&quot;", "\""), ("&apos;", "'"), ("&#39;", "'"), ("&hellip;", "…"),
@@ -552,7 +634,10 @@ extension ClipboardManager {
         for (e, r) in entities { s = s.replacingOccurrences(of: e, with: r) }
         s = s.replacingOccurrences(of: "&#(\\d+);", with: " ",
                                    options: .regularExpression)
-        s = s.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
+        // Collapse repeated plain spaces only — NOT tabs, which is exactly
+        // the character the table-cell substitution above relies on to mark
+        // column boundaries.
+        s = s.replacingOccurrences(of: " +", with: " ", options: .regularExpression)
         s = s.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
         let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
@@ -571,10 +656,19 @@ extension ClipboardManager {
             item.sourceAppName = app.localizedName
             item.sourceBundleID = app.bundleIdentifier
         }
+        // Stamp the clip with whichever collection is active as it's captured.
+        // In the "All" view nothing is active, so the clip stays unfiled — it
+        // shows in All and in no collection until filed with a transform.
+        if item.collections.isEmpty, let activeCollection {
+            item.collections = [activeCollection]
+        }
 
         if case .text(let newText) = item.content {
             var mutableItem = item
-            mutableItem.diffBadge = computeDiffBadge(newText: newText, against: items)
+            if let (badge, detail) = computeDiffBadge(newText: newText, against: items) {
+                mutableItem.diffBadge = badge
+                mutableItem.diffDetail = detail
+            }
             items.insert(mutableItem, at: 0)
         } else {
             items.insert(item, at: 0)
@@ -664,12 +758,25 @@ extension ClipboardManager {
         }.resume()
     }
 
-    func computeDiffBadge(newText: String, against existing: [ClipboardItem]) -> String? {
+    private static let maxDiffDetailItems = 8
+
+    func computeDiffBadge(newText: String, against existing: [ClipboardItem]) -> (badge: String, detail: DiffDetail)? {
         guard newText.count <= Self.maxDiffBadgeTextLength else { return nil }
         let newLines = newText.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        guard newLines.count >= 2 else { return nil }
+
+        if newLines.count >= 2 {
+            return lineDiffBadge(newLines: newLines, against: existing)
+        }
+        // Single-line text (e.g. a short note or title) can't be diffed
+        // line-by-line — fall back to word-level comparison instead, gated
+        // at a much stricter 80% similarity so unrelated short strings never
+        // get flagged as "the same item with edits".
+        return wordDiffBadge(newText: newText, against: existing)
+    }
+
+    private func lineDiffBadge(newLines: [String], against existing: [ClipboardItem]) -> (badge: String, detail: DiffDetail)? {
         let newSet = Set(newLines)
 
         for (i, item) in existing.prefix(10).enumerated() {
@@ -687,14 +794,59 @@ extension ClipboardManager {
             let similarity = Double(shared) / Double(total)
             guard similarity >= 0.4 && similarity < 1.0 else { continue }
 
-            let added   = newSet.subtracting(existSet).count
-            let removed = existSet.subtracting(newSet).count
-            guard added + removed > 0 else { continue }
+            // Preserve original order of the added/removed lines, capped.
+            let addedLines   = newLines.filter   { !existSet.contains($0) }
+            let removedLines = existLines.filter { !newSet.contains($0) }
+            guard !addedLines.isEmpty || !removedLines.isEmpty else { continue }
 
+            let rank = i + 2
             var parts: [String] = []
-            if added   > 0 { parts.append("+\(added)") }
-            if removed > 0 { parts.append("-\(removed)") }
-            return parts.joined(separator: " ") + " from #\(i + 2)"
+            if !addedLines.isEmpty   { parts.append("+\(addedLines.count)") }
+            if !removedLines.isEmpty { parts.append("-\(removedLines.count)") }
+            let badge = parts.joined(separator: " ") + " from #\(rank)"
+            let detail = DiffDetail(added: Array(addedLines.prefix(Self.maxDiffDetailItems)),
+                                    removed: Array(removedLines.prefix(Self.maxDiffDetailItems)),
+                                    fromRank: rank)
+            return (badge, detail)
+        }
+        return nil
+    }
+
+    private func wordDiffBadge(newText: String, against existing: [ClipboardItem]) -> (badge: String, detail: DiffDetail)? {
+        let newWords = newText.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard newWords.count >= 2 else { return nil }
+        let newSet = Set(newWords.map { $0.lowercased() })
+
+        for (i, item) in existing.prefix(10).enumerated() {
+            guard let existText = item.textForEmbedding,
+                  existText.count <= Self.maxDiffBadgeTextLength else { continue }
+            let existLines = existText.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard existLines.count < 2 else { continue }  // compare only against other single-line texts
+            let existWords = existText.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+            guard existWords.count >= 2 else { continue }
+            let existSet = Set(existWords.map { $0.lowercased() })
+
+            let shared = newSet.intersection(existSet).count
+            let total  = newSet.union(existSet).count
+            guard total > 0 else { continue }
+            let similarity = Double(shared) / Double(total)
+            guard similarity >= 0.8 && similarity < 1.0 else { continue }
+
+            let addedWords   = newWords.filter { !existSet.contains($0.lowercased()) }
+            let removedWords = existWords.filter { !newSet.contains($0.lowercased()) }
+            guard !addedWords.isEmpty || !removedWords.isEmpty else { continue }
+
+            let rank = i + 2
+            var parts: [String] = []
+            if !addedWords.isEmpty   { parts.append("+" + addedWords.joined(separator: " ")) }
+            if !removedWords.isEmpty { parts.append("-" + removedWords.joined(separator: " ")) }
+            let badge = parts.joined(separator: " ") + " from #\(rank)"
+            let detail = DiffDetail(added: Array(addedWords.prefix(Self.maxDiffDetailItems)),
+                                    removed: Array(removedWords.prefix(Self.maxDiffDetailItems)),
+                                    fromRank: rank)
+            return (badge, detail)
         }
         return nil
     }

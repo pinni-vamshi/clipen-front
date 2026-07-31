@@ -8,17 +8,22 @@ import Vision
 extension ClipboardManager {
 
     func recomputeEmbeddingsInBackground() {
-        guard let emb = nlEmbedding else { return }
+        // Snapshot on main (cheap), then hand EVERYTHING — including the
+        // singleton first-touch — to a background queue. Previously the
+        // `ClipenEmbedder.shared.isAvailable` guard ran on main, which
+        // triggered NLContextualEmbedding.load() (5-20 s on cold launch)
+        // synchronously and froze the whole app before the window could open.
         let snapshot = items.filter { $0.embedding == nil }
-        guard !snapshot.isEmpty else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard ClipenEmbedder.shared.isAvailable else { return }
+            guard !snapshot.isEmpty else { return }
             var computed: [(id: UUID, vector: [Float])] = []
             computed.reserveCapacity(snapshot.count)
             for item in snapshot {
                 guard self != nil else { return }
                 guard let str = item.richEmbeddingText,
-                      let vector = emb.vector(for: str) else { continue }
-                computed.append((item.id, vector.map { Float($0) }))
+                      let vector = ClipenEmbedder.shared.vector(for: str) else { continue }
+                computed.append((item.id, vector))
             }
             guard !computed.isEmpty else { return }
             DispatchQueue.main.async { [weak self] in
@@ -49,9 +54,16 @@ extension ClipboardManager {
         clearPopupHintHighlights()
         cancelPendingFirstOpen()
         guard !displayItems.isEmpty else { return }
+        // Trial spent: this path never opens the popup, so with the paste
+        // blocked a quick ⌘V tap would do nothing visible whatsoever and read
+        // as the app being broken. Show the popup — and therefore the subscribe
+        // prompt — instead of failing silently.
+        guard ProGate.shared.isUnlocked else {
+            openPopupNow()
+            return
+        }
         selectedIndex = 0
-        inTransformStage = false
-        transformIndex = 0
+        setSidePanelStage(.none)
         AuthManager.shared.registerFastPasteAction()
         commitPaste()
         showFastPasteHintIfNeeded()
@@ -84,7 +96,11 @@ extension ClipboardManager {
         markBlobPurgeNeeded()
         if displayItems.isEmpty { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
-        syncItemPreviewWithSelection()
+        // Deleting shifts the selection onto a DIFFERENT item, so the transform
+        // and share panels must re-target too. Syncing only the item preview
+        // here left transformDisplaysCache describing the deleted item, and
+        // commitPaste() reads its tool id while operating on the new one.
+        selectionDidChange()
     }
 
     func deleteMarked() {
@@ -97,8 +113,7 @@ extension ClipboardManager {
         markBlobPurgeNeeded()
         if displayItems.isEmpty { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
-        syncItemPreviewWithSelection()
-        syncTransformPanelWithSelection()
+        selectionDidChange()
         flashStatus("Deleted \(ids.count) items.")
     }
 
@@ -122,8 +137,7 @@ extension ClipboardManager {
         } else {
             clampSelectedIndexToDisplay()
         }
-        syncItemPreviewWithSelection()
-        syncTransformPanelWithSelection()
+        selectionDidChange()
     }
 
     func moveMarkedToFront() {
@@ -138,8 +152,7 @@ extension ClipboardManager {
         } else {
             selectedIndex = 0
         }
-        syncItemPreviewWithSelection()
-        syncTransformPanelWithSelection()
+        selectionDidChange()
     }
 
     func clampSelectedIndexToDisplay() {
@@ -174,10 +187,13 @@ extension ClipboardManager {
     }
 
     func dismissPreview() {
+        // Popup going away means the inline editor loses its host — treat
+        // that as a cancel, silently.
+        if isInlineEditing { inlineEditItemID = nil; itemPreviewPanel.hide() }
         if previewWindow.isVisible {
             if let openedAt = popupOpenedAt {
                 let ms = max(0, Int(Date().timeIntervalSince(openedAt) * 1000))
-                AuthManager.shared.registerActionUsage(actionID: "popup.dur_ms", count: ms)
+                TrackingService.shared.recordPopupDuration(ms: ms)
             }
             if !popupSessionPasted {
                 AuthManager.shared.registerActionUsage(actionID: "popup.abandon")
@@ -204,18 +220,10 @@ extension ClipboardManager {
         firstOpenHoldTimer?.invalidate()
         firstOpenHoldTimer = nil
         popupPinnedOpen = false
+        caseTransformOriginals.removeAll()
         xTapHoldTimer?.invalidate()
         xTapHoldTimer = nil
-        inTransformStage = false
-        transformingMarkedSet = false
-        transformIndex   = 0
-        transformDisplaysCache = []
-        lastTransformCacheItemID = nil
-        inShareStage = false
-        shareServices = []
-        shareTargetItems = []
-        shareIndex = 0
-        sharePanel.hide()
+        setSidePanelStage(.none)
         selectedIndex    = 0
         popupTagFilter   = nil
         cycleCount       = 0
@@ -241,6 +249,7 @@ extension ClipboardManager {
     func openQuickClipPanelForSelection() {
         itemPreviewPanel.hide()
         AuthManager.shared.registerActionUsage(actionID: "action.reference-pin")
+        markNudgeUsedNaturally(.pinPreview)
 
         if !markedItemIDs.isEmpty {
             let orderedItems = markedItemIDs.compactMap { id in items.first(where: { $0.id == id }) }
@@ -297,8 +306,11 @@ extension ClipboardManager {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, q.count >= 2 else { return [] }
 
+        // Key the cache on itemsRevision, not items.count: content can change
+        // while the count stays the same (an item edited/moved/re-captured),
+        // which the old count-based key would miss and serve stale results.
         if q == lastSearchQuery
-            && items.count == lastSearchItemsRev
+            && itemsRevision == lastSearchItemsRev
             && embeddedItemCount == lastSearchEmbedRev {
             return lastSearchResult
         }
@@ -309,9 +321,8 @@ extension ClipboardManager {
 
         var queryVec: [Float]? = nil
         if AuthManager.shared.semanticSearch,
-           let emb = nlEmbedding,
-           let v = emb.vector(for: qNorm) {
-            queryVec = v.map { Float($0) }
+           let v = ClipenEmbedder.shared.vector(for: qNorm) {
+            queryVec = v
         }
 
         let now = Date()
@@ -348,7 +359,7 @@ extension ClipboardManager {
         let sorted = scored.sorted { $0.1 > $1.1 }.map { $0.0 }
         lastSearchQuery = q
         lastSearchResult = sorted
-        lastSearchItemsRev = items.count
+        lastSearchItemsRev = itemsRevision
         lastSearchEmbedRev = embeddedItemCount
         return sorted
     }
@@ -417,10 +428,10 @@ extension ClipboardManager {
 
     func semanticBestMatch(forBundleID bundleID: String, in panels: [QuickClipPanel],
                            tabTexts: [String]) -> (panel: QuickClipPanel, pageID: UUID)? {
-        guard let nlEmbedding else { return nil }
+        guard ClipenEmbedder.shared.isAvailable else { return nil }
         guard !tabTexts.isEmpty else { return nil }
         let tabVectors: [[Float]] = tabTexts.compactMap { text in
-            nlEmbedding.vector(for: text)?.map(Float.init)
+            ClipenEmbedder.shared.vector(for: text)
         }
         guard !tabVectors.isEmpty else { return nil }
 
@@ -530,5 +541,69 @@ enum ImageSimilarityService {
         } catch {
             return nil
         }
+    }
+}
+
+/// Text embedder that prefers the on-device transformer
+/// `NLContextualEmbedding` (macOS 14+) — it runs on the **Neural Engine** and
+/// is **multilingual** — and transparently falls back to the classic CPU-only,
+/// English-only sentence embedding when the contextual model's assets aren't
+/// present. The backend is chosen ONCE at startup so every vector produced in a
+/// session shares the same dimensionality (mixing would break cosine compares;
+/// `cosineSimilarity` already guards mismatches, but we avoid them entirely).
+///
+/// Safety: if anything about the contextual path is unavailable it behaves
+/// exactly like the previous `NLEmbedding` code — it can never regress search.
+final class ClipenEmbedder {
+    static let shared = ClipenEmbedder()
+
+    private let fallback: NLEmbedding?
+    private let contextual: Any?   // NLContextualEmbedding, boxed behind availability
+    let usingContextual: Bool
+
+    var isAvailable: Bool { usingContextual || fallback != nil }
+
+    private init() {
+        fallback = NLEmbedding.sentenceEmbedding(for: .english)
+
+        var box: Any? = nil
+        var usingCtx = false
+        if #available(macOS 14.0, *) {
+            // Latin-script model covers most Western languages in one model.
+            if let model = NLContextualEmbedding(script: .latin),
+               (try? model.load()) != nil {
+                box = model
+                usingCtx = true
+            } else if #available(macOS 14.0, *) {
+                // Assets not present yet — request them in the background so a
+                // later launch can use the Neural Engine path. This session
+                // still runs on the safe fallback below.
+                NLContextualEmbedding(script: .latin)?.requestAssets { _, _ in }
+            }
+        }
+        contextual = box
+        usingContextual = usingCtx
+    }
+
+    /// A single mean-pooled vector for `text`, or nil if it can't be embedded.
+    func vector(for text: String) -> [Float]? {
+        if #available(macOS 14.0, *), let model = contextual as? NLContextualEmbedding {
+            guard let result = try? model.embeddingResult(for: text, language: nil) else { return nil }
+            let dim = model.dimension
+            guard dim > 0 else { return nil }
+            var sum = [Double](repeating: 0, count: dim)
+            var count = 0
+            result.enumerateTokenVectors(in: text.startIndex..<text.endIndex) { vec, _ in
+                if vec.count == dim {
+                    for i in 0..<dim { sum[i] += vec[i] }
+                    count += 1
+                }
+                return true
+            }
+            guard count > 0 else { return nil }
+            let inv = 1.0 / Double(count)
+            return sum.map { Float($0 * inv) }
+        }
+        return fallback?.vector(for: text)?.map { Float($0) }
     }
 }

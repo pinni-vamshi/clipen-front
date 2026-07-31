@@ -9,16 +9,8 @@ enum TextTools {
             guard isPlainText($0) else { return nil }
             return $0.titleCased
         },
-        make("text.uppercase", icon: "arrow.up.to.line.compact", label: "UPPERCASE", group: "CASE") {
-            guard isPlainTextOrHexColor($0) else { return nil }
-            let out = $0.uppercased()
-            return out == $0 ? nil : out
-        },
-        make("text.lowercase", icon: "arrow.down.to.line.compact", label: "lowercase", group: "CASE") {
-            guard isPlainTextOrHexColor($0) else { return nil }
-            let out = $0.lowercased()
-            return out == $0 ? nil : out
-        },
+        uppercaseTool,
+        lowercaseTool,
         make("text.trim", icon: "scissors", label: "Trim whitespace", group: "EDIT") {
             let trimmed = $0.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed == $0 ? nil : trimmed
@@ -116,6 +108,9 @@ enum TextTools {
             runAsync: { item in
                 guard let text = input(for: item), AIService.fits(text) else { return nil }
                 guard let result = await apply(text) else {
+                    await MainActor.run {
+                        AuthManager.shared.registerActionUsage(actionID: "fail.\(id.replacingOccurrences(of: ".", with: "_"))")
+                    }
                     return .status("Apple Intelligence couldn't process this.")
                 }
                 return .text(result)
@@ -123,28 +118,91 @@ enum TextTools {
         )
     }
 
+    private static func isEditDenied(_ item: ClipboardItem) -> Bool {
+        guard item.tags.contains(.markdown) else { return false }
+        switch item.content {
+        case .html, .richText, .rtfd: return true
+        default: return false
+        }
+    }
+
     private static let editTool = ClipboardTool(
         id: "text.edit",
         icon: "square.and.pencil",
-        label: "Edit",
+        label: "Edit (E)",
         group: "EDIT",
         preview: { item in
-            guard ClipboardManager.editablePlainText(for: item) != nil else { return nil }
-            return "Edit in reference panel…"
+            guard !isEditDenied(item),
+                  ClipboardManager.editablePlainText(for: item) != nil else { return nil }
+            return "Inline edit — Enter to save, Esc to cancel"
         },
         runSync: { item in
             guard ClipboardManager.editablePlainText(for: item) != nil else { return nil }
-            AuthManager.shared.registerToolUsage(toolID: "text.edit")
-            ClipboardManager.shared.openQuickClipPanel(for: item, focusContent: true)
-            return .status("Opened in reference panel for editing.")
+            // Registration + opening the editor happen inside beginInlineEdit.
+            ClipboardManager.shared.beginInlineEdit(for: item)
+            return .status("Editing inline…")
         },
         runAsync: { item in
             guard ClipboardManager.editablePlainText(for: item) != nil else { return nil }
-            AuthManager.shared.registerToolUsage(toolID: "text.edit")
             await MainActor.run {
-                ClipboardManager.shared.openQuickClipPanel(for: item, focusContent: true)
+                ClipboardManager.shared.beginInlineEdit(for: item)
             }
-            return .status("Opened in reference panel for editing.")
+            return .status("Editing inline…")
+        }
+    )
+
+    // Deliberately NOT wired to applyCaseTransformForSelection (that stays
+    // reserved for the direct L/U keypress, which mutates the item in place
+    // and keeps the popup open for toggling). From the Transform panel,
+    // release-⌘ is expected to PASTE the result like every other tool here —
+    // these used to return `.status(...)`, the same "nothing to paste, just a
+    // message" category as an OCR failure, which is why selecting Uppercase/
+    // lowercase from the panel and releasing ⌘ only ever flashed a status and
+    // left the result sitting in the preview instead of pasting it. Following
+    // the same plain, stateless `make(...)` pattern as every sibling CASE tool
+    // (e.g. Title Case just above) fixes that: compute the value, return
+    // `.text`, and the normal transform-paste path takes it from there.
+    private static let uppercaseTool = ClipboardTool(
+        id: "text.uppercase",
+        icon: "arrow.up.to.line.compact",
+        label: "UPPERCASE (U)",
+        group: "CASE",
+        preview: { item in
+            guard let s = input(for: item), isPlainTextOrHexColor(s) else { return nil }
+            let out = s.uppercased()
+            return out == s ? nil : out
+        },
+        runSync: { item in
+            guard let s = input(for: item), isPlainTextOrHexColor(s) else { return nil }
+            let out = s.uppercased()
+            return out == s ? nil : .text(out)
+        },
+        runAsync: { item in
+            guard let s = input(for: item), isPlainTextOrHexColor(s) else { return nil }
+            let out = s.uppercased()
+            return out == s ? nil : .text(out)
+        }
+    )
+
+    private static let lowercaseTool = ClipboardTool(
+        id: "text.lowercase",
+        icon: "arrow.down.to.line.compact",
+        label: "lowercase (L)",
+        group: "CASE",
+        preview: { item in
+            guard let s = input(for: item), isPlainTextOrHexColor(s) else { return nil }
+            let out = s.lowercased()
+            return out == s ? nil : out
+        },
+        runSync: { item in
+            guard let s = input(for: item), isPlainTextOrHexColor(s) else { return nil }
+            let out = s.lowercased()
+            return out == s ? nil : .text(out)
+        },
+        runAsync: { item in
+            guard let s = input(for: item), isPlainTextOrHexColor(s) else { return nil }
+            let out = s.lowercased()
+            return out == s ? nil : .text(out)
         }
     )
 
@@ -165,6 +223,21 @@ enum TextTools {
         UserDefaults.standard.object(forKey: "pastePlainTextByDefault") as? Bool ?? false
     }
 
+    /// A real table must still paste as a table — flattening it to tab text
+    /// only reads back as columns in a spreadsheet; anywhere else (Word,
+    /// Pages, Notes, Mail) it lands as bare text with visible tab gaps and
+    /// the table is simply gone. So a table gets a fresh, un-styled HTML
+    /// table (structure kept, every bold/color/font stripped); anything else
+    /// falls back to the flat plain-text string as before.
+    private static func plainOutput(for item: ClipboardItem) -> TransformOutput? {
+        if let table = TableCellExtractor.plainTableHTML(for: item) {
+            return .item(ClipboardItem(content: .html(table.html, plain: table.plain)),
+                         message: "Pasted without formatting.")
+        }
+        guard let plain = richPlainText(for: item) else { return nil }
+        return .text(plain)
+    }
+
     private static let pastePlainTool = ClipboardTool(
         id: "text.paste-plain",
         icon: "textformat",
@@ -174,14 +247,8 @@ enum TextTools {
             guard !pastePlainDefault else { return nil }
             return richPlainText(for: item)
         },
-        runSync: { item in
-            guard let plain = richPlainText(for: item) else { return nil }
-            return .text(plain)
-        },
-        runAsync: { item in
-            guard let plain = richPlainText(for: item) else { return nil }
-            return .text(plain)
-        }
+        runSync: { item in plainOutput(for: item) },
+        runAsync: { item in plainOutput(for: item) }
     )
 
     private static let pasteFormattedTool = ClipboardTool(

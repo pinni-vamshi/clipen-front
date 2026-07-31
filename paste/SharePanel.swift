@@ -6,6 +6,9 @@ class SharePanel: NSObject, NSPopoverDelegate {
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
     private let popover = NSPopover()
     private var cachedPanelHeight: CGFloat = 320
+    // See TransformPanel's identical comment: keyed on content shape so a
+    // fresh S press doesn't re-measure a throwaway view just to discard it.
+    private var cachedHeightSignature: Int? = nil
     private var wantsVisible = false
     private var shownStrip: NSRect? = nil
 
@@ -51,8 +54,9 @@ class SharePanel: NSObject, NSPopoverDelegate {
         let leftFits = popupFrame.minX - bubbleW - 8 >= screen.minX + 8
         let placeRight = rightFits || !leftFits
 
+        let heightSignature = services.count
         let h: CGFloat
-        if popover.isShown {
+        if popover.isShown || cachedHeightSignature == heightSignature {
             h = cachedPanelHeight
         } else {
             let hv = NSHostingView(rootView: content)
@@ -60,6 +64,7 @@ class SharePanel: NSObject, NSPopoverDelegate {
             let measured = hv.fittingSize.height
             h = min(max(measured > 0 ? measured : 220, 160), 420)
             cachedPanelHeight = h
+            cachedHeightSignature = heightSignature
         }
 
         popover.contentSize = NSSize(width: bubbleW, height: h)
@@ -95,7 +100,13 @@ class SharePanel: NSObject, NSPopoverDelegate {
 
     func hide() {
         wantsVisible = false
-        if popover.isShown { popover.performClose(nil) }
+        if popover.isShown {
+            // Snap-close to avoid the animated fade visually overlapping
+            // whatever panel replaces it (transform, item preview).
+            popover.animates = false
+            popover.performClose(nil)
+            popover.animates = true
+        }
         anchorPanel.orderOut(nil)
         shownStrip = nil
     }
@@ -158,6 +169,7 @@ struct ShareView: View {
                     VStack(spacing: 0) {
                         ForEach(Array(services.enumerated()), id: \.offset) { idx, service in
                             ShareRow(service: service, isSelected: idx == selectedIndex)
+                                .equatable()
                                 .id(idx)
                                 .contentShape(Rectangle())
                                 .onTapGesture(count: 2) {
@@ -189,9 +201,15 @@ struct ShareView: View {
     }
 }
 
-private struct ShareRow: View {
+private struct ShareRow: View, Equatable {
     let service: NSSharingService
     let isSelected: Bool
+
+    // Same pattern as TransformRow: `@State private var isHovered` is
+    // intentionally left out of the equality contract.
+    static func == (lhs: ShareRow, rhs: ShareRow) -> Bool {
+        lhs.service === rhs.service && lhs.isSelected == rhs.isSelected
+    }
 
     @State private var isHovered = false
 

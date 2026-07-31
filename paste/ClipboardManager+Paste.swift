@@ -133,6 +133,13 @@ extension ClipboardManager {
             commitShare()
             return
         }
+        // Trial spent: swallow the paste and leave the popup up, which is
+        // already rendering the subscribe prompt. Returning here rather than
+        // falling through means no pasteboard write and no ⌘V injection.
+        if !ProGate.shared.isUnlocked {
+            markedItemIDs = []
+            return
+        }
         vTapHoldTimer?.invalidate()
         vTapHoldTimer = nil
         bTapHoldTimer?.invalidate()
@@ -145,7 +152,7 @@ extension ClipboardManager {
         xTapHoldTimer = nil
         if previewWindow.isVisible, let openedAt = popupOpenedAt {
             let ms = max(0, Int(Date().timeIntervalSince(openedAt) * 1000))
-            AuthManager.shared.registerActionUsage(actionID: "popup.dur_ms", count: ms)
+            TrackingService.shared.recordPopupDuration(ms: ms)
             popupOpenedAt = nil
         }
         isSearchActive = false
@@ -162,7 +169,7 @@ extension ClipboardManager {
             let markedItems = orderedMarkedItems
             guard markedItems.count >= 2,
                   transformDisplaysCache.indices.contains(transformIndex) else {
-                exitTransformStage()
+                setSidePanelStage(.none)
                 previewWindow.hide()
                 markedItemIDs = []
                 return
@@ -177,11 +184,7 @@ extension ClipboardManager {
                 }
                 await MainActor.run {
                     self.updateTransformPanelProcessing(false)
-                    self.inTransformStage = false
-                    self.transformingMarkedSet = false
-                    self.transformIndex = 0
-                    self.transformPanel.hide()
-                    self.itemPreviewPanel.hide()
+                    self.setSidePanelStage(.none)
                     self.previewWindow.hide()
                     self.markedItemIDs = []
                     self.handleTransformResult(result, restoring: markedItems[0], toolID: toolID)
@@ -231,14 +234,24 @@ extension ClipboardManager {
                     guard let self else { return }
                     let result = await ToolRegistry.run(item: item, toolID: selectedToolID)
                     await MainActor.run {
+                        // If the popup or the transform stage was torn down while
+                        // this async tool ran (user hit Esc / pasted elsewhere),
+                        // drop the result silently. Otherwise updateTransformPanel-
+                        // Processing below would resurrect a ghost transform panel
+                        // over a dismissed popup, and the leftover inTransformStage
+                        // could wedge later auto-preview.
+                        guard self.inTransformStage, self.previewWindow.isVisible else { return }
                         self.updateTransformPanelProcessing(false)
-                        self.inTransformStage = false
-                        self.transformIndex   = 0
-                        self.transformDisplaysCache = []
-                        self.lastTransformCacheItemID = nil
-                        self.transformingMarkedSet = false
-                        self.transformPanel.hide()
-                        self.itemPreviewPanel.hide()
+                        if self.isInlineEditing { return }
+                        if case .status(let msg) = result {
+                            // A no-op / informational result (e.g. OCR "no text
+                            // found") still ends the transform — leave the stage
+                            // so the slot is released and auto-preview resumes.
+                            self.setSidePanelStage(.none)
+                            self.flashStatus(msg)
+                            return
+                        }
+                        self.setSidePanelStage(.none)
                         self.previewWindow.hide()
                         self.markedItemIDs = []
                         self.handleTransformResult(result, restoring: item, toolID: selectedToolID)
@@ -247,12 +260,17 @@ extension ClipboardManager {
                 return
             } else {
                 let result = applySyncTransform(item: item, toolID: selectedToolID)
-                inTransformStage = false; transformIndex = 0
-                transformDisplaysCache = []
-                lastTransformCacheItemID = nil
-                transformingMarkedSet = false
-                transformPanel.hide()
-                itemPreviewPanel.hide()
+                if isInlineEditing {
+                    return
+                }
+                if case .status(let msg) = result {
+                    // Same as the async path — a no-op result still ends the
+                    // transform and releases the slot.
+                    setSidePanelStage(.none)
+                    flashStatus(msg)
+                    return
+                }
+                setSidePanelStage(.none)
                 previewWindow.hide()
                 markedItemIDs = []
                 handleTransformResult(result, restoring: item, toolID: selectedToolID)
@@ -260,7 +278,7 @@ extension ClipboardManager {
             }
         }
 
-        inTransformStage = false; transformIndex = 0
+        setSidePanelStage(.none)
 
         if !markedItemIDs.isEmpty {
             let ids = Set(markedItemIDs)
@@ -274,7 +292,8 @@ extension ClipboardManager {
             }
             let pasteTarget = resolvedPasteTarget()
             previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
-            commitMultiPaste(orderedItems, target: pasteTarget)
+            commitMultiPaste(orderedItems, target: pasteTarget,
+                              nudgeKind: orderedItems.count > 1 ? .multiMarked : .single)
             AuthManager.shared.registerCommandVAction()
             return
         }
@@ -293,6 +312,17 @@ extension ClipboardManager {
                              displayIndex: displayItems.firstIndex(where: { $0.id == item.id }))
         let pasteTarget = resolvedPasteTarget()
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
+
+        // A group pastes its members one after another, exactly like a marked
+        // multi-paste — that's the whole point of grouping them.
+        if case .group(let children) = item.content {
+            commitMultiPaste(children, target: pasteTarget, nudgeKind: .group)
+            AuthManager.shared.registerCommandVAction()
+            selectedIndex = 0; cycleCount = 0
+            return
+        }
+
+        recordNudgePaste(kind: .single)
         simulatePaste(item, target: pasteTarget) { [weak self] in
             self?.selectedIndex = 0
             self?.cycleCount    = 0
@@ -307,6 +337,9 @@ extension ClipboardManager {
 
     func simulatePaste(_ item: ClipboardItem, target: NSRunningApplication?,
                               completion: (() -> Void)? = nil) {
+        // Backstop for every paste entry point (fast paste, transform results,
+        // paste-while-pinned), not just the ⌘V path guarded in commitPaste.
+        guard ProGate.shared.isUnlocked else { completion?(); return }
         popupSessionPasted = true
         finalizePopupOutcome()
         recordPasteDestination(for: item.id, app: target)
@@ -343,14 +376,27 @@ extension ClipboardManager {
         guard let item = items.first(where: { $0.id == id }) else { return }
         recordPasteAnalytics(item: item,
                              displayIndex: displayItems.firstIndex(where: { $0.id == id }))
+        recordNudgePaste(kind: .single)
         simulatePaste(item, target: resolvedPasteTarget())
     }
 
-    func commitMultiPaste(_ itemList: [ClipboardItem], target: NSRunningApplication?) {
+    /// `nudgeKind` is only recorded on the outermost call (the real user
+    /// gesture); pass `nil` on the recursive self-calls below so a 5-item
+    /// multi-paste doesn't advance the nudge counters 5 times.
+    func commitMultiPaste(_ itemList: [ClipboardItem], target: NSRunningApplication?,
+                          nudgeKind: NudgePasteKind? = nil) {
         guard !itemList.isEmpty else {
             isSimulatingPaste = false
             selectedIndex = 0; cycleCount = 0
             return
+        }
+        guard ProGate.shared.isUnlocked else {
+            isSimulatingPaste = false
+            selectedIndex = 0; cycleCount = 0
+            return
+        }
+        if let nudgeKind {
+            recordNudgePaste(kind: nudgeKind)
         }
         popupSessionPasted = true
         finalizePopupOutcome()
@@ -422,9 +468,27 @@ extension ClipboardManager {
     func write(_ item: ClipboardItem, to pb: NSPasteboard, plainOnly: Bool = false) {
         if plainOnly {
             switch item.content {
-            case .richText(_, let plain), .rtfd(_, let plain), .html(_, let plain):
+            case .richText, .rtfd, .html:
                 let pitem = NSPasteboardItem()
-                pitem.setString(plain, forType: .string)
+                // A real table must still land as a table in the
+                // destination — writing only `public.string` (even with
+                // tabs) reads back as real columns in a spreadsheet, but in
+                // any other app (Word, Pages, Notes, Mail) it shows as bare
+                // text with visible tab gaps and the table itself is gone.
+                // An un-styled HTML table alongside the plain fallback
+                // preserves structure while still stripping every bit of
+                // the original formatting.
+                if let table = TableCellExtractor.plainTableHTML(for: item) {
+                    pitem.setData(Data(table.html.utf8), forType: .init("public.html"))
+                    pitem.setData(Data(table.html.utf8), forType: .init("Apple HTML pasteboard type"))
+                    pitem.setString(table.plain, forType: .string)
+                } else if case .richText(_, let plain) = item.content {
+                    pitem.setString(plain, forType: .string)
+                } else if case .rtfd(_, let plain) = item.content {
+                    pitem.setString(plain, forType: .string)
+                } else if case .html(_, let plain) = item.content {
+                    pitem.setString(plain, forType: .string)
+                }
                 pb.writeObjects([pitem])
                 return
             default:
@@ -517,6 +581,21 @@ extension ClipboardManager {
                 pitem.setData(data, forType: .init(typeStr))
             }
             pb.writeObjects([pitem])
+
+        case .group(let children):
+            // Single-shot paste of a group as one pasteboard write: its files
+            // plus a joined-text fallback. (The normal ⌘-release paste routes a
+            // group through commitMultiPaste instead, pasting each member in
+            // turn — see commitPaste — which is the primary behavior.)
+            var objects: [NSPasteboardWriting] = ClipboardItem.flattenedFileURLs(children)
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+                .map { makeFilePasteboardItem(for: $0) }
+            if let text = ClipboardContent.group(children).plainText {
+                let pitem = NSPasteboardItem()
+                pitem.setString(text, forType: .string)
+                objects.append(pitem)
+            }
+            if !objects.isEmpty { pb.writeObjects(objects) }
         }
     }
 

@@ -4,6 +4,7 @@ import Combine
 import UniformTypeIdentifiers
 import NaturalLanguage
 import ServiceManagement
+import AVFoundation
 @preconcurrency import PDFKit
 
 class ClipboardManager: ObservableObject {
@@ -20,6 +21,23 @@ class ClipboardManager: ObservableObject {
     var sidecarBlobCache: [UUID: String] = [:]
     var embeddingsDirty = false
     var blobPurgeNeeded = true
+    /// False until the async history load has published its result on main.
+    /// The Dashboard uses this to distinguish "truly empty history" (show
+    /// onboarding) from "still loading" (show nothing yet) — otherwise the
+    /// 200-800 ms load window flashes the onboarding animation on every launch.
+    @Published var hasLoadedHistoryOnce: Bool = false
+
+    /// True only once EVERY item (head paint + priority batch + every
+    /// deferred chunk) has landed in `items` — not just the first publish.
+    /// The auto-save debounce and the ring-size eviction below both gate on
+    /// this: while it's false, `items` can still be a small interim slice
+    /// (the instant head-paint batch), and saving or evicting against that
+    /// slice would silently overwrite/truncate the real, larger history
+    /// still loading in the background. This was a real bug: a big history
+    /// (lots of images/RTF) can take longer than the 1s save-debounce to
+    /// fully decode, so the debounced auto-save fired on the interim ~45-item
+    /// batch and wrote THAT over the real encrypted history on disk.
+    @Published var isHistoryFullyLoaded: Bool = false
 
     var transformingMarkedSet = false
 
@@ -60,6 +78,7 @@ class ClipboardManager: ObservableObject {
     @Published var popupHintShiftX = false
     @Published var popupHintXHold = false
     @Published var popupHintC = false
+    @Published var popupHintCategory = false
     @Published var popupHintSpace = false
     @Published var popupHintSpaceDoubleTap = false
     @Published var popupHintCmd = false
@@ -68,15 +87,64 @@ class ClipboardManager: ObservableObject {
 
     var multiSelectAnchorIndex: Int? = nil
 
+    /// The user's collections, in display / shortcut order (1–5). Starts empty
+    /// — nothing is pre-made, and "All" is the absence of a filter, not an
+    /// entry in here.
+    @Published var collections: [String] =
+        UserDefaults.standard.stringArray(forKey: "clipenCollections") ?? [] {
+        didSet {
+            UserDefaults.standard.set(collections, forKey: "clipenCollections")
+            _displayItems = nil
+        }
+    }
+
+    /// Currently active collection — `nil` means the "All" view (everything).
+    @Published var activeCollection: String? =
+        UserDefaults.standard.string(forKey: "clipenActiveCollection") {
+        didSet {
+            if let activeCollection {
+                UserDefaults.standard.set(activeCollection, forKey: "clipenActiveCollection")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "clipenActiveCollection")
+            }
+            _displayItems = nil
+            selectedIndex = 0
+            if previewWindow.isVisible { selectionDidChange() }
+        }
+    }
+
     @Published var popupTagFilter: ClipboardTag? = nil {
         didSet {
             _displayItems = nil
             selectedIndex = 0
-            if previewWindow.isVisible { syncItemPreviewWithSelection() }
+            if previewWindow.isVisible { selectionDidChange() }
         }
     }
 
+    // The raw, instantly-updated text shown in the popup's search bar — every
+    // keystroke lands here immediately, from the global event tap, so what
+    // you see typed is never delayed. Actual filtering below reads the
+    // debounced copy instead, so a fast typist doesn't re-run hybridSearch's
+    // full scoring pass (with its concurrentPerform fan-out) on every single
+    // keystroke — only once typing pauses for a beat.
     @Published var popupSearchQuery: String = "" {
+        didSet {
+            selectedIndex = 0
+            popupSearchDebounceTask?.cancel()
+            let query = popupSearchQuery
+            if query.isEmpty {
+                debouncedPopupSearchQuery = ""
+                return
+            }
+            popupSearchDebounceTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: 120_000_000)
+                guard !Task.isCancelled else { return }
+                self?.debouncedPopupSearchQuery = query
+            }
+        }
+    }
+    private var popupSearchDebounceTask: Task<Void, Never>? = nil
+    @Published private(set) var debouncedPopupSearchQuery: String = "" {
         didSet {
             _displayItems = nil
             selectedIndex = 0
@@ -87,6 +155,12 @@ class ClipboardManager: ObservableObject {
         didSet {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                // Same reason as the auto-save gate above: while history is
+                // still loading, `items` can be just the small interim head
+                // batch — evicting "excess" against that would wrongly
+                // delete real items' blob files that were only ever missing
+                // because the rest of history hadn't landed yet.
+                guard self.isHistoryFullyLoaded else { return }
                 let unpinned = self.items.indices.filter { !self.items[$0].isPinned }
                 if unpinned.count > self.maxItems {
                     let toRemove = unpinned.suffix(from: self.maxItems)
@@ -117,7 +191,15 @@ class ClipboardManager: ObservableObject {
     @Published var pastePlainTextByDefault: Bool = UserDefaults.standard.object(forKey: "pastePlainTextByDefault") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(pastePlainTextByDefault, forKey: "pastePlainTextByDefault")
-            if oldValue != pastePlainTextByDefault { AuthManager.shared.registerActionUsage(actionID: "setting.pure_paste") }
+            if oldValue != pastePlainTextByDefault {
+                AuthManager.shared.registerActionUsage(actionID: "setting.pure_paste")
+                // The transform panel keeps its own item-id-keyed cache; nudge
+                // it to rebuild so the newly-appropriate paste tool appears
+                // without waiting for the selection to change.
+                lastTransformCacheItemID = nil
+                transformDisplaysCache = []
+                if inTransformStage { refreshTransformDisplaysCache(); updateTransformPanel() }
+            }
         }
     }
 
@@ -148,9 +230,60 @@ class ClipboardManager: ObservableObject {
         didSet { UserDefaults.standard.set(showPopupInteractionHints, forKey: "showPopupInteractionHints") }
     }
 
+    @Published var interactionSoundsEnabled: Bool = UserDefaults.standard.object(forKey: "interactionSoundsEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(interactionSoundsEnabled, forKey: "interactionSoundsEnabled") }
+    }
+
+    /// Every stock macOS system sound (Tink, Ping, Glass, …) is a designed
+    /// chime with some resonant decay after the initial hit — there is no
+    /// stock sound that's a true single ping with zero ring-down. Each case
+    /// instead gets its own synthesized pure-tone pitch, played by
+    /// `InteractionToneGenerator` — a plain sine wave with a hard fade-out
+    /// envelope, so it's audibly distinct per gesture with no tail at all.
+    enum InteractionSound {
+        case cycle, preview, transform, moveFront, share, pin, mark, delete, category, denied
+
+        var frequency: Double {
+            switch self {
+            case .cycle:     return 880   // A5  — V next/previous
+            case .preview:   return 988   // B5  — Space preview/refer
+            case .transform: return 784   // G5  — X transform
+            case .moveFront: return 659   // E5  — C move to front
+            case .share:     return 1046  // C6  — S share
+            case .pin:       return 740   // F#5 — P pin
+            case .mark:      return 932   // A#5 — hold-V/hold-B mark
+            case .delete:    return 523   // C5  — Delete (lower pitch)
+            case .category:  return 587   // D5  — ` next category
+            case .denied:    return 220   // A3  — action refused (E on a non-editable item)
+            }
+        }
+    }
+
+    /// Call this from inside the action's own `DispatchQueue.main.async` block
+    /// (not directly from the event-tap callback, which must return quickly).
+    func playInteractionSoundIfEnabled(_ sound: InteractionSound = .cycle) {
+        guard interactionSoundsEnabled else { return }
+        InteractionToneGenerator.shared.play(frequency: sound.frequency)
+    }
+
     @Published var isCapturingPaused: Bool = false
 
     @Published var transientStatus: String? = nil
+
+    /// A refused action (E on a non-editable item) shakes the popup row
+    /// instead of showing a separate popup — `generation` increments on every
+    /// refusal so the same item can shake again even if nothing else changed.
+    struct DeniedShakeSignal: Equatable {
+        let itemID: UUID
+        let generation: Int
+    }
+    @Published var editDeniedShake: DeniedShakeSignal? = nil
+
+    func signalEditDenied(for itemID: UUID) {
+        editDeniedShake = DeniedShakeSignal(itemID: itemID,
+                                            generation: (editDeniedShake?.generation ?? 0) + 1)
+        playInteractionSoundIfEnabled(.denied)
+    }
 
     @Published var highlightOpenDelaySlider: Bool = false
 
@@ -172,10 +305,15 @@ class ClipboardManager: ObservableObject {
     var displayItems: [ClipboardItem] {
         if let cached = _displayItems { return cached }
         var result = popupTagFilter.map { tag in items.filter { $0.tags.contains(tag) } } ?? items
-        if !popupSearchQuery.isEmpty {
-            let trimmed = popupSearchQuery.trimmingCharacters(in: .whitespaces)
+        // Collections are an orthogonal dimension to the content tags above:
+        // `nil` is the "All" view, otherwise only clips carrying that name.
+        if let activeCollection {
+            result = result.filter { $0.collections.contains(activeCollection) }
+        }
+        if !debouncedPopupSearchQuery.isEmpty {
+            let trimmed = debouncedPopupSearchQuery.trimmingCharacters(in: .whitespaces)
             if trimmed.count >= 2 {
-                let rankedIDs = hybridSearch(query: popupSearchQuery)
+                let rankedIDs = hybridSearch(query: debouncedPopupSearchQuery)
                 let allowed = Set(result.map(\.id))
                 result = rankedIDs.filter { allowed.contains($0.id) }
             } else if !trimmed.isEmpty {
@@ -219,6 +357,7 @@ class ClipboardManager: ObservableObject {
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
     let sharePanel = SharePanel()
+    let nudgeLessonPanel = NudgeLessonPanel()
     let fastPasteHintPanel = FastPasteHintPanel()
     @Published var hasAccessibilityPermission: Bool = AXIsProcessTrusted()
     var accessibilityPollTimer: Timer?
@@ -278,7 +417,8 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    let nlEmbedding: NLEmbedding? = NLEmbedding.sentenceEmbedding(for: .english)
+    // Text embeddings now go through ClipenEmbedder.shared (Neural-Engine
+    // contextual model when available, classic sentence embedding otherwise).
 
     @Published var firstOpenDelay: Double = {
         let stored = UserDefaults.standard.object(forKey: "firstOpenDelay") as? Double ?? 0.0
@@ -347,6 +487,17 @@ class ClipboardManager: ObservableObject {
             applyAlwaysShowItemPreviewPolicy()
         }
     }
+    /// Bundle identifiers whose copies are never captured at all — checked in
+    /// pollClipboard() before any pasteboard reading happens, same "claim
+    /// early, do the heavy work never for nothing" style as the existing
+    /// concealed-type check it sits next to.
+    @Published var excludedCaptureBundleIDs: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: "excludedCaptureBundleIDs") ?? []) {
+        didSet {
+            UserDefaults.standard.set(Array(excludedCaptureBundleIDs), forKey: "excludedCaptureBundleIDs")
+            if oldValue != excludedCaptureBundleIDs { AuthManager.shared.registerActionUsage(actionID: "setting.excluded_apps") }
+        }
+    }
     @Published var rememberLastSelection: Bool = UserDefaults.standard.object(forKey: "rememberLastSelection") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(rememberLastSelection, forKey: "rememberLastSelection")
@@ -409,8 +560,25 @@ class ClipboardManager: ObservableObject {
     var firstOpenHoldTimer: Timer?
     @Published var popupPinnedOpen: Bool = false
 
+    /// Non-nil while the inline editor (E on the popup) is active. Pins the
+    /// popup open, suspends the auto-dismiss timer, and gates every keyboard
+    /// path so Enter/Esc/typing reach the editor's NSTextView unfiltered.
+    @Published var inlineEditItemID: UUID? = nil
+    var isInlineEditing: Bool { inlineEditItemID != nil }
+
+    enum CaseTransformKind { case lowercase, uppercase }
+    var caseTransformOriginals: [UUID: (text: String, kind: CaseTransformKind)] = [:]
+
     var popupOpenedAt: Date? = nil
     var popupSessionPasted = false
+
+    // Onboarding-nudge state — see ClipboardManager+Nudges.swift.
+    var nudgeIsShowing = false
+    /// True while the "Learned!" confirmation is playing and the lesson is
+    /// waiting to close — keeps repeat gesture events from restacking it.
+    var nudgeIsFinishing = false
+    var nudgeActiveFeature: NudgeFeature? = nil
+    var lastNudgeShownAt: Date? = nil
     /// Set when a delete happens during the current popup session, checked
     /// (and reset) only by dismissPreview() when classifying the session's
     /// outcome — a delete followed by any close reason still counts as
@@ -446,7 +614,26 @@ class ClipboardManager: ObservableObject {
     var pendingFirstOpen: Bool = false
     var lastChangeCount: Int = NSPasteboard.general.changeCount
     var remoteClipboardRetryCount = 0
-    static let maxRemoteClipboardRetries = 30
+    // Wall-clock settle window ≈ retries × poll interval (~9s at the current
+    // 100ms poll). Originally sized for Universal Clipboard transfers;
+    // `pasteboardDataReady` now also uses this same budget for any source
+    // (Photos.app, iCloud Drive) that declares pasteboard types before the
+    // actual bytes finish downloading.
+    static let maxRemoteClipboardRetries = 90
+
+    /// Max marked items that ⌘+G folds into a single group.
+    static let maxGroupItems = 10
+
+    /// Max user-created collections. Slot 1 is always "All" (the unfiltered
+    /// ring), so 8 collections occupy slots 2…9.
+    static let maxCollections = 8
+    /// Number-row keycodes 1…9 → popup slot.
+    static let numberRowKeycodeToCollectionSlot: [Int64: Int] =
+        [18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9]
+    /// Beta 1.0.252 shipped a pre-made collection by this name and stamped it
+    /// onto everything. There is no default collection any more — the name is
+    /// kept only so the one-time cleanup below can undo it.
+    static let legacyDefaultCollectionName = "Personal"
     static let maxDiffBadgeTextLength = 20_000
     var remoteClipboardLastFileSize: [String: Int] = [:]
     var eventTap: CFMachPort?
@@ -469,11 +656,84 @@ class ClipboardManager: ObservableObject {
 
     var userOpenedItemPreview = false
 
-    var inTransformStage = false
+    /// Mirrors `itemPreviewPanel.isVisible` — that class isn't observable, so
+    /// this is what the dynamic popup hint strip actually watches to know
+    /// whether to show "Preview" or "Close preview" / "Pin". Kept in sync via
+    /// `itemPreviewPanel.onVisibilityChange`, wired once in init.
+    @Published var isItemPreviewVisible = false
+
+    /// Which feature currently owns the panel slot beside the popup. The slot
+    /// is single-occupancy, so this is ONE value rather than the two
+    /// independent `inTransformStage` / `inShareStage` booleans it replaces —
+    /// those could (and did) both drift out of step with the panels actually
+    /// on screen, producing two visible panels at once and, in the other
+    /// direction, a `true` flag with nothing showing that wedged the E/L/U
+    /// keys off for the rest of the session.
+    ///
+    /// Never assign this directly — go through `setSidePanelStage(_:)`, which
+    /// is the single place that tears the outgoing owner down.
+    enum SidePanelStage: Equatable { case none, transform, share }
+    @Published private(set) var sidePanelStage: SidePanelStage = .none
+
+    /// Read-only derivations kept so the ~25 existing call sites that ask
+    /// "are we in transform/share?" keep reading naturally. They are
+    /// deliberately get-only: making them computed is what forced every
+    /// former write site through `setSidePanelStage(_:)` at compile time.
+    var inTransformStage: Bool { sidePanelStage == .transform }
+    var inShareStage:     Bool { sidePanelStage == .share }
+
     var transformIndex   = 0
     var transformDisplaysCache: [TransformDisplay] = []
 
-    @Published var inShareStage = false
+    /// THE single place a side-panel stage is entered or left. Tears the
+    /// outgoing owner down completely, then installs the new one.
+    ///
+    /// Two ordering rules are load-bearing here, and both were real bugs
+    /// before this existed:
+    ///
+    /// 1. The auto-preview re-check runs ONLY on the transition to `.none`.
+    ///    It used to live at the end of `exitShareStage()`, so entering the
+    ///    transform stage (which first exits share) re-opened the item preview
+    ///    *mid-transition* — while `transformPanel` wasn't visible yet, so the
+    ///    guard in `syncItemPreviewWithSelection()` couldn't block it — and
+    ///    nothing hid it again once the transform panel appeared. Result: two
+    ///    panels on screen. Gating on `.none` makes that unrepresentable.
+    ///
+    /// 2. The item preview is dropped on EVERY transition, because the slot is
+    ///    single-occupancy. Callers no longer hide it by hand, so they can no
+    ///    longer do it in the wrong order relative to the stage switch.
+    func setSidePanelStage(_ new: SidePanelStage) {
+        guard new != sidePanelStage else { return }
+
+        switch sidePanelStage {
+        case .transform:
+            transformPanel.hide()
+            transformDisplaysCache   = []
+            lastTransformCacheItemID = nil
+            transformIndex           = 0
+            transformingMarkedSet    = false
+        case .share:
+            sharePanel.hide()
+            shareServices      = []
+            shareTargetItems   = []
+            shareServicesCache = [:]
+            shareIndex         = 0
+        case .none:
+            break
+        }
+
+        sidePanelStage = new
+        itemPreviewPanel.hide()
+
+        if new == .none {
+            // Slot is free again — let the auto-preview policy decide fresh
+            // for whatever is selected now.
+            if previewWindow.isVisible { syncItemPreviewWithSelection() }
+        } else {
+            userOpenedItemPreview = false
+        }
+    }
+
     @Published var shareIndex = 0
     var shareServices: [NSSharingService] = []
     var shareTargetItems: [ClipboardItem] = []
@@ -481,10 +741,6 @@ class ClipboardManager: ObservableObject {
     var shareSyncGeneration = 0
 
     var saveCancellable: AnyCancellable?
-
-    @Published var popupCoachStep: Int = UserDefaults.standard.integer(forKey: "popupCoachStep") {
-        didSet { UserDefaults.standard.set(popupCoachStep, forKey: "popupCoachStep") }
-    }
 
     @Published var inPageRangeMode: Bool = false
     @Published var pageRangeQuery: String = ""
@@ -517,6 +773,10 @@ class ClipboardManager: ObservableObject {
     }
 
     let saveQueue = DispatchQueue(label: "com.clipen.history-save", qos: .utility)
+    // Serial + high priority: reading every pasteboard representation and running
+    // content detection happens here, off the main thread, one capture at a time
+    // (serial so back-to-back copies keep their order). Main thread never blocks.
+    let captureQueue = DispatchQueue(label: "com.clipen.capture", qos: .userInitiated)
 
     private init() {
         UserDefaults.standard.removeObject(forKey: "maxItems")
@@ -524,16 +784,49 @@ class ClipboardManager: ObservableObject {
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
+                // Never let the interim head-paint/priority-batch slice get
+                // saved as if it were the whole history — see
+                // isHistoryFullyLoaded's doc comment. Once the real load
+                // finishes it re-publishes `items` anyway, which reschedules
+                // this debounce and saves the true, complete snapshot.
+                guard self.isHistoryFullyLoaded else { return }
                 let snapshot = self.items
                 self.saveQueue.async {
                     self.saveHistory(snapshot: snapshot)
                 }
             }
+        previewWindow.onHide = { [weak self] in
+            self?.popupSearchQuery = ""
+            self?.isSearchActive = false
+            // Deliberately NOT finalizing an active nudge lesson here anymore —
+            // the lesson panel is now fully independent of the ring popup (see
+            // ClipboardManager+Nudges.swift) and only closes via its own
+            // "Learned"/"Later" buttons, or automatically when the user
+            // performs the real gesture. It must survive the popup closing.
+            //
+            // The popup is gone, so no side panel can still own its slot.
+            // This is the ONE hook every close path funnels through — several
+            // of them (the guards in commitPaste) call previewWindow.hide()
+            // directly and never reach dismissPreview(), which used to leave
+            // the stage set with no panel on screen. Since openPopupNow() does
+            // not reset it either, that stale stage survived into the next
+            // session and wedged E/L/U off (their guards are !inTransformStage).
+            //
+            // Safe to call during teardown: the auto-preview re-check inside
+            // setSidePanelStage is itself gated on previewWindow.isVisible,
+            // which is already false by the time onHide fires.
+            self?.setSidePanelStage(.none)
+        }
+        itemPreviewPanel.onVisibilityChange = { [weak self] visible in
+            self?.isItemPreviewVisible = visible
+        }
     }
 
     func startMonitoring() {
+        // loadHistory is now async — it fires recomputeEmbeddingsInBackground
+        // itself on the main thread once items are published, so no separate
+        // call here (which used to race the empty pre-load state).
         loadHistory()
-        recomputeEmbeddingsInBackground()
         startPolling()
         startAccessibilityWatcher()
         attemptEventTap()
@@ -596,7 +889,12 @@ class ClipboardManager: ObservableObject {
 
         if matched == nil, let (panel, pageID) = semanticBestMatch(forBundleID: bundleID, in: quickClipPanels, tabTexts: tabTexts) {
             panel.carousel.jumpToPage(id: pageID)
-            panel.carousel.linkCurrentPage(toApp: bundleID, context: liveContext)
+            // Do NOT auto-tag the page with this app: passive app-switching
+            // must never create tags. Tag creation happens only through a
+            // real user interaction with the reference panel — namely,
+            // `QuickClipPanel.expand()` when the user clicks the collapsed
+            // badge while a foreign app is frontmost (pendingLinkAppBundleID
+            // is stashed there by collapseToCorner and consumed on expand).
             matched = panel
         }
 
@@ -659,6 +957,14 @@ class ClipboardManager: ObservableObject {
 
 }
 
+/// The concrete lines/words added and removed relative to the earlier item
+/// this one was edited from. Shown in the preview insights strip.
+struct DiffDetail: Equatable {
+    var added: [String]
+    var removed: [String]
+    var fromRank: Int   // 1-based position of the item it was compared against
+}
+
 struct ClipboardItem: Identifiable {
     let id:        UUID
     let timestamp: Date
@@ -671,11 +977,24 @@ struct ClipboardItem: Identifiable {
     var embedding: [Float]? = nil
     var urlTitle:  String?  = nil { didSet { rebuildSearchHaystacks() } }
     var diffBadge: String?  = nil
+    // The actual changed lines vs the item this was edited from — surfaced in
+    // the preview panel's insights strip (not the popup). Transient: it's a
+    // "you just tweaked this" hint, recomputed on capture, not persisted.
+    var diffDetail: DiffDetail? = nil
+    /// User-defined collections this item belongs to. Multi-membership on
+    /// purpose: a clip can live in "Work" and "Personal" at once, so these
+    /// behave like user-created tags rather than one exclusive bucket.
+    var collections: Set<String> = []
     var sourceAppName: String? = nil { didSet { rebuildSearchHaystacks() } }
     var sourceBundleID: String? = nil
     var userNote: String? = nil { didSet { rebuildSearchHaystacks() } }
     var ocrText: String? = nil { didSet { rebuildSearchHaystacks() } }
     var sidecarTypes: [String: Data]? = nil
+    /// Set only on an EDITED file item. `content` then points at the edited
+    /// copy on disk, and this holds the untouched original file alongside it,
+    /// so the "Revert to Original" tool can throw away the edit and restore the
+    /// original. nil on every non-edited item.
+    var originalFileURL: URL? = nil
 
     var pastedToAppName:  String? = nil
     var pastedToBundleID: String? = nil
@@ -706,19 +1025,25 @@ struct ClipboardItem: Identifiable {
         rebuildSearchHaystacks()
     }
 
+    /// Cap for the normalized substring-search haystack. Normalizing (lowercase
+    /// + diacritic strip) allocates full-size copies, so on a multi-MB paste
+    /// the naive full-text normalize was a real cost. Nobody substring-searches
+    /// for text buried megabytes deep, so a generous prefix is plenty.
+    static let maxSearchNormLength = 100_000
+
     mutating func rebuildSearchHaystacks() {
         metadataSummary  = Self.computeMetadataSummary(for: content)
         textForEmbedding = Self.computeTextForEmbedding(content: content,
                                                        urlTitle: urlTitle,
                                                        sourceAppName: sourceAppName)
         searchPreviewNorm = Self.normalize(previewText)
-        searchEmbedNorm   = Self.normalize(textForEmbedding ?? "")
-        searchMetaNorm    = Self.normalize(metadataSummary ?? "")
+        searchEmbedNorm   = Self.normalize(String((textForEmbedding ?? "").prefix(Self.maxSearchNormLength)))
+        searchMetaNorm    = Self.normalize(String((metadataSummary ?? "").prefix(Self.maxSearchNormLength)))
         if let ocr = ocrText, !ocr.isEmpty {
-            searchEmbedNorm += " " + Self.normalize(ocr)
+            searchEmbedNorm += " " + Self.normalize(String(ocr.prefix(Self.maxSearchNormLength)))
         }
         if let note = userNote, !note.isEmpty {
-            searchEmbedNorm += " " + Self.normalize(note)
+            searchEmbedNorm += " " + Self.normalize(String(note.prefix(Self.maxSearchNormLength)))
         }
     }
 
@@ -751,6 +1076,7 @@ struct ClipboardItem: Identifiable {
         case .files(let urls):           return "\(urls.count) files"
         case .svg:                       return "[SVG]"
         case .blob(let d):               return "[\(d.count) private types]"
+        case .group(let items):          return "\(items.count) items"
         }
     }
 
@@ -765,6 +1091,7 @@ struct ClipboardItem: Identifiable {
         case .files:    return "doc.on.doc"
         case .svg:      return "square.on.circle"
         case .blob:     return "lock.doc"
+        case .group:    return "square.stack.3d.up.fill"
         }
     }
 
@@ -785,6 +1112,7 @@ struct ClipboardItem: Identifiable {
             return "\(urls.count) Files"
         case .svg:              return "SVG"
         case .blob:             return "Private"
+        case .group(let items): return "\(items.count) Items"
         }
     }
 
@@ -800,6 +1128,7 @@ struct ClipboardItem: Identifiable {
         case .files:            return "doc.on.doc"
         case .svg:              return "square.on.circle"
         case .blob:             return "lock.doc"
+        case .group:            return "square.stack.3d.up.fill"
         }
     }
 
@@ -939,6 +1268,9 @@ struct ClipboardItem: Identifiable {
             return src.isEmpty ? nil : String(src.prefix(500))
         case .blob(let d):
             return d.isEmpty ? nil : "private data \(d.keys.sorted().joined(separator: " "))"
+        case .group(let items):
+            let joined = items.compactMap { $0.textForEmbedding }.joined(separator: " ")
+            return joined.isEmpty ? "group of \(items.count) items" : "group " + String(joined.prefix(1_000))
         }
     }
 
@@ -983,7 +1315,7 @@ struct ClipboardItem: Identifiable {
 
 enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
     case text, code, link, json, markdown, email, phone, color
-    case richText, html, table, image, pdf, file, files, svg, blob
+    case richText, html, table, image, pdf, file, files, svg, blob, group
 
     var id: String { rawValue }
 
@@ -1006,6 +1338,7 @@ enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
         case .files:    return "Files"
         case .svg:      return "SVG"
         case .blob:     return "Private"
+        case .group:    return "Group"
         }
     }
 
@@ -1028,6 +1361,7 @@ enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
         case .files:    return "doc.on.doc"
         case .svg:      return "square.on.circle"
         case .blob:     return "lock.doc"
+        case .group:    return "square.stack.3d.up.fill"
         }
     }
 
@@ -1055,6 +1389,7 @@ enum AutoPreviewContentType: String, CaseIterable, Identifiable, Codable {
         case .files:    return .files
         case .svg:      return .svg
         case .blob:     return .blob
+        case .group:    return .group
         }
     }
 
@@ -1134,6 +1469,9 @@ enum ClipboardContent {
     case files([URL])
     case svg(String)
     case blob([String: Data])
+    /// A bundle of several marked items collapsed into one ring entry (⌘+G).
+    /// Recursive, so `indirect`; capped at `ClipboardManager.maxGroupItems`.
+    indirect case group([ClipboardItem])
 
     var plainText: String? {
         switch self {
@@ -1142,6 +1480,9 @@ enum ClipboardContent {
         case .html(_, plain: let s):     return s
         case .rtfd(_, plain: let s):     return s
         case .svg(let s):                return s
+        case .group(let items):
+            let joined = items.compactMap { $0.content.plainText }.joined(separator: "\n")
+            return joined.isEmpty ? nil : joined
         default:                         return nil
         }
     }
@@ -1333,8 +1674,28 @@ extension ClipboardItem {
                     return nil
                 }
             }
+        case .group(let items):
+            // A dragged group offers its members' files + a joined-text fallback.
+            for url in Self.flattenedFileURLs(items) {
+                provider.registerObject(url as NSURL, visibility: .all)
+            }
+            if let text = ClipboardContent.group(items).plainText {
+                provider.registerObject(text as NSString, visibility: .all)
+            }
         }
         return provider
+    }
+
+    /// File URLs contained anywhere inside a set of items (recursing into groups).
+    static func flattenedFileURLs(_ items: [ClipboardItem]) -> [URL] {
+        items.flatMap { item -> [URL] in
+            switch item.content {
+            case .file(let u):     return [u]
+            case .files(let us):   return us
+            case .group(let gi):   return flattenedFileURLs(gi)
+            default:               return []
+            }
+        }
     }
 
     func makePasteboardWriter() -> NSPasteboardWriting {
@@ -1371,6 +1732,10 @@ extension ClipboardItem {
                 if let firstKey = dict.keys.first, let firstData = dict[firstKey] {
                     pbItem.setData(firstData, forType: NSPasteboard.PasteboardType(firstKey))
                 }
+            case .group(let items):
+                if let text = ClipboardContent.group(items).plainText {
+                    pbItem.setString(text, forType: .string)
+                }
             case .file, .files:
                 break
             }
@@ -1385,6 +1750,7 @@ extension ClipboardItem {
             switch item.content {
             case .file(let u):   return [u]
             case .files(let us): return us
+            case .group(let gi): return flattenedFileURLs(gi)
             default:             return []
             }
         }
@@ -1402,6 +1768,7 @@ extension ClipboardItem {
             case .file(let url):           return url.lastPathComponent
             case .files(let urls):         return urls.map(\.lastPathComponent).joined(separator: "\n")
             case .image, .blob:            return nil
+            case .group(let gi):           return ClipboardContent.group(gi).plainText
             }
         }
         if !textParts.isEmpty {
