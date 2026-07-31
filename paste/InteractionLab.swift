@@ -2193,16 +2193,27 @@ struct ClipenSettingsView: View {
         var width: CGFloat = 1
         var demos: [InteractionDemo] = []
         var isCommand: Bool = false
+        /// Consecutive keys sharing the same groupID render as ONE bordered
+        /// cluster (e.g. the whole 1–9 row for Collections) instead of each
+        /// key getting its own separate blue box — any of them opens the
+        /// same demo, since the real gesture is "hold ⌘ and press 1–9",
+        /// not tied to any single number.
+        var groupID: String? = nil
         static func == (l: KBKey, r: KBKey) -> Bool { l.id == r.id }
     }
 
     private enum KBLayout {
+        // 1 is "All", 2 through maxCollections+1 are your collections — the
+        // whole row is one gesture (hold ⌘, press 1–9), so all nine keys
+        // share the Collections demo and render as a single grouped cluster.
+        private static let collectionNumberKeys: [KBKey] = (1...9).map { n in
+            KBKey(id: "\(n)", label: "\(n)", demos: [.collections], groupID: "collections")
+        }
+
         static let rows: [[KBKey]] = [
-            [KBKey(id: "GRAVE", label: "`", demos: [.nextCategory]),
-             KBKey(id: "1", label: "1", demos: [.collections]),
-             KBKey(id: "2", label: "2"), KBKey(id: "3", label: "3"), KBKey(id: "4", label: "4"),
-             KBKey(id: "5", label: "5"), KBKey(id: "6", label: "6"), KBKey(id: "7", label: "7"),
-             KBKey(id: "8", label: "8"), KBKey(id: "9", label: "9"), KBKey(id: "0", label: "0"),
+            [KBKey(id: "GRAVE", label: "`", demos: [.nextCategory])]
+            + collectionNumberKeys
+            + [KBKey(id: "0", label: "0"),
              KBKey(id: "MINUS", label: "-"), KBKey(id: "EQUAL", label: "="),
              KBKey(id: "DELETE", label: "⌫", width: 1.6, demos: [.delete])],
             [KBKey(id: "TAB", label: "tab", width: 1.4),
@@ -2513,10 +2524,11 @@ struct ClipenSettingsView: View {
                         let unitW = max(16, rowAvail / rowUnits)
 
                         HStack(spacing: keySpacing) {
-                            ForEach(row) { key in
-                                if key.id == "ARROWS" {
-                                    ArrowKeysCluster(totalWidth: key.width * unitW, keyHeight: keyHeight)
-                                } else {
+                            ForEach(Array(Self.segments(for: row).enumerated()), id: \.offset) { _, segment in
+                                if segment.count == 1, segment[0].id == "ARROWS" {
+                                    ArrowKeysCluster(totalWidth: segment[0].width * unitW, keyHeight: keyHeight)
+                                } else if segment.count == 1 {
+                                    let key = segment[0]
                                     KeyCapView(key: key, isActive: activeKeyID == key.id,
                                                isPressed: pressedRealIDs.contains(key.id),
                                                dimmed: lab.isPlaying && !involvedRealIDs.contains(key.id),
@@ -2531,6 +2543,22 @@ struct ClipenSettingsView: View {
                                         ), arrowEdge: .bottom) {
                                             KeyDemoPopup(key: key, lab: lab)
                                         }
+                                } else {
+                                    let groupActive = segment.contains { $0.id == activeKeyID }
+                                    GroupedKeyCluster(keys: segment,
+                                                       isActive: groupActive,
+                                                       pressedRealIDs: pressedRealIDs,
+                                                       dimmed: lab.isPlaying && !segment.contains(where: { involvedRealIDs.contains($0.id) }),
+                                                       unitWidth: unitW, keyHeight: keyHeight,
+                                                       onTapKey: { tapped in
+                                                           activeKeyID = groupActive ? nil : tapped.id
+                                                       })
+                                        .popover(isPresented: Binding(
+                                            get: { groupActive },
+                                            set: { isPresented in if !isPresented { activeKeyID = nil } }
+                                        ), arrowEdge: .bottom) {
+                                            KeyDemoPopup(key: segment.first(where: { $0.id == activeKeyID }) ?? segment[0], lab: lab)
+                                        }
                                 }
                             }
                         }
@@ -2541,6 +2569,79 @@ struct ClipenSettingsView: View {
                 .frame(width: totalWidth, alignment: .center)
             }
             .frame(minHeight: 320)
+        }
+
+        /// Splits a row into render segments: consecutive keys sharing the
+        /// same non-nil groupID collapse into one segment (rendered as a
+        /// single bordered cluster); everything else stays its own segment.
+        private static func segments(for row: [KBKey]) -> [[KBKey]] {
+            var result: [[KBKey]] = []
+            var current: [KBKey] = []
+            for key in row {
+                if let last = current.last, let g = last.groupID, g == key.groupID {
+                    current.append(key)
+                } else {
+                    if !current.isEmpty { result.append(current) }
+                    current = [key]
+                }
+            }
+            if !current.isEmpty { result.append(current) }
+            return result
+        }
+    }
+
+    /// Renders a run of keys (e.g. the whole 1–9 Collections row) as ONE
+    /// bordered box instead of N separate ones — any key in it opens the
+    /// same demo, so visually they read as a single unified control rather
+    /// than nine individually-interactive buttons.
+    private struct GroupedKeyCluster: View {
+        let keys: [KBKey]
+        let isActive: Bool
+        let pressedRealIDs: Set<String>
+        let dimmed: Bool
+        let unitWidth: CGFloat
+        let keyHeight: CGFloat
+        let onTapKey: (KBKey) -> Void
+        @State private var pulse = false
+        @State private var hovered = false
+
+        private static let interactiveColor = Color(hex: "#4F8EF7")
+        private var anyPressed: Bool { keys.contains { pressedRealIDs.contains($0.id) } }
+
+        var body: some View {
+            HStack(spacing: 0) {
+                ForEach(Array(keys.enumerated()), id: \.offset) { idx, key in
+                    let keyPressed = pressedRealIDs.contains(key.id)
+                    Text(key.label)
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(keyPressed ? .white : (dimmed ? .textSec : Self.interactiveColor))
+                        .frame(width: key.width * unitWidth, height: keyHeight)
+                        .background(keyPressed ? Color.accent
+                                    : (isActive ? Color.accentDim : Color.surfaceHi.opacity(0.6)))
+                        .overlay(alignment: .trailing) {
+                            if idx < keys.count - 1 {
+                                Rectangle().fill(Color.border.opacity(dimmed ? 1 : 0.6)).frame(width: 1)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { onTapKey(key) }
+                        .animation(.easeOut(duration: 0.1), value: keyPressed)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(dimmed ? Color.border
+                            : Self.interactiveColor.opacity(isActive || hovered || anyPressed ? 1 : (pulse ? 1 : 0.4)),
+                            lineWidth: dimmed ? 1 : (isActive || anyPressed ? 2.5 : 1.6))
+            )
+            .onHover { hovering in hovered = hovering }
+            .animation(.easeOut(duration: 0.15), value: isActive)
+            .animation(.easeOut(duration: 0.12), value: hovered)
+            .animation(.easeOut(duration: 0.15), value: dimmed)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
+            }
         }
     }
 
