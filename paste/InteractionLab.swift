@@ -131,6 +131,29 @@ enum LabKey: String, Identifiable, Hashable {
     }
 
     var isWide: Bool { self == .space }
+
+    /// The real MacBook-keyboard key id(s) (`KBKey.id` in InteractionLab's
+    /// keyboard panel) that light up in sync with this lab key's press
+    /// animation, so the actual keyboard visibly "plays along" with the demo
+    /// instead of only the popup's own small keycap row moving.
+    var kbKeyIDs: [String] {
+        switch self {
+        case .cmd:       return ["LCMD", "RCMD"]
+        case .v:         return ["V"]
+        case .x:         return ["X"]
+        case .f:         return ["F"]
+        case .c:         return ["C"]
+        case .b:         return ["B"]
+        case .p:         return ["P"]
+        case .g:         return ["G"]
+        case .shift:     return ["LSHIFT", "RSHIFT"]
+        case .space:     return ["SPACE"]
+        case .backspace: return ["DELETE"]
+        case .one:       return ["1"]
+        case .two:       return ["2"]
+        case .grave:     return ["GRAVE"]
+        }
+    }
 }
 
 @MainActor
@@ -2183,12 +2206,17 @@ struct ClipenSettingsView: View {
              KBKey(id: "H", label: "H"), KBKey(id: "J", label: "J"), KBKey(id: "K", label: "K"),
              KBKey(id: "L", label: "L"), KBKey(id: "SEMI", label: ";"), KBKey(id: "QUOTE", label: "'"),
              KBKey(id: "RETURN", label: "return", width: 1.8)],
-            [KBKey(id: "LSHIFT", label: "shift", width: 2.0, demos: [.reverseCycle]),
+            [KBKey(id: "LSHIFT", label: "shift", width: 2.0),
              KBKey(id: "Z", label: "Z"),
              KBKey(id: "X", label: "X", demos: [.transform]),
              KBKey(id: "C", label: "C", demos: [.moveToFront]),
-             KBKey(id: "V", label: "V", demos: [.cycle, .multiPaste, .pinnedOpen]),
-             KBKey(id: "B", label: "B"), KBKey(id: "N", label: "N"), KBKey(id: "M", label: "M"),
+             // Reverse (previously its own thing on Shift) is now a category
+             // of V itself — Shift+V IS a V gesture, not a separate key.
+             KBKey(id: "V", label: "V", demos: [.cycle, .multiPaste, .pinnedOpen, .reverseCycle]),
+             // B doubles as the alternate reverse-cycle trigger when that
+             // setting is toggled on (see the toggle inside the reverse demo).
+             KBKey(id: "B", label: "B", demos: [.reverseCycle]),
+             KBKey(id: "N", label: "N"), KBKey(id: "M", label: "M"),
              KBKey(id: "COMMA", label: ","), KBKey(id: "PERIOD", label: "."), KBKey(id: "SLASH", label: "/"),
              KBKey(id: "RSHIFT", label: "shift", width: 2.4)],
             [KBKey(id: "FN", label: "fn", width: 1.2),
@@ -2206,6 +2234,11 @@ struct ClipenSettingsView: View {
     private struct KeyCapView: View {
         let key: KBKey
         let isActive: Bool
+        /// True while the demo currently playing in this key's (or a sibling
+        /// key's) popover is "pressing" this real key — drives the actual
+        /// keyboard tile to visibly depress in sync with the popup's own
+        /// animated keycap, instead of only the popup animating on its own.
+        let isPressed: Bool
         let unitWidth: CGFloat
         let keyHeight: CGFloat
         @State private var pulse = false
@@ -2218,22 +2251,26 @@ struct ClipenSettingsView: View {
         var body: some View {
             Text(key.label)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundColor(key.isCommand ? Self.commandColor
-                                  : (isInteractive ? Self.interactiveColor : .textSec))
+                .foregroundColor(isPressed ? .white
+                                  : (key.isCommand ? Self.commandColor
+                                     : (isInteractive ? Self.interactiveColor : .textSec)))
                 .frame(width: key.width * unitWidth, height: keyHeight)
                 .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isActive ? Color.accentDim
-                          : (hovered && isInteractive ? Self.interactiveColor.opacity(0.18) : Color.surfaceHi.opacity(0.6))))
+                    .fill(isPressed ? Color.accent
+                          : (isActive ? Color.accentDim
+                             : (hovered && isInteractive ? Self.interactiveColor.opacity(0.18) : Color.surfaceHi.opacity(0.6)))))
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(
                             key.isCommand ? Self.commandColor
-                                : (isInteractive ? Self.interactiveColor.opacity(isActive || hovered ? 1 : (pulse ? 1 : 0.4)) : Color.border),
-                            lineWidth: (key.isCommand || isInteractive) ? (isActive ? 2.5 : 1.6) : 1)
+                                : (isInteractive ? Self.interactiveColor.opacity(isActive || hovered || isPressed ? 1 : (pulse ? 1 : 0.4)) : Color.border),
+                            lineWidth: (key.isCommand || isInteractive) ? (isActive || isPressed ? 2.5 : 1.6) : 1)
                 )
                 .scaleEffect(isActive ? 1.08 : 1.0)
+                .offset(y: isPressed ? 2 : 0)
                 .animation(.easeOut(duration: 0.15), value: isActive)
                 .animation(.easeOut(duration: 0.12), value: hovered)
+                .animation(.easeOut(duration: 0.1), value: isPressed)
                 .onHover { hovering in
                     guard isInteractive else { return }
                     hovered = hovering
@@ -2247,12 +2284,17 @@ struct ClipenSettingsView: View {
 
     private struct KeyDemoPopup: View {
         let key: KBKey
+        // Shared with KeyboardInteractionPanel (not owned here) so the real
+        // keyboard tiles can light up in sync with this demo's own animated
+        // keycap row instead of only the popup animating.
+        @ObservedObject var lab: InteractionLabController
 
         @State private var selected: InteractionDemo
-        @StateObject private var lab = InteractionLabController()
+        @ObservedObject private var manager = ClipboardManager.shared
 
-        init(key: KBKey) {
+        init(key: KBKey, lab: InteractionLabController) {
             self.key = key
+            self.lab = lab
             _selected = State(initialValue: key.demos.first ?? .cycle)
         }
 
@@ -2306,6 +2348,23 @@ struct ClipenSettingsView: View {
                         }
                     }
                 }
+
+                // Reverse-cycle's actual trigger (Shift+V vs B) is a global
+                // setting, not a per-key thing — surface the toggle right
+                // here since this demo is reachable from both V and B.
+                if selected == .reverseCycle {
+                    HStack(spacing: 8) {
+                        Text("Reverse key").font(.system(size: 9)).foregroundColor(.textDim)
+                        reverseKeyChoice(label: "Shift + V", isOn: !manager.reverseCycleUsesB) {
+                            manager.reverseCycleUsesB = false
+                            lab.select(selected)
+                        }
+                        reverseKeyChoice(label: "B", isOn: manager.reverseCycleUsesB) {
+                            manager.reverseCycleUsesB = true
+                            lab.select(selected)
+                        }
+                    }
+                }
             }
             .padding(14)
             // Wide enough for demos that slide the mock popup aside and show
@@ -2315,6 +2374,18 @@ struct ClipenSettingsView: View {
             .frame(width: 380)
             .onAppear { lab.select(selected) }
             .onDisappear { lab.stop() }
+        }
+
+        private func reverseKeyChoice(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+            Button(action: action) {
+                Text(label)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(isOn ? .white : .textSec)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(isOn ? Color.accent : Color.surfaceHi,
+                                in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
 
         private func speedBinding(for demo: InteractionDemo) -> Binding<GestureSpeed>? {
@@ -2367,14 +2438,19 @@ struct ClipenSettingsView: View {
 
     private struct KeyboardInteractionPanel: View {
         @State private var activeKeyID: String? = nil
+        // Owned here (not inside KeyDemoPopup) so the real keyboard tiles
+        // below can read its pressedKeys and depress in sync with whichever
+        // demo is currently playing in the open popover.
+        @StateObject private var lab = InteractionLabController()
 
         private let keySpacing: CGFloat = 7
         private let horizontalPadding: CGFloat = 14
-        private let keyHeight: CGFloat = 46
+        private let keyHeight: CGFloat = 50
 
         var body: some View {
             GeometryReader { geo in
                 let totalWidth = geo.size.width
+                let pressedRealIDs = Set(lab.pressedKeys.flatMap { $0.kbKeyIDs })
 
                 VStack(spacing: keySpacing) {
                     ForEach(Array(KBLayout.rows.enumerated()), id: \.offset) { _, row in
@@ -2388,7 +2464,9 @@ struct ClipenSettingsView: View {
                                 if key.id == "ARROWS" {
                                     ArrowKeysCluster(totalWidth: key.width * unitW, keyHeight: keyHeight)
                                 } else {
-                                    KeyCapView(key: key, isActive: activeKeyID == key.id, unitWidth: unitW, keyHeight: keyHeight)
+                                    KeyCapView(key: key, isActive: activeKeyID == key.id,
+                                               isPressed: pressedRealIDs.contains(key.id),
+                                               unitWidth: unitW, keyHeight: keyHeight)
                                         .onTapGesture {
                                             guard !key.demos.isEmpty else { return }
                                             activeKeyID = (activeKeyID == key.id) ? nil : key.id
@@ -2397,7 +2475,7 @@ struct ClipenSettingsView: View {
                                             get: { activeKeyID == key.id },
                                             set: { isPresented in if !isPresented { activeKeyID = nil } }
                                         ), arrowEdge: .bottom) {
-                                            KeyDemoPopup(key: key)
+                                            KeyDemoPopup(key: key, lab: lab)
                                         }
                                 }
                             }
@@ -2408,7 +2486,7 @@ struct ClipenSettingsView: View {
                 .padding(.vertical, 14)
                 .frame(width: totalWidth, alignment: .center)
             }
-            .frame(minHeight: 300)
+            .frame(minHeight: 320)
         }
     }
 
