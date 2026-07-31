@@ -175,6 +175,12 @@ final class InteractionLabController: ObservableObject {
     @Published var selectedDemo: InteractionDemo = .cycle
     @Published var isPlaying = false
 
+    /// When true (the default), the InteractionLab keyboard panel mirrors
+    /// pressedKeys onto the REAL keyboard tiles instead of the popup's own
+    /// small keycap row — the two are mutually exclusive so only one thing
+    /// is visibly "playing" the gesture at a time.
+    @Published var syncRealKeyboard = true
+
     @Published var pressedKeys: Set<LabKey> = []
     @Published var stageKeys: [LabKey] = [.cmd, .v]
 
@@ -947,6 +953,11 @@ private struct LabSidePanel: View {
 
 struct InteractionLabStage: View {
     @ObservedObject var lab: InteractionLabController
+    /// Hides just the small animated keycap row at the bottom (⌘ V X …) —
+    /// everything above it (mock panel, instruction, caption, result) always
+    /// plays. Used by the Settings keyboard panel, which shows that same
+    /// press animation on the real keyboard tiles instead when this is off.
+    var showKeyRow: Bool = true
 
     var body: some View {
         VStack(spacing: 14) {
@@ -983,38 +994,40 @@ struct InteractionLabStage: View {
                 .multilineTextAlignment(.center)
                 .frame(height: 30)
 
-            VStack(spacing: 8) {
-                HStack(spacing: 10) {
-                    ForEach(lab.stageKeys) { key in
-                        LabKeyCapView(key: key, pressed: lab.pressedKeys.contains(key), size: 54)
-                    }
-                }
-                .frame(height: 58)
-
-                // Paste-demo tap counter: V ● ● ● ×N. The row is ALWAYS present
-                // at a fixed height and only its contents fade in/out — otherwise
-                // inserting/removing it as the demo restarts (on every paste)
-                // changed the stage height and shook the whole sheet up and down.
-                ZStack {
-                    if lab.pasteTapTarget > 0 {
-                        HStack(spacing: 7) {
-                            Text("V").font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundColor(.textDim)
-                            ForEach(0..<lab.pasteTapTarget, id: \.self) { i in
-                                Circle()
-                                    .fill(i < lab.pasteTapDone ? Color.accent : Color.textDim.opacity(0.3))
-                                    .frame(width: 8, height: 8)
-                                    .scaleEffect(i == lab.pasteTapDone - 1 ? 1.4 : 1)
-                                    .animation(.spring(response: 0.25, dampingFraction: 0.5), value: lab.pasteTapDone)
-                            }
-                            Text("×\(lab.pasteTapTarget)").font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundColor(.accent)
+            if showKeyRow {
+                VStack(spacing: 8) {
+                    HStack(spacing: 10) {
+                        ForEach(lab.stageKeys) { key in
+                            LabKeyCapView(key: key, pressed: lab.pressedKeys.contains(key), size: 54)
                         }
                     }
+                    .frame(height: 58)
+
+                    // Paste-demo tap counter: V ● ● ● ×N. The row is ALWAYS present
+                    // at a fixed height and only its contents fade in/out — otherwise
+                    // inserting/removing it as the demo restarts (on every paste)
+                    // changed the stage height and shook the whole sheet up and down.
+                    ZStack {
+                        if lab.pasteTapTarget > 0 {
+                            HStack(spacing: 7) {
+                                Text("V").font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.textDim)
+                                ForEach(0..<lab.pasteTapTarget, id: \.self) { i in
+                                    Circle()
+                                        .fill(i < lab.pasteTapDone ? Color.accent : Color.textDim.opacity(0.3))
+                                        .frame(width: 8, height: 8)
+                                        .scaleEffect(i == lab.pasteTapDone - 1 ? 1.4 : 1)
+                                        .animation(.spring(response: 0.25, dampingFraction: 0.5), value: lab.pasteTapDone)
+                                }
+                                Text("×\(lab.pasteTapTarget)").font(.system(size: 9, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.accent)
+                            }
+                        }
+                    }
+                    .frame(height: 20)
                 }
-                .frame(height: 20)
+                .padding(.top, 14)
             }
-            .padding(.top, 14)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -2296,12 +2309,12 @@ struct ClipenSettingsView: View {
         @ObservedObject var lab: InteractionLabController
 
         @State private var selected: InteractionDemo
-        // The InteractionLabStage animation (and, with it, the shared lab's
-        // pressedKeys that drive the real keyboard's synced key-press glow)
-        // starts hidden — nothing runs until this is explicitly opened, so
-        // the real keyboard's idle interactive pulse is the only thing
-        // moving until you ask to see the demo.
-        @State private var showAnimation = false
+        // OFF (default): the mock panel etc. always play, and their key
+        // presses sync onto the REAL keyboard tiles behind this popup.
+        // ON: the same press animation plays on the popup's own small
+        // keycap row instead, and the real keyboard goes quiet. The two
+        // never animate at once — this just picks which one shows it.
+        @State private var showInnerButtons = false
         @ObservedObject private var manager = ClipboardManager.shared
 
         init(key: KBKey, lab: InteractionLabController) {
@@ -2317,7 +2330,7 @@ struct ClipenSettingsView: View {
                         ForEach(key.demos, id: \.self) { demo in
                             Button {
                                 selected = demo
-                                if showAnimation { lab.select(demo) }
+                                lab.select(demo)
                             } label: {
                                 Text(LocalizedStringKey(demo.title))
                                     .font(.system(size: 9, weight: .semibold))
@@ -2333,24 +2346,20 @@ struct ClipenSettingsView: View {
                         .font(.system(size: 11, weight: .semibold)).foregroundColor(.textPri)
                 }
 
-                if showAnimation {
-                    // No separate caption Text here — InteractionLabStage
-                    // already renders the caption itself (lab.currentCaption).
-                    InteractionLabStage(lab: lab)
-                }
+                // No separate caption Text here — InteractionLabStage already
+                // renders the caption itself (lab.currentCaption). The mock
+                // panel always plays; only its own keycap row is toggled off
+                // when the real keyboard is doing that job instead.
+                InteractionLabStage(lab: lab, showKeyRow: showInnerButtons)
 
                 Button {
-                    showAnimation.toggle()
-                    if showAnimation {
-                        lab.select(selected)
-                    } else {
-                        lab.stop()
-                    }
+                    showInnerButtons.toggle()
+                    lab.syncRealKeyboard = !showInnerButtons
                 } label: {
                     HStack(spacing: 5) {
-                        Image(systemName: showAnimation ? "eye.slash" : "play.fill")
+                        Image(systemName: showInnerButtons ? "keyboard" : "rectangle.on.rectangle")
                             .font(.system(size: 9, weight: .semibold))
-                        Text(showAnimation ? "Hide animation" : "Show animation")
+                        Text(showInnerButtons ? "Animate on keyboard instead" : "Animate keys in popup instead")
                             .font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundColor(.accent)
@@ -2367,7 +2376,7 @@ struct ClipenSettingsView: View {
                         ForEach(GestureSpeed.allCases) { speed in
                             Button {
                                 binding.wrappedValue = speed
-                                if showAnimation { lab.select(selected) }
+                                lab.select(selected)
                             } label: {
                                 Text(LocalizedStringKey(speed.label))
                                     .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -2389,11 +2398,11 @@ struct ClipenSettingsView: View {
                         Text("Reverse key").font(.system(size: 9)).foregroundColor(.textDim)
                         reverseKeyChoice(label: "Shift + V", isOn: !manager.reverseCycleUsesB) {
                             manager.reverseCycleUsesB = false
-                            if showAnimation { lab.select(selected) }
+                            lab.select(selected)
                         }
                         reverseKeyChoice(label: "B", isOn: manager.reverseCycleUsesB) {
                             manager.reverseCycleUsesB = true
-                            if showAnimation { lab.select(selected) }
+                            lab.select(selected)
                         }
                     }
                 }
@@ -2404,6 +2413,10 @@ struct ClipenSettingsView: View {
             // together span ~320pt once their offsets are accounted for; a
             // narrower popup clipped the side panel's right edge.
             .frame(width: 380)
+            .onAppear {
+                lab.syncRealKeyboard = !showInnerButtons
+                lab.select(selected)
+            }
             .onDisappear { lab.stop() }
         }
 
@@ -2481,7 +2494,7 @@ struct ClipenSettingsView: View {
         var body: some View {
             GeometryReader { geo in
                 let totalWidth = geo.size.width
-                let pressedRealIDs = Set(lab.pressedKeys.flatMap { $0.kbKeyIDs })
+                let pressedRealIDs = lab.syncRealKeyboard ? Set(lab.pressedKeys.flatMap { $0.kbKeyIDs }) : []
 
                 VStack(spacing: keySpacing) {
                     ForEach(Array(KBLayout.rows.enumerated()), id: \.offset) { _, row in
@@ -2497,7 +2510,7 @@ struct ClipenSettingsView: View {
                                 } else {
                                     KeyCapView(key: key, isActive: activeKeyID == key.id,
                                                isPressed: pressedRealIDs.contains(key.id),
-                                               suppressIdlePulse: lab.isPlaying,
+                                               suppressIdlePulse: lab.isPlaying && lab.syncRealKeyboard,
                                                unitWidth: unitW, keyHeight: keyHeight)
                                         .onTapGesture {
                                             guard !key.demos.isEmpty else { return }
