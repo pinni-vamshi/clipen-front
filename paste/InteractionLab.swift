@@ -138,7 +138,7 @@ enum LabKey: String, Identifiable, Hashable {
     /// instead of only the popup's own small keycap row moving.
     var kbKeyIDs: [String] {
         switch self {
-        case .cmd:       return ["LCMD", "RCMD"]
+        case .cmd:       return ["LCMD"]
         case .v:         return ["V"]
         case .x:         return ["X"]
         case .f:         return ["F"]
@@ -2287,7 +2287,6 @@ struct ClipenSettingsView: View {
                                 : (showBlue ? Self.interactiveColor.opacity(isActive || hovered || isPressed ? 1 : (pulse ? 1 : 0.4)) : Color.border),
                             lineWidth: (showGold || showBlue) ? (isActive || isPressed ? 2.5 : 1.6) : 1)
                 )
-                .scaleEffect(isActive ? 1.08 : 1.0)
                 .offset(y: isPressed ? 2 : 0)
                 .animation(.easeOut(duration: 0.15), value: isActive)
                 .animation(.easeOut(duration: 0.12), value: hovered)
