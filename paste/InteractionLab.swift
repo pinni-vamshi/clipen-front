@@ -2203,18 +2203,13 @@ struct ClipenSettingsView: View {
         static let all: [KBKey] = rows.flatMap { $0 }
     }
 
-    private struct KeyFramePreference: PreferenceKey {
-        static var defaultValue: [String: CGRect] = [:]
-        static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
-            value.merge(nextValue()) { _, new in new }
-        }
-    }
-
     private struct KeyCapView: View {
         let key: KBKey
         let isActive: Bool
         let unitWidth: CGFloat
+        let keyHeight: CGFloat
         @State private var pulse = false
+        @State private var hovered = false
 
         private var isInteractive: Bool { !key.demos.isEmpty }
         private static let interactiveColor = Color(hex: "#4F8EF7")
@@ -2222,21 +2217,27 @@ struct ClipenSettingsView: View {
 
         var body: some View {
             Text(key.label)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundColor(key.isCommand ? Self.commandColor
                                   : (isInteractive ? Self.interactiveColor : .textSec))
-                .frame(width: key.width * unitWidth, height: 28)
-                .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(isActive ? Color.accentDim : Color.surfaceHi.opacity(0.6)))
+                .frame(width: key.width * unitWidth, height: keyHeight)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isActive ? Color.accentDim
+                          : (hovered && isInteractive ? Self.interactiveColor.opacity(0.18) : Color.surfaceHi.opacity(0.6))))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(
                             key.isCommand ? Self.commandColor
-                                : (isInteractive ? Self.interactiveColor.opacity(pulse ? 1 : 0.4) : Color.border),
+                                : (isInteractive ? Self.interactiveColor.opacity(isActive || hovered ? 1 : (pulse ? 1 : 0.4)) : Color.border),
                             lineWidth: (key.isCommand || isInteractive) ? (isActive ? 2.5 : 1.6) : 1)
                 )
                 .scaleEffect(isActive ? 1.08 : 1.0)
                 .animation(.easeOut(duration: 0.15), value: isActive)
+                .animation(.easeOut(duration: 0.12), value: hovered)
+                .onHover { hovering in
+                    guard isInteractive else { return }
+                    hovered = hovering
+                }
                 .onAppear {
                     guard isInteractive else { return }
                     withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
@@ -2246,46 +2247,36 @@ struct ClipenSettingsView: View {
 
     private struct KeyDemoPopup: View {
         let key: KBKey
-        let onClose: () -> Void
 
         @State private var selected: InteractionDemo
         @StateObject private var lab = InteractionLabController()
 
-        init(key: KBKey, onClose: @escaping () -> Void) {
+        init(key: KBKey) {
             self.key = key
-            self.onClose = onClose
             _selected = State(initialValue: key.demos.first ?? .cycle)
         }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    if key.demos.count > 1 {
-                        HStack(spacing: 6) {
-                            ForEach(key.demos, id: \.self) { demo in
-                                Button {
-                                    selected = demo
-                                    lab.select(demo)
-                                } label: {
-                                    Text(LocalizedStringKey(demo.title))
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundColor(selected == demo ? .white : .textSec)
-                                        .padding(.horizontal, 8).padding(.vertical, 4)
-                                        .background(selected == demo ? Color.accent : Color.surfaceHi, in: Capsule())
-                                }
-                                .buttonStyle(.plain)
+                if key.demos.count > 1 {
+                    HStack(spacing: 6) {
+                        ForEach(key.demos, id: \.self) { demo in
+                            Button {
+                                selected = demo
+                                lab.select(demo)
+                            } label: {
+                                Text(LocalizedStringKey(demo.title))
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(selected == demo ? .white : .textSec)
+                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                    .background(selected == demo ? Color.accent : Color.surfaceHi, in: Capsule())
                             }
+                            .buttonStyle(.plain)
                         }
-                    } else {
-                        Text(LocalizedStringKey(selected.title))
-                            .font(.system(size: 11, weight: .semibold)).foregroundColor(.textPri)
                     }
-                    Spacer()
-                    Button(action: onClose) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14)).foregroundColor(.textDim)
-                    }
-                    .buttonStyle(.plain)
+                } else {
+                    Text(LocalizedStringKey(selected.title))
+                        .font(.system(size: 11, weight: .semibold)).foregroundColor(.textPri)
                 }
 
                 Text(LocalizedStringKey(selected.caption))
@@ -2318,9 +2309,6 @@ struct ClipenSettingsView: View {
             }
             .padding(14)
             .frame(width: 300)
-            .background(Color.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.border, lineWidth: 1))
-            .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
             .onAppear { lab.select(selected) }
             .onDisappear { lab.stop() }
         }
@@ -2375,74 +2363,48 @@ struct ClipenSettingsView: View {
 
     private struct KeyboardInteractionPanel: View {
         @State private var activeKeyID: String? = nil
-        @State private var keyFrames: [String: CGRect] = [:]
 
-        private let keySpacing: CGFloat = 4
-        private let horizontalPadding: CGFloat = 12
-        private let keyHeight: CGFloat = 28
+        private let keySpacing: CGFloat = 6
+        private let horizontalPadding: CGFloat = 14
+        private let keyHeight: CGFloat = 32
 
         var body: some View {
             GeometryReader { geo in
                 let totalWidth = geo.size.width
 
-                ZStack(alignment: .topLeading) {
-                    VStack(spacing: keySpacing) {
-                        ForEach(Array(KBLayout.rows.enumerated()), id: \.offset) { _, row in
-                            let rowUnits = row.reduce(CGFloat(0)) { $0 + $1.width }
-                            let rowGaps = CGFloat(row.count - 1)
-                            let rowAvail = totalWidth - horizontalPadding * 2 - rowGaps * keySpacing
-                            let unitW = max(14, rowAvail / rowUnits)
+                VStack(spacing: keySpacing) {
+                    ForEach(Array(KBLayout.rows.enumerated()), id: \.offset) { _, row in
+                        let rowUnits = row.reduce(CGFloat(0)) { $0 + $1.width }
+                        let rowGaps = CGFloat(row.count - 1)
+                        let rowAvail = totalWidth - horizontalPadding * 2 - rowGaps * keySpacing
+                        let unitW = max(16, rowAvail / rowUnits)
 
-                            HStack(spacing: keySpacing) {
-                                ForEach(row) { key in
-                                    if key.id == "ARROWS" {
-                                        ArrowKeysCluster(totalWidth: key.width * unitW, keyHeight: keyHeight)
-                                            .background(GeometryReader { keyGeo in
-                                                Color.clear.preference(
-                                                    key: KeyFramePreference.self,
-                                                    value: [key.id: keyGeo.frame(in: .named("clipenKeyboard"))])
-                                            })
-                                    } else {
-                                        KeyCapView(key: key, isActive: activeKeyID == key.id, unitWidth: unitW)
-                                            .background(GeometryReader { keyGeo in
-                                                Color.clear.preference(
-                                                    key: KeyFramePreference.self,
-                                                    value: [key.id: keyGeo.frame(in: .named("clipenKeyboard"))])
-                                            })
-                                            .onTapGesture {
-                                                guard !key.demos.isEmpty else { return }
-                                                withAnimation(.easeOut(duration: 0.15)) {
-                                                    activeKeyID = (activeKeyID == key.id) ? nil : key.id
-                                                }
-                                            }
-                                    }
+                        HStack(spacing: keySpacing) {
+                            ForEach(row) { key in
+                                if key.id == "ARROWS" {
+                                    ArrowKeysCluster(totalWidth: key.width * unitW, keyHeight: keyHeight)
+                                } else {
+                                    KeyCapView(key: key, isActive: activeKeyID == key.id, unitWidth: unitW, keyHeight: keyHeight)
+                                        .onTapGesture {
+                                            guard !key.demos.isEmpty else { return }
+                                            activeKeyID = (activeKeyID == key.id) ? nil : key.id
+                                        }
+                                        .popover(isPresented: Binding(
+                                            get: { activeKeyID == key.id },
+                                            set: { isPresented in if !isPresented { activeKeyID = nil } }
+                                        ), arrowEdge: .bottom) {
+                                            KeyDemoPopup(key: key)
+                                        }
                                 }
                             }
                         }
                     }
-                    .padding(.horizontal, horizontalPadding)
-                    .padding(.vertical, 12)
-                    .frame(width: totalWidth, alignment: .center)
-                    .coordinateSpace(name: "clipenKeyboard")
-                    .onPreferenceChange(KeyFramePreference.self) { keyFrames = $0 }
-
-                    if let id = activeKeyID, let key = KBLayout.all.first(where: { $0.id == id }),
-                       let frame = keyFrames[id] {
-                        KeyDemoPopup(key: key, onClose: {
-                            withAnimation(.easeOut(duration: 0.15)) { activeKeyID = nil }
-                        })
-                        .offset(x: popupX(for: frame, totalWidth: totalWidth), y: max(0, frame.minY - 60))
-                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .leading)))
-                        .zIndex(1)
-                    }
                 }
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, 14)
+                .frame(width: totalWidth, alignment: .center)
             }
-            .frame(minHeight: 190)
-        }
-
-        private func popupX(for frame: CGRect, totalWidth: CGFloat) -> CGFloat {
-            let placeRight = frame.midX < totalWidth / 2
-            return placeRight ? frame.maxX + 10 : frame.minX - 300 - 10
+            .frame(minHeight: 210)
         }
     }
 
