@@ -583,7 +583,7 @@ final class TrackingService {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
         let c = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     static func timeBucket(for date: Date) -> String {

@@ -12,13 +12,10 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
     var onHide: (() -> Void)?
 
     func popoverDidShow(_ notification: Notification) {
+        popover.contentViewController?.view.window?.sharingType = .none
         if !wantsVisible {
             popover.performClose(nil)
             anchorPanel.orderOut(nil)
-            // This is an errant show slipping through after something already
-            // asked us to hide — run the same cleanup a normal hide() would,
-            // so state (e.g. an in-flight onboarding nudge) can't get stuck
-            // thinking the popup is still open.
             onHide?()
         }
     }
@@ -217,6 +214,7 @@ struct PopoverPreviewView: View {
                         .foregroundColor(.secondary.opacity(0.5))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
                 .help("Clear search (Esc)")
             }
 
@@ -923,6 +921,7 @@ final class PopupHintOverlay {
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
+        panel.sharingType = .none
     }
 
     /// `popupFrame` is the ring popup's actual current on-screen frame —
@@ -1137,30 +1136,21 @@ extension NSPopover {
     func clipenAnimateIn(duration: TimeInterval = 0.17) {
         guard let view = contentViewController?.view else { return }
         view.wantsLayer = true
-        if let layer = view.layer {
-            let frame = layer.frame
-            layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            layer.position = CGPoint(x: frame.midX, y: frame.midY)
+        guard let layer = view.layer else { return }
+        let frame = layer.frame
+        layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        layer.position = CGPoint(x: frame.midX, y: frame.midY)
 
-            let fade = CABasicAnimation(keyPath: "opacity")
-            fade.fromValue = 0
-            fade.toValue = 1
-            let scale = CABasicAnimation(keyPath: "transform.scale")
-            scale.fromValue = 0.94
-            scale.toValue = 1
-            let group = CAAnimationGroup()
-            group.animations = [fade, scale]
-            group.duration = duration
-            group.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            layer.add(group, forKey: "clipenPopIn")
-        }
-        if let win = view.window {
-            win.alphaValue = 0
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = duration
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                win.animator().alphaValue = 1
-            }
-        }
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        let scale = CABasicAnimation(keyPath: "transform.scale")
+        scale.fromValue = 0.94
+        scale.toValue = 1
+        let group = CAAnimationGroup()
+        group.animations = [fade, scale]
+        group.duration = duration
+        group.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(group, forKey: "clipenPopIn")
     }
 }

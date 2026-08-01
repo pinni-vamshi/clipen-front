@@ -112,10 +112,10 @@ enum ImageTools {
                 guard let input = ImageService.imageInput(for: item) else { return nil }
                 switch await SubjectLiftService.removeBackground(from: input.image) {
                 case .success(let (png, image)):
-                    return .item(
-                        ClipboardItem(content: ClipboardContent.imageContent(rawData: png, dataType: .init("public.png"), fallback: image)!),
-                        message: "Removed background."
-                    )
+                    guard let content = ClipboardContent.imageContent(rawData: png, dataType: .init("public.png"), fallback: image) else {
+                        return .status("Couldn't create image from result.")
+                    }
+                    return .item(ClipboardItem(content: content), message: "Removed background.")
                 case .decodeFailed:
                     await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.image_decode") }
                     return .status("Couldn't find a clear subject to cut out.")

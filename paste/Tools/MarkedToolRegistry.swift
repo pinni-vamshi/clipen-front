@@ -347,8 +347,12 @@ enum MarkedToolService {
                     return
                 }
                 let fallback = NSImage(cgImage: stitched, size: NSSize(width: width, height: height))
+                guard let content = ClipboardContent.imageContent(rawData: png, dataType: .init("public.png"), fallback: fallback) else {
+                    continuation.resume(returning: .status("Couldn't create image from stitched result."))
+                    return
+                }
                 continuation.resume(returning: .item(
-                    ClipboardItem(content: ClipboardContent.imageContent(rawData: png, dataType: .init("public.png"), fallback: fallback)!),
+                    ClipboardItem(content: content),
                     message: "Stitched \(cgs.count) images \(vertical ? "vertically" : "horizontally")."
                 ))
             }

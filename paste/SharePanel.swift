@@ -13,6 +13,7 @@ class SharePanel: NSObject, NSPopoverDelegate {
     private var shownStrip: NSRect? = nil
 
     func popoverDidShow(_ notification: Notification) {
+        popover.contentViewController?.view.window?.sharingType = .none
         if !wantsVisible {
             popover.performClose(nil)
             anchorPanel.orderOut(nil)

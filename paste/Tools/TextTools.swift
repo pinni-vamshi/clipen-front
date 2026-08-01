@@ -3,6 +3,7 @@ import Foundation
 enum TextTools {
     static let all: [ClipboardTool] = [
         editTool,
+        undoEditTool,
         pastePlainTool,
         pasteFormattedTool,
         make("text.title-case", icon: "textformat", label: "Title Case", group: "CASE") {
@@ -149,6 +150,22 @@ enum TextTools {
             }
             return .status("Editing inline…")
         }
+    )
+
+    private static let undoEditTool = ClipboardTool(
+        id: "text.undo-edit",
+        icon: "arrow.uturn.backward",
+        label: "Undo Edit",
+        group: "EDIT",
+        preview: { item in
+            ClipboardManager.shared.inlineEditOriginals[item.id] != nil
+                ? "Restore the content before last edit" : nil
+        },
+        runSync: { item in
+            DispatchQueue.main.async { ClipboardManager.shared.revertInlineEdit(id: item.id) }
+            return .status("Edit reverted.")
+        },
+        runAsync: { _ in nil }
     )
 
     // Deliberately NOT wired to applyCaseTransformForSelection (that stays

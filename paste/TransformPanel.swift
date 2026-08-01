@@ -14,6 +14,7 @@ class TransformPanel: NSObject, NSPopoverDelegate {
     private var wantsVisible = false
 
     func popoverDidShow(_ notification: Notification) {
+        popover.contentViewController?.view.window?.sharingType = .none
         if !wantsVisible {
             popover.performClose(nil)
             anchorPanel.orderOut(nil)

@@ -2300,7 +2300,7 @@ struct ClipenSettingsView: View {
                 )
                 .offset(y: isPressed ? 2 : 0)
                 .animation(.easeOut(duration: 0.15), value: isActive)
-                .animation(.easeOut(duration: 0.12), value: hovered)
+                .animation(.easeOut(duration: 0.15), value: hovered)
                 .animation(.easeOut(duration: 0.1), value: isPressed)
                 .animation(.easeOut(duration: 0.15), value: dimmed)
                 .onHover { hovering in
@@ -2645,7 +2645,7 @@ struct ClipenSettingsView: View {
             )
             .onHover { hovering in hovered = hovering }
             .animation(.easeOut(duration: 0.15), value: isActive)
-            .animation(.easeOut(duration: 0.12), value: hovered)
+            .animation(.easeOut(duration: 0.15), value: hovered)
             .animation(.easeOut(duration: 0.15), value: dimmed)
             .onAppear {
                 withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }

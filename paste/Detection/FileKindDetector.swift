@@ -105,8 +105,7 @@ enum FileKindDetector {
              "obj", "stl", "ply", "dae", "abc", "scn",
              "gltf", "glb":
             return true
-        // fbx/blend/dwg/dxf have no viewer library on Apple platforms; they
-        // used to be listed here and always fell back to a black panel.
+        // fbx/blend/dwg/dxf have no viewer library on Apple platforms.
         default:
             return false
         }

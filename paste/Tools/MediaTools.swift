@@ -112,10 +112,11 @@ enum MediaService {
                         continuation.resume(returning: .status("Couldn't create video frame image."))
                         return
                     }
-                    continuation.resume(returning: .item(
-                        ClipboardItem(content: ClipboardContent.imageContent(rawData: pngData, dataType: .init("public.png"), fallback: image)!),
-                        message: "Created first frame image."
-                    ))
+                    guard let content = ClipboardContent.imageContent(rawData: pngData, dataType: .init("public.png"), fallback: image) else {
+                        continuation.resume(returning: .status("Couldn't create image from frame."))
+                        return
+                    }
+                    continuation.resume(returning: .item(ClipboardItem(content: content), message: "Created first frame image."))
                 } catch {
                     AuthManager.shared.registerActionUsage(actionID: "fail.video_first_frame")
                     continuation.resume(returning: .status("Couldn't extract the first video frame."))

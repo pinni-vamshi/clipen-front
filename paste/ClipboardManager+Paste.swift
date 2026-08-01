@@ -26,7 +26,7 @@ extension ClipboardManager {
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef) == .success,
               let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID()
         else { return false }
-        let axApp = focusedAppRef as! AXUIElement
+        let axApp = unsafeBitCast(focusedAppRef, to: AXUIElement.self)
         var pid: pid_t = 0
         guard AXUIElementGetPid(axApp, &pid) == .success,
               let app = NSRunningApplication(processIdentifier: pid)
@@ -45,8 +45,8 @@ extension ClipboardManager {
         if AXUIElementCopyAttributeValue(systemWide,
                                          kAXFocusedUIElementAttribute as CFString,
                                          &focusedRef) == .success,
-           let focusedRef {
-            let focused = focusedRef as! AXUIElement
+           let focusedRef, CFGetTypeID(focusedRef) == AXUIElementGetTypeID() {
+            let focused = unsafeBitCast(focusedRef, to: AXUIElement.self)
             if AXUIElementSetAttributeValue(focused,
                                             kAXSelectedTextAttribute as CFString,
                                             text as CFString) == .success {

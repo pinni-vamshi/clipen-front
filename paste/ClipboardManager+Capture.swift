@@ -690,6 +690,8 @@ extension ClipboardManager {
 
         recomputeEmbeddingsInBackground()
 
+        prewarmPreviewCaches(for: item)
+
         if case .image(let nsImage, let rawData, let dataType) = item.content,
            item.ocrText == nil {
             let itemID = item.id
@@ -727,6 +729,78 @@ extension ClipboardManager {
                     self.recomputeEmbeddingsInBackground()
                 }
             }
+        }
+    }
+
+    func prewarmAllItems() {
+        let snapshot = items
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            for item in snapshot {
+                guard self != nil else { return }
+                Self.prewarmItem(item)
+            }
+        }
+    }
+
+    func prewarmPreviewCaches(for item: ClipboardItem) {
+        DispatchQueue.global(qos: .utility).async {
+            Self.prewarmItem(item)
+        }
+    }
+
+    private static func prewarmItem(_ item: ClipboardItem) {
+        let content = item.content
+
+        // 1. Table cell extraction (rich text / HTML with tables)
+        _ = TableCellExtractor.cells(for: item)
+
+        // 2. Embedded image extraction (rich text / RTFD with attachments)
+        _ = EmbeddedImageExtractor.firstImage(for: item)
+
+        // 3. Text-based pre-warming: insights, links, syntax highlighting
+        guard let plainText = content.plainText, !plainText.isEmpty else { return }
+
+        let cacheKey = TextInsightService.cacheKey(id: item.id, text: plainText)
+
+        // 3a. Text insights (emails, names, code lines, repeated lines)
+        if TextInsightService.shared.cached(forKey: cacheKey) == nil {
+            let result = TextInsightExtractor.computeInsights(in: plainText)
+            TextInsightService.shared.store(result, forKey: cacheKey)
+        }
+
+        // 3b. Link extraction
+        if TextInsightService.shared.cachedLinks(forKey: cacheKey) == nil {
+            let links: [ExtractedLink]
+            switch content {
+            case .html(let html, _):
+                links = LinkExtractor.links(fromHTML: html)
+            case .richText(let attr, _):
+                links = LinkExtractor.links(from: attr)
+            case .rtfd(let data, _):
+                if let attr = NSAttributedString(rtfd: data, documentAttributes: nil) {
+                    links = LinkExtractor.links(from: attr)
+                } else {
+                    links = LinkExtractor.links(fromPlainText: plainText)
+                }
+            default:
+                links = LinkExtractor.links(fromPlainText: plainText)
+            }
+            TextInsightService.shared.storeLinks(links, forKey: cacheKey)
+        }
+
+        // 3c. Syntax highlighting (code / JSON / LaTeX)
+        let language: String? = {
+            switch item.detectedType {
+            case .code(let lang): return lang
+            case .json:           return "json"
+            case .latex:          return "latex"
+            default:              return nil
+            }
+        }()
+        if let language {
+            let capped = String(plainText.prefix(CodeHighlighter.maxHighlightLength))
+            _ = CodeHighlighter.shared.highlightSync(capped, languageDisplayName: language, dark: false)
+            _ = CodeHighlighter.shared.highlightSync(capped, languageDisplayName: language, dark: true)
         }
     }
 

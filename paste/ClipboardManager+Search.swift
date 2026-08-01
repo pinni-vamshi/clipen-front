@@ -517,6 +517,10 @@ extension ClipboardManager {
 enum ImageSimilarityService {
     private static let cache = NSCache<NSUUID, VNFeaturePrintObservation>()
 
+    static func invalidate(itemID: UUID) {
+        cache.removeObject(forKey: itemID as NSUUID)
+    }
+
     static func featurePrint(id: UUID, cgImage: () -> CGImage?) -> VNFeaturePrintObservation? {
         let key = id as NSUUID
         if let cached = cache.object(forKey: key) { return cached }

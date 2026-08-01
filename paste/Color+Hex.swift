@@ -179,7 +179,9 @@ final class ClipenIconCache {
 
     private init() {
         fileIcons.countLimit = 512
+        fileIcons.totalCostLimit = 32 * 1024 * 1024
         appIcons.countLimit = 128
+        appIcons.totalCostLimit = 16 * 1024 * 1024
     }
 
     func fileIcon(for url: URL) -> NSImage {

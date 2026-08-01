@@ -298,6 +298,7 @@ extension ClipboardManager {
         invalidateBlobCaches(for: id)
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
+        prewarmPreviewCaches(for: updated)
     }
 
     func evictFileSnapshots(for item: ClipboardItem) {
@@ -361,16 +362,28 @@ extension ClipboardManager {
     }
     func removeItem(at index: Int) {
         guard items.indices.contains(index) else { return }
-        evictFileSnapshots(for: items[index])
+        let item = items[index]
+        evictFileSnapshots(for: item)
+        evictCaches(for: item.id)
         items.remove(at: index)
         markBlobPurgeNeeded()
         if selectedIndex >= items.count { selectedIndex = max(0, items.count - 1) }
     }
     func clearAll() {
-        items.forEach { evictFileSnapshots(for: $0) }
+        items.forEach {
+            evictFileSnapshots(for: $0)
+            evictCaches(for: $0.id)
+        }
         items.removeAll()
         markBlobPurgeNeeded()
         selectedIndex = 0
+    }
+
+    func evictCaches(for id: UUID) {
+        TableCellExtractor.invalidate(itemID: id)
+        EmbeddedImageExtractor.invalidate(itemID: id)
+        ImageSimilarityService.invalidate(itemID: id)
+        inlineEditOriginals.removeValue(forKey: id)
     }
 
     func applyPlanLimits(ringLimit cap: Int) {
@@ -998,7 +1011,11 @@ extension ClipboardManager {
                 try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
             }
             try? FileManager.default.removeItem(at: legacyPlaintextHistoryURL)
-            persisted = try? dec.decode([PersistedItem].self, from: legacy)
+            do {
+                persisted = try dec.decode([PersistedItem].self, from: legacy)
+            } catch {
+                NSLog("[Clipen] loadHistory: legacy plaintext migration decode failed — %@", error.localizedDescription)
+            }
         }
 
         if persisted == nil, primaryExisted {
@@ -1083,6 +1100,7 @@ extension ClipboardManager {
                 // Now that items are populated, kick off the embedding backfill
                 // — it also lazily wakes the Neural-Engine model, on background.
                 self.recomputeEmbeddingsInBackground()
+                self.prewarmAllItems()
             }
         }
 
@@ -1112,6 +1130,7 @@ extension ClipboardManager {
                     // is finally in `items`, so auto-save/eviction may run.
                     self.isHistoryFullyLoaded = true
                     self.recomputeEmbeddingsInBackground()
+                    self.prewarmAllItems()
                 }
             }
             start = end

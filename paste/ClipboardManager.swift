@@ -167,6 +167,7 @@ class ClipboardManager: ObservableObject {
                     let toRemove = unpinned.suffix(from: self.maxItems)
                     for idx in toRemove.reversed() {
                         self.evictFileSnapshots(for: self.items[idx])
+                        self.evictCaches(for: self.items[idx].id)
                         self.items.remove(at: idx)
                     }
                     self.markBlobPurgeNeeded()
@@ -570,6 +571,7 @@ class ClipboardManager: ObservableObject {
 
     enum CaseTransformKind { case lowercase, uppercase }
     var caseTransformOriginals: [UUID: (text: String, kind: CaseTransformKind)] = [:]
+    var inlineEditOriginals: [UUID: ClipboardContent] = [:]
 
     var popupOpenedAt: Date? = nil
     var popupSessionPasted = false
@@ -833,9 +835,23 @@ class ClipboardManager: ObservableObject {
         startAccessibilityWatcher()
         attemptEventTap()
         startAppAffinityObserver()
+        startScreenChangeObserver()
     }
 
     var appActivationObserver: NSObjectProtocol?
+    private var screenChangeObserver: NSObjectProtocol?
+
+    private func startScreenChangeObserver() {
+        guard screenChangeObserver == nil else { return }
+        screenChangeObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.previewWindow.isVisible else { return }
+            self.previewWindow.hide()
+            self.setSidePanelStage(.none)
+        }
+    }
 
     let referenceContextQueue = DispatchQueue(label: "com.clipen.referenceContext")
     var pendingReferenceBundleID: String?

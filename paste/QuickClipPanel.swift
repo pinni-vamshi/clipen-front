@@ -188,6 +188,7 @@ class QuickClipPanel: NSPanel {
         self.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         self.isMovableByWindowBackground = false
         self.isReleasedWhenClosed = false
+        self.sharingType = .none
 
         let hostingView = NSHostingView(
             rootView: QuickClipPanelContentView(

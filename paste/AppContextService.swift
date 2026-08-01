@@ -113,7 +113,7 @@ enum AppContextService {
         guard AXUIElementCopyAttributeValue(axApp, kAXFocusedWindowAttribute as CFString, &focusedWindowRef) == .success,
               let focusedWindowRef, CFGetTypeID(focusedWindowRef) == AXUIElementGetTypeID()
         else { return nil }
-        let window = focusedWindowRef as! AXUIElement
+        let window = unsafeBitCast(focusedWindowRef, to: AXUIElement.self)
 
         var titleRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,

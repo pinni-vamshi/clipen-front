@@ -4,3 +4,7 @@ xcuserdata/
 DerivedData/
 build/
 *.xcarchive
+dist/*.dmg
+dist/export-*/
+dist/*.log
+dist/old_updates/

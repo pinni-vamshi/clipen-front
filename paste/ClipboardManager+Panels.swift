@@ -623,6 +623,7 @@ extension ClipboardManager {
     func commitInlineMixedEdit(with segments: [ContentSegment]) {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
+        saveInlineEditOriginal(for: id)
         updateItemMixed(id: id, segments: segments)
         finishInlineEditCommit()
     }
@@ -650,6 +651,7 @@ extension ClipboardManager {
     func commitInlineRichEdit(with attributedString: NSAttributedString) {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
+        saveInlineEditOriginal(for: id)
         updateItemRichText(id: id, editedAttributedString: attributedString)
         finishInlineEditCommit()
     }
@@ -657,6 +659,7 @@ extension ClipboardManager {
     func commitInlineEdit(with newText: String) {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
+        saveInlineEditOriginal(for: id)
         if let item = items.first(where: { $0.id == id }), case .file = item.content {
             updateFileItemText(id: id, newText: newText)
         } else {
@@ -674,6 +677,7 @@ extension ClipboardManager {
     func commitInlineTableEdit(with rows: [[String]]) {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
+        saveInlineEditOriginal(for: id)
         updateItemTable(id: id, rows: rows)
         finishInlineEditCommit()
     }
@@ -725,6 +729,20 @@ extension ClipboardManager {
         guard isInlineEditing else { return }
         inlineEditItemID = nil
         endInlineEditPresentation()
+    }
+
+    private func saveInlineEditOriginal(for id: UUID) {
+        guard inlineEditOriginals[id] == nil,
+              let item = items.first(where: { $0.id == id }) else { return }
+        inlineEditOriginals[id] = item.content
+    }
+
+    func revertInlineEdit(id: UUID) {
+        guard let original = inlineEditOriginals.removeValue(forKey: id) else { return }
+        replaceItemContent(id: id, newContent: original)
+        TableCellExtractor.invalidate(itemID: id)
+        invalidateCachesAfterContentEdit()
+        flashStatus("Edit reverted.")
     }
 
     private func endInlineEditPresentation() {

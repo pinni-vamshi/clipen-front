@@ -35,6 +35,7 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     }
 
     func popoverDidShow(_ notification: Notification) {
+        popover.contentViewController?.view.window?.sharingType = .none
         if !wantsVisible {
             popover.performClose(nil)
             anchorPanel.orderOut(nil)
@@ -233,23 +234,14 @@ private struct MultiItemPreviewView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                         if idx > 0 { Divider() }
-                        let isCurrent = item.id == currentItemID
                         HStack(spacing: 8) {
                             Text("\(idx + 1)")
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                                 .foregroundColor(.accentColor)
                                 .frame(width: 18)
                             ItemPreviewView(item: item, compact: true)
-                            if isCurrent {
-                                Text("CURRENT")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 5).padding(.vertical, 2)
-                                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 3))
-                            }
                         }
                         .padding(.horizontal, 12).padding(.vertical, 6)
-                        .background(isCurrent ? Color.accentColor.opacity(0.08) : Color.clear)
                     }
                 }
             }
@@ -769,8 +761,8 @@ enum TableCellExtractor {
                     i += 1
                 }
                 if !grid.isEmpty {
-                    let rows = grid.keys.sorted().map { r in
-                        let cols = grid[r]!
+                    let rows = grid.keys.sorted().compactMap { r -> [String]? in
+                        guard let cols = grid[r] else { return nil }
                         return cols.keys.sorted().map { cols[$0] ?? "" }
                     }
                     segments.append(.table(rows))
@@ -808,6 +800,10 @@ enum EmbeddedImageExtractor {
         c.countLimit = 300
         return c
     }()
+
+    static func invalidate(itemID: UUID) {
+        cache.removeObject(forKey: itemID as NSUUID)
+    }
 
     static func firstImage(for item: ClipboardItem) -> NSImage? {
         if let cached = cache.object(forKey: item.id as NSUUID) as? [NSImage] {
@@ -1201,6 +1197,17 @@ final class CodeHighlighter {
     /// fallback instantly instead of hanging. Highlighting a 5 MB file adds no
     /// real value anyway.
     static let maxHighlightLength = 100_000
+
+    func highlightSync(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
+        let key = Self.cacheKey(code, languageDisplayName: languageDisplayName, dark: dark)
+        if let hit = cache.object(forKey: key) { return hit }
+        return queue.sync { [weak self] () -> NSAttributedString? in
+            if let hit = self?.cache.object(forKey: key) { return hit }
+            let result = self?.highlightOnQueue(code, languageDisplayName: languageDisplayName, dark: dark)
+            if let result { self?.cache.setObject(result, forKey: key) }
+            return result
+        }
+    }
 
     private func highlightOnQueue(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
         guard code.count <= Self.maxHighlightLength else { return nil }
@@ -1760,7 +1767,9 @@ private struct QuickLookFilePreview: NSViewRepresentable {
     let url: URL
 
     func makeNSView(context: Context) -> QLPreviewView {
-        let view = QLPreviewView(frame: .zero, style: .normal)!
+        guard let view = QLPreviewView(frame: .zero, style: .normal) else {
+            return QLPreviewView()
+        }
         view.autostarts = true
         view.previewItem = url as NSURL
         return view
@@ -2159,6 +2168,14 @@ final class TextInsightService {
         cache.object(forKey: key as NSString)
     }
 
+    func store(_ insights: TextInsights, forKey key: String) {
+        cache.setObject(insights, forKey: key as NSString)
+    }
+
+    func storeLinks(_ links: [ExtractedLink], forKey key: String) {
+        linkCache.setObject(links as NSArray, forKey: key as NSString)
+    }
+
     func insights(forKey key: String, text: String) async -> TextInsights {
         await withCheckedContinuation { continuation in
             queue.async { [weak self] in
@@ -2530,7 +2547,7 @@ struct AttributedTextPreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSTextView.scrollableTextView()
-        let textView = scrollView.documentView as! NSTextView
+        guard let textView = scrollView.documentView as? NSTextView else { return scrollView }
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
@@ -2541,7 +2558,7 @@ struct AttributedTextPreview: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        let textView = scrollView.documentView as! NSTextView
+        guard let textView = scrollView.documentView as? NSTextView else { return }
         if textView.textStorage?.string != attributedString.string {
             textView.textStorage?.setAttributedString(attributedString)
         }
