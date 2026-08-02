@@ -3622,16 +3622,16 @@
     },
     "Added to %@": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Added to %@"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Zu %@ hinzugefügt"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added to %@"
           }
         },
         "es": {
@@ -4328,16 +4328,16 @@
     },
     "All": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "All"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Alle"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All"
           }
         },
         "es": {
@@ -4534,16 +4534,16 @@
     },
     "All is your whole clipboard, unfiltered. Create a collection and anything you copy while it's active is filed under it — hold ⌘ and press 1–9 in the popup to switch instantly.": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "All is your whole clipboard, unfiltered. Create a collection and anything you copy while it's active is filed under it — hold ⌘ and press 1–9 in the popup to switch instantly."
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "„Alle“ ist deine gesamte Zwischenablage, ungefiltert. Erstelle eine Sammlung, und alles, was du bei aktiver Sammlung kopierst, wird dort abgelegt — halte ⌘ und drücke 1–9 im Popup, um sofort zu wechseln."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All is your whole clipboard, unfiltered. Create a collection and anything you copy while it's active is filed under it — hold ⌘ and press 1–9 in the popup to switch instantly."
           }
         },
         "es": {
@@ -4640,16 +4640,16 @@
     },
     "Also in %@": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Also in %@"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Auch in %@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Also in %@"
           }
         },
         "es": {
@@ -6452,16 +6452,16 @@
     },
     "COLLECTIONS": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "COLLECTIONS"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "SAMMLUNGEN"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "COLLECTIONS"
           }
         },
         "es": {
@@ -7764,6 +7764,12 @@
             "value": "In jedes Feld klicken und ⌘C drücken. Clipen erfasst jede Kopie automatisch."
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click into each box and press ⌘C. Clipen catches every copy automatically."
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -7852,12 +7858,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "點按每個框並按 ⌘C。Clipen 會自動擷取每一次複製。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Click into each box and press ⌘C. Clipen catches every copy automatically."
           }
         }
       }
@@ -7970,6 +7970,12 @@
             "value": "Clipen-Instagram-Seite"
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen Instagram page"
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -8059,27 +8065,21 @@
             "state": "translated",
             "value": "Clipen Instagram 頁面"
           }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clipen Instagram page"
-          }
         }
       }
     },
     "Clipen isn't a list you scroll — it's a keyboard-first ring. Hold ⌘, tap V to cycle, release to paste. Let's feel it in three quick steps.": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clipen isn't a list you scroll — it's a keyboard-first ring. Hold ⌘, tap V to cycle, release to paste. Let's feel it in three quick steps."
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Clipen ist keine Liste zum Scrollen – es ist ein tastaturbasierter Ring. ⌘ halten, V tippen zum Wechseln, loslassen zum Einfügen. Erleben wir es in drei schnellen Schritten."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen isn't a list you scroll — it's a keyboard-first ring. Hold ⌘, tap V to cycle, release to paste. Let's feel it in three quick steps."
           }
         },
         "es": {
@@ -8182,6 +8182,12 @@
             "value": "Clipen benötigt Bedienungshilfen-Zugriff, damit\n⌘V durch deinen Clipboard-Ring wechseln kann."
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen needs Accessibility access so\n⌘V can cycle your clipboard ring."
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -8271,12 +8277,6 @@
             "state": "translated",
             "value": "Clipen 需要輔助使用權限，\n讓 ⌘V 可以循環切換剪貼簿。"
           }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clipen needs Accessibility access so\n⌘V can cycle your clipboard ring."
-          }
         }
       }
     },
@@ -8286,6 +8286,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Clipen benötigt die Bedienungshilfen-Berechtigung, um das Einfüge-Popup anzuzeigen. Verlauf und Doppelklick-Einfügen funktionieren weiterhin."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen needs Accessibility permission to show the paste popup. History and double-click-to-paste still work."
           }
         },
         "es": {
@@ -8377,12 +8383,6 @@
             "state": "translated",
             "value": "Clipen 需要輔助使用權限才能顯示貼上彈出視窗。歷史記錄與雙擊貼上仍可正常使用。"
           }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clipen needs Accessibility permission to show the paste popup. History and double-click-to-paste still work."
-          }
         }
       }
     },
@@ -8392,6 +8392,12 @@
           "stringUnit": {
             "state": "translated",
             "value": "Clipen muss neu gestartet werden, um zu %@ zu wechseln."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen needs to restart to switch to %@."
           }
         },
         "es": {
@@ -8482,12 +8488,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Clipen 需要重新啟動才能切換到 %@。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clipen needs to restart to switch to %@."
           }
         }
       }
@@ -9194,16 +9194,16 @@
     },
     "Collection": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Collection"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Sammlung"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collection"
           }
         },
         "es": {
@@ -9300,16 +9300,16 @@
     },
     "Collections": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Collections"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Sammlungen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collections"
           }
         },
         "es": {
@@ -11412,16 +11412,16 @@
     },
     "Create": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Create"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Erstellen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create"
           }
         },
         "es": {
@@ -11518,16 +11518,16 @@
     },
     "Current collection — press 1–9 to switch": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Current collection — press 1–9 to switch"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Aktuelle Sammlung — mit 1–9 wechseln"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current collection — press 1–9 to switch"
           }
         },
         "es": {
@@ -12136,16 +12136,16 @@
     },
     "Delete collection?": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete collection?"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Sammlung löschen?"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete collection?"
           }
         },
         "es": {
@@ -12242,16 +12242,16 @@
     },
     "Delete…": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete…"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Löschen…"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete…"
           }
         },
         "es": {
@@ -12642,6 +12642,106 @@
           "stringUnit": {
             "state": "translated",
             "value": "設計檔案"
+          }
+        }
+      }
+    },
+    "Discard your edit, restore the original file": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bearbeitung verwerfen, Originaldatei wiederherstellen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descartar edición, restaurar el archivo original"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler la modification, restaurer le fichier original"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buang suntingan, pulihkan file asli"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elimina la modifica, ripristina il file originale"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編集を破棄し、元のファイルを復元"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "편집 삭제, 원본 파일 복원"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bewerking verwijderen, origineel bestand herstellen"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odrzuć edycję, przywróć oryginalny plik"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descartar edição, restaurar o arquivo original"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отменить редактирование, восстановить оригинальный файл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Förkasta redigering, återställ originalfilen"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Düzenlemeyi sil, orijinal dosyayı geri yükle"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hủy chỉnh sửa, khôi phục tệp gốc"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "放弃编辑，恢复原始文件"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "捨棄編輯，還原原始檔案"
           }
         }
       }
@@ -13454,6 +13554,106 @@
           "stringUnit": {
             "state": "translated",
             "value": "編輯"
+          }
+        }
+      }
+    },
+    "Edit reverted.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bearbeitung rückgängig gemacht."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edición revertida."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modification annulée."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pengeditan dibatalkan."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifica annullata."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編集を元に戻しました。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "편집이 취소되었습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bewerking ongedaan gemaakt."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edycja cofnięta."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edição revertida."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Правка отменена."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redigering återställd."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Düzenleme geri alındı."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Đã hoàn tác chỉnh sửa."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已撤销编辑。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已復原編輯。"
           }
         }
       }
@@ -16078,6 +16278,12 @@
             "value": "Hallo von Clipen"
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hello from Clipen"
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -16166,112 +16372,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "來自 Clipen 的問候"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hello from Clipen"
-          }
-        }
-      }
-    },
-    "Hide in popup": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Im Popup ausblenden"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ocultar en la ventana emergente"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Masquer dans la fenêtre"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sembunyikan di popup"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nascondi nel popup"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ポップアップで非表示"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "팝업에서 숨기기"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Verbergen in pop-up"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ukryj w wyskakującym oknie"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ocultar no pop-up"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Скрыть во всплывающем окне"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dölj i popup"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Açılır pencerede gizle"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ẩn trong cửa sổ bật lên"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在弹出窗口中隐藏"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在彈出視窗中隱藏"
           }
         }
       }
@@ -16472,6 +16572,206 @@
           "stringUnit": {
             "state": "translated",
             "value": "隱藏彈出視窗頂部的互動提示列"
+          }
+        }
+      }
+    },
+    "Hints in popup: Off": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hinweise im Popup: Aus"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sugerencias en la ventana emergente: Desactivadas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Indices dans la fenêtre : Désactivés"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Petunjuk di popup: Nonaktif"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suggerimenti nel popup: Disattivi"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ポップアップのヒント：オフ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "팝업 힌트: 꺼짐"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hints in pop-up: Uit"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Podpowiedzi w wyskakującym oknie: Wył."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dicas no pop-up: Desativado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подсказки во всплывающем окне: Выкл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tips i popup: Av"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Açılır penceredeki ipuçları: Kapalı"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gợi ý trong cửa sổ bật lên: Tắt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "弹出窗口提示：关闭"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "彈出視窗提示：關閉"
+          }
+        }
+      }
+    },
+    "Hints in popup: On": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hinweise im Popup: Ein"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sugerencias en la ventana emergente: Activadas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Indices dans la fenêtre : Activés"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Petunjuk di popup: Aktif"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suggerimenti nel popup: Attivi"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ポップアップのヒント：オン"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "팝업 힌트: 켜짐"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hints in pop-up: Aan"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Podpowiedzi w wyskakującym oknie: Wł."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dicas no pop-up: Ativado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Подсказки во всплывающем окне: Вкл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tips i popup: På"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Açılır penceredeki ipuçları: Açık"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gợi ý trong cửa sổ bật lên: Bật"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "弹出窗口提示：开启"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "彈出視窗提示：開啟"
           }
         }
       }
@@ -17608,16 +17908,16 @@
     },
     "Hold ⌘ and tap V to open the ring, then press 1 for All — your whole clipboard — or 2 onward for each collection you created.\nThe ring switches to that view instantly.": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hold ⌘ and tap V to open the ring, then press 1 for All — your whole clipboard — or 2 onward for each collection you created.\nThe ring switches to that view instantly."
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Halte ⌘ und tippe V, um den Ring zu öffnen, dann drücke 1 für „Alle“ — deine gesamte Zwischenablage — oder ab 2 für jede von dir erstellte Sammlung.\nDer Ring wechselt sofort zu dieser Ansicht."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hold ⌘ and tap V to open the ring, then press 1 for All — your whole clipboard — or 2 onward for each collection you created.\nThe ring switches to that view instantly."
           }
         },
         "es": {
@@ -18618,112 +18918,6 @@
         }
       }
     },
-    "Interaction sounds": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Interaktionstöne"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "Interaction sounds"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sonidos de interacción"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sons d'interaction"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Suara interaksi"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Suoni di interazione"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "操作音"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "상호작용 소리"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Interactiegeluiden"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dźwięki interakcji"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sons de interação"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Звуки взаимодействия"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Interaktionsljud"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Etkileşim sesleri"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Âm thanh tương tác"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "交互音效"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "互動音效"
-          }
-        }
-      }
-    },
     "Item marked and pinned to tray": {
       "localizations": {
         "de": {
@@ -18832,16 +19026,16 @@
     },
     "Items already in this collection follow the new name.": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Items already in this collection follow the new name."
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Objekte in dieser Sammlung übernehmen den neuen Namen."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Items already in this collection follow the new name."
           }
         },
         "es": {
@@ -19038,16 +19232,16 @@
     },
     "Items only in “%@” are deleted. Items that also live in another collection are kept there.": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Items only in “%@” are deleted. Items that also live in another collection are kept there."
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Objekte, die nur in „%@“ liegen, werden gelöscht. Objekte in weiteren Sammlungen bleiben dort erhalten."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Items only in “%@” are deleted. Items that also live in another collection are kept there."
           }
         },
         "es": {
@@ -19444,16 +19638,16 @@
     },
     "Keep here and file under %@ too": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keep here and file under %@ too"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Hier behalten und zusätzlich unter %@ ablegen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep here and file under %@ too"
           }
         },
         "es": {
@@ -20050,16 +20244,16 @@
     },
     "Leave %@, file under %@": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Leave %@, file under %@"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "%1$@ verlassen, unter %2$@ ablegen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leave %@, file under %@"
           }
         },
         "es": {
@@ -21668,16 +21862,16 @@
     },
     "Move to %@": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Move to %@"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Verschieben nach %@"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to %@"
           }
         },
         "es": {
@@ -21974,16 +22168,16 @@
     },
     "Moved to %@": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Moved to %@"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Nach %@ verschoben"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moved to %@"
           }
         },
         "es": {
@@ -22180,13 +22374,13 @@
     },
     "Name": {
       "localizations": {
-        "en": {
+        "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Name"
           }
         },
-        "de": {
+        "en": {
           "stringUnit": {
             "state": "translated",
             "value": "Name"
@@ -22284,18 +22478,218 @@
         }
       }
     },
-    "New": {
+    "Navigation sounds: Off": {
       "localizations": {
-        "en": {
+        "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "New"
+            "value": "Navigationstöne: Aus"
           }
         },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sonidos de navegación: Desactivados"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sons de navigation : Désactivés"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suara navigasi: Nonaktif"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suoni di navigazione: Disattivi"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ナビゲーション音：オフ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "탐색 소리: 꺼짐"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigatiegeluiden: Uit"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dźwięki nawigacji: Wył."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sons de navegação: Desativado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Звуки навигации: Выкл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigeringsljud: Av"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gezinme sesleri: Kapalı"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Âm thanh điều hướng: Tắt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导航音效：关闭"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "導覽音效：關閉"
+          }
+        }
+      }
+    },
+    "Navigation sounds: On": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigationstöne: Ein"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sonidos de navegación: Activados"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sons de navigation : Activés"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suara navigasi: Aktif"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suoni di navigazione: Attivi"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ナビゲーション音：オン"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "탐색 소리: 켜짐"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigatiegeluiden: Aan"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dźwięki nawigacji: Wł."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sons de navegação: Ativado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Звуки навигации: Вкл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Navigeringsljud: På"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gezinme sesleri: Açık"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Âm thanh điều hướng: Bật"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导航音效：开启"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "導覽音效：開啟"
+          }
+        }
+      }
+    },
+    "New": {
+      "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Neu"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New"
           }
         },
         "es": {
@@ -22392,16 +22786,16 @@
     },
     "New collection": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New collection"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Neue Sammlung"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New collection"
           }
         },
         "es": {
@@ -24404,16 +24798,16 @@
     },
     "Only %lld collections can exist at once.": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Only %lld collections can exist at once."
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Es sind nur %lld Sammlungen gleichzeitig möglich."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only %lld collections can exist at once."
           }
         },
         "es": {
@@ -29734,6 +30128,12 @@
             "value": "Drücke ⌘V — halte ⌘ gedrückt, während sich der Timer füllt, und der Clipen-Picker öffnet sich."
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press ⌘V — keep ⌘ held while the timer fills, and the Clipen picker opens."
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -29822,12 +30222,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "按下 ⌘V——在計時器填滿期間持續按住 ⌘，Clipen 選擇器即會開啟。"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Press ⌘V — keep ⌘ held while the timer fills, and the Clipen picker opens."
           }
         }
       }
@@ -30752,6 +31146,12 @@
             "value": "Clipen beenden"
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit Clipen"
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -30840,12 +31240,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "結束 Clipen"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quit Clipen"
           }
         }
       }
@@ -31964,16 +32358,16 @@
     },
     "Rename": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rename"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Umbenennen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename"
           }
         },
         "es": {
@@ -32070,16 +32464,16 @@
     },
     "Rename collection": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rename collection"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Sammlung umbenennen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename collection"
           }
         },
         "es": {
@@ -32176,16 +32570,16 @@
     },
     "Rename…": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rename…"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Umbenennen…"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rename…"
           }
         },
         "es": {
@@ -32688,6 +33082,12 @@
             "value": "Clipen neu starten, um die Sprache zu wechseln?"
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart Clipen to switch language?"
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -32776,12 +33176,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "重新啟動 Clipen 以切換語言？"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Restart Clipen to switch language?"
           }
         }
       }
@@ -32886,6 +33280,106 @@
         }
       }
     },
+    "Restore the content before last edit": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inhalt vor der letzten Bearbeitung wiederherstellen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurar el contenido antes de la última edición"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurer le contenu avant la dernière modification"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pulihkan konten sebelum pengeditan terakhir"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ripristina il contenuto prima dell'ultima modifica"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最後の編集前の内容を復元"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "마지막 편집 전 내용 복원"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inhoud herstellen van voor de laatste bewerking"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przywróć treść sprzed ostatniej edycji"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restaurar o conteúdo antes da última edição"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Восстановить содержимое до последней правки"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ innehållet före senaste redigeringen"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Son düzenlemeden önceki içeriği geri yükle"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Khôi phục nội dung trước lần chỉnh sửa cuối"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复上次编辑前的内容"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢復上次編輯前的內容"
+          }
+        }
+      }
+    },
     "Reverse key": {
       "localizations": {
         "de": {
@@ -32982,6 +33476,206 @@
           "stringUnit": {
             "state": "translated",
             "value": "反向鍵"
+          }
+        }
+      }
+    },
+    "Revert to Original": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auf Original zurücksetzen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revertir al original"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revenir à l'original"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kembalikan ke Asli"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ripristina l'originale"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元に戻す"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "원본으로 되돌리기"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terugzetten naar origineel"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przywróć oryginał"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reverter ao original"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вернуть оригинал"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställ till original"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Orijinale Geri Dön"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Khôi phục bản gốc"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复原始文件"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "還原為原始檔案"
+          }
+        }
+      }
+    },
+    "Reverted to original.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auf Original zurückgesetzt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revertido al original."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revenu à l'original."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dikembalikan ke asli."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ripristinato l'originale."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元に戻しました。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "원본으로 되돌렸습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Teruggezet naar origineel."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przywrócono oryginał."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revertido ao original."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Восстановлен оригинал."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Återställd till original."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Orijinale geri döndürüldü."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Đã khôi phục bản gốc."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已恢复原始文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已還原為原始檔案。"
           }
         }
       }
@@ -34894,106 +35588,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "在 Finder 中顯示"
-          }
-        }
-      }
-    },
-    "Show in popup": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Im Popup anzeigen"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mostrar en la ventana emergente"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Afficher dans la fenêtre"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Tampilkan di popup"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mostra nel popup"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ポップアップで表示"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "팝업에 표시"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Weergeven in pop-up"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pokaż w wyskakującym oknie"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mostrar no pop-up"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Показывать во всплывающем окне"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Visa i popup"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Açılır pencerede göster"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hiển thị trong cửa sổ bật lên"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在弹出窗口中显示"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在彈出視窗中顯示"
           }
         }
       }
@@ -37024,6 +37618,12 @@
             "value": "Clipen unterstützen"
           }
         },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Support Clipen"
+          }
+        },
         "es": {
           "stringUnit": {
             "state": "translated",
@@ -37113,27 +37713,21 @@
             "state": "translated",
             "value": "支持 Clipen"
           }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Support Clipen"
-          }
         }
       }
     },
     "Switch Collection": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switch Collection"
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Sammlung wechseln"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switch Collection"
           }
         },
         "es": {
@@ -40940,6 +41534,106 @@
         }
       }
     },
+    "Undo Edit": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bearbeitung rückgängig"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deshacer edición"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annuler la modification"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batalkan Edit"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Annulla modifica"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "編集を元に戻す"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "편집 실행 취소"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bewerking ongedaan"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cofnij edycję"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desfazer edição"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отменить правку"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ångra redigering"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Düzenlemeyi geri al"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hoàn tác chỉnh sửa"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "撤销编辑"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "復原編輯"
+          }
+        }
+      }
+    },
     "Ungroup": {
       "localizations": {
         "de": {
@@ -41348,16 +42042,16 @@
     },
     "Up to %lld collections.": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Up to %lld collections."
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "Bis zu %lld Sammlungen."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Up to %lld collections."
           }
         },
         "es": {
@@ -44466,16 +45160,16 @@
     },
     "“%@” already exists.": {
       "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "“%@” already exists."
-          }
-        },
         "de": {
           "stringUnit": {
             "state": "translated",
             "value": "„%@“ existiert bereits."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” already exists."
           }
         },
         "es": {
@@ -45998,607 +46692,7 @@
       }
     },
     "▌": {},
-    "✕": {},
-    "Revert to Original": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Auf Original zurücksetzen"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revertir al original"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revenir à l'original"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kembalikan ke Asli"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ripristina l'originale"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "元に戻す"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "원본으로 되돌리기"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Terugzetten naar origineel"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Przywróć oryginał"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Reverter ao original"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Вернуть оригинал"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Återställ till original"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Orijinale Geri Dön"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Khôi phục bản gốc"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "恢复原始文件"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "還原為原始檔案"
-          }
-        }
-      }
-    },
-    "Reverted to original.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Auf Original zurückgesetzt."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revertido al original."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revenu à l'original."
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dikembalikan ke asli."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ripristinato l'originale."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "元に戻しました。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "원본으로 되돌렸습니다."
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Teruggezet naar origineel."
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Przywrócono oryginał."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Revertido ao original."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Восстановлен оригинал."
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Återställd till original."
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Orijinale geri döndürüldü."
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Đã khôi phục bản gốc."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已恢复原始文件。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已還原為原始檔案。"
-          }
-        }
-      }
-    },
-    "Discard your edit, restore the original file": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bearbeitung verwerfen, Originaldatei wiederherstellen"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Descartar edición, restaurar el archivo original"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Annuler la modification, restaurer le fichier original"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Buang suntingan, pulihkan file asli"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Elimina la modifica, ripristina il file originale"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "編集を破棄し、元のファイルを復元"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "편집 삭제, 원본 파일 복원"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bewerking verwijderen, origineel bestand herstellen"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Odrzuć edycję, przywróć oryginalny plik"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Descartar edição, restaurar o arquivo original"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Отменить редактирование, восстановить оригинальный файл"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Förkasta redigering, återställ originalfilen"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Düzenlemeyi sil, orijinal dosyayı geri yükle"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hủy chỉnh sửa, khôi phục tệp gốc"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "放弃编辑，恢复原始文件"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "捨棄編輯，還原原始檔案"
-          }
-        }
-      }
-    },
-    "Undo Edit": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bearbeitung rückgängig"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Deshacer edición"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Annuler la modification"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Batalkan Edit"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Annulla modifica"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "編集を元に戻す"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "편집 실행 취소"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bewerking ongedaan"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cofnij edycję"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Desfazer edição"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Отменить правку"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ångra redigering"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Düzenlemeyi geri al"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hoàn tác chỉnh sửa"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "撤销编辑"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "復原編輯"
-          }
-        }
-      }
-    },
-    "Restore the content before last edit": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Inhalt vor der letzten Bearbeitung wiederherstellen"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Restaurar el contenido antes de la última edición"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Restaurer le contenu avant la dernière modification"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pulihkan konten sebelum pengeditan terakhir"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ripristina il contenuto prima dell'ultima modifica"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "最後の編集前の内容を復元"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "마지막 편집 전 내용 복원"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Inhoud herstellen van voor de laatste bewerking"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Przywróć treść sprzed ostatniej edycji"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Restaurar o conteúdo antes da última edição"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Восстановить содержимое до последней правки"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Återställ innehållet före senaste redigeringen"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Son düzenlemeden önceki içeriği geri yükle"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Khôi phục nội dung trước lần chỉnh sửa cuối"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "恢复上次编辑前的内容"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "恢復上次編輯前的內容"
-          }
-        }
-      }
-    },
-    "Edit reverted.": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bearbeitung rückgängig gemacht."
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Edición revertida."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Modification annulée."
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Pengeditan dibatalkan."
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Modifica annullata."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "編集を元に戻しました。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "편집이 취소되었습니다."
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bewerking ongedaan gemaakt."
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Edycja cofnięta."
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Edição revertida."
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Правка отменена."
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Redigering återställd."
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Düzenleme geri alındı."
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Đã hoàn tác chỉnh sửa."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已撤销编辑。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已復原編輯。"
-          }
-        }
-      }
-    }
+    "✕": {}
   },
   "version": "1.0"
 }

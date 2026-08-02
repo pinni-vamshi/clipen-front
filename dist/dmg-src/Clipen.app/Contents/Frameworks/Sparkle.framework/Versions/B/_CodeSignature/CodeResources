@@ -354,10 +354,10 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			kGMQRM4YnH/5mm+Kzzod1hlgBlg=
+			1OJwMwRE71ruhOslSEisuywzo14=
 			</data>
 			<key>requirement</key>
-			<string>anchor apple generic and identifier "Autoupdate-555549442167d38eb3283e31ba7a561e60dde15c" and (certificate leaf[field.1.2.840.113635.100.6.1.9] /* exists */ or certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2)</string>
+			<string>identifier Autoupdate and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
 		</dict>
 		<key>Resources/Base.lproj/Sparkle.strings</key>
 		<dict>
@@ -727,28 +727,28 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			yN0Ti3ey6o/rv+bUmtkE1NY5ILE=
+			hBmjO4qClfbHAQgtn0HL9aPEE/8=
 			</data>
 			<key>requirement</key>
-			<string>anchor apple generic and identifier "org.sparkle-project.Sparkle.Updater" and (certificate leaf[field.1.2.840.113635.100.6.1.9] /* exists */ or certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2)</string>
+			<string>identifier "org.sparkle-project.Sparkle.Updater" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
 		</dict>
 		<key>XPCServices/Downloader.xpc</key>
 		<dict>
 			<key>cdhash</key>
 			<data>
-			Jmo9ahHpniV9GDbetW0ALVmjyHI=
+			KCquJPDDRzTujuKZ2AokpLnz+90=
 			</data>
 			<key>requirement</key>
-			<string>anchor apple generic and identifier "org.sparkle-project.DownloaderService" and (certificate leaf[field.1.2.840.113635.100.6.1.9] /* exists */ or certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2)</string>
+			<string>identifier "org.sparkle-project.DownloaderService" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
 		</dict>
 		<key>XPCServices/Installer.xpc</key>
 		<dict>
 			<key>cdhash</key>
 			<data>
-			hHuysupaSNADHXlLCZ99m9hjR9o=
+			0425VxpkIGw2uohfqXhG0A1604s=
 			</data>
 			<key>requirement</key>
-			<string>anchor apple generic and identifier "org.sparkle-project.InstallerLauncher" and (certificate leaf[field.1.2.840.113635.100.6.1.9] /* exists */ or certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2)</string>
+			<string>identifier "org.sparkle-project.InstallerLauncher" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
 		</dict>
 	</dict>
 	<key>rules</key>

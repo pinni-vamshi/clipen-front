@@ -53,6 +53,16 @@ enum AppContextService {
         return value
     }
 
+    /// ASCII Record Separator (0x1E) — joins the AppleScript list explicitly
+    /// so `splitList` below has an unambiguous boundary to split on. Letting
+    /// `NSAppleScript` auto-coerce the returned list to a string instead
+    /// joins entries with a plain ", ", which silently corrupts the split
+    /// the moment any tab title or URL itself contains that substring
+    /// (extremely common — e.g. "Breaking News, Live Updates").
+    private static let joinScript = "set AppleScript's text item delimiters to (ASCII character 30)\n"
+        + "set joined to out as text\n"
+        + "return joined"
+
     static func allTabTexts(for bundleID: String) -> [String] {
         switch bundleID {
         case "com.apple.Safari":
@@ -64,7 +74,8 @@ enum AppContextService {
                             set end of out to ((name of t) & " || " & (URL of t))
                         end repeat
                     end repeat
-                    return out
+                    \(joinScript)
+                end tell
                 """) else { return [] }
             return splitList(raw)
 
@@ -80,7 +91,8 @@ enum AppContextService {
                             set end of out to ((title of t) & " || " & (URL of t))
                         end repeat
                     end repeat
-                    return out
+                    \(joinScript)
+                end tell
                 """) else { return [] }
             return splitList(raw)
 
@@ -91,7 +103,8 @@ enum AppContextService {
                     repeat with w in Finder windows
                         set end of out to (name of w)
                     end repeat
-                    return out
+                    \(joinScript)
+                end tell
                 """) else { return [] }
             return splitList(raw)
 
@@ -101,7 +114,7 @@ enum AppContextService {
     }
 
     private static func splitList(_ raw: String) -> [String] {
-        raw.components(separatedBy: ", ").filter { !$0.isEmpty }
+        raw.components(separatedBy: "\u{1E}").filter { !$0.isEmpty }
     }
 
     private static func accessibilityWindowTitle(forBundleID bundleID: String) -> String? {

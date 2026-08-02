@@ -59,6 +59,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
         Self.refreshLaunchServicesIfNewBuild()
+        Self.sweepStaleTempDirectories()
 
         // Second-instance guard. After a Sparkle-installed update, the old
         // process's kernel record can linger in the running-apps list for up
@@ -232,6 +233,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         d.set(currentBuild, forKey: key)
+    }
+
+    /// Both `ClipenQuickLook/` (QuickLookController's per-item preview files)
+    /// and `ClipenPromises/` (resolved drag-promise files) write a fresh
+    /// UUID-named subdirectory on every use and never clean up after
+    /// themselves — every entry is a throwaway, always regenerable on
+    /// demand, so the whole parent directory is safe to wipe wholesale on
+    /// each launch rather than tracking individual entries' lifetimes.
+    /// Best-effort, off the main thread, never blocks launch.
+    private static func sweepStaleTempDirectories() {
+        let tmp = FileManager.default.temporaryDirectory
+        let dirs = [tmp.appendingPathComponent("ClipenQuickLook", isDirectory: true),
+                    tmp.appendingPathComponent("ClipenPromises", isDirectory: true)]
+        DispatchQueue.global(qos: .utility).async {
+            for dir in dirs {
+                try? FileManager.default.removeItem(at: dir)
+            }
+        }
     }
 
     func openMainWindow(retriesLeft: Int = 8) {

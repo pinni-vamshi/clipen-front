@@ -1,7 +1,10 @@
 import AppKit
+import CommonCrypto
 import SwiftUI
 
 extension ClipboardManager {
+
+    private static let lastTrustedBinaryHashKey = "clipen.ax.lastTrustedBinaryHash"
 
     func attemptEventTap() {
         if eventTap != nil { return }
@@ -12,11 +15,50 @@ extension ClipboardManager {
 
         if AXIsProcessTrusted() {
             createEventTap()
+            saveBinaryHash()
         } else {
+            resetStaleTCCEntryIfNeeded()
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
             AXIsProcessTrustedWithOptions(opts as CFDictionary)
             scheduleNextPermissionRetry()
         }
+    }
+
+    private func resetStaleTCCEntryIfNeeded() {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let savedHash = UserDefaults.standard.string(forKey: Self.lastTrustedBinaryHashKey)
+        guard savedHash != nil else { return }
+        let currentHash = Self.binaryHash()
+        guard currentHash != savedHash else { return }
+        // This runs synchronously from `attemptEventTap()`, which
+        // `applicationDidFinishLaunching` calls directly on the main thread.
+        // tccutil + the TCC daemon round-trip can take a few seconds — a
+        // blocking `waitUntilExit()` here held up launch long enough that
+        // the app never created its menu bar item, i.e. "it doesn't open."
+        // Fire-and-forget on a background queue instead.
+        DispatchQueue.global(qos: .utility).async {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            proc.arguments = ["reset", "Accessibility", bundleID]
+            try? proc.run()
+            proc.waitUntilExit()
+        }
+    }
+
+    private func saveBinaryHash() {
+        if let hash = Self.binaryHash() {
+            UserDefaults.standard.set(hash, forKey: Self.lastTrustedBinaryHashKey)
+        }
+    }
+
+    private static func binaryHash() -> String? {
+        guard let path = Bundle.main.executablePath,
+              let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        var hash = [UInt8](repeating: 0, count: 32)
+        data.withUnsafeBytes { buf in
+            CC_SHA256(buf.baseAddress, CC_LONG(buf.count), &hash)
+        }
+        return hash.map { String(format: "%02x", $0) }.joined()
     }
 
     func scheduleNextPermissionRetry() {
@@ -28,6 +70,7 @@ extension ClipboardManager {
                 self.permissionRetryTimer = nil
                 self.permissionRetryBackoff = 1.0
                 self.createEventTap()
+                self.saveBinaryHash()
             } else {
                 self.permissionRetryBackoff = min(self.permissionRetryBackoff * 2, 30.0)
                 self.scheduleNextPermissionRetry()

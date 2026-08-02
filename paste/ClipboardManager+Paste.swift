@@ -641,10 +641,28 @@ extension ClipboardManager {
         return item
     }
 
+    /// `itemsIndex` is a position in `items` (the raw, unfiltered array).
+    /// Every call site is a direct item action from the main window or a
+    /// reference panel — never routed through the ⌘V ring popup — so this
+    /// pastes the item straight by identity, the same way
+    /// `pasteItemKeepingPopupOpen(id:)` does, instead of going through
+    /// `commitPaste()`'s `selectedIndex`/`displayItems` machinery.
+    ///
+    /// That machinery is scoped to the popup: `displayItems` can be a
+    /// DIFFERENT set/order than `items` (pin ordering, or a tag/collection/
+    /// search filter left over from an earlier popup session that never
+    /// resets on its own). Setting `selectedIndex` to a raw `items` index
+    /// against it either pastes the wrong item, or — once resolved by id —
+    /// silently pastes nothing at all when the target isn't currently in
+    /// `displayItems`. Neither can happen when the item is looked up and
+    /// pasted directly.
     func pasteItem(at itemsIndex: Int) {
         guard items.indices.contains(itemsIndex) else { return }
-        selectedIndex = itemsIndex
-        commitPaste()
+        let item = items[itemsIndex]
+        recordPasteAnalytics(item: item,
+                             displayIndex: displayItems.firstIndex(where: { $0.id == item.id }))
+        recordNudgePaste(kind: .single)
+        simulatePaste(item, target: resolvedPasteTarget())
     }
 
 }

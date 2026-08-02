@@ -52,7 +52,6 @@ extension ClipboardManager {
         items[idx].embedding = nil
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
-        CloudKitSyncEngine.shared.pushUpdate(items[idx])
     }
 
     static func editableAttributedString(for item: ClipboardItem) -> NSAttributedString? {
@@ -298,7 +297,6 @@ extension ClipboardManager {
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
         prewarmPreviewCaches(for: updated)
-        CloudKitSyncEngine.shared.pushUpdate(updated)
     }
 
     func evictFileSnapshots(for item: ClipboardItem) {
@@ -339,7 +337,6 @@ extension ClipboardManager {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         if items[idx].isPinned {
             items[idx].isPinned = false
-            CloudKitSyncEngine.shared.pushUpdate(items[idx])
             return
         }
         let pinnedCount = items.filter(\.isPinned).count
@@ -348,7 +345,6 @@ extension ClipboardManager {
             return
         }
         items[idx].isPinned = true
-        CloudKitSyncEngine.shared.pushUpdate(items[idx])
         _displayItems = nil
     }
 
@@ -365,7 +361,6 @@ extension ClipboardManager {
     func removeItem(at index: Int) {
         guard items.indices.contains(index) else { return }
         let item = items[index]
-        CloudKitSyncEngine.shared.pushDelete(itemID: item.id)
         evictFileSnapshots(for: item)
         evictCaches(for: item.id)
         items.remove(at: index)
@@ -373,7 +368,6 @@ extension ClipboardManager {
         if selectedIndex >= items.count { selectedIndex = max(0, items.count - 1) }
     }
     func clearAll() {
-        let ids = items.map(\.id)
         items.forEach {
             evictFileSnapshots(for: $0)
             evictCaches(for: $0.id)
@@ -381,9 +375,6 @@ extension ClipboardManager {
         items.removeAll()
         markBlobPurgeNeeded()
         selectedIndex = 0
-        for id in ids {
-            CloudKitSyncEngine.shared.pushDelete(itemID: id)
-        }
     }
 
     func evictCaches(for id: UUID) {
@@ -1107,7 +1098,6 @@ extension ClipboardManager {
                 // Now that items are populated, kick off the embedding backfill
                 // — it also lazily wakes the Neural-Engine model, on background.
                 self.recomputeEmbeddingsInBackground()
-                self.prewarmAllItems()
             }
         }
 
@@ -1137,7 +1127,6 @@ extension ClipboardManager {
                     // is finally in `items`, so auto-save/eviction may run.
                     self.isHistoryFullyLoaded = true
                     self.recomputeEmbeddingsInBackground()
-                    self.prewarmAllItems()
                 }
             }
             start = end

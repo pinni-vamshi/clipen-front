@@ -189,6 +189,8 @@ class QuickClipPanel: NSPanel {
         self.isMovableByWindowBackground = false
         self.isReleasedWhenClosed = false
         self.sharingType = .none
+        self.titlebarAppearsTransparent = true
+        self.titleVisibility = .hidden
 
         let hostingView = NSHostingView(
             rootView: QuickClipPanelContentView(
@@ -205,6 +207,8 @@ class QuickClipPanel: NSPanel {
                 },
                 onEndPreview: { ClipboardManager.shared.itemPreviewPanel.hide() }
             ))
+        hostingView.wantsLayer = true
+        hostingView.layer?.borderWidth = 0
         self.contentView = hostingView
 
         self.contentMinSize = Self.expandedMinSize
@@ -442,7 +446,6 @@ private struct QuickClipPanelContentView: View {
         }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
         .onChange(of: item.id) { _, _ in
             showSimilar = false
             similarItems = []
@@ -618,6 +621,7 @@ private struct ReferencePageContentView: View {
     @FocusState private var contentFocused: Bool
     @State private var editedRows: [[String]]
     @State private var savedRows: [[String]]
+    @State private var urlPreviewReloadToken = 0
 
     private func commitNote(_ value: String) {
         guard value != lastCommittedNote else { return }
@@ -782,12 +786,47 @@ private struct ReferencePageContentView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(8)
                 } else if isEditableText {
-                    TextEditor(text: $editedText)
-                        .font(.system(size: 12))
-                        .scrollContentBackground(.hidden)
-                        .focused($contentFocused)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(8)
+                    if case .text = item.content, let previewURL = ContentPreviewView.validWebURL(editedText) {
+                        VStack(spacing: 0) {
+                            TextEditor(text: $editedText)
+                                .font(.system(size: 12, design: .monospaced))
+                                .scrollContentBackground(.hidden)
+                                .focused($contentFocused)
+                                .frame(height: 54)
+                                .padding(8)
+                            Divider()
+                            HStack(spacing: 6) {
+                                Image(systemName: "link")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                Text("Website preview")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button {
+                                    urlPreviewReloadToken += 1
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 11, weight: .medium))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Reload preview for this URL")
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(.ultraThinMaterial)
+                            Divider()
+                            WebsitePreview(url: previewURL, reloadToken: urlPreviewReloadToken)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    } else {
+                        TextEditor(text: $editedText)
+                            .font(.system(size: 12))
+                            .scrollContentBackground(.hidden)
+                            .focused($contentFocused)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(8)
+                    }
                 } else {
                     QuickClipPreview(item: item)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

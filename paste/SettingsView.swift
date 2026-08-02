@@ -3,1054 +3,6 @@ import AppKit
 import Combine
 import UniformTypeIdentifiers
 
-enum InteractionDemo: String, CaseIterable, Identifiable {
-    case cycle, pinnedOpen, multiPaste, search, nextCategory
-    case spacePreview, pinPreview, transform, moveToFront, delete, reverseCycle
-    case cyclePinned, pinItem, group, collections
-    // Tutorial-only demos — three distinct paste animations, one per element,
-    // each with a progressively larger V-tap count (×1, ×2, ×3). Deliberately
-    // NOT reusing `.cycle`: they teach "reach the Nth item with N taps" and are
-    // wired only into the how-to-use flow, never the Settings interactions list.
-    case pasteOne, pasteTwo, pasteThree
-
-    var id: String { rawValue }
-
-    var keyLabel: String {
-        switch self {
-        case .cycle:        return "⌘ + tap V"
-        case .pinnedOpen:   return "⌘ + hold V"
-        case .multiPaste:   return "hold V"
-        case .search:       return "tap F"
-        case .nextCategory: return "tap `"
-        case .spacePreview: return "tap ␣"
-        case .pinPreview:   return "tap ␣ ×2"
-        case .transform:    return "tap X"
-        case .moveToFront:  return "tap C"
-        case .delete:       return "tap ⌫"
-        case .reverseCycle: return "⇧ + tap V"
-        case .cyclePinned:  return "tap P"
-        case .pinItem:      return "hold P"
-        case .group:        return "hold V → G"
-        case .collections:  return "⌘ + V → 1 – 9"
-        case .pasteOne:     return "⌘ + tap V"
-        case .pasteTwo:     return "⌘ + V ×2"
-        case .pasteThree:   return "⌘ + V ×3"
-        }
-    }
-
-    var title: String {
-        switch self {
-        case .cycle:        return "Open / Next Item"
-        case .pinnedOpen:   return "Open Pinned"
-        case .multiPaste:   return "Mark for Multi-Paste"
-        case .search:       return "Search"
-        case .nextCategory: return "Next Category"
-        case .spacePreview: return "Preview"
-        case .pinPreview:   return "Refer (Pin Preview)"
-        case .transform:    return "Transform"
-        case .moveToFront:  return "Move to Front"
-        case .delete:       return "Delete"
-        case .reverseCycle: return "Previous Item"
-        case .cyclePinned:  return "Cycle Pinned"
-        case .pinItem:      return "Pin / Unpin"
-        case .group:        return "Group Marked"
-        case .collections:  return "Switch Collection"
-        case .pasteOne:     return "Paste 1st Item"
-        case .pasteTwo:     return "Paste 2nd Item"
-        case .pasteThree:   return "Paste 3rd Item"
-        }
-    }
-
-    var caption: String {
-        switch self {
-        case .cycle:        return "Hold ⌘ and tap V to open the popup; each tap moves to the next item.\nRelease ⌘ to paste the highlighted item."
-        case .pinnedOpen:   return "HOLD V on the very first press — the popup opens pinned.\nReleasing ⌘ keeps it open; click ✕ or press Esc to close."
-        case .multiPaste:   return "With the popup open, HOLD V to mark the highlighted item.\nRelease ⌘ to paste every marked item, in marking order."
-        case .search:       return "Tap F while the popup is open to enter search mode.\nType to filter the list by contents."
-        case .nextCategory: return "Tap ` to step to the next category one at a time.\nKeeps going through each category and wraps back to Recents."
-        case .spacePreview: return "Tap Space to preview the highlighted item full-size.\nTap Space again to close — nothing is pasted."
-        case .pinPreview:   return "Double-tap Space on the highlighted item.\nSends it to the Reference panel — the popup closes, the preview stays."
-        case .transform:    return "Tap X to open the tools, tap X again to cycle them.\n⇧X steps back · hold X closes · release ⌘ pastes the result."
-        case .moveToFront:  return "Tap C to move the highlighted item to the front of the ring.\nThe selection stays put — keep tapping C to promote a run of items."
-        case .delete:       return "Tap ⌫ to remove the highlighted item from the ring.\nThe next item slides into its place."
-        case .reverseCycle: return "Hold ⌘ and tap ⇧V.\nMoves to the previous item instead of the next."
-        case .cyclePinned:  return "Tap P to jump between PINNED items only, wrapping at the end.\nUnpinned items in between are skipped entirely."
-        case .pinItem:      return "HOLD P to pin the highlighted item (or unpin it if already pinned).\nUp to 5 items can be pinned at once."
-        case .group:        return "Mark a few items (hold V on each), then tap G.\nThey fold into one group at the first-marked spot — paste, share or ungroup it as one."
-        case .collections:  return "Hold ⌘ and tap V to open the ring, then press 1 for All — your whole clipboard — or 2 onward for each collection you created.\nThe ring switches to that view instantly."
-        case .pasteOne:     return "Hold ⌘ and tap V once to land on the top item.\nRelease ⌘ to paste it."
-        case .pasteTwo:     return "Hold ⌘ and tap V twice to reach the second item.\nRelease ⌘ to paste it."
-        case .pasteThree:   return "Hold ⌘ and tap V three times to reach the third item.\nRelease ⌘ to paste it."
-        }
-    }
-
-    var heroKeys: [LabKey] {
-        switch self {
-        case .cycle:        return [.cmd, .v]
-        case .pinnedOpen:   return [.v]
-        case .multiPaste:   return [.cmd, .v]
-        case .search:       return [.cmd, .f]
-        case .nextCategory: return [.cmd, .grave]
-        case .spacePreview: return [.cmd, .space]
-        case .pinPreview:   return [.cmd, .space]
-        case .transform:    return [.cmd, .x]
-        case .moveToFront:  return [.cmd, .c]
-        case .delete:       return [.cmd, .backspace]
-        case .reverseCycle: return [.cmd, .shift, .v]
-        case .cyclePinned:  return [.cmd, .v, .p]
-        case .pinItem:      return [.cmd, .v, .p]
-        case .group:        return [.cmd, .v, .g]
-        case .collections:  return [.cmd, .v, .one, .two]
-        case .pasteOne, .pasteTwo, .pasteThree: return [.cmd, .v]
-        }
-    }
-}
-
-enum LabKey: String, Identifiable, Hashable {
-    case cmd, v, x, f, c, b, p, g, shift, space, backspace, one, two, grave
-
-    var id: String { rawValue }
-
-    var symbol: String {
-        switch self {
-        case .cmd:       return "⌘"
-        case .v:         return "V"
-        case .x:         return "X"
-        case .f:         return "F"
-        case .c:         return "C"
-        case .b:         return "B"
-        case .p:         return "P"
-        case .g:         return "G"
-        case .shift:     return "⇧"
-        case .space:     return "SPACE"
-        case .backspace: return "⌫"
-        case .one:       return "1"
-        case .two:       return "2"
-        case .grave:     return "`"
-        }
-    }
-
-    var isWide: Bool { self == .space }
-
-    /// The real MacBook-keyboard key id(s) (`KBKey.id` in InteractionLab's
-    /// keyboard panel) that light up in sync with this lab key's press
-    /// animation, so the actual keyboard visibly "plays along" with the demo
-    /// instead of only the popup's own small keycap row moving.
-    var kbKeyIDs: [String] {
-        switch self {
-        case .cmd:       return ["LCMD"]
-        case .v:         return ["V"]
-        case .x:         return ["X"]
-        case .f:         return ["F"]
-        case .c:         return ["C"]
-        case .b:         return ["B"]
-        case .p:         return ["P"]
-        case .g:         return ["G"]
-        case .shift:     return ["LSHIFT", "RSHIFT"]
-        case .space:     return ["SPACE"]
-        case .backspace: return ["DELETE"]
-        case .one:       return ["1"]
-        case .two:       return ["2"]
-        case .grave:     return ["GRAVE"]
-        }
-    }
-}
-
-@MainActor
-final class InteractionLabController: ObservableObject {
-
-    struct LabItem: Identifiable, Equatable {
-        let id = UUID()
-        var title: String
-        var mark: Int? = nil
-        var pin: Bool = false
-    }
-
-    static func defaultItems() -> [LabItem] {
-        [LabItem(title: "History item 1"),
-         LabItem(title: "History item 2"),
-         LabItem(title: "History item 3")]
-    }
-
-    @Published var selectedDemo: InteractionDemo = .cycle
-    @Published var isPlaying = false
-
-    /// When true (the default), the InteractionLab keyboard panel mirrors
-    /// pressedKeys onto the REAL keyboard tiles instead of the popup's own
-    /// small keycap row — the two are mutually exclusive so only one thing
-    /// is visibly "playing" the gesture at a time.
-    @Published var syncRealKeyboard = true
-
-    @Published var pressedKeys: Set<LabKey> = []
-    @Published var stageKeys: [LabKey] = [.cmd, .v]
-
-    @Published var panelVisible = false
-    @Published var items: [LabItem] = InteractionLabController.defaultItems()
-    @Published var selectedIndex = 0
-    @Published var showCloseButton = false
-    @Published var searchActive = false
-    @Published var activeTab = 0
-
-    @Published var previewVisible = false
-    @Published var transformVisible = false
-    @Published var activeTransform: Int? = nil
-    @Published var transformLabels = ["Capitalize", "Small Case", "Base64"]
-
-    @Published var resultText: String? = nil
-    @Published var instruction: LocalizedStringKey? = nil
-
-    /// Drives the small "tap counter" pips shown during the paste demos:
-    /// `pasteTapTarget` is how many V taps this element needs (0 = not a paste
-    /// demo, hide the pips), `pasteTapDone` is how many have played so far.
-    @Published var pasteTapTarget = 0
-    @Published var pasteTapDone = 0
-
-    private var task: Task<Void, Never>? = nil
-    private let tabNames = ["Recents", "Image"]
-
-    var currentCaption: String {
-        if selectedDemo == .reverseCycle, ClipboardManager.shared.reverseCycleUsesB {
-            return "Hold ⌘ and tap B to move to the previous item.\nHOLD B to mark the item and step back in one go."
-        }
-        return selectedDemo.caption
-    }
-
-    func select(_ demo: InteractionDemo) {
-        selectedDemo = demo
-        play()
-    }
-
-    func play() {
-        task?.cancel()
-        resetStage()
-        let demo = selectedDemo
-        stageKeys = demo.heroKeys
-        isPlaying = true
-        task = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                do {
-                    try await self.run(demo)
-                    try await self.pause(900)
-                } catch {
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                self.resetStage()
-                self.stageKeys = demo.heroKeys
-            }
-        }
-    }
-
-    func stop() {
-        task?.cancel()
-        task = nil
-        resetStage()
-        isPlaying = false
-    }
-
-    private func resetStage() {
-        pressedKeys = []
-        panelVisible = false
-        items = Self.defaultItems()
-        selectedIndex = 0
-        showCloseButton = false
-        searchActive = false
-        activeTab = 0
-        previewVisible = false
-        transformVisible = false
-        activeTransform = nil
-        transformLabels = ["Capitalize", "Small Case", "Base64"]
-        resultText = nil
-        instruction = nil
-        pasteTapTarget = 0
-        pasteTapDone = 0
-    }
-
-    private func hint(_ text: LocalizedStringKey?) {
-        withAnimation(.easeOut(duration: 0.2)) { instruction = text }
-    }
-
-    private func pause(_ ms: UInt64) async throws {
-        try await Task.sleep(nanoseconds: ms * 1_000_000)
-        try Task.checkCancellation()
-    }
-
-    private func press(_ key: LabKey) {
-        withAnimation(.easeOut(duration: 0.1)) { _ = pressedKeys.insert(key) }
-    }
-
-    private func release(_ key: LabKey) {
-        withAnimation(.easeOut(duration: 0.1)) { _ = pressedKeys.remove(key) }
-    }
-
-    private func tap(_ key: LabKey, hold: UInt64 = 200) async throws {
-        press(key)
-        try await pause(hold)
-        release(key)
-    }
-
-    private func showPanel(_ visible: Bool) {
-        withAnimation(.easeOut(duration: 0.25)) { panelVisible = visible }
-    }
-
-    private func selectItem(_ index: Int) {
-        withAnimation(.easeOut(duration: 0.15)) { selectedIndex = index }
-    }
-
-    private func finish(_ key: String.LocalizationValue, _ args: CVarArg...) {
-        let template = String(localized: key)
-        let text = args.isEmpty ? template : String(format: template, arguments: args)
-        withAnimation(.easeOut(duration: 0.25)) { resultText = text }
-    }
-
-    private func run(_ demo: InteractionDemo) async throws {
-        switch demo {
-        case .cycle:         try await runCycle()
-        case .pinnedOpen:    try await runPinnedOpen()
-        case .multiPaste:    try await runMultiPaste()
-        case .search:        try await runSearch()
-        case .nextCategory:  try await runNextCategory()
-        case .spacePreview:  try await runSpacePreview()
-        case .pinPreview:    try await runPinPreview()
-        case .transform:     try await runTransform()
-        case .moveToFront:   try await runMoveToFront()
-        case .delete:        try await runDelete()
-        case .reverseCycle:  try await runReverseCycle()
-        case .cyclePinned:   try await runCyclePinned()
-        case .pinItem:       try await runPinItem()
-        case .group:         try await runGroup()
-        case .collections:   try await runCollections()
-        case .pasteOne:      try await runPasteOne()
-        case .pasteTwo:      try await runPasteTwo()
-        case .pasteThree:    try await runPasteThree()
-        }
-    }
-
-    // MARK: - Tutorial paste demos (distinct from runCycle)
-    //
-    // Three separate animations, one per element. Each reaches a deeper item
-    // by adding one more V tap: element 1 = one tap, element 2 = two taps,
-    // element 3 = three taps. Kept as their own functions on purpose so the
-    // choreography (tap count, pacing, the counter pips) can differ per element
-    // without ever touching the shared `.cycle` demo.
-
-    /// Element 1 — a single V tap lands on the top item.
-    private func runPasteOne() async throws {
-        stageKeys = [.cmd, .v]
-        pasteTapTarget = 1
-        pasteTapDone = 0
-        press(.cmd)
-        try await pause(450)
-        hint("Tap V once")
-        showPanel(true)
-        try await pause(250)
-        try await tap(.v)
-        pasteTapDone = 1
-        selectItem(0)
-        try await pause(650)
-        hint("Release ⌘ to paste")
-        try await pause(550)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("Pasted “%@”", items[0].title)
-        pasteTapTarget = 0
-    }
-
-    /// Element 2 — two V taps step down to the second item.
-    private func runPasteTwo() async throws {
-        stageKeys = [.cmd, .v]
-        pasteTapTarget = 2
-        pasteTapDone = 0
-        press(.cmd)
-        try await pause(450)
-        hint("Tap V twice")
-        showPanel(true)
-        try await pause(250)
-        try await tap(.v)
-        pasteTapDone = 1
-        selectItem(0)
-        try await pause(360)
-        try await tap(.v)
-        pasteTapDone = 2
-        selectItem(1)
-        try await pause(650)
-        hint("Release ⌘ to paste")
-        try await pause(500)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("Pasted “%@”", items[1].title)
-        pasteTapTarget = 0
-    }
-
-    /// Element 3 — three V taps walk all the way to the third item.
-    private func runPasteThree() async throws {
-        stageKeys = [.cmd, .v]
-        pasteTapTarget = 3
-        pasteTapDone = 0
-        press(.cmd)
-        try await pause(450)
-        hint("Tap V three times")
-        showPanel(true)
-        try await pause(250)
-        try await tap(.v)
-        pasteTapDone = 1
-        selectItem(0)
-        try await pause(320)
-        try await tap(.v)
-        pasteTapDone = 2
-        selectItem(1)
-        try await pause(320)
-        try await tap(.v)
-        pasteTapDone = 3
-        selectItem(2)
-        try await pause(650)
-        hint("Release ⌘ to paste")
-        try await pause(500)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("Pasted “%@”", items[2].title)
-        pasteTapTarget = 0
-    }
-
-    private func runCycle() async throws {
-        stageKeys = [.cmd, .v]
-        press(.cmd)
-        try await pause(400)
-        hint("Release ⌘ to paste")
-        showPanel(true)
-        try await tap(.v)
-        try await pause(400)
-        var idx = 0
-        for _ in 0..<2 {
-            try await tap(.v)
-            idx = (idx + 1) % items.count
-            selectItem(idx)
-            try await pause(450)
-        }
-        try await pause(300)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("Pasted “%@”", items[idx].title)
-    }
-
-    private func runPinnedOpen() async throws {
-        stageKeys = [.cmd, .v]
-        press(.cmd)
-        try await pause(400)
-        hint("Double tap to paste")
-        showPanel(true)
-        press(.v)
-        try await pause(600)
-        withAnimation(.easeOut(duration: 0.2)) { showCloseButton = true }
-        try await pause(600)
-        release(.v)
-        try await pause(1000)
-        release(.cmd)
-        finish("Item marked and pinned to tray")
-        try await pause(1600)
-    }
-
-    private func runMultiPaste() async throws {
-        stageKeys = [.cmd, .v]
-        press(.cmd)
-        try await pause(400)
-        hint("Release ⌘ to paste")
-        showPanel(true)
-        try await tap(.v)
-        try await pause(400)
-        press(.v)
-        try await pause(600)
-        release(.v)
-        withAnimation(.easeOut(duration: 0.15)) { items[0].mark = 1 }
-        try await pause(450)
-        try await tap(.v)
-        selectItem(1)
-        try await pause(350)
-        try await tap(.v)
-        selectItem(2)
-        try await pause(350)
-        press(.v)
-        try await pause(600)
-        release(.v)
-        withAnimation(.easeOut(duration: 0.15)) { items[2].mark = 2 }
-        try await pause(1000)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("2 items pasted together")
-    }
-
-    private func runSearch() async throws {
-        stageKeys = [.cmd, .v, .f]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        try await pause(400)
-        hint("Type to search")
-        try await tap(.f)
-        withAnimation(.easeOut(duration: 0.15)) { searchActive = true }
-        try await pause(1800)
-        finish("Search active — type to filter")
-        try await pause(1200)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-    }
-
-    private func runNextCategory() async throws {
-        // Show all three keys: ⌘ opens, V lights up as the popup appears, then
-        // ` steps through the categories one at a time.
-        stageKeys = [.cmd, .v, .grave]
-        press(.cmd)
-        try await pause(350)
-        hint("Tap V to open")
-        try await tap(.v)
-        showPanel(true)
-        try await pause(650)
-        hint("Tap ` for the next category")
-        try await pause(250)
-        // Start on Recents, step to each category one tap at a time, then wrap.
-        for tab in [1, 0] {
-            try await tap(.grave)
-            withAnimation(.easeOut(duration: 0.15)) {
-                activeTab = tab
-                for idx in items.indices {
-                    items[idx].title = "\(tabNames[tab]) item \(idx + 1)"
-                    items[idx].mark = nil
-                }
-                selectedIndex = 0
-            }
-            try await pause(800)
-        }
-        finish("Stepped through every category with `")
-        try await pause(900)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-    }
-
-    private func runSpacePreview() async throws {
-        stageKeys = [.cmd, .v, .space]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        try await pause(350)
-        try await tap(.v)
-        selectItem(1)
-        try await pause(550)
-        try await tap(.space)
-        withAnimation(.easeOut(duration: 0.25)) { previewVisible = true }
-        try await pause(1100)
-        try await tap(.space)
-        withAnimation(.easeOut(duration: 0.25)) { previewVisible = false }
-        try await pause(500)
-        release(.cmd)
-        showPanel(false)
-        finish("Previewed “%@”, no paste", items[1].title)
-    }
-
-    private func runPinPreview() async throws {
-        stageKeys = [.cmd, .v, .space]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        try await pause(350)
-        try await tap(.v)
-        selectItem(1)
-        try await pause(450)
-        try await tap(.space, hold: 140)
-        withAnimation(.easeOut(duration: 0.2)) { previewVisible = true }
-        try await pause(140)
-        try await tap(.space, hold: 140)
-        showPanel(false)
-        release(.cmd)
-        finish("Pinned “%@” to tray", items[1].title)
-        try await pause(1400)
-    }
-
-    private func runTransform() async throws {
-        stageKeys = [.cmd, .v, .x]
-        press(.cmd)
-        try await pause(400)
-        hint("Release ⌘ to paste")
-        showPanel(true)
-        try await tap(.v)
-        try await pause(350)
-        try await tap(.v)
-        selectItem(1)
-        try await pause(400)
-        try await tap(.x)
-        withAnimation(.easeOut(duration: 0.25)) { transformVisible = true }
-        try await pause(500)
-        var chosen = 0
-        for i in 0..<3 {
-            try await tap(.x)
-            withAnimation(.easeOut(duration: 0.12)) { activeTransform = i }
-            chosen = i
-            try await pause(400)
-        }
-        release(.cmd)
-        let applied = transformLabels[chosen]
-        withAnimation { transformLabels[chosen] = "Applying \(applied)…" }
-        try await pause(550)
-        showPanel(false)
-        withAnimation(.easeOut(duration: 0.25)) { transformVisible = false }
-        hint(nil)
-        finish("%@ applied → pasted", applied)
-    }
-
-    private func runMoveToFront() async throws {
-        stageKeys = [.cmd, .v, .c]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        try await pause(350)
-        try await tap(.v)
-        selectItem(1)
-        try await pause(500)
-        try await tap(.c)
-        withAnimation(.easeOut(duration: 0.3)) {
-            let moved = items.remove(at: 1)
-            items.insert(moved, at: 0)
-            selectedIndex = 2
-        }
-        try await pause(1000)
-        release(.cmd)
-        showPanel(false)
-        finish("“%@” moved to front — selection stays on the next item", items[0].title)
-    }
-
-    private func runDelete() async throws {
-        stageKeys = [.cmd, .v, .backspace]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        try await pause(350)
-        try await tap(.v)
-        selectItem(1)
-        try await pause(500)
-        let removedTitle = items[1].title
-        try await tap(.backspace)
-        _ = withAnimation(.easeOut(duration: 0.25)) {
-            items.remove(at: 1)
-        }
-        selectItem(min(1, items.count - 1))
-        try await pause(1000)
-        release(.cmd)
-        showPanel(false)
-        finish("“%@” removed from the ring", removedTitle)
-    }
-
-    private func runReverseCycle() async throws {
-        let usesB = ClipboardManager.shared.reverseCycleUsesB
-        stageKeys = usesB ? [.cmd, .v, .b] : [.cmd, .shift, .v]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        try await pause(400)
-        if !usesB {
-            press(.shift)
-            try await pause(200)
-        }
-        var idx = 0
-        for _ in 0..<2 {
-            try await tap(usesB ? .b : .v)
-            idx = (idx - 1 + items.count) % items.count
-            selectItem(idx)
-            try await pause(450)
-        }
-        if !usesB {
-            release(.shift)
-        }
-        try await pause(300)
-        release(.cmd)
-        showPanel(false)
-        finish("Pasted “%@”", items[idx].title)
-    }
-
-    private func runCyclePinned() async throws {
-        stageKeys = [.cmd, .v, .p]
-        items[0].pin = true
-        items[2].pin = true
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        selectItem(0)
-        try await pause(500)
-        hint("Tap P to jump between pins")
-        try await tap(.p)
-        try await pause(500)
-        try await tap(.p)
-        selectItem(2)
-        try await pause(500)
-        try await tap(.p)
-        selectItem(0)
-        try await pause(800)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("Cycled between 2 pinned items — the unpinned one was skipped")
-    }
-
-    private func runPinItem() async throws {
-        stageKeys = [.cmd, .v, .p]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        try await pause(350)
-        try await tap(.v)
-        selectItem(1)
-        try await pause(450)
-        hint("Hold P to pin")
-        press(.p)
-        try await pause(650)
-        withAnimation(.easeOut(duration: 0.2)) { items[1].pin = true }
-        try await pause(400)
-        release(.p)
-        try await pause(700)
-        hint("Hold P again to unpin")
-        press(.p)
-        try await pause(650)
-        withAnimation(.easeOut(duration: 0.2)) { items[1].pin = false }
-        try await pause(400)
-        release(.p)
-        try await pause(700)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("Hold P pins the highlighted item — hold again to unpin")
-    }
-
-    private func runGroup() async throws {
-        stageKeys = [.cmd, .v, .g]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        try await tap(.v)
-        try await pause(300)
-        hint("Hold V to mark items")
-        // Mark the first item.
-        press(.v)
-        try await pause(550)
-        release(.v)
-        withAnimation(.easeOut(duration: 0.15)) { items[0].mark = 1 }
-        try await pause(400)
-        // Move down and mark the second.
-        try await tap(.v)
-        selectItem(1)
-        try await pause(300)
-        press(.v)
-        try await pause(550)
-        release(.v)
-        withAnimation(.easeOut(duration: 0.15)) { items[1].mark = 2 }
-        try await pause(500)
-        hint("Tap G to group them")
-        try await tap(.g)
-        // Collapse the marked items into a single group entry.
-        withAnimation(.easeOut(duration: 0.35)) {
-            items = [LabItem(title: "Group · 2 items")]
-            selectedIndex = 0
-        }
-        try await pause(500)
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("2 items folded into one group")
-    }
-
-    /// 1–5 swaps which collection the ring is showing. The demo starts in
-    /// "All", narrows to a collection, then flips back with the same key.
-    private func runCollections() async throws {
-        stageKeys = [.cmd, .v, .one, .two]
-        press(.cmd)
-        try await pause(400)
-        showPanel(true)
-        // Same opening as every other gesture: ⌘ held, then a V tap actually
-        // opens the ring. Only then do the number keys come into play.
-        try await tap(.v)
-        try await pause(400)
-        hint("All — your whole clipboard")
-        try await pause(700)
-
-        hint("Press 2 for your first collection")
-        try await tap(.two)
-        withAnimation(.easeOut(duration: 0.3)) {
-            items = [LabItem(title: "Work note"),
-                     LabItem(title: "Work screenshot")]
-            selectedIndex = 0
-        }
-        try await pause(800)
-
-        hint("Press 1 for All again")
-        try await tap(.one)
-        withAnimation(.easeOut(duration: 0.3)) {
-            items = Self.defaultItems()
-            selectedIndex = 0
-        }
-        try await pause(500)
-
-        release(.cmd)
-        showPanel(false)
-        hint(nil)
-        finish("1 is All, 2 onward are your collections")
-    }
-}
-
-struct LabKeyCapView: View {
-    let key: LabKey
-    let pressed: Bool
-    var size: CGFloat = 44
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-            .fill(pressed ? Color.accent : Color.surfaceHi)
-            .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                .stroke(Color.border, lineWidth: 1))
-            .frame(width: key.isWide ? size * 2.2 : size, height: size)
-            .shadow(color: .black.opacity(pressed ? 0 : 0.45), radius: 0, y: pressed ? 0 : 4)
-            .overlay(
-                Text(key.symbol)
-                    .font(.system(size: key.isWide ? size * 0.26 : size * 0.42, weight: .semibold))
-                    .foregroundColor(pressed ? .white : .textPri)
-            )
-            .offset(y: pressed ? 4 : 0)
-    }
-}
-
-private struct LabMockPanel: View {
-    @ObservedObject var lab: InteractionLabController
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").font(.system(size: 9))
-                if lab.searchActive {
-                    Text("Type to search")
-                        .font(.system(size: 9))
-                    Rectangle().fill(Color.textPri).frame(width: 1, height: 10)
-                        .opacity(0.9)
-                } else {
-                    Text("Press F to search").font(.system(size: 9))
-                }
-                Spacer()
-            }
-            .foregroundColor(lab.searchActive ? .textPri : .textDim)
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(lab.searchActive ? Color.accent.opacity(0.10) : Color.clear)
-
-            Divider().background(Color.border)
-
-            HStack(spacing: 5) {
-                ForEach(0..<2, id: \.self) { i in
-                    Text(["Recents", "Image"][i])
-                        .font(.system(size: 8, weight: lab.activeTab == i ? .bold : .regular))
-                        .foregroundColor(lab.activeTab == i ? .white : .textDim)
-                        .lineLimit(1).fixedSize()
-                        .padding(.horizontal, 7).padding(.vertical, 3)
-                        .background(lab.activeTab == i ? Color.accent : Color.surfaceHi,
-                                    in: Capsule())
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 8).padding(.vertical, 6)
-
-            Divider().background(Color.border)
-
-            VStack(spacing: 3) {
-                ForEach(Array(lab.items.enumerated()), id: \.element.id) { idx, item in
-                    HStack {
-                        Text(item.title)
-                            .font(.system(size: 10, weight: idx == lab.selectedIndex ? .semibold : .regular))
-                            .foregroundColor(idx == lab.selectedIndex ? .white : .textSec)
-                        Spacer()
-                        if item.pin {
-                            Image(systemName: "pin.fill")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 15, height: 15)
-                                .background(Color.blue, in: Circle())
-                        }
-                        if let mark = item.mark {
-                            Text("\(mark)")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 5).padding(.vertical, 1.5)
-                                .background(Color.green, in: Capsule())
-                        }
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 7)
-                    .background(idx == lab.selectedIndex ? Color.accent : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 6))
-                }
-            }
-            .padding(5)
-
-            Spacer(minLength: 0)
-        }
-        .frame(width: 190, height: 158)
-        .background(Color.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.border, lineWidth: 1))
-        .overlay(alignment: .topLeading) {
-            if lab.showCloseButton {
-                Text("✕")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 20, height: 20)
-                    .background(Color.accent, in: Circle())
-                    .offset(x: -8, y: -8)
-                    .transition(.scale.combined(with: .opacity))
-            }
-        }
-        .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
-    }
-}
-
-private struct LabSidePanel: View {
-    @ObservedObject var lab: InteractionLabController
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if lab.previewVisible {
-                Text("Preview").font(.system(size: 10, weight: .bold)).foregroundColor(.textPri)
-                Text("Full text content of the selected item.")
-                    .font(.system(size: 9)).foregroundColor(.textDim)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            } else {
-                ForEach(Array(lab.transformLabels.enumerated()), id: \.offset) { idx, label in
-                    Text(label)
-                        .font(.system(size: 9, weight: lab.activeTransform == idx ? .semibold : .regular))
-                        .foregroundColor(lab.activeTransform == idx ? .white : .textDim)
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(lab.activeTransform == idx ? Color.accent : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 5))
-                }
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(10)
-        .frame(width: 120, height: 158, alignment: .topLeading)
-        .background(Color.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.border, lineWidth: 1))
-        .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
-        .transition(.opacity.combined(with: .move(edge: .leading)))
-    }
-}
-
-struct InteractionLabStage: View {
-    @ObservedObject var lab: InteractionLabController
-    /// Hides just the small animated keycap row at the bottom (⌘ V X …) —
-    /// everything above it (mock panel, instruction, caption, result) always
-    /// plays. Used by the Settings keyboard panel, which shows that same
-    /// press animation on the real keyboard tiles instead when this is off.
-    var showKeyRow: Bool = true
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Text(lab.instruction ?? LocalizedStringKey(" "))
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(Color.white.opacity(0.16), in: Capsule())
-                .opacity(lab.instruction == nil ? 0 : 1)
-                .frame(height: 20)
-
-            ZStack {
-                LabMockPanel(lab: lab)
-                    .opacity(lab.panelVisible ? 1 : 0)
-                    .offset(x: (lab.previewVisible || lab.transformVisible) ? -66 : 0)
-                    .animation(.easeOut(duration: 0.25),
-                               value: lab.previewVisible || lab.transformVisible)
-                LabSidePanel(lab: lab)
-                    .opacity((lab.previewVisible || lab.transformVisible) ? 1 : 0)
-                    .offset(x: 101)
-            }
-            .frame(height: 190)
-            .frame(maxWidth: .infinity)
-
-            Text(lab.resultText.map { "→ \($0)" } ?? " ")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.green)
-                .opacity(lab.resultText == nil ? 0 : 1)
-                .frame(height: 16)
-
-            Text(LocalizedStringKey(lab.currentCaption))
-                .font(.system(size: 11))
-                .foregroundColor(.textSec)
-                .multilineTextAlignment(.center)
-                .frame(height: 30)
-
-            if showKeyRow {
-                VStack(spacing: 8) {
-                    HStack(spacing: 10) {
-                        ForEach(lab.stageKeys) { key in
-                            LabKeyCapView(key: key, pressed: lab.pressedKeys.contains(key), size: 54)
-                        }
-                    }
-                    .frame(height: 58)
-
-                    // Paste-demo tap counter: V ● ● ● ×N. The row is ALWAYS present
-                    // at a fixed height and only its contents fade in/out — otherwise
-                    // inserting/removing it as the demo restarts (on every paste)
-                    // changed the stage height and shook the whole sheet up and down.
-                    ZStack {
-                        if lab.pasteTapTarget > 0 {
-                            HStack(spacing: 7) {
-                                Text("V").font(.system(size: 9, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.textDim)
-                                ForEach(0..<lab.pasteTapTarget, id: \.self) { i in
-                                    Circle()
-                                        .fill(i < lab.pasteTapDone ? Color.accent : Color.textDim.opacity(0.3))
-                                        .frame(width: 8, height: 8)
-                                        .scaleEffect(i == lab.pasteTapDone - 1 ? 1.4 : 1)
-                                        .animation(.spring(response: 0.25, dampingFraction: 0.5), value: lab.pasteTapDone)
-                                }
-                                Text("×\(lab.pasteTapTarget)").font(.system(size: 9, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.accent)
-                            }
-                        }
-                    }
-                    .frame(height: 20)
-                }
-                .padding(.top, 14)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .onAppear {
-            guard !lab.isPlaying else { return }
-            lab.play()
-        }
-    }
-}
-
-private extension View {
-    func measured<K: PreferenceKey>(_ key: K.Type) -> some View where K.Value == CGFloat {
-        background(GeometryReader { geo in
-            Color.clear.preference(key: key, value: geo.size.height)
-        })
-    }
-
-    func measuredWidth<K: PreferenceKey>(_ key: K.Type) -> some View where K.Value == CGFloat {
-        background(GeometryReader { geo in
-            Color.clear.preference(key: key, value: geo.size.width)
-        })
-    }
-}
 
 struct CollectionsWidthKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
@@ -1062,6 +14,12 @@ struct SettingsRow2HeightKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
+private enum CollectionAlertKind {
+    case new
+    case rename(String)
+    case delete(String)
+}
+
 struct ClipenSettingsView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
@@ -1071,13 +29,19 @@ struct ClipenSettingsView: View {
 
     @State private var row1Height: CGFloat = 0
 
-    @State private var showingNewCollection = false
     @State private var newCollectionName = ""
-    @State private var showingRenameCollection = false
-    @State private var renamingCollection: String? = nil
     @State private var renameCollectionText = ""
-    @State private var showingDeleteCollection = false
-    @State private var deletingCollection: String? = nil
+    /// One shared trigger for all three collection alerts. Chaining three
+    /// separate `.alert(isPresented:)` modifiers on the same view is the
+    /// cause of a real bug: SwiftUI only reliably tracks one alert's
+    /// presentation state per view identity, so after a handful of
+    /// presentations across the three, EVERY alert on this view — new,
+    /// rename, and delete alike — silently stops presenting at all,
+    /// with no error and no visible feedback on click. Routing all
+    /// three through a single `.alert(_:isPresented:presenting:)` call
+    /// keyed on this one enum removes the conflict entirely.
+    @State private var collectionAlertKind: CollectionAlertKind? = nil
+    @State private var showingCollectionAlert = false
     @State private var scrollViewportWidth: CGFloat = 0
     @State private var showExcludedAppsManager = false
     @State private var row2Height: CGFloat = 0
@@ -1698,6 +662,15 @@ struct ClipenSettingsView: View {
 
     // MARK: - Collections
 
+    private var collectionAlertTitle: String {
+        switch collectionAlertKind {
+        case .new:        return String(localized: "New collection")
+        case .rename:     return String(localized: "Rename collection")
+        case .delete:     return String(localized: "Delete collection?")
+        case nil:         return ""
+        }
+    }
+
     private var collectionsSection: some View {
         VStack(alignment: .center, spacing: 14) {
             sectionHeader("00", "COLLECTIONS")
@@ -1720,7 +693,8 @@ struct ClipenSettingsView: View {
                     if manager.collections.count < ClipboardManager.maxCollections {
                         Button {
                             newCollectionName = ""
-                            showingNewCollection = true
+                            collectionAlertKind = .new
+                            showingCollectionAlert = true
                         } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: "plus").font(.system(size: 10, weight: .bold))
@@ -1752,31 +726,29 @@ struct ClipenSettingsView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .stroke(Color.border, lineWidth: 1))
         .onPreferenceChange(CollectionsWidthKey.self) { scrollViewportWidth = $0 }
-        .alert("New collection", isPresented: $showingNewCollection) {
-            TextField("Name", text: $newCollectionName)
-            Button("Cancel", role: .cancel) { }
-            Button("Create") { manager.addCollection(named: newCollectionName) }
-        } message: {
-            Text("Up to \(ClipboardManager.maxCollections) collections.")
-        }
-        .alert("Rename collection", isPresented: $showingRenameCollection) {
-            TextField("Name", text: $renameCollectionText)
-            Button("Cancel", role: .cancel) { }
-            Button("Rename") {
-                if let old = renamingCollection {
-                    manager.renameCollection(old, to: renameCollectionText)
-                }
+        .alert(collectionAlertTitle, isPresented: $showingCollectionAlert, presenting: collectionAlertKind) { kind in
+            switch kind {
+            case .new:
+                TextField("Name", text: $newCollectionName)
+                Button("Cancel", role: .cancel) { }
+                Button("Create") { manager.addCollection(named: newCollectionName) }
+            case .rename(let old):
+                TextField("Name", text: $renameCollectionText)
+                Button("Cancel", role: .cancel) { }
+                Button("Rename") { manager.renameCollection(old, to: renameCollectionText) }
+            case .delete(let name):
+                Button("Cancel", role: .cancel) { }
+                Button("Delete", role: .destructive) { manager.deleteCollection(name) }
             }
-        } message: {
-            Text("Items already in this collection follow the new name.")
-        }
-        .alert("Delete collection?", isPresented: $showingDeleteCollection) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                if let name = deletingCollection { manager.deleteCollection(name) }
+        } message: { kind in
+            switch kind {
+            case .new:
+                Text("Up to \(ClipboardManager.maxCollections) collections.")
+            case .rename:
+                Text("Items already in this collection follow the new name.")
+            case .delete(let name):
+                Text("Items only in “\(name)” are deleted. Items that also live in another collection are kept there.")
             }
-        } message: {
-            Text("Items only in “\(deletingCollection ?? "")” are deleted. Items that also live in another collection are kept there.")
         }
     }
 
@@ -1902,8 +874,8 @@ struct ClipenSettingsView: View {
             // the unfiltered view, not something that can be deleted.
             if let name {
                 Button {
-                    deletingCollection = name
-                    showingDeleteCollection = true
+                    collectionAlertKind = .delete(name)
+                    showingCollectionAlert = true
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 10, weight: .semibold))
@@ -1923,13 +895,13 @@ struct ClipenSettingsView: View {
         .contextMenu {
             if let name {
                 Button("Rename\u{2026}") {
-                    renamingCollection = name
                     renameCollectionText = name
-                    showingRenameCollection = true
+                    collectionAlertKind = .rename(name)
+                    showingCollectionAlert = true
                 }
                 Button("Delete\u{2026}", role: .destructive) {
-                    deletingCollection = name
-                    showingDeleteCollection = true
+                    collectionAlertKind = .delete(name)
+                    showingCollectionAlert = true
                 }
             }
         }
@@ -2140,11 +1112,12 @@ struct ClipenSettingsView: View {
                 Button {
                     manager.showPopupInteractionHints.toggle()
                 } label: {
-                    Text(manager.showPopupInteractionHints ? "Hide in popup" : "Show in popup")
+                    Text(manager.showPopupInteractionHints ? "Hints in popup: On" : "Hints in popup: Off")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.accent)
+                        .foregroundColor(manager.showPopupInteractionHints ? .accent : .textDim)
                         .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Color.accentDim, in: Capsule())
+                        .background(manager.showPopupInteractionHints ? Color.accentDim : Color.white.opacity(0.06),
+                                    in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .help(manager.showPopupInteractionHints
@@ -2154,7 +1127,7 @@ struct ClipenSettingsView: View {
                 Button {
                     manager.interactionSoundsEnabled.toggle()
                 } label: {
-                    Text("Interaction sounds")
+                    Text(manager.interactionSoundsEnabled ? "Navigation sounds: On" : "Navigation sounds: Off")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundColor(manager.interactionSoundsEnabled ? .accent : .textDim)
                         .padding(.horizontal, 7).padding(.vertical, 2)
@@ -2426,8 +1399,9 @@ struct ClipenSettingsView: View {
             // together span ~320pt once their offsets are accounted for; a
             // narrower popup clipped the side panel's right edge.
             .frame(width: 380)
-            .onAppear {
+            .task {
                 lab.syncRealKeyboard = !showInnerButtons
+                try? await Task.sleep(nanoseconds: 80_000_000)
                 lab.select(selected)
             }
             .onDisappear { lab.stop() }

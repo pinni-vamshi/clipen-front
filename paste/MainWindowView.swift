@@ -872,46 +872,24 @@ private struct ItemDetailView: View {
         let source = item.sourceAppName
         let destinations = pastedToNames
         if source != nil || !destinations.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                VStack(alignment: .center, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
                     if let source = source {
-                        HStack(spacing: 0) {
-                            appChip(source)
-                            Spacer(minLength: 0)
-                            Text("copied from")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.textDim)
-                        }
-                        .padding(.horizontal, 12).padding(.vertical, 10)
+                        appChip(source)
                     }
                     if source != nil && !destinations.isEmpty {
-                        Image(systemName: "arrow.down")
+                        Image(systemName: "arrow.right")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.textDim.opacity(0.6))
-                            .padding(.vertical, 2)
                     }
-                    if !destinations.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 0) {
-                                Text("pasted to")
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(.textDim)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 12)
-                            FlowLayout(spacing: 6) {
-                                ForEach(destinations, id: \.self) { name in
-                                    appChip(name)
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                        }
-                        .padding(.vertical, 10)
+                    ForEach(destinations, id: \.self) { name in
+                        appChip(name)
                     }
                 }
-                .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
+                .padding(.horizontal, 12).padding(.vertical, 10)
             }
+            .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
         }
     }
 
@@ -1200,9 +1178,8 @@ private struct CompactItemRow: View, Equatable {
     @State private var isHovered = false
 
     // Exact footprint of the trailing icon zone (pin badge / delete+pin hover
-    // buttons: 20pt circle, or two 20pt circles with 4pt spacing) plus its own
-    // trailing padding — the text is capped to stop exactly before this zone
-    // starts, regardless of row width, instead of an arbitrary percentage.
+    // buttons) plus its own trailing padding — the text is capped to stop
+    // exactly before this zone starts.
     private static let iconZoneWidth: CGFloat = 20 + 4 + 20 + 12
 
     static func == (l: CompactItemRow, r: CompactItemRow) -> Bool {

@@ -732,16 +732,6 @@ extension ClipboardManager {
         }
     }
 
-    func prewarmAllItems() {
-        let snapshot = items
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            for item in snapshot {
-                guard self != nil else { return }
-                Self.prewarmItem(item)
-            }
-        }
-    }
-
     func prewarmPreviewCaches(for item: ClipboardItem) {
         DispatchQueue.global(qos: .utility).async {
             Self.prewarmItem(item)
