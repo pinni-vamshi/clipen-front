@@ -35,9 +35,13 @@ extension ClipboardManager {
 
         // Remove the originals, then insert the group at the anchor slot.
         let removedBefore = items.prefix(insertAt).filter { markedSet.contains($0.id) }.count
+        for id in markedSet {
+            CloudKitSyncEngine.shared.pushDelete(itemID: id)
+        }
         items.removeAll { markedSet.contains($0.id) }
         let clampedIndex = min(max(0, insertAt - removedBefore), items.count)
         items.insert(groupItem, at: clampedIndex)
+        CloudKitSyncEngine.shared.pushItem(groupItem)
 
         markedItemIDs = []
         multiSelectAnchorIndex = nil
@@ -51,12 +55,14 @@ extension ClipboardManager {
     func ungroup(_ item: ClipboardItem) {
         guard case .group(let children) = item.content,
               let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
+        CloudKitSyncEngine.shared.pushDelete(itemID: item.id)
         items.remove(at: idx)
         var insert = idx
         for child in children {
             var c = child
             c.isPinned = false
             items.insert(c, at: min(insert, items.count))
+            CloudKitSyncEngine.shared.pushItem(c)
             insert += 1
         }
         markBlobPurgeNeeded()
@@ -1692,6 +1698,7 @@ extension ClipboardManager {
         for i in items.indices where items[i].collections.contains(old) {
             items[i].collections.remove(old)
             items[i].collections.insert(new)
+            CloudKitSyncEngine.shared.pushUpdate(items[i])
         }
         if activeCollection == old { activeCollection = new }
         _displayItems = nil
@@ -1704,9 +1711,14 @@ extension ClipboardManager {
     func deleteCollection(_ name: String) {
         guard let slot = collections.firstIndex(of: name) else { return }
         collections.remove(at: slot)
+        let deletedItems = items.filter { $0.collections == [name] }
+        for item in deletedItems {
+            CloudKitSyncEngine.shared.pushDelete(itemID: item.id)
+        }
         items.removeAll { $0.collections == [name] }
         for i in items.indices where items[i].collections.contains(name) {
             items[i].collections.remove(name)
+            CloudKitSyncEngine.shared.pushUpdate(items[i])
         }
         if activeCollection == name { activeCollection = nil }
         markBlobPurgeNeeded()
@@ -1720,6 +1732,7 @@ extension ClipboardManager {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         if let activeCollection { items[idx].collections.remove(activeCollection) }
         items[idx].collections.insert(target)
+        CloudKitSyncEngine.shared.pushUpdate(items[idx])
         _displayItems = nil
         saveHistory()
         AuthManager.shared.registerActionUsage(actionID: "action.collection-move")
@@ -1729,6 +1742,7 @@ extension ClipboardManager {
     func shareItem(_ id: UUID, toCollection target: String) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].collections.insert(target)
+        CloudKitSyncEngine.shared.pushUpdate(items[idx])
         _displayItems = nil
         saveHistory()
         AuthManager.shared.registerActionUsage(actionID: "action.collection-share")

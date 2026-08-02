@@ -52,6 +52,7 @@ extension ClipboardManager {
         items[idx].embedding = nil
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
+        CloudKitSyncEngine.shared.pushUpdate(items[idx])
     }
 
     static func editableAttributedString(for item: ClipboardItem) -> NSAttributedString? {
@@ -291,14 +292,13 @@ extension ClipboardManager {
         updated.pasteCount        = old.pasteCount
         updated.pasteCountByApp   = old.pasteCountByApp
         updated.pastedToAppNames  = old.pastedToAppNames
-        // Carry the edited-file marker forward by default; callers that are
-        // starting/ending an edit override it explicitly right after.
         updated.originalFileURL   = old.originalFileURL
         items[idx] = updated
         invalidateBlobCaches(for: id)
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
         prewarmPreviewCaches(for: updated)
+        CloudKitSyncEngine.shared.pushUpdate(updated)
     }
 
     func evictFileSnapshots(for item: ClipboardItem) {
@@ -339,6 +339,7 @@ extension ClipboardManager {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         if items[idx].isPinned {
             items[idx].isPinned = false
+            CloudKitSyncEngine.shared.pushUpdate(items[idx])
             return
         }
         let pinnedCount = items.filter(\.isPinned).count
@@ -347,6 +348,7 @@ extension ClipboardManager {
             return
         }
         items[idx].isPinned = true
+        CloudKitSyncEngine.shared.pushUpdate(items[idx])
         _displayItems = nil
     }
 
@@ -363,6 +365,7 @@ extension ClipboardManager {
     func removeItem(at index: Int) {
         guard items.indices.contains(index) else { return }
         let item = items[index]
+        CloudKitSyncEngine.shared.pushDelete(itemID: item.id)
         evictFileSnapshots(for: item)
         evictCaches(for: item.id)
         items.remove(at: index)
@@ -370,6 +373,7 @@ extension ClipboardManager {
         if selectedIndex >= items.count { selectedIndex = max(0, items.count - 1) }
     }
     func clearAll() {
+        let ids = items.map(\.id)
         items.forEach {
             evictFileSnapshots(for: $0)
             evictCaches(for: $0.id)
@@ -377,6 +381,9 @@ extension ClipboardManager {
         items.removeAll()
         markBlobPurgeNeeded()
         selectedIndex = 0
+        for id in ids {
+            CloudKitSyncEngine.shared.pushDelete(itemID: id)
+        }
     }
 
     func evictCaches(for id: UUID) {
