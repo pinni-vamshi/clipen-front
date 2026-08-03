@@ -12,6 +12,14 @@
             <enclosure url="https://github.com/pinni-vamshi/clipen-releases/releases/download/v1.4.10/Clipen-1.4.10.366.dmg" length="7221948" type="application/octet-stream" sparkle:edSignature="QGSvO/08GqD9uZBtbeGkSttKORvWlzjH06w0QaE4yGXgSkCTl32CXIT02IYvt7RObtVPNgNhVQgAlEviFcVIDQ=="/>
         </item>
         <item>
+            <title>1.4.11</title>
+            <pubDate>Mon, 03 Aug 2026 19:51:15 +0530</pubDate>
+            <sparkle:version>367</sparkle:version>
+            <sparkle:shortVersionString>1.4.11</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/pinni-vamshi/clipen-releases/releases/download/v1.4.11/Clipen-1.4.11.367.dmg" length="7221980" type="application/octet-stream" sparkle:edSignature="hEG981pBtemK8i5ZS+hQxZdMQtfSNTdabBam5LLQg+b8CTxMwmW1lySAFy46eHA5YFLcMgqm+RHGgcpDmaDPCg=="/>
+        </item>
+        <item>
             <title>1.4.9</title>
             <pubDate>Mon, 03 Aug 2026 06:29:33 +0530</pubDate>
             <sparkle:version>365</sparkle:version>
