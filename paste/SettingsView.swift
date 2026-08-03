@@ -154,18 +154,26 @@ struct ClipenSettingsView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(learned ? .green : .textDim.opacity(0.5))
             }
+            // No line cap — the caption fills however much of the card it
+            // needs and only truncates if it genuinely doesn't fit, instead
+            // of always cutting off at a fixed line count regardless of how
+            // much room was actually left.
             Text(LocalizedStringKey(feature.demo.caption))
                 .font(.system(size: 11))
                 .foregroundColor(.textSec)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+            HStack(spacing: 3) {
+                Text("Practice")
+                Image(systemName: "chevron.right")
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.accent)
         }
-        .frame(width: 180, height: 100, alignment: .topLeading)
+        .frame(width: 180, height: 140, alignment: .topLeading)
         .padding(12)
         .background(Color.surfaceHi.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .clipped()
         .onTapGesture { manager.presentTipManually(feature) }
         .help(learned ? "Learned — click to see it again" : "Click to see how")
     }
@@ -902,7 +910,9 @@ struct ClipenSettingsView: View {
     /// open at the moment you're configuring this.
     private func browseForApplicationToExclude() {
         let panel = NSOpenPanel()
-        panel.title = "Choose an App to Exclude"
+        // NSOpenPanel.title is a plain String — never goes through SwiftUI's
+        // catalog lookup on its own, so this needs the explicit wrap.
+        panel.title = String(localized: "Choose an App to Exclude")
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowedContentTypes = [.application]
         panel.canChooseDirectories = false

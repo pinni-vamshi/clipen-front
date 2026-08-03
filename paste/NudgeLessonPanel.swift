@@ -73,8 +73,12 @@ final class NudgeLessonPanel: NSObject, NSWindowDelegate {
         } else {
             panel.contentViewController = NSHostingController(rootView: content)
         }
-        panel.title = "Tip: \(feature.demo.title)"
-        panel.subtitle = "\(learnedCount) of \(total) learned"
+        // NSWindow.title/.subtitle are plain Strings — they never go
+        // through SwiftUI's catalog lookup, localized or not, so both
+        // pieces have to be resolved explicitly here.
+        let localizedDemoTitle = String(localized: String.LocalizationValue(feature.demo.title))
+        panel.title = String(localized: "Tip: \(localizedDemoTitle)")
+        panel.subtitle = String(localized: "\(learnedCount) of \(total) learned")
         panel.setContentSize(Self.size)
         centerOnMainScreen()
         // Clipen is a menu-bar accessory, so it is normally not the active
@@ -104,7 +108,7 @@ final class NudgeLessonPanel: NSObject, NSWindowDelegate {
             onLearned: shownOnLearned ?? {},
             onLater: shownOnLater ?? {}
         )
-        panel.subtitle = "\(learnedCount) of \(shownTotal) learned"
+        panel.subtitle = String(localized: "\(learnedCount) of \(shownTotal) learned")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { onDone() }
     }
 
