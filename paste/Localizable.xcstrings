@@ -15670,6 +15670,106 @@
         }
       }
     },
+    "Group related copies": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zusammengehörige Kopien gruppieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agrupa copias relacionadas"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Regroupez des copies liées"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kelompokkan salinan terkait"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raggruppa copie correlate"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "関連するコピーをグループ化"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "관련 복사 항목 그룹화"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Groepeer gerelateerde kopieën"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grupuj powiązane kopie"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Agrupe cópias relacionadas"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Группируйте связанные копии"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gruppera relaterade kopior"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İlgili kopyaları grupla"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nhóm các bản sao liên quan"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将相关拷贝分组"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將相關複製項分組"
+          }
+        }
+      }
+    },
     "Group · %lld items": {
       "localizations": {
         "de": {
@@ -17294,6 +17394,106 @@
         }
       }
     },
+    "Hold V to mark several items, then tap G to group them into one, in the order you marked.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Halte V gedrückt, um mehrere Elemente zu markieren, tippe dann G, um sie in der markierten Reihenfolge zu einem zu gruppieren."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén V para marcar varios elementos, luego pulsa G para agruparlos en uno, en el orden en que los marcaste."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintenez V pour marquer plusieurs éléments, puis appuyez sur G pour les regrouper en un seul, dans l'ordre où vous les avez marqués."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tahan V untuk menandai beberapa item, lalu ketuk G untuk mengelompokkannya menjadi satu, sesuai urutan penandaan."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tieni premuto V per contrassegnare più elementi, poi premi G per raggrupparli in uno solo, nell'ordine in cui li hai contrassegnati."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vを長押しして複数のアイテムをマークし、Gをタップするとマークした順序で1つにグループ化されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "V를 길게 눌러 여러 항목을 표시한 다음, G를 눌러 표시한 순서대로 하나로 그룹화하세요."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Houd V ingedrukt om meerdere items te markeren, tik dan op G om ze in de gemarkeerde volgorde tot één te groeperen."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przytrzymaj V, aby zaznaczyć kilka elementów, a następnie naciśnij G, aby zgrupować je w jeden, w kolejności zaznaczenia."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantenha V pressionado para marcar vários itens, depois toque em G para agrupá-los em um só, na ordem em que foram marcados."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удерживайте V, чтобы отметить несколько элементов, затем нажмите G, чтобы сгруппировать их в один, в порядке отметки."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Håll V för att markera flera objekt, tryck sedan på G för att gruppera dem till ett, i den ordning du markerade dem."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Birden fazla öğeyi işaretlemek için V'yi basılı tutun, ardından işaretlediğiniz sırayla tek bir grup oluşturmak için G'ye dokunun."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giữ V để đánh dấu nhiều mục, sau đó nhấn G để nhóm chúng thành một, theo thứ tự bạn đã đánh dấu."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按住 V 标记多个项目，然后点按 G 按标记顺序将它们合并为一组。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按住 V 標記多個項目，然後點一下 G，依標記順序將它們合併成一組。"
+          }
+        }
+      }
+    },
     "Hold speed": {
       "localizations": {
         "de": {
@@ -17396,6 +17596,106 @@
           "stringUnit": {
             "state": "translated",
             "value": "長按速度"
+          }
+        }
+      }
+    },
+    "Hold ⌘ and press 1–9 to jump straight into a collection, no clicking required.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Halte ⌘ gedrückt und drücke 1–9, um direkt in eine Sammlung zu springen – kein Klicken nötig."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén ⌘ y pulsa 1–9 para saltar directamente a una colección, sin necesidad de hacer clic."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintenez ⌘ et appuyez sur 1–9 pour accéder directement à une collection, sans avoir à cliquer."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tahan ⌘ dan tekan 1–9 untuk langsung melompat ke koleksi, tanpa perlu mengklik."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tieni premuto ⌘ e premi 1–9 per saltare direttamente in una raccolta, senza bisogno di cliccare."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘を押しながら1〜9を押すと、クリックせずにコレクションへ直接移動できます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘를 누른 채 1–9를 눌러 클릭 없이 바로 컬렉션으로 이동하세요."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Houd ⌘ ingedrukt en druk op 1–9 om direct naar een verzameling te springen, zonder klikken."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przytrzymaj ⌘ i naciśnij 1–9, aby od razu przejść do kolekcji, bez klikania."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantenha ⌘ pressionado e pressione 1–9 para ir direto a uma coleção, sem precisar clicar."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удерживайте ⌘ и нажмите 1–9, чтобы сразу перейти в коллекцию, без кликов."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Håll ⌘ och tryck på 1–9 för att hoppa direkt till en samling, utan att klicka."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘ tuşunu basılı tutup 1–9'a basarak tıklamadan doğrudan bir koleksiyona atlayın."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giữ ⌘ và nhấn 1–9 để nhảy thẳng vào một bộ sưu tập, không cần nhấp chuột."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按住 ⌘ 并按 1–9 即可直接跳转到收藏集，无需点击。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按住 ⌘ 並按 1–9，即可直接跳到收藏集，無需點擊。"
           }
         }
       }
@@ -18208,6 +18508,206 @@
           "stringUnit": {
             "state": "translated",
             "value": "按住 ⌘ 並點按 ⇧V。\n將移到上一個項目而不是下一個。"
+          }
+        }
+      }
+    },
+    "Hold ⌘, tap V to land on an item, then hold P to pin it so it never falls off the ring.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Halte ⌘ gedrückt, tippe V, um auf einem Element zu landen, dann halte P, um es anzupinnen, damit es nie aus dem Ring fällt."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén ⌘, pulsa V para posarte en un elemento y luego mantén P para fijarlo, así nunca se cae del anillo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintenez ⌘, appuyez sur V pour vous positionner sur un élément, puis maintenez P pour l'épingler afin qu'il ne quitte jamais l'anneau."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tahan ⌘, ketuk V untuk mendarat di sebuah item, lalu tahan P untuk menyematkannya agar tidak pernah lepas dari ring."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tieni premuto ⌘, premi V per posizionarti su un elemento, poi tieni premuto P per fissarlo così non esce mai dall'anello."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘を押しながらVをタップしてアイテムを選び、Pを長押しするとピン留めされ、リングから外れなくなります。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘를 누른 채 V를 눌러 항목에 위치한 다음, P를 길게 눌러 고정하면 링에서 절대 사라지지 않습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Houd ⌘ ingedrukt, tik op V om op een item te landen, houd dan P ingedrukt om het vast te zetten zodat het nooit van de ring valt."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przytrzymaj ⌘, naciśnij V, aby wylądować na elemencie, a następnie przytrzymaj P, aby go przypiąć, dzięki czemu nigdy nie wypadnie z pierścienia."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantenha ⌘ pressionado, toque em V para pousar em um item e depois mantenha P pressionado para fixá-lo, assim ele nunca sai do anel."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удерживайте ⌘, нажмите V, чтобы выбрать элемент, затем удерживайте P, чтобы закрепить его — он никогда не выпадет из кольца."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Håll ⌘, tryck på V för att landa på ett objekt, håll sedan P för att fästa det så att det aldrig faller ur ringen."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘ tuşunu basılı tutup V'ye dokunarak bir öğeye inin, ardından P'yi basılı tutarak sabitleyin, böylece asla halkadan düşmez."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giữ ⌘, nhấn V để dừng ở một mục, sau đó giữ P để ghim mục đó lại để nó không bao giờ rớt khỏi vòng."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按住 ⌘，点按 V 定位到某个项目，然后长按 P 将其置顶，使其永不脱离环形队列。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按住 ⌘，點一下 V 停在某個項目上，然後按住 P 將其釘選，使其永遠不會脫離環形佇列。"
+          }
+        }
+      }
+    },
+    "Hold ⌘, tap V to land on an item, then tap X to cycle through transforms like uppercase or Base64.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Halte ⌘ gedrückt, tippe V, um auf einem Element zu landen, dann tippe X, um durch Transformationen wie Großbuchstaben oder Base64 zu wechseln."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantén ⌘, pulsa V para posarte en un elemento y luego pulsa X para recorrer transformaciones como mayúsculas o Base64."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maintenez ⌘, appuyez sur V pour vous positionner sur un élément, puis sur X pour parcourir les transformations comme les majuscules ou le Base64."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tahan ⌘, ketuk V untuk mendarat di sebuah item, lalu ketuk X untuk beralih transformasi seperti huruf kapital atau Base64."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tieni premuto ⌘, premi V per posizionarti su un elemento, poi premi X per scorrere le trasformazioni come maiuscolo o Base64."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘を押しながらVをタップしてアイテムを選び、Xをタップして大文字やBase64などの変換を切り替えます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘를 누른 채 V를 눌러 항목에 위치한 다음, X를 눌러 대문자나 Base64 같은 변환을 순환하세요."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Houd ⌘ ingedrukt, tik op V om op een item te landen, tik dan op X om door transformaties zoals hoofdletters of Base64 te bladeren."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przytrzymaj ⌘, naciśnij V, aby wylądować na elemencie, a następnie naciśnij X, aby przechodzić przez przekształcenia, takie jak wielkie litery czy Base64."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mantenha ⌘ pressionado, toque em V para pousar em um item e depois toque em X para percorrer transformações como maiúsculas ou Base64."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Удерживайте ⌘, нажмите V, чтобы выбрать элемент, затем нажмите X, чтобы переключать преобразования, например верхний регистр или Base64."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Håll ⌘, tryck på V för att landa på ett objekt, tryck sedan på X för att växla mellan omvandlingar som versaler eller Base64."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘ tuşunu basılı tutup V'ye dokunarak bir öğeye inin, ardından büyük harf veya Base64 gibi dönüşümler arasında geçiş yapmak için X'e dokunun."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giữ ⌘, nhấn V để dừng ở một mục, sau đó nhấn X để chuyển qua các kiểu biến đổi như chữ hoa hoặc Base64."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按住 ⌘，点按 V 定位到某个项目，然后点按 X 可循环切换转换方式，例如大写或 Base64。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按住 ⌘，點一下 V 停在某個項目上，然後點一下 X 循環切換轉換方式，例如大寫或 Base64。"
           }
         }
       }
@@ -19632,6 +20132,106 @@
           "stringUnit": {
             "state": "translated",
             "value": "格式化 JSON"
+          }
+        }
+      }
+    },
+    "Jump to a collection": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zu einer Sammlung springen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salta a una colección"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aller directement à une collection"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lompat ke koleksi"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salta a una raccolta"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コレクションへジャンプ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "컬렉션으로 바로 이동"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spring naar een verzameling"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przeskocz do kolekcji"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pule para uma coleção"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Переход к коллекции"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hoppa till en samling"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bir koleksiyona atla"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nhảy đến một bộ sưu tập"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳转到收藏集"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳到收藏集"
           }
         }
       }
@@ -28402,6 +29002,106 @@
         }
       }
     },
+    "Paste everything marked": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alles Markierte einfügen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pega todo lo marcado"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collez tout ce qui est marqué"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempel semua yang ditandai"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Incolla tutto ciò che è contrassegnato"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "マークしたものをすべて貼り付け"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "표시된 항목 모두 붙여넣기"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plak alles wat gemarkeerd is"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wklej wszystko, co zaznaczone"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cole tudo o que foi marcado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вставить всё отмеченное"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klistra in allt markerat"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İşaretlenen her şeyi yapıştır"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dán tất cả những gì đã đánh dấu"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴所有已标记项"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼上所有已標記項目"
+          }
+        }
+      }
+    },
     "Paste with Formatting": {
       "localizations": {
         "de": {
@@ -29704,6 +30404,106 @@
           "stringUnit": {
             "state": "translated",
             "value": "釘選到頂端"
+          }
+        }
+      }
+    },
+    "Pin your favourites": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favoriten anpinnen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fija tus favoritos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Épinglez vos favoris"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sematkan favoritmu"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fissa i tuoi preferiti"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "お気に入りをピン留め"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "즐겨찾기 고정"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zet je favorieten vast"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przypnij ulubione"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fixe seus favoritos"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Закрепите избранное"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fäst dina favoriter"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorilerini sabitle"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ghim các mục yêu thích"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "置顶你的收藏"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "釘選你的最愛"
           }
         }
       }
@@ -34686,6 +35486,206 @@
         }
       }
     },
+    "Search mid-cycle": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suche mitten im Zyklus"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Busca en pleno ciclo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recherchez en plein cycle"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cari di tengah siklus"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cerca a metà ciclo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "循環中でも検索"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "순환 중에도 검색"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoeken tijdens het cyclen"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyszukiwanie w trakcie cyklu"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Busque no meio do ciclo"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Поиск прямо во время цикла"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök mitt i cykeln"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Döngü sırasında ara"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tìm kiếm giữa chừng"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "循环中也能搜索"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "循環中也能搜尋"
+          }
+        }
+      }
+    },
+    "Search works even while you're mid-cycle — just start typing and the ring filters live.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Suche funktioniert auch mitten im Zyklus – einfach tippen, und der Ring filtert live."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La búsqueda funciona incluso en pleno ciclo — solo empieza a escribir y el anillo filtra en vivo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La recherche fonctionne même en plein cycle — commencez simplement à taper et l'anneau filtre en direct."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pencarian tetap berfungsi meski sedang di tengah siklus — cukup mulai mengetik dan ring akan memfilter secara langsung."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La ricerca funziona anche a metà ciclo — basta iniziare a digitare e l'anello filtra in tempo reale."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "循環中でも検索は機能します — 入力するだけでリングがリアルタイムに絞り込まれます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "순환 중에도 검색이 작동합니다 — 입력을 시작하면 링이 실시간으로 필터링됩니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoeken werkt zelfs tijdens het cyclen — begin gewoon te typen en de ring filtert live."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyszukiwanie działa nawet w trakcie cyklu — po prostu zacznij pisać, a pierścień filtruje na żywo."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A busca funciona mesmo no meio do ciclo — basta começar a digitar e o anel filtra em tempo real."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Поиск работает даже во время цикла — просто начните печатать, и кольцо отфильтруется в реальном времени."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sökningen fungerar även mitt i cykeln — börja bara skriva så filtrerar ringen live."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arama, döngü ortasında bile çalışır — yazmaya başlamanız yeterli, halka anında filtrelenir."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tìm kiếm vẫn hoạt động ngay cả khi đang giữa chừng — chỉ cần gõ và vòng sẽ lọc theo thời gian thực."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即使在循环中，搜索也能正常工作——只需开始输入，环形队列就会实时筛选。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即使在循環中，搜尋依然可用——只要開始輸入，環形佇列就會即時篩選。"
+          }
+        }
+      }
+    },
     "See more": {
       "localizations": {
         "de": {
@@ -38028,6 +39028,106 @@
         }
       }
     },
+    "TIPS": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TIPPS"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CONSEJOS"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ASTUCES"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TIPS"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SUGGERIMENTI"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ヒント"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "팁"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TIPS"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WSKAZÓWKI"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DICAS"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "СОВЕТЫ"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TIPS"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İPUÇLARI"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MẸO"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小贴士"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "小提示"
+          }
+        }
+      }
+    },
     "TRY IT HERE": {
       "localizations": {
         "de": {
@@ -40430,6 +41530,106 @@
           "stringUnit": {
             "state": "translated",
             "value": "貼上前轉換"
+          }
+        }
+      }
+    },
+    "Transform on the fly": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Direkt transformieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transforma sobre la marcha"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transformez à la volée"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transformasi langsung"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trasforma al volo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "その場で変換"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "즉석에서 변환"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transformeer direct"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przekształcaj w locie"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transforme na hora"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Преобразуйте на лету"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Omvandla direkt"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anında dönüştür"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Biến đổi ngay tức thì"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即时转换"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即時轉換"
           }
         }
       }

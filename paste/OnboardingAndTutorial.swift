@@ -421,13 +421,31 @@ struct TutorialSheet: View {
                 .textSelection(.enabled).lineLimit(1).truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 4) {
-                Image(systemName: copied ? "checkmark.circle.fill" : "command")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(copied ? "Copied" : "⌘C")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+            if copied {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("Copied")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                }
+                .foregroundColor(.green)
+            } else {
+                // Lets someone finish this step with a click instead of
+                // needing to select the text and press ⌘C themselves —
+                // writes straight to the pasteboard, which Clipen's own
+                // clipboard watcher picks up exactly like a real copy,
+                // so `isCopied` flips true the same way either path.
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.textDim)
+                .help("Copy")
             }
-            .foregroundColor(copied ? .green : .textDim)
         }
         .padding(.horizontal, 12).padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)

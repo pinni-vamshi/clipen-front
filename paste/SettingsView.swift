@@ -103,6 +103,8 @@ struct ClipenSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .onPreferenceChange(SettingsRow2HeightKey.self) { row2Height = $0 }
 
+                tipsSection
+
                 feedbackSection
             }
             .padding(.horizontal, 28)
@@ -110,9 +112,67 @@ struct ClipenSettingsView: View {
         }
     }
 
+    // MARK: - Tips
+    //
+    // Cards for the app's real, tracked lesson windows — not a second,
+    // separately-worded copy of the same gestures. Heading/description come
+    // straight from InteractionDemo (the same source the keyboard-demo
+    // popup above and the automatic nudges already use), and clicking a
+    // card opens that exact lesson window via `presentTipManually`. The
+    // first 5 are the ones that can ALSO appear automatically once their
+    // usage threshold is crossed; Collections and Search only ever open
+    // from here (see NudgeFeature.thresholdMet).
+
+    private static let tipFeatures: [NudgeFeature] =
+        [.multiPaste, .groups, .preview, .pinPreview, .transformPanel, .collections, .search]
+
+    private var tipsSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionHeader("05", "TIPS")
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(Self.tipFeatures, id: \.self) { feature in
+                        tipCard(feature)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    private func tipCard(_ feature: NudgeFeature) -> some View {
+        let learned = manager.isNudgeLearned(feature)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Text(LocalizedStringKey(feature.demo.title))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.textPri)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Image(systemName: learned ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(learned ? .green : .textDim.opacity(0.5))
+            }
+            Text(LocalizedStringKey(feature.demo.caption))
+                .font(.system(size: 11))
+                .foregroundColor(.textSec)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .frame(width: 180, height: 100, alignment: .topLeading)
+        .padding(12)
+        .background(Color.surfaceHi.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .onTapGesture { manager.presentTipManually(feature) }
+        .help(learned ? "Learned — click to see it again" : "Click to see how")
+    }
+
     private var feedbackSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("05", "FEEDBACK")
+            sectionHeader("06", "FEEDBACK")
 
             rowCard(border: .allSides) {
                 VStack(alignment: .leading, spacing: 10) {

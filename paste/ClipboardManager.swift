@@ -609,6 +609,12 @@ class ClipboardManager: ObservableObject {
     var nudgeIsFinishing = false
     var nudgeActiveFeature: NudgeFeature? = nil
     var lastNudgeShownAt: Date? = nil
+    /// Bumped whenever a feature's learned flag flips — the rest of this
+    /// nudge state deliberately isn't @Published (the lesson window is a
+    /// separate AppKit panel, not SwiftUI-driven), but the Settings Tips
+    /// cards DO need to notice a change made from that panel while Settings
+    /// is still open, so this one exists purely to trigger that refresh.
+    @Published var nudgeLearnedRevision = 0
     /// Set when a delete happens during the current popup session, checked
     /// (and reset) only by dismissPreview() when classifying the session's
     /// outcome — a delete followed by any close reason still counts as

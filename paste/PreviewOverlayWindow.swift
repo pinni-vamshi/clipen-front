@@ -874,16 +874,16 @@ struct DynamicHintText: View {
     var body: some View {
         HStack(spacing: 3) {
             Text(key)
-                .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundColor(isPressed ? .white : .primary.opacity(0.85))
                 .lineLimit(1).fixedSize()
             Text(label)
-                .font(.system(size: 8, weight: .semibold))
+                .font(.system(size: 8.5, weight: .semibold))
                 .foregroundColor(isPressed ? .white.opacity(0.9) : .secondary)
                 .lineLimit(1).fixedSize()
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 7.5)
+        .padding(.vertical, 3.5)
         // Solid, not translucent — the overlay panel itself has no window
         // backing (isOpaque = false), so a low-opacity fill here let the
         // desktop/whatever's behind Clipen show straight through the pill.
@@ -904,7 +904,7 @@ final class PopupHintOverlay {
     // Was 26 — right at the edge of what the text itself needs with zero
     // vertical padding around it, which is why it read as clipped top and
     // bottom, not just at the sides.
-    private static let height: CGFloat = 36
+    private static let height: CGFloat = 38
     // Inset from the popup's own edges (NOT wider than the popup — an
     // earlier attempt made this panel wider than the popup below it, which
     // read as the hint row spilling past the popup's own boundary instead

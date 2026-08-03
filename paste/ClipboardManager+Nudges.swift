@@ -13,6 +13,16 @@ enum NudgeFeature: Int, CaseIterable {
     case preview = 3
     case pinPreview = 4
     case transformPanel = 5
+    // Deliberately NOT eligible for the automatic threshold-based nudge
+    // (see `thresholdMet` below, which always returns false for these two) —
+    // they only ever open from the Settings "Tips" cards, on click. They
+    // still reuse the exact same lesson window and learned/not-learned
+    // bookkeeping as the original 5, just scoped to their own "X of 2"
+    // progress instead of folding into the main "X of 5" count (see
+    // `learnedProgress(for:)`), so adding them can't silently change what
+    // `nudgesLearnedCount`/the auto-nudge subtitle have always meant.
+    case collections = 6
+    case search = 7
 
     var demo: InteractionDemo {
         switch self {
@@ -21,6 +31,8 @@ enum NudgeFeature: Int, CaseIterable {
         case .preview:        return .spacePreview
         case .pinPreview:     return .pinPreview
         case .transformPanel: return .transform
+        case .collections:    return .collections
+        case .search:         return .search
         }
     }
 
@@ -31,6 +43,8 @@ enum NudgeFeature: Int, CaseIterable {
         case .preview:        return "clipen.nudge.used.preview"
         case .pinPreview:     return "clipen.nudge.used.pinPreview"
         case .transformPanel: return "clipen.nudge.used.transformPanel"
+        case .collections:    return "clipen.nudge.used.collections"
+        case .search:         return "clipen.nudge.used.search"
         }
     }
 
@@ -39,7 +53,8 @@ enum NudgeFeature: Int, CaseIterable {
     /// early). Once it hits the cap the feature stops being eligible for
     /// good, so a never-learned lesson can't camp at the front of the queue
     /// forever and starve later (higher rawValue) features from ever getting
-    /// a turn.
+    /// a turn. Unused by `.collections`/`.search` (never auto-shown, so
+    /// never retried), but every case needs a key for the switch to compile.
     fileprivate var retryKey: String {
         switch self {
         case .multiPaste:     return "clipen.nudge.retry.multiPaste"
@@ -47,6 +62,8 @@ enum NudgeFeature: Int, CaseIterable {
         case .preview:        return "clipen.nudge.retry.preview"
         case .pinPreview:     return "clipen.nudge.retry.pinPreview"
         case .transformPanel: return "clipen.nudge.retry.transformPanel"
+        case .collections:    return "clipen.nudge.retry.collections"
+        case .search:         return "clipen.nudge.retry.search"
         }
     }
 }
@@ -94,6 +111,7 @@ extension ClipboardManager {
         let alreadyKnew = UserDefaults.standard.bool(forKey: key)
         if !alreadyKnew {
             UserDefaults.standard.set(true, forKey: key)
+            nudgeLearnedRevision += 1
         }
         // The user just performed the real gesture. If this happens to be the
         // lesson currently on screen, finish it automatically — no need to
@@ -109,9 +127,31 @@ extension ClipboardManager {
         UserDefaults.standard.bool(forKey: feature.usedKey)
     }
 
+    /// Whether a tip's learned state should show on its Settings card —
+    /// public because SettingsView reads it directly per card.
+    func isNudgeLearned(_ feature: NudgeFeature) -> Bool { hasUsedNaturally(feature) }
+
+    /// The original 5 auto-triggered lessons — kept as an explicit list
+    /// (not `NudgeFeature.allCases`) so adding `.collections`/`.search`
+    /// can never silently change what "X of 5 learned" has always meant,
+    /// here or in the AuthManager telemetry that reads this same count.
+    private static let autoTrackedFeatures: [NudgeFeature] =
+        [.multiPaste, .groups, .preview, .pinPreview, .transformPanel]
+    private static let manualOnlyFeatures: [NudgeFeature] = [.collections, .search]
+
     /// "X of 5 learned" — read by the lesson panel's progress line.
     var nudgesLearnedCount: Int {
-        NudgeFeature.allCases.filter(hasUsedNaturally).count
+        Self.autoTrackedFeatures.filter(hasUsedNaturally).count
+    }
+
+    /// Progress line for whichever lesson is currently open — the original
+    /// 5 always read against each other ("X of 5"), and the click-only
+    /// Settings extras read against each other too ("X of 2"), so opening
+    /// a Tips card can never perturb the main count above.
+    private func learnedProgress(for feature: NudgeFeature) -> (learned: Int, total: Int) {
+        let siblings = Self.autoTrackedFeatures.contains(feature)
+            ? Self.autoTrackedFeatures : Self.manualOnlyFeatures
+        return (siblings.filter(hasUsedNaturally).count, siblings.count)
     }
 
     private static let maxNudgeRetries = 3
@@ -132,6 +172,9 @@ extension ClipboardManager {
         case .preview:        return nudgePasteCount >= 2
         case .pinPreview:     return nudgePreviewCount >= 3
         case .transformPanel: return nudgePasteCount >= 8
+        // Never met — these two are click-only from the Settings Tips
+        // cards and must never enter the automatic candidate pool below.
+        case .collections, .search: return false
         }
     }
 
@@ -191,7 +234,12 @@ extension ClipboardManager {
               !popupPinnedOpen, !nudgeIsShowing else { return }
         if let last = lastNudgeShownAt,
            Date().timeIntervalSince(last) < Self.minSecondsBetweenNudges { return }
-        guard let next = NudgeFeature.allCases.filter(isEligible).min(by: { $0.rawValue < $1.rawValue })
+        // Explicitly scoped to the auto-tracked 5 — `.collections`/`.search`
+        // would never pass `isEligible` anyway (their threshold is always
+        // false), but this keeps that guarantee visible right where the
+        // candidate pool is built, not just implied by a threshold two
+        // functions away.
+        guard let next = Self.autoTrackedFeatures.filter(isEligible).min(by: { $0.rawValue < $1.rawValue })
         else { return }
         presentNudge(next)
     }
@@ -200,13 +248,24 @@ extension ClipboardManager {
         nudgeIsShowing = true
         nudgeActiveFeature = feature
         lastNudgeShownAt = Date()
+        let progress = learnedProgress(for: feature)
         nudgeLessonPanel.show(
             feature: feature,
-            learnedCount: nudgesLearnedCount,
-            total: NudgeFeature.allCases.count,
+            learnedCount: progress.learned,
+            total: progress.total,
             onLearned: { [weak self] in self?.answerNudgeLesson(learned: true) },
             onLater:   { [weak self] in self?.answerNudgeLesson(learned: false) }
         )
+    }
+
+    /// Opens a lesson window on demand, from the Settings "Tips" cards —
+    /// the click-only entry point for every feature, and the ONLY way
+    /// `.collections`/`.search` ever get shown (see `thresholdMet` above).
+    /// Reuses the exact same window/state machine as an automatic nudge,
+    /// so "Learned"/"Later" behave identically either way.
+    func presentTipManually(_ feature: NudgeFeature) {
+        guard !nudgeIsShowing else { return }
+        presentNudge(feature)
     }
 
     /// The two explicit answers on the lesson panel. "Learned" marks the
@@ -218,6 +277,7 @@ extension ClipboardManager {
         guard let feature = nudgeActiveFeature else { return }
         if learned {
             UserDefaults.standard.set(true, forKey: feature.usedKey)
+            nudgeLearnedRevision += 1
             finishNudgeAsLearned()
         } else {
             incrementNudgeRetry(feature)
@@ -230,9 +290,10 @@ extension ClipboardManager {
     /// so a burst of gesture events can't stack several confirmations or cut
     /// the first one short.
     private func finishNudgeAsLearned() {
-        guard !nudgeIsFinishing else { return }
+        guard !nudgeIsFinishing, let feature = nudgeActiveFeature else { return }
         nudgeIsFinishing = true
-        nudgeLessonPanel.flashLearnedThenHide(learnedCount: nudgesLearnedCount) { [weak self] in
+        let progress = learnedProgress(for: feature)
+        nudgeLessonPanel.flashLearnedThenHide(learnedCount: progress.learned) { [weak self] in
             guard let self else { return }
             self.nudgeIsFinishing = false
             self.hideNudgeLesson()
