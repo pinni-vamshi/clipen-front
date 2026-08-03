@@ -18,6 +18,7 @@
 		B10000000000000000000103 /* TextInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000103 /* TextInsights.swift */; };
 		B10000000000000000000104 /* InlineEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000104 /* InlineEditors.swift */; };
 		B10000000000000000000105 /* NudgeLessonPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000105 /* NudgeLessonPanel.swift */; };
+		B10000000000000000000110 /* WakeGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* WakeGuard.swift */; };
 		B10000000000000000000007 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Keychain.swift */; };
 		B10000000000000000000008 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* MainWindowView.swift */; };
 		B1000000000000000000000A /* pasteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* pasteApp.swift */; };
@@ -81,6 +82,7 @@
 		A10000000000000000000103 /* TextInsights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInsights.swift; sourceTree = "<group>"; };
 		A10000000000000000000104 /* InlineEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineEditors.swift; sourceTree = "<group>"; };
 		A10000000000000000000105 /* NudgeLessonPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NudgeLessonPanel.swift; sourceTree = "<group>"; };
+		A10000000000000000000110 /* WakeGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeGuard.swift; sourceTree = "<group>"; };
 		A10000000000000000000007 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		A10000000000000000000008 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
 		A1000000000000000000000A /* pasteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = pasteApp.swift; sourceTree = "<group>"; };
@@ -224,6 +226,7 @@
 				A10000000000000000000103 /* TextInsights.swift */,
 				A10000000000000000000104 /* InlineEditors.swift */,
 				A10000000000000000000105 /* NudgeLessonPanel.swift */,
+				A10000000000000000000110 /* WakeGuard.swift */,
 				A10000000000000000000007 /* Keychain.swift */,
 				A10000000000000000000008 /* MainWindowView.swift */,
 				A10000000000000000000024 /* QuickClipPanel.swift */,
@@ -362,6 +365,7 @@
 				B10000000000000000000103 /* TextInsights.swift in Sources */,
 				B10000000000000000000104 /* InlineEditors.swift in Sources */,
 				B10000000000000000000105 /* NudgeLessonPanel.swift in Sources */,
+				B10000000000000000000110 /* WakeGuard.swift in Sources */,
 				B10000000000000000000007 /* Keychain.swift in Sources */,
 				B10000000000000000000008 /* MainWindowView.swift in Sources */,
 				B10000000000000000000024 /* QuickClipPanel.swift in Sources */,
@@ -534,7 +538,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 364;
+				CURRENT_PROJECT_VERSION = 365;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -553,7 +557,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.8;
+				MARKETING_VERSION = 1.4.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -574,7 +578,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 364;
+				CURRENT_PROJECT_VERSION = 365;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -593,7 +597,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.8;
+				MARKETING_VERSION = 1.4.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

@@ -35086,102 +35086,102 @@
         }
       }
     },
-    "Send a message straight to the developer.": {
+    "Send a message straight to the developer — suggest a feature, report a bug, or paste a macOS crash report.": {
       "localizations": {
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sende eine Nachricht direkt an den Entwickler."
+            "value": "Sende eine Nachricht direkt an den Entwickler — schlage eine Funktion vor, melde einen Fehler oder füge einen macOS-Absturzbericht ein."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Envía un mensaje directamente al desarrollador."
+            "value": "Envía un mensaje directamente al desarrollador — sugiere una función, informa un error o pega un informe de fallos de macOS."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Envoyez un message directement au développeur."
+            "value": "Envoyez un message directement au développeur — suggérez une fonctionnalité, signalez un bug ou collez un rapport de plantage macOS."
           }
         },
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kirim pesan langsung ke pengembang."
+            "value": "Kirim pesan langsung ke pengembang — sarankan fitur, laporkan bug, atau tempel laporan crash macOS."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Invia un messaggio direttamente allo sviluppatore."
+            "value": "Invia un messaggio direttamente allo sviluppatore — suggerisci una funzionalità, segnala un bug o incolla un rapporto di crash di macOS."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "開発者に直接メッセージを送信します。"
+            "value": "開発者に直接メッセージを送信します — 新機能の提案、バグの報告、macOSのクラッシュレポートの貼り付けができます。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "개발자에게 직접 메시지를 보내세요."
+            "value": "개발자에게 직접 메시지를 보내세요 — 기능을 제안하거나, 버그를 신고하거나, macOS 충돌 보고서를 붙여넣으세요."
           }
         },
         "nl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Stuur een bericht rechtstreeks naar de ontwikkelaar."
+            "value": "Stuur een bericht rechtstreeks naar de ontwikkelaar — stel een functie voor, meld een bug of plak een macOS-crashrapport."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wyślij wiadomość bezpośrednio do dewelopera."
+            "value": "Wyślij wiadomość bezpośrednio do dewelopera — zaproponuj funkcję, zgłoś błąd lub wklej raport awarii macOS."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Envie uma mensagem diretamente ao desenvolvedor."
+            "value": "Envie uma mensagem diretamente ao desenvolvedor — sugira um recurso, relate um bug ou cole um relatório de falha do macOS."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Отправьте сообщение прямо разработчику."
+            "value": "Отправьте сообщение прямо разработчику — предложите функцию, сообщите об ошибке или вставьте отчёт о сбое macOS."
           }
         },
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Skicka ett meddelande direkt till utvecklaren."
+            "value": "Skicka ett meddelande direkt till utvecklaren — föreslå en funktion, rapportera en bugg eller klistra in en macOS-kraschrapport."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Geliştiriciye doğrudan bir mesaj gönder."
+            "value": "Geliştiriciye doğrudan bir mesaj gönder — bir özellik öner, bir hata bildir veya bir macOS çökme raporu yapıştır."
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Gửi tin nhắn trực tiếp cho nhà phát triển."
+            "value": "Gửi tin nhắn trực tiếp cho nhà phát triển — đề xuất tính năng, báo lỗi hoặc dán báo cáo sự cố macOS."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "直接给开发者发送消息。"
+            "value": "直接给开发者发消息——建议新功能、报告错误，或粘贴 macOS 崩溃报告。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "直接向開發者傳送訊息。"
+            "value": "直接傳訊息給開發者——建議新功能、回報錯誤，或貼上 macOS 當機報告。"
           }
         }
       }

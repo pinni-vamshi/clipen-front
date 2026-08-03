@@ -92,11 +92,13 @@ class SharePanel: NSObject, NSPopoverDelegate {
         anchorPanel.setFrame(desiredStrip, display: false)
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
         shownStrip = desiredStrip
-        popover.animates = false
-        popover.show(relativeTo: rowRect, of: anchorView,
-                     preferredEdge: placeRight ? .maxX : .minX)
-        popover.animates = true
-        popover.clipenAnimateIn()
+        let edge: NSRectEdge = placeRight ? .maxX : .minX
+        WakeGuard.afterWakeSettle { [popover, anchorView] in
+            popover.animates = false
+            popover.show(relativeTo: rowRect, of: anchorView, preferredEdge: edge)
+            popover.animates = true
+            popover.clipenAnimateIn()
+        }
     }
 
     func hide() {

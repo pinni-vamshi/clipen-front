@@ -112,16 +112,19 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
 
         anchorPanel.setFrame(NSRect(x: anchor.x, y: anchor.y, width: 1, height: 1), display: false)
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
-        popover.animates = false
-        popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: preferredEdge)
-        popover.animates = true
-        popover.clipenAnimateIn()
-        // The popover's real on-screen frame only exists once it's actually
-        // shown — position the hint row relative to that, one runloop turn
-        // later, rather than guessing where it'll land.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.isVisible else { return }
-            self.hintOverlay.show(above: self.frame)
+        WakeGuard.afterWakeSettle { [weak self, popover, anchorView] in
+            guard let self else { return }
+            popover.animates = false
+            popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: preferredEdge)
+            popover.animates = true
+            popover.clipenAnimateIn()
+            // The popover's real on-screen frame only exists once it's actually
+            // shown — position the hint row relative to that, one runloop turn
+            // later, rather than guessing where it'll land.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isVisible else { return }
+                self.hintOverlay.show(above: self.frame)
+            }
         }
     }
 

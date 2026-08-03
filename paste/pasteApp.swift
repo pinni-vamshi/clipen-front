@@ -58,6 +58,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
+        WakeGuard.install()
         Self.refreshLaunchServicesIfNewBuild()
         Self.sweepStaleTempDirectories()
 

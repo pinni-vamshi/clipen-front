@@ -116,7 +116,7 @@ struct ClipenSettingsView: View {
 
             rowCard(border: .allSides) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Send a message straight to the developer.")
+                    Text("Send a message straight to the developer — suggest a feature, report a bug, or paste a macOS crash report.")
                         .font(.system(size: 11)).foregroundColor(.textSec)
 
                     TextEditor(text: $feedbackText)
@@ -241,7 +241,7 @@ struct ClipenSettingsView: View {
             Text("Always show preview").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
             Button {
-                showAutoPreviewPicker.toggle()
+                togglePopover($showAutoPreviewPicker)
             } label: {
                 Text("Configure")
                     .font(.system(size: 11, weight: .semibold))
@@ -343,7 +343,7 @@ struct ClipenSettingsView: View {
             Text("Remember last position").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
             Button {
-                showRememberTimeoutPicker.toggle()
+                togglePopover($showRememberTimeoutPicker)
             } label: {
                 let minutes = manager.rememberLastPositionTimeoutMinutes
                 let label = minutes == 0 ? "∞"
@@ -380,7 +380,7 @@ struct ClipenSettingsView: View {
             Text("Open delay").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
             Button {
-                showOpenDelayPicker.toggle()
+                togglePopover($showOpenDelayPicker)
             } label: {
                 Text("Configure")
                     .font(.system(size: 11, weight: .semibold))
@@ -451,7 +451,7 @@ struct ClipenSettingsView: View {
             Text("Pin to top").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
             Button {
-                showPinPositionPicker.toggle()
+                togglePopover($showPinPositionPicker)
             } label: {
                 Text("Configure")
                     .font(.system(size: 11, weight: .semibold))
@@ -515,7 +515,7 @@ struct ClipenSettingsView: View {
             Text("Auto-dismiss popup").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
             Button {
-                showAutoDismissPicker.toggle()
+                togglePopover($showAutoDismissPicker)
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "hourglass.bottomhalf.filled").font(.system(size: 9, weight: .semibold))
@@ -661,6 +661,18 @@ struct ClipenSettingsView: View {
     }
 
     // MARK: - Collections
+
+    /// Opening any of the picker popovers below routes through
+    /// NSPopover.show(...) — see WakeGuard for why that's gated. Closing
+    /// stays instant; only the "turning on" transition is ever delayed,
+    /// and only in the rare post-wake window.
+    private func togglePopover(_ flag: Binding<Bool>) {
+        if flag.wrappedValue {
+            flag.wrappedValue = false
+        } else {
+            WakeGuard.afterWakeSettle { flag.wrappedValue = true }
+        }
+    }
 
     private var collectionAlertTitle: String {
         switch collectionAlertKind {
@@ -994,7 +1006,7 @@ struct ClipenSettingsView: View {
                     Text("Language").font(.system(size: 13)).foregroundColor(.textPri)
                     Spacer()
                     Button {
-                        showLanguagePicker.toggle()
+                        togglePopover($showLanguagePicker)
                     } label: {
                         Text(AppLanguage.current(for: manager.appLanguageCode).displayName)
                             .font(.system(size: 11, weight: .semibold))
@@ -1017,7 +1029,7 @@ struct ClipenSettingsView: View {
                     Text("Excluded apps").font(.system(size: 13)).foregroundColor(.textPri)
                     Spacer()
                     Button {
-                        showExcludedAppsManager.toggle()
+                        togglePopover($showExcludedAppsManager)
                     } label: {
                         Text("Manage")
                             .font(.system(size: 11, weight: .semibold)).foregroundColor(.accent)
@@ -1517,7 +1529,12 @@ struct ClipenSettingsView: View {
                                                unitWidth: unitW, keyHeight: keyHeight)
                                         .onTapGesture {
                                             guard !key.demos.isEmpty else { return }
-                                            activeKeyID = (activeKeyID == key.id) ? nil : key.id
+                                            if activeKeyID == key.id {
+                                                activeKeyID = nil
+                                            } else {
+                                                let id = key.id
+                                                WakeGuard.afterWakeSettle { activeKeyID = id }
+                                            }
                                         }
                                         .popover(isPresented: Binding(
                                             get: { activeKeyID == key.id },
