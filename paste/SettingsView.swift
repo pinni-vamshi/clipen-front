@@ -1377,12 +1377,13 @@ struct ClipenSettingsView: View {
         @ObservedObject var lab: InteractionLabController
 
         @State private var selected: InteractionDemo
-        // OFF (default): the mock panel etc. always play, and their key
-        // presses sync onto the REAL keyboard tiles behind this popup.
-        // ON: the same press animation plays on the popup's own small
-        // keycap row instead, and the real keyboard goes quiet. The two
-        // never animate at once — this just picks which one shows it.
-        @State private var showInnerButtons = false
+        // ON (default): the mock panel etc. always play, with the press
+        // animation on the popup's OWN small keycap row — self-contained,
+        // nothing behind the popup needs to be visible for the demo to make
+        // sense. OFF: the same key presses sync onto the REAL keyboard tiles
+        // behind this popup instead, and the popup's own row goes quiet.
+        // The two never animate at once — this just picks which one shows it.
+        @State private var showInnerButtons = true
         @ObservedObject private var manager = ClipboardManager.shared
 
         init(key: KBKey, lab: InteractionLabController) {
