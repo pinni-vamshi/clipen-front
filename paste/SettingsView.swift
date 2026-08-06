@@ -1310,7 +1310,12 @@ struct ClipenSettingsView: View {
         static let all: [KBKey] = rows.flatMap { $0 }
     }
 
-    private struct KeyCapView: View {
+    private struct KeyCapView: View, Equatable {
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.key == rhs.key && lhs.isActive == rhs.isActive && lhs.isPressed == rhs.isPressed
+                && lhs.dimmed == rhs.dimmed && lhs.unitWidth == rhs.unitWidth && lhs.keyHeight == rhs.keyHeight
+        }
+
         let key: KBKey
         let isActive: Bool
         /// True while the demo currently playing in this key's (or a sibling
@@ -1484,21 +1489,11 @@ struct ClipenSettingsView: View {
             .frame(width: 380)
             .task {
                 lab.syncRealKeyboard = !showInnerButtons
-                // A fixed-time sleep here isn't reliable on a cold first
-                // open: this popover's own presentation and its first real
-                // layout pass can still be in flight when the sleep ends,
-                // so `lab.select` used to fire its withAnimation calls into
-                // a subtree that wasn't attached/observing yet — the very
-                // first playthrough would silently run with no visible
-                // animation, only recovering on the next open once
-                // everything was already warm. Waiting for the main run
-                // loop to actually drain queued work (AppKit's window
-                // ordering/layout, SwiftUI's own commit) survives however
-                // long that cold-start mount really takes, instead of
-                // guessing a millisecond count.
-                await Self.nextRunLoopTurn()
-                await Self.nextRunLoopTurn()
-                await Self.nextRunLoopTurn()
+                // The cold-start race (first playthrough has no visible
+                // animation) is now handled inside
+                // InteractionLabController.play() itself, which every
+                // `select`/`play` call funnels through — no need to
+                // duplicate a settle-wait here.
                 lab.select(selected)
             }
             .onDisappear { lab.stop() }
@@ -1524,17 +1519,6 @@ struct ClipenSettingsView: View {
             case .pinPreview:  return Binding(get: { m.spaceDoubleTapSpeed }, set: { m.spaceDoubleTapSpeed = $0 })
             case .pinnedOpen:  return Binding(get: { m.pinnedOpenHoldSpeed }, set: { m.pinnedOpenHoldSpeed = $0 })
             default:           return nil
-            }
-        }
-
-        /// A real main-run-loop turn, not a guessed sleep duration —
-        /// `DispatchQueue.main.async` genuinely posts to Cocoa's own queue,
-        /// so awaiting it lets AppKit's pending window-ordering/layout work
-        /// actually drain before the next line runs, however long that
-        /// takes on this particular launch.
-        private static func nextRunLoopTurn() async {
-            await withCheckedContinuation { continuation in
-                DispatchQueue.main.async { continuation.resume() }
             }
         }
     }
@@ -1623,6 +1607,15 @@ struct ClipenSettingsView: View {
                                                isPressed: pressedRealIDs.contains(key.id),
                                                dimmed: lab.isPlaying && !involvedRealIDs.contains(key.id),
                                                unitWidth: unitW, keyHeight: keyHeight)
+                                        // `lab` republishes many times a second
+                                        // while any demo plays, re-running this
+                                        // whole panel's body — without this,
+                                        // every key's `.popover()` bridge (all
+                                        // of them, across the whole keyboard,
+                                        // not just the open one) would get
+                                        // re-evaluated on every single publish
+                                        // for as long as any demo is playing.
+                                        .equatable()
                                         .onTapGesture {
                                             guard !key.demos.isEmpty else { return }
                                             if activeKeyID == key.id {
@@ -1648,6 +1641,7 @@ struct ClipenSettingsView: View {
                                                        onTapKey: { tapped in
                                                            activeKeyID = groupActive ? nil : tapped.id
                                                        })
+                                        .equatable()
                                         .popover(isPresented: Binding(
                                             get: { groupActive },
                                             set: { isPresented in if !isPresented { activeKeyID = nil } }
@@ -1689,7 +1683,12 @@ struct ClipenSettingsView: View {
     /// bordered box instead of N separate ones — any key in it opens the
     /// same demo, so visually they read as a single unified control rather
     /// than nine individually-interactive buttons.
-    private struct GroupedKeyCluster: View {
+    private struct GroupedKeyCluster: View, Equatable {
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.keys == rhs.keys && lhs.isActive == rhs.isActive && lhs.pressedRealIDs == rhs.pressedRealIDs
+                && lhs.dimmed == rhs.dimmed && lhs.unitWidth == rhs.unitWidth && lhs.keyHeight == rhs.keyHeight
+        }
+
         let keys: [KBKey]
         let isActive: Bool
         let pressedRealIDs: Set<String>

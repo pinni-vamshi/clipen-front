@@ -75,7 +75,23 @@ final class InteractionLabController: ObservableObject {
         stageKeys = demo.heroKeys
         isPlaying = true
         task = Task { [weak self] in
-            guard let self else { return }
+            // Real run-loop turns, not a guessed sleep: on a cold mount the
+            // hosting popover/window's own presentation and first layout
+            // pass can still be in flight, so firing withAnimation here
+            // immediately runs it into a subtree that isn't attached/
+            // observing yet — the very first playthrough silently has no
+            // visible animation, only recovering once everything is warm
+            // on the next open. Waiting for AppKit's pending window-
+            // ordering/layout work to actually drain survives however long
+            // that takes, instead of guessing a millisecond count. This is
+            // the one place every caller (KeyDemoPopup, NudgeLessonPanel,
+            // the onboarding practice page, and InteractionLabStage's own
+            // self-driving fallback) funnels through, so fixing it here
+            // fixes the race everywhere at once.
+            await Self.nextRunLoopTurn()
+            await Self.nextRunLoopTurn()
+            await Self.nextRunLoopTurn()
+            guard let self, !Task.isCancelled else { return }
             while !Task.isCancelled {
                 do {
                     try await self.run(demo)
@@ -95,6 +111,12 @@ final class InteractionLabController: ObservableObject {
         task = nil
         resetStage()
         isPlaying = false
+    }
+
+    private static func nextRunLoopTurn() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
     }
 
     private func resetStage() {

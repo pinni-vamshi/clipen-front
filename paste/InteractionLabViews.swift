@@ -227,7 +227,9 @@ struct InteractionLabStage: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .task {
-            try? await Task.sleep(nanoseconds: 80_000_000)
+            // `play()` itself now waits for real run-loop turns before its
+            // first animation fires (see InteractionLabController.play()),
+            // so this fallback no longer needs its own guessed delay.
             guard !lab.isPlaying else { return }
             lab.play()
         }

@@ -672,7 +672,11 @@ private struct PopupGestureDemo: View {
             .animation(.easeOut(duration: 0.12), value: isActive)
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .onTapGesture {
-                activeGesture = isActive ? nil : gesture
+                if isActive {
+                    activeGesture = nil
+                } else {
+                    WakeGuard.afterWakeSettle { activeGesture = gesture }
+                }
             }
             .popover(isPresented: Binding(
                 get: { activeGesture == gesture },
