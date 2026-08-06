@@ -1496,7 +1496,12 @@ struct ClipenSettingsView: View {
                 // duplicate a settle-wait here.
                 lab.select(selected)
             }
-            .onDisappear { lab.stop() }
+            // Not a plain `lab.stop()`: if a different key's popover has
+            // already opened and taken `lab` over by the time this fires
+            // (see InteractionLabController.stopIfStillPlaying), stopping
+            // unconditionally here would cancel that new popup's just-
+            // started animation instead of this one's.
+            .onDisappear { lab.stopIfStillPlaying(selected) }
         }
 
         private func reverseKeyChoice(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {

@@ -113,6 +113,26 @@ final class InteractionLabController: ObservableObject {
         isPlaying = false
     }
 
+    /// Like `stop()`, but a no-op if `lab` has already moved on to a
+    /// different demo by the time this runs. Two popovers driven by the
+    /// same `activeKeyID`/`activeGesture` switch can share one
+    /// `InteractionLabController` (KeyDemoPopup's `lab` is passed in, not
+    /// owned per-popup) — tapping key B while key A's popup is still open
+    /// flips that ID straight from A to B in one change, and SwiftUI
+    /// doesn't guarantee A's `.onDisappear` (which used to call plain
+    /// `stop()`) runs before B's `.task` (which calls `select`/`play`). If
+    /// B wins that race and starts playing first, A's now-stale teardown
+    /// would otherwise cancel B's brand-new task and leave nothing to
+    /// restart it — the popup opens but never animates until closed and
+    /// reopened. Checking that `selectedDemo` still matches what THIS
+    /// caller started lets a late, stale stop from the closing popup
+    /// recognize it's no longer current and back off instead of clobbering
+    /// whoever took over.
+    func stopIfStillPlaying(_ demo: InteractionDemo) {
+        guard selectedDemo == demo else { return }
+        stop()
+    }
+
     private static func nextRunLoopTurn() async {
         await withCheckedContinuation { continuation in
             DispatchQueue.main.async { continuation.resume() }
