@@ -1484,7 +1484,21 @@ struct ClipenSettingsView: View {
             .frame(width: 380)
             .task {
                 lab.syncRealKeyboard = !showInnerButtons
-                try? await Task.sleep(nanoseconds: 80_000_000)
+                // A fixed-time sleep here isn't reliable on a cold first
+                // open: this popover's own presentation and its first real
+                // layout pass can still be in flight when the sleep ends,
+                // so `lab.select` used to fire its withAnimation calls into
+                // a subtree that wasn't attached/observing yet — the very
+                // first playthrough would silently run with no visible
+                // animation, only recovering on the next open once
+                // everything was already warm. Waiting for the main run
+                // loop to actually drain queued work (AppKit's window
+                // ordering/layout, SwiftUI's own commit) survives however
+                // long that cold-start mount really takes, instead of
+                // guessing a millisecond count.
+                await Self.nextRunLoopTurn()
+                await Self.nextRunLoopTurn()
+                await Self.nextRunLoopTurn()
                 lab.select(selected)
             }
             .onDisappear { lab.stop() }
@@ -1510,6 +1524,17 @@ struct ClipenSettingsView: View {
             case .pinPreview:  return Binding(get: { m.spaceDoubleTapSpeed }, set: { m.spaceDoubleTapSpeed = $0 })
             case .pinnedOpen:  return Binding(get: { m.pinnedOpenHoldSpeed }, set: { m.pinnedOpenHoldSpeed = $0 })
             default:           return nil
+            }
+        }
+
+        /// A real main-run-loop turn, not a guessed sleep duration —
+        /// `DispatchQueue.main.async` genuinely posts to Cocoa's own queue,
+        /// so awaiting it lets AppKit's pending window-ordering/layout work
+        /// actually drain before the next line runs, however long that
+        /// takes on this particular launch.
+        private static func nextRunLoopTurn() async {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.main.async { continuation.resume() }
             }
         }
     }
