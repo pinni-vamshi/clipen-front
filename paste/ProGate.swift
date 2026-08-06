@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import FirebaseAnalytics
 import Foundation
 import SwiftUI
 
@@ -132,6 +133,20 @@ final class ProGate: ObservableObject {
             if result.trial_total > 0 { d.set(result.trial_total, forKey: Key.trialTotal) }
             d.set(Date().timeIntervalSince1970, forKey: Key.lastCheckedAt)
             d.set(true, forKey: Key.everChecked)
+
+            // Mirrors main.py's own forward_event_fire_and_forget calls at
+            // this exact same /clipen/entitlement response — same trigger
+            // condition (every check that comes back pro/gated, not just a
+            // transition), so Firebase and PostHog counts should agree.
+            // The backend's "reason" (global vs test_list) isn't knowable
+            // client-side, so that one parameter is the one intentional gap.
+            if result.pro {
+                Analytics.logEvent("pro_unlocked", parameters: nil)
+            } else if result.paywall {
+                Analytics.logEvent("paywall_gated", parameters: nil)
+            }
+            // Mirrors the "plan" $set person property in posthog_forward.py.
+            Analytics.setUserProperty(result.pro ? "pro" : "free", forName: "plan")
 
             DispatchQueue.main.async { [weak self] in
                 self?.evaluate()

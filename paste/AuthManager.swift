@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import FirebaseAnalytics
 import Foundation
 import SwiftUI
 
@@ -140,12 +141,14 @@ final class TrackingService {
         }
         lock.lock(); store.totalPastes += 1; let total = store.totalPastes; lock.unlock()
         maybeTriggerUpdateCheck(totalPastes: total)
+        Analytics.logEvent("paste", parameters: ["count": 1])
         persistSoon()
     }
 
     func recordFastPaste() {
         mutateToday { $0.fastPastes += 1 }
         lock.lock(); store.totalFastPastes += 1; lock.unlock()
+        Analytics.logEvent("fast_paste", parameters: ["count": 1])
         persistSoon()
     }
 
@@ -169,6 +172,7 @@ final class TrackingService {
     func recordPopupOutcome(_ outcome: String) {
         guard !outcome.isEmpty else { return }
         mutateToday { $0.popupOutcomes[outcome, default: 0] += 1 }
+        Analytics.logEvent("popup_outcome", parameters: ["outcome": outcome, "count": 1])
         persistSoon()
     }
 
@@ -183,6 +187,7 @@ final class TrackingService {
         store.toolBuckets["\(id)|\(bucket)", default: 0] += count
         store.globalBuckets[bucket, default: 0] += count
         lock.unlock()
+        Analytics.logEvent("tool_used", parameters: ["tool_id": id, "count": count])
         persistSoon()
     }
 
@@ -191,12 +196,20 @@ final class TrackingService {
     func recordToolVariant(id: String) {
         guard !id.isEmpty else { return }
         mutateToday { $0.toolUses[id, default: 0] += 1 }
+        // Same "tool_used" name as recordToolUse — this feeds the exact same
+        // toolUses_by_date bucket the PostHog forwarder reads, so it must
+        // mirror as the same event for the two pipelines to agree.
+        Analytics.logEvent("tool_used", parameters: ["tool_id": id, "count": 1])
         persistSoon()
     }
 
     func recordMarkedBatch(id: String, size: Int) {
         guard !id.isEmpty, size > 0 else { return }
         mutateToday { $0.markedBatches[id, default: []].append(size) }
+        // Deliberately NOT mirrored to Firebase: marked_batches_by_date isn't
+        // translated by posthog_forward.py either (see day_entry_to_events),
+        // so mirroring it here would make Firebase show something PostHog
+        // never will — breaking the very cross-check this is meant to enable.
         persistSoon()
     }
 
@@ -208,6 +221,7 @@ final class TrackingService {
     func recordSettingValue(id: String, value: Int) {
         guard !id.isEmpty else { return }
         mutateToday { $0.settingValues[id, default: []].append(value) }
+        Analytics.logEvent("setting_value_changed", parameters: ["setting": id, "last_value": value])
         persistSoon()
     }
 
@@ -215,7 +229,68 @@ final class TrackingService {
     func recordEvent(id: String, count: Int = 1) {
         guard !id.isEmpty, count > 0 else { return }
         mutateToday { Self.route(id: id, count: count, into: &$0) }
+        Self.logToFirebaseAnalytics(id: id, count: count)
         persistSoon()
+    }
+
+    /// Mirrors this event to Firebase Analytics using the SAME
+    /// categorization `route()` (below) uses for the backend, and the same
+    /// event names `posthog_forward.py`'s `day_entry_to_events()` forwards
+    /// to PostHog — so a given real action shows up identically in all
+    /// three places, letting a mismatch between Firebase and PostHog be
+    /// read as a real pipeline problem rather than a naming difference.
+    /// Anything `day_entry_to_events()` does NOT forward to PostHog
+    /// (paste positions, popup abandon/nav, page.* buckets) is deliberately
+    /// skipped here too, for the same reason.
+    private static func logToFirebaseAnalytics(id: String, count: Int) {
+        func suffix(_ prefix: String) -> String {
+            String(id.dropFirst(prefix.count)).replacingOccurrences(of: "-", with: "_")
+        }
+        switch true {
+        case id == "popup.open":
+            Analytics.logEvent("popup_opened", parameters: ["count": count])
+        case id == "popup.abandon", id == "popup.nav":
+            return
+        case id == "action.popup-search":
+            Analytics.logEvent("popup_search", parameters: ["count": count])
+        case id == "action.mark":
+            Analytics.logEvent("action", parameters: ["action": "marked", "count": count])
+        case id == "action.delete":
+            Analytics.logEvent("action", parameters: ["action": "deleted", "count": count])
+        case id == "action.pin":
+            Analytics.logEvent("action", parameters: ["action": "pinned", "count": count])
+        case id == "action.preview":
+            Analytics.logEvent("action", parameters: ["action": "previews", "count": count])
+        case id == "action.share":
+            Analytics.logEvent("action", parameters: ["action": "shares", "count": count])
+        case id == "action.front":
+            Analytics.logEvent("action", parameters: ["action": "move_front", "count": count])
+        case id == "action.reference-pin":
+            Analytics.logEvent("action", parameters: ["action": "quickclip_pins", "count": count])
+        case id.hasPrefix("action."):
+            Analytics.logEvent("action", parameters: ["action": suffix("action."), "count": count])
+        case id.hasPrefix("ref."):
+            Analytics.logEvent("action", parameters: ["action": "quickclip_" + suffix("ref."), "count": count])
+        case id == "session.open":
+            Analytics.logEvent("action", parameters: ["action": "session_opens", "count": count])
+        case id.hasPrefix("capture."):
+            Analytics.logEvent("capture", parameters: ["content_type": suffix("capture."), "count": count])
+        case id.hasPrefix("setting."):
+            Analytics.logEvent("setting_changed", parameters: ["setting": suffix("setting."), "count": count])
+        case id.hasPrefix("fail."):
+            let kind = suffix("fail.")
+            // posthog_forward.py explicitly drops sparkle_check as noise —
+            // mirrored here so Firebase doesn't show a "failure" PostHog
+            // will never have for the same event.
+            guard kind != "sparkle_check" else { return }
+            Analytics.logEvent("failure", parameters: ["kind": kind, "count": count])
+        case id.hasPrefix("pidx."), id.hasPrefix("page."):
+            return
+        default:
+            Analytics.logEvent("action", parameters: [
+                "action": id.replacingOccurrences(of: ".", with: "_"), "count": count,
+            ])
+        }
     }
 
     private static func route(id: String, count: Int, into day: inout DayData) {
@@ -650,6 +725,14 @@ final class AuthManager: ObservableObject {
             ClipboardManager.shared.applyPlanLimits(ringLimit: self.ringLimit)
             AppDelegate.shared?.automaticallyChecksForUpdates = self.sparkleAutomaticChecks
         }
+        // Mirrors the same $set person properties the backend applies to
+        // every PostHog profile (person_set_event in posthog_forward.py) —
+        // app_version/os_version don't change mid-session, so setting them
+        // once here (rather than on every flush) is enough to keep both
+        // profiles in sync.
+        Analytics.setUserProperty(
+            Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, forName: "app_version")
+        Analytics.setUserProperty(ProcessInfo.processInfo.operatingSystemVersionString, forName: "os_version")
         flushTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { _ in
             DispatchQueue.main.async {
                 TrackingService.shared.flushToBackend()
