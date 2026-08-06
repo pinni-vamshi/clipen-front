@@ -3814,6 +3814,106 @@
         }
       }
     },
+    "A few of the most useful moves — click a key to see it happen.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein paar der nützlichsten Aktionen – klicke auf eine Taste, um sie zu sehen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Algunos de los movimientos más útiles: haz clic en una tecla para verlo."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quelques-uns des gestes les plus utiles — cliquez sur une touche pour le voir."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beberapa gerakan paling berguna — klik tombol untuk melihatnya."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alcune delle mosse più utili: fai clic su un tasto per vederle."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "よく使う操作のいくつかです — キーをクリックすると確認できます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "가장 유용한 동작 몇 가지 — 키를 클릭하면 확인할 수 있습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enkele van de handigste acties — klik op een toets om het te zien."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kilka najbardziej przydatnych ruchów — kliknij klawisz, aby je zobaczyć."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alguns dos movimentos mais úteis — clique numa tecla para ver."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Несколько самых полезных действий — нажмите клавишу, чтобы увидеть."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Några av de mest användbara greppen — klicka på en tangent för att se det."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En kullanışlı hareketlerden birkaçı — görmek için bir tuşa tıklayın."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Một vài thao tác hữu ích nhất — nhấp vào một phím để xem."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "几个最常用的操作——点按按键即可查看。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "幾個最常用的操作——點按按鍵即可查看。"
+          }
+        }
+      }
+    },
     "A large or older history can take a little while the first time.": {
       "localizations": {
         "de": {
@@ -9058,6 +9158,106 @@
           "stringUnit": {
             "state": "translated",
             "value": "點按每個框並按 ⌘C。Clipen 會自動擷取每一次複製。"
+          }
+        }
+      }
+    },
+    "Click these buttons to see the interactions.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klicke auf diese Schaltflächen, um die Interaktionen zu sehen."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Haz clic en estos botones para ver las interacciones."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cliquez sur ces boutons pour voir les interactions."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klik tombol-tombol ini untuk melihat interaksinya."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fai clic su questi pulsanti per vedere le interazioni."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これらのボタンをクリックして操作を確認してください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 버튼들을 클릭하여 상호작용을 확인하세요."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klik op deze knoppen om de interacties te zien."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kliknij te przyciski, aby zobaczyć interakcje."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clique nestes botões para ver as interações."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нажмите на эти кнопки, чтобы увидеть взаимодействия."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Klicka på dessa knappar för att se interaktionerna."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Etkileşimleri görmek için bu düğmelere tıklayın."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nhấp vào các nút này để xem các tương tác."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点按这些按钮即可查看互动效果。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "點按這些按鈕即可查看互動效果。"
           }
         }
       }

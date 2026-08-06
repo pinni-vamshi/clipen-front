@@ -1242,7 +1242,7 @@ struct ClipenSettingsView: View {
     // picker right there in the same popup. Click the same key again to
     // close it.
 
-    private struct KBKey: Identifiable, Equatable {
+    struct KBKey: Identifiable, Equatable {
         let id: String
         let label: String
         var width: CGFloat = 1
@@ -1369,7 +1369,7 @@ struct ClipenSettingsView: View {
         }
     }
 
-    private struct KeyDemoPopup: View {
+    struct KeyDemoPopup: View {
         let key: KBKey
         // Shared with KeyboardInteractionPanel (not owned here) so the real
         // keyboard tiles can light up in sync with this demo's own animated
