@@ -545,50 +545,202 @@ struct TutorialSheet: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("There's a lot more behind the popup")
                     .font(.system(size: 17, weight: .bold)).foregroundColor(.textPri)
-                Text("A few of the most useful moves — all from the same ⌘-held ring. Open Settings to see and try them all.")
+                Text("A few of the most useful moves — hover a key to see it happen.")
                     .font(.system(size: 12)).foregroundColor(.textSec)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Two compact features (no boxes) split by a tall vertical divider,
-            // grouped in the centre. Narrow columns let each description wrap
-            // over a few lines so the pair reads as a balanced block instead of
-            // two texts stranded far apart.
-            ZStack {
-                Color.clear
-                HStack(alignment: .center, spacing: 26) {
-                    featureText(key: "X",
-                                title: "Transform before pasting",
-                                desc: "Land on an item, tap X to cycle transforms — UPPERCASE, Base64, JSON… release ⌘ to paste the result.")
-                        .frame(width: 230)
-                    Divider().frame(height: 108)
-                    featureText(key: "hold V",
-                                title: "Mark & paste many at once",
-                                desc: "Hold V to mark items, then release ⌘ to paste them all together, in the order you marked.")
-                        .frame(width: 230)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .offset(y: 10)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            PopupGestureDemo()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func featureText(key: String, title: LocalizedStringKey, desc: LocalizedStringKey) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(key)
-                    .font(.system(size: 12, weight: .heavy, design: .monospaced))
-                    .foregroundColor(.accent)
-                Text(title).font(.system(size: 14, weight: .semibold)).foregroundColor(.textPri)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text(desc).font(.system(size: 11)).foregroundColor(.textSec)
-                .fixedSize(horizontal: false, vertical: true)
+}
+
+/// The four gestures this page teaches by letting you hover them, in the
+/// fixed order they appear in the demo's key column.
+private enum PopupDemoGesture: String, CaseIterable {
+    case holdV, space, x, del
+
+    var label: LocalizedStringKey {
+        switch self {
+        case .holdV: return "hold V"
+        case .space: return "space"
+        case .x:     return "X"
+        case .del:   return "del"
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A live, hover-driven mock of the real ⌘V popup — used only on the final
+/// onboarding page in place of two static text blocks. Hovering one of the
+/// four key buttons on the right plays that gesture's effect directly in
+/// the mock popup on the left (marking, transforming, previewing, deleting)
+/// and mirrors the same result in a single shared panel on the right, so
+/// all four gestures read as variations of one popup rather than four
+/// unrelated demos.
+private struct PopupGestureDemo: View {
+    private static let items: [LocalizedStringKey] = ["Item One", "Item Two", "Item Three", "Item Four"]
+    private static let transformLabels: [LocalizedStringKey] = ["UPPERCASE", "lowercase", "Base64", "JSON"]
+    private static let selectedIndex = 0
+
+    @State private var hovered: PopupDemoGesture? = nil
+    @State private var transformStep = 0
+    @State private var transformTimer: Timer? = nil
+    // Drives the idle "you can hover these" affordance — a slow breathing
+    // border on all four keys before the user has touched any of them.
+    @State private var pulse = false
+
+    private var markedIndices: Set<Int> {
+        // Marking is a multi-item gesture in real use — mirror that with
+        // more than a single row lighting up, not just the selected one.
+        hovered == .holdV ? [0, 1] : []
+    }
+    private var itemDeleted: Bool { hovered == .del }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 22) {
+            VStack(spacing: 10) {
+                mockPopup
+                // Sits BELOW the popup, outside its box — matching how the
+                // real popup shows "hold ⌘, press V" as a caption underneath
+                // rather than as a row inside the item list.
+                VStack(spacing: 2) {
+                    Text("Open popup").font(.system(size: 10, weight: .semibold)).foregroundColor(.textDim)
+                    Text("⌘V").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.textSec)
+                }
+            }
+
+            VStack(spacing: 10) {
+                ForEach(PopupDemoGesture.allCases, id: \.self) { gesture in
+                    demoKey(gesture)
+                }
+            }
+
+            resultPanel
+                .frame(width: 190, height: 176, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
+        }
+        .onChange(of: hovered) { newValue in
+            transformTimer?.invalidate()
+            transformStep = 0
+            guard newValue == .x else { return }
+            // X's real gesture cycles transforms one step per tap while
+            // held — simulate that same stepping automatically while
+            // hovered, instead of a single static transform panel.
+            transformTimer = Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { _ in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    transformStep = (transformStep + 1) % Self.transformLabels.count
+                }
+            }
+        }
+        .onDisappear { transformTimer?.invalidate() }
     }
 
+    private var mockPopup: some View {
+        VStack(spacing: 4) {
+            ForEach(Array(Self.items.enumerated()), id: \.offset) { idx, label in
+                if itemDeleted && idx == Self.selectedIndex {
+                    EmptyView()
+                } else {
+                    HStack(spacing: 6) {
+                        if markedIndices.contains(idx) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 9)).foregroundColor(.white)
+                        }
+                        Text(label)
+                            .font(.system(size: 11, weight: idx == Self.selectedIndex ? .semibold : .regular))
+                            .foregroundColor(idx == Self.selectedIndex ? .white : .textPri)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(idx == Self.selectedIndex ? Color.accent : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                }
+            }
+        }
+        .padding(8)
+        .frame(width: 150)
+        .background(Color.surfaceHi, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.border, lineWidth: 1))
+        .animation(.easeInOut(duration: 0.2), value: hovered)
+    }
+
+    /// One square, macOS-keycap-style button per gesture — pulses gently
+    /// while idle (the "you can hover these" affordance) and snaps to a
+    /// solid pressed look on hover, matching the click feedback of a real
+    /// key rather than a plain highlight.
+    private func demoKey(_ gesture: PopupDemoGesture) -> some View {
+        let isHovered = hovered == gesture
+        return Text(gesture.label)
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundColor(isHovered ? .white : .textSec)
+            .frame(width: 54, height: 40)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(isHovered ? Color.accent : Color.surfaceHi))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(Color.accent.opacity(isHovered ? 1 : (pulse ? 0.9 : 0.35)),
+                        lineWidth: isHovered ? 2 : 1.4))
+            .scaleEffect(isHovered ? 0.94 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+            .onHover { inside in hovered = inside ? gesture : nil }
+    }
+
+    @ViewBuilder
+    private var resultPanel: some View {
+        switch hovered {
+        case .holdV:
+            resultBox(title: "Marked", icon: "checkmark.circle.fill") {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(markedIndices).sorted(), id: \.self) { idx in
+                        Text(Self.items[idx]).font(.system(size: 11)).foregroundColor(.textPri)
+                    }
+                }
+            }
+        case .space:
+            resultBox(title: "Preview", icon: "eye.fill") {
+                Text(Self.items[Self.selectedIndex])
+                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.textPri)
+            }
+        case .x:
+            resultBox(title: "Transform", icon: "wand.and.stars") {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(Self.transformLabels.enumerated()), id: \.offset) { idx, label in
+                        Text(label)
+                            .font(.system(size: 11, weight: idx == transformStep ? .bold : .regular))
+                            .foregroundColor(idx == transformStep ? .accent : .textDim)
+                    }
+                }
+            }
+        case .del:
+            resultBox(title: "Deleted", icon: "trash.fill") {
+                Text(Self.items[Self.selectedIndex])
+                    .font(.system(size: 11)).foregroundColor(.textDim).strikethrough()
+            }
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private func resultBox<Content: View>(
+        title: LocalizedStringKey, icon: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 10))
+                Text(title).font(.system(size: 10, weight: .bold))
+            }
+            .foregroundColor(.accent)
+            content()
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Color.surfaceHi.opacity(0.5), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.border, lineWidth: 1))
+    }
 }

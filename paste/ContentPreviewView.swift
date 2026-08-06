@@ -561,16 +561,81 @@ enum EmbeddedImageExtractor {
 }
 
 
-/// One shared WKWebView reused across every WebsitePreview mount — same
-/// rationale as HTMLWebViewPool above (constructing a WKWebView is 100-200 ms
-/// and only one URL preview is ever visible at a time).
-private enum WebsitePreviewPool {
-    static let shared: WKWebView = {
+/// A small, bounded pool of live WKWebView instances, each able to hold one
+/// distinct already-loaded (or loading) page at once.
+///
+/// This used to be a single shared view (building a WKWebView is 100-200 ms,
+/// and only one URL preview was ever visible at a time). That's no longer
+/// true: neighbor items now get prefetched in the background while the item
+/// preview panel is open (see `PreviewPrefetcher`), so several distinct URLs
+/// can legitimately need to be "already loaded" at once — one shared view
+/// can't do that, since loading a second URL into it throws away the first.
+///
+/// Kept intentionally small (`maxPoolSize`): each live WKWebView is real
+/// memory, comparable to an extra browser tab, for as long as it's pooled.
+final class WebsitePreviewPool {
+    static let shared = WebsitePreviewPool()
+    private init() {}
+
+    private final class Entry {
+        let webView: WKWebView
+        var lastUsed: Date
+        init(webView: WKWebView, lastUsed: Date) { self.webView = webView; self.lastUsed = lastUsed }
+    }
+
+    private var entries: [String: Entry] = [:]
+    // The currently-displayed preview's view is always one of these entries
+    // too — capacity covers it plus up to 3 neighbors on one side.
+    private let maxPoolSize = 4
+
+    private func makeWebView() -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         view.allowsMagnification = true
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
-    }()
+    }
+
+    /// Returns the pooled view for this URL — creating and starting a load
+    /// for it if it isn't already pooled — and marks it most-recently-used
+    /// so it isn't the next one evicted.
+    func webView(for url: URL) -> WKWebView {
+        assert(Thread.isMainThread, "WKWebView must only be touched on the main thread")
+        let k = url.absoluteString
+        if let entry = entries[k] {
+            entry.lastUsed = Date()
+            return entry.webView
+        }
+        evictLeastRecentlyUsedIfNeeded()
+        let view = makeWebView()
+        entries[k] = Entry(webView: view, lastUsed: Date())
+        view.load(URLRequest(url: url, timeoutInterval: 10))
+        return view
+    }
+
+    /// Whether `url` already has a pooled view (loading or finished) —
+    /// lets a fresh mount skip re-triggering `.load()` on a page that's
+    /// already in flight or done.
+    func hasPooledView(for url: URL) -> Bool { entries[url.absoluteString] != nil }
+
+    /// Background-safe: prepares a URL nobody is looking at yet. Does
+    /// nothing if that URL is already pooled (loading or loaded).
+    func prefetch(url: URL) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.prefetch(url: url) }
+            return
+        }
+        guard !hasPooledView(for: url) else { return }
+        _ = webView(for: url)
+    }
+
+    private func evictLeastRecentlyUsedIfNeeded() {
+        guard entries.count >= maxPoolSize,
+              let oldestKey = entries.min(by: { $0.value.lastUsed < $1.value.lastUsed })?.key
+        else { return }
+        let evicted = entries.removeValue(forKey: oldestKey)
+        evicted?.webView.stopLoading()
+        evicted?.webView.removeFromSuperview()
+    }
 }
 
 struct WebsitePreview: NSViewRepresentable {
@@ -582,8 +647,10 @@ struct WebsitePreview: NSViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         var progressView: NSProgressIndicator?
         var lastLoadKey: String?
+        var lastURL: URL?
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation _: WKNavigation!) {
+            progressView?.isHidden = false
             progressView?.startAnimation(nil)
         }
         func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
@@ -598,14 +665,10 @@ struct WebsitePreview: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeNSView(context: Context) -> NSView {
-        let container = NSView()
-
-        let webView = WebsitePreviewPool.shared
-        // Reparent from whatever previous mount last hosted it, same as
-        // HTMLStringPreview does with its own pool.
+    private static func attach(_ webView: WKWebView, to container: NSView, delegate: WKNavigationDelegate) {
+        container.subviews.filter { $0 is WKWebView }.forEach { $0.removeFromSuperview() }
         webView.removeFromSuperview()
-        webView.navigationDelegate = context.coordinator
+        webView.navigationDelegate = delegate
         container.addSubview(webView)
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: container.topAnchor),
@@ -613,6 +676,17 @@ struct WebsitePreview: NSViewRepresentable {
             webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let container = NSView()
+
+        // May already be sitting in the pool, fully or partially loaded, if
+        // a neighbor-item prefetch got to it first — in which case getting
+        // the view here does NOT re-trigger a load.
+        let wasAlreadyPooled = WebsitePreviewPool.shared.hasPooledView(for: url)
+        let webView = WebsitePreviewPool.shared.webView(for: url)
+        Self.attach(webView, to: container, delegate: context.coordinator)
 
         let progress = NSProgressIndicator()
         progress.style = .spinning
@@ -623,22 +697,46 @@ struct WebsitePreview: NSViewRepresentable {
             progress.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             progress.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
-        progress.startAnimation(nil)
         context.coordinator.progressView = progress
-
         context.coordinator.lastLoadKey = "\(url.absoluteString)#\(reloadToken)"
-        webView.load(URLRequest(url: url, timeoutInterval: 10))
+        context.coordinator.lastURL = url
+
+        if wasAlreadyPooled && !webView.isLoading {
+            // Prefetched and already finished — show it immediately instead
+            // of flashing a spinner for a load that already happened.
+            progress.isHidden = true
+        } else {
+            progress.startAnimation(nil)
+        }
         return container
     }
 
     func updateNSView(_ container: NSView, context: Context) {
         let key = "\(url.absoluteString)#\(reloadToken)"
-        guard let webView = container.subviews.first(where: { $0 is WKWebView }) as? WKWebView,
-              context.coordinator.lastLoadKey != key else { return }
+        guard context.coordinator.lastLoadKey != key else { return }
+        let urlChanged = context.coordinator.lastURL != url
         context.coordinator.lastLoadKey = key
-        context.coordinator.progressView?.isHidden = false
-        context.coordinator.progressView?.startAnimation(nil)
-        webView.load(URLRequest(url: url, timeoutInterval: 10))
+        context.coordinator.lastURL = url
+
+        let wasAlreadyPooled = WebsitePreviewPool.shared.hasPooledView(for: url)
+        let webView = WebsitePreviewPool.shared.webView(for: url)
+        if webView.superview !== container {
+            Self.attach(webView, to: container, delegate: context.coordinator)
+        }
+
+        if !urlChanged {
+            // Same URL, reloadToken bumped — an explicit user-triggered
+            // refresh, so force a real reload even though it's pooled.
+            context.coordinator.progressView?.isHidden = false
+            context.coordinator.progressView?.startAnimation(nil)
+            webView.load(URLRequest(url: url, timeoutInterval: 10))
+        } else if wasAlreadyPooled && !webView.isLoading {
+            context.coordinator.progressView?.isHidden = true
+            context.coordinator.progressView?.stopAnimation(nil)
+        } else {
+            context.coordinator.progressView?.isHidden = false
+            context.coordinator.progressView?.startAnimation(nil)
+        }
     }
 }
 

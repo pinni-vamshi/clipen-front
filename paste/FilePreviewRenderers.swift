@@ -43,13 +43,17 @@ struct AsyncDelimitedFilePreview: View {
             rows = nil
             isTruncated = false
             loadFailed = false
+            if let cached = FilePreviewCache.delimitedRows(for: url) {
+                rows = cached.rows
+                isTruncated = cached.isTruncated
+                return
+            }
             let loaded = await Task.detached(priority: .userInitiated) {
-                FileKindDetector.readableTextPreview(from: url)
+                FilePreviewCache.loadDelimitedRows(for: url)
             }.value
             guard !Task.isCancelled else { return }
             guard let loaded else { loadFailed = true; return }
-            let delimiter = DelimitedTableParser.detectDelimiter(loaded.text)
-            rows = DelimitedTableParser.parse(loaded.text, delimiter: delimiter)
+            rows = loaded.rows
             isTruncated = loaded.isTruncated
         }
     }
@@ -97,8 +101,13 @@ struct AsyncTextFilePreview: View {
             text = nil
             isTruncated = false
             loadFailed = false
+            if let cached = FilePreviewCache.text(for: url) {
+                text = cached.text
+                isTruncated = cached.isTruncated
+                return
+            }
             let loaded = await Task.detached(priority: .userInitiated) {
-                FileKindDetector.readableTextPreview(from: url)
+                FilePreviewCache.loadText(for: url)
             }.value
             guard !Task.isCancelled else { return }
             if let loaded {
@@ -931,8 +940,12 @@ struct AsyncImageFilePreview: View {
         }
         .task(id: url) {
             image = nil
+            if let cached = FilePreviewCache.image(for: url) {
+                image = cached
+                return
+            }
             let loaded = await Task.detached(priority: .userInitiated) {
-                NSImage(contentsOf: url)
+                FilePreviewCache.loadImage(for: url)
             }.value
             guard !Task.isCancelled else { return }
             image = loaded
@@ -962,8 +975,12 @@ struct AsyncPDFFilePreview: View {
         .task(id: url) {
             document = nil
             failed = false
+            if let cached = FilePreviewCache.pdf(for: url) {
+                document = cached
+                return
+            }
             let loaded = await Task.detached(priority: .userInitiated) {
-                PDFDocument(url: url)
+                FilePreviewCache.loadPDF(for: url)
             }.value
             guard !Task.isCancelled else { return }
             if let loaded { document = loaded } else { failed = true }
@@ -994,9 +1011,12 @@ struct AsyncGIFFilePreview: View {
         .task(id: url) {
             loaded = nil
             failed = false
-            let result = await Task.detached(priority: .userInitiated) { () -> (NSImage, Data)? in
-                guard let data = try? Data(contentsOf: url), let image = NSImage(data: data) else { return nil }
-                return (image, data)
+            if let cached = FilePreviewCache.gif(for: url) {
+                loaded = cached
+                return
+            }
+            let result = await Task.detached(priority: .userInitiated) {
+                FilePreviewCache.loadGIF(for: url)
             }.value
             guard !Task.isCancelled else { return }
             if let result { loaded = result } else { failed = true }

@@ -801,6 +801,7 @@ extension ClipboardManager {
         if userOpenedItemPreview {
             if itemPreviewPanel.isVisible {
                 showSelectedItemPreview()
+                prefetchNeighborPreviews()
             }
             return
         }
@@ -809,12 +810,30 @@ extension ClipboardManager {
             && autoPreviewTypes.contains(AutoPreviewContentType.from(displayItems[selectedIndex]))
         if autoShowsCurrent {
             showSelectedItemPreview()
+            prefetchNeighborPreviews()
         } else if itemPreviewPanel.isVisible {
             if !autoPreviewTypes.isEmpty {
                 itemPreviewPanel.hide()
             } else {
                 showSelectedItemPreview()
+                prefetchNeighborPreviews()
             }
+        }
+    }
+
+    /// Warms the (up to) 3 items before and 3 after the current selection
+    /// in the background — see PreviewPrefetch.swift for what "warms"
+    /// actually does per content type. Only ever runs alongside an actual
+    /// preview update, so it's purely a "the next few V-taps won't feel
+    /// like they're loading" optimization while you're already browsing
+    /// with preview open — never anything else.
+    private func prefetchNeighborPreviews() {
+        guard itemPreviewPanel.isVisible, !displayItems.isEmpty else { return }
+        let lower = max(0, selectedIndex - 3)
+        let upper = min(displayItems.count - 1, selectedIndex + 3)
+        guard lower <= upper else { return }
+        for idx in lower...upper where idx != selectedIndex {
+            PreviewPrefetcher.prefetch(displayItems[idx])
         }
     }
 

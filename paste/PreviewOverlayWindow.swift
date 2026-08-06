@@ -105,9 +105,21 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
             popover.contentViewController = NSHostingController(rootView: popoverView)
         }
 
-        guard !popover.isShown else {
-            hintOverlay.show(above: frame)
-            return
+        // `showAnchored` is only ever reached via `show()`, and every caller
+        // of `show()` already checks the popup is currently closed before
+        // calling it — so `popover.isShown` reading true here is never a
+        // legitimate "it's already open for this session" case. It's a
+        // stale flag lagging an in-flight close animation from the PREVIOUS
+        // session (NSPopover's close is animated; `isShown` can still read
+        // true for a moment after a close was requested but hasn't visually
+        // settled). Trusting it here used to reposition the hint row and
+        // return WITHOUT ever calling `.show()` again — the hints would
+        // appear, but the ring itself would silently never (re)appear until
+        // a second attempt, once the flag had finally caught up. Forcing a
+        // close first guarantees a real `.show()` always follows below,
+        // regardless of what the flag said going in.
+        if popover.isShown {
+            popover.performClose(nil)
         }
 
         anchorPanel.setFrame(NSRect(x: anchor.x, y: anchor.y, width: 1, height: 1), display: false)
