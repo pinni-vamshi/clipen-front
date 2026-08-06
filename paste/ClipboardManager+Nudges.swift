@@ -36,6 +36,19 @@ enum NudgeFeature: Int, CaseIterable {
         }
     }
 
+    /// Short slug for telemetry event IDs (action.nudge-shown-<slug>, etc).
+    var trackingID: String {
+        switch self {
+        case .multiPaste:     return "multi_paste"
+        case .groups:         return "groups"
+        case .preview:        return "preview"
+        case .pinPreview:     return "pin_preview"
+        case .transformPanel: return "transform_panel"
+        case .collections:    return "collections"
+        case .search:         return "search"
+        }
+    }
+
     fileprivate var usedKey: String {
         switch self {
         case .multiPaste:     return "clipen.nudge.used.multiPaste"
@@ -112,6 +125,11 @@ extension ClipboardManager {
         if !alreadyKnew {
             UserDefaults.standard.set(true, forKey: key)
             nudgeLearnedRevision += 1
+            // Distinct from "action.nudge-learned-<feature>" (explicit
+            // "Learned" click) — this fires when the real gesture is
+            // detected, whether or not any lesson was ever shown for it.
+            AuthManager.shared.registerActionUsage(
+                actionID: "action.nudge-learned-naturally-\(feature.trackingID)")
         }
         // The user just performed the real gesture. If this happens to be the
         // lesson currently on screen, finish it automatically — no need to
@@ -241,13 +259,15 @@ extension ClipboardManager {
         // functions away.
         guard let next = Self.autoTrackedFeatures.filter(isEligible).min(by: { $0.rawValue < $1.rawValue })
         else { return }
-        presentNudge(next)
+        presentNudge(next, auto: true)
     }
 
-    private func presentNudge(_ feature: NudgeFeature) {
+    private func presentNudge(_ feature: NudgeFeature, auto: Bool) {
         nudgeIsShowing = true
         nudgeActiveFeature = feature
         lastNudgeShownAt = Date()
+        AuthManager.shared.registerActionUsage(
+            actionID: "action.nudge-shown-\(feature.trackingID)-\(auto ? "auto" : "manual")")
         let progress = learnedProgress(for: feature)
         nudgeLessonPanel.show(
             feature: feature,
@@ -265,7 +285,7 @@ extension ClipboardManager {
     /// so "Learned"/"Later" behave identically either way.
     func presentTipManually(_ feature: NudgeFeature) {
         guard !nudgeIsShowing else { return }
-        presentNudge(feature)
+        presentNudge(feature, auto: false)
     }
 
     /// The two explicit answers on the lesson panel. "Learned" marks the
@@ -275,6 +295,8 @@ extension ClipboardManager {
     /// lesson tries again on a future popup open.
     private func answerNudgeLesson(learned: Bool) {
         guard let feature = nudgeActiveFeature else { return }
+        AuthManager.shared.registerActionUsage(
+            actionID: "action.nudge-\(learned ? "learned" : "later")-\(feature.trackingID)")
         if learned {
             UserDefaults.standard.set(true, forKey: feature.usedKey)
             nudgeLearnedRevision += 1

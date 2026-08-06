@@ -82,6 +82,11 @@ final class ProGate: ObservableObject {
             || UserDefaults.standard.bool(forKey: Key.serverIsPro)
         // Paying always beats the gate; the trial only matters for non-payers.
         let unlocked = paid || !applies || remaining > 0
+        // Fires once, on the actual 0-crossing — not every re-evaluation
+        // while already exhausted (evaluate() runs on every popup open).
+        if applies, !paid, trialRemaining > 0, remaining == 0 {
+            AuthManager.shared.registerActionUsage(actionID: "action.trial_exhausted")
+        }
         if paywallApplies != applies { paywallApplies = applies }
         if trialRemaining != remaining { trialRemaining = remaining }
         if isUnlocked != unlocked { isUnlocked = unlocked }
@@ -173,6 +178,7 @@ struct SubscribeGateView: View {
                 }
 
                 Button {
+                    AuthManager.shared.registerActionUsage(actionID: "action.paywall_subscribe_click")
                     NSWorkspace.shared.open(Self.subscribeURL)
                 } label: {
                     Text("Subscribe to Pro")
@@ -203,5 +209,8 @@ struct SubscribeGateView: View {
             .frame(height: 26)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            AuthManager.shared.registerActionUsage(actionID: "action.paywall_shown")
+        }
     }
 }

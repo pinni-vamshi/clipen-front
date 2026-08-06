@@ -38,13 +38,20 @@ final class TrackingService {
         var popupOutcomes: [String: Int] = [:]
         var actions: [String: Int] = [:]        // marked/deleted/pinned/previews/shares/...
         var settingsChanged: [String: Int] = [:]
+        /// Raw sequence of values a numeric setting was actually changed TO,
+        /// in order — `settingsChanged` only ever said a setting was
+        /// touched N times, never what it was touched to (e.g. ring_size
+        /// going 10 -> 25 -> 15 in a day looked identical to it going
+        /// 10 -> 11 -> 10). One entry per change, same key scheme as
+        /// `settingsChanged` (e.g. "ring_size").
+        var settingValues: [String: [Int]] = [:]
         var failures: [String: Int] = [:]
 
         var isEmpty: Bool {
             cmdVPastes == 0 && fastPastes == 0 && positions.isEmpty && hours.isEmpty
                 && toolUses.isEmpty && markedBatches.isEmpty && captures.isEmpty
                 && popup.isEmpty && popupDurationsMs.isEmpty && popupOutcomes.isEmpty
-                && actions.isEmpty && settingsChanged.isEmpty && failures.isEmpty
+                && actions.isEmpty && settingsChanged.isEmpty && settingValues.isEmpty && failures.isEmpty
         }
 
         init() {}
@@ -59,7 +66,7 @@ final class TrackingService {
         enum CodingKeys: String, CodingKey {
             case cmdVPastes, fastPastes, positions, hours, toolUses, markedBatches,
                  captures, popup, popupDurationsMs, popupOutcomes, actions,
-                 settingsChanged, failures
+                 settingsChanged, settingValues, failures
         }
 
         init(from decoder: Decoder) throws {
@@ -76,6 +83,7 @@ final class TrackingService {
             popupOutcomes = try c.decodeIfPresent([String: Int].self, forKey: .popupOutcomes) ?? [:]
             actions = try c.decodeIfPresent([String: Int].self, forKey: .actions) ?? [:]
             settingsChanged = try c.decodeIfPresent([String: Int].self, forKey: .settingsChanged) ?? [:]
+            settingValues = try c.decodeIfPresent([String: [Int]].self, forKey: .settingValues) ?? [:]
             failures = try c.decodeIfPresent([String: Int].self, forKey: .failures) ?? [:]
         }
     }
@@ -189,6 +197,17 @@ final class TrackingService {
     func recordMarkedBatch(id: String, size: Int) {
         guard !id.isEmpty, size > 0 else { return }
         mutateToday { $0.markedBatches[id, default: []].append(size) }
+        persistSoon()
+    }
+
+    /// Records the exact value a numeric setting was just changed TO (not
+    /// just that it changed) — e.g. `recordSettingValue(id: "ring_size",
+    /// value: 25)`. Pairs with the existing count-only `recordEvent(id:
+    /// "setting.ring_size")` call at the same call site; this is additive,
+    /// not a replacement.
+    func recordSettingValue(id: String, value: Int) {
+        guard !id.isEmpty else { return }
+        mutateToday { $0.settingValues[id, default: []].append(value) }
         persistSoon()
     }
 
@@ -330,6 +349,7 @@ final class TrackingService {
             if !day.popupOutcomes.isEmpty { d["popup_outcomes"] = day.popupOutcomes }
             if !day.actions.isEmpty { d["actions"] = day.actions }
             if !day.settingsChanged.isEmpty { d["settings_changed"] = day.settingsChanged }
+            if !day.settingValues.isEmpty { d["setting_values"] = day.settingValues }
             if !day.failures.isEmpty { d["failures"] = day.failures }
             daysJSON[date] = d
         }
@@ -670,6 +690,10 @@ final class AuthManager: ObservableObject {
 
     func registerToolUsage(toolID: String, count: Int = 1) {
         TrackingService.shared.recordToolUse(id: toolID, count: count)
+    }
+
+    func registerSettingValue(id: String, value: Int) {
+        TrackingService.shared.recordSettingValue(id: id, value: value)
     }
 
     var fastPasteCount: Int {

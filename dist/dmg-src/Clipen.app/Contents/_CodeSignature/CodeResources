@@ -12,6 +12,114 @@
 		<data>
 		xWbgNCygjbmifSnUTh9WN0EmM0w=
 		</data>
+		<key>Resources/Firebase_FirebaseCore.bundle/Contents/Info.plist</key>
+		<data>
+		c1sX1Pyuuywr+Ok71jvWhhf7Pwo=
+		</data>
+		<key>Resources/Firebase_FirebaseCore.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		sa2OhFlqdCIyz9oV7fUdDKWzFL0=
+		</data>
+		<key>Resources/Firebase_FirebaseCoreExtension.bundle/Contents/Info.plist</key>
+		<data>
+		R0jhFiC46OZYLlTe7m0ZxMpsh3o=
+		</data>
+		<key>Resources/Firebase_FirebaseCoreExtension.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		6iBlSEWzrD6zouHx4NqeDhjKSGQ=
+		</data>
+		<key>Resources/Firebase_FirebaseCoreInternal.bundle/Contents/Info.plist</key>
+		<data>
+		rEI4zul4PpNP1TVtkpHZ6gBUkX0=
+		</data>
+		<key>Resources/Firebase_FirebaseCoreInternal.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		ifoThrqbbqoLG4yjAruMQRaf0Dw=
+		</data>
+		<key>Resources/Firebase_FirebaseFirestore.bundle/Contents/Info.plist</key>
+		<data>
+		VrmGNhXQ7L10xDQNfwVBQ5qLkMc=
+		</data>
+		<key>Resources/Firebase_FirebaseFirestore.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		WXQUJr75eMRgiVnLGyf8Gr3uLUU=
+		</data>
+		<key>Resources/Firebase_FirebaseInstallations.bundle/Contents/Info.plist</key>
+		<data>
+		6rRo8SJYUBiNqaHAFBPGuL/M7PM=
+		</data>
+		<key>Resources/Firebase_FirebaseInstallations.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		WXQUJr75eMRgiVnLGyf8Gr3uLUU=
+		</data>
+		<key>Resources/GoogleService-Info.plist</key>
+		<data>
+		gKhgArx29in+4h7S0C36LP5g9cU=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-AppDelegateSwizzler.bundle/Contents/Info.plist</key>
+		<data>
+		4midvEWqqduM5nxy46DOw9U6tmk=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-AppDelegateSwizzler.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		6iBlSEWzrD6zouHx4NqeDhjKSGQ=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Environment.bundle/Contents/Info.plist</key>
+		<data>
+		zCyjS/Vuz/JouO6vVWLoWsn79OM=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Environment.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		6REKbJ61VeJGxEVgfCgqAzWWfA4=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Logger.bundle/Contents/Info.plist</key>
+		<data>
+		rkseEOnRpmcAuVxSYLV4MDfdA64=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Logger.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		6iBlSEWzrD6zouHx4NqeDhjKSGQ=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-MethodSwizzler.bundle/Contents/Info.plist</key>
+		<data>
+		O7VlBHkFmsLSQ7zBITAn3Sv2F2s=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-MethodSwizzler.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		6iBlSEWzrD6zouHx4NqeDhjKSGQ=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-NSData.bundle/Contents/Info.plist</key>
+		<data>
+		012S9b8uPZYnZHBcUwniWQLYZ9I=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-NSData.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		6iBlSEWzrD6zouHx4NqeDhjKSGQ=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Network.bundle/Contents/Info.plist</key>
+		<data>
+		GohrrGgjnU45Cg/D3Jh0P75bmqc=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Network.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		JTGYQTSkuJ7uGfD1SfjQTq3ngyk=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Reachability.bundle/Contents/Info.plist</key>
+		<data>
+		SO7ZxN35ub9G4yfQaYAoJNOeDWs=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Reachability.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		6iBlSEWzrD6zouHx4NqeDhjKSGQ=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-UserDefaults.bundle/Contents/Info.plist</key>
+		<data>
+		+RkIzfBDvSqHsOTIoIEbwpQm+gA=
+		</data>
+		<key>Resources/GoogleUtilities_GoogleUtilities-UserDefaults.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		g7Mu9E5yQgr4xj5lu4Xos3uMptQ=
+		</data>
 		<key>Resources/Highlightr_Highlightr.bundle/Contents/Info.plist</key>
 		<data>
 		PJQOG6k8nBS5i5bDX0m4nEVmzzI=
@@ -1104,6 +1212,22 @@
 		<data>
 		311zAXwhd+o9/ALBfn1koscuGbQ=
 		</data>
+		<key>Resources/Promises_FBLPromises.bundle/Contents/Info.plist</key>
+		<data>
+		iJ55MlBCou0d+qnR/heDiGMrhsg=
+		</data>
+		<key>Resources/Promises_FBLPromises.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		ZajnvEs/MYRS3X4TPLAhBWi8mc4=
+		</data>
+		<key>Resources/abseil_abslWrapper.bundle/Contents/Info.plist</key>
+		<data>
+		sjm4Zeb0u9bHHJcvHJmsIUbLcyc=
+		</data>
+		<key>Resources/abseil_abslWrapper.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		/1wMut5/ge/PBrRmM4qHdKkUkjI=
+		</data>
 		<key>Resources/de.lproj/Localizable.strings</key>
 		<dict>
 			<key>hash</key>
@@ -1140,6 +1264,30 @@
 			<key>optional</key>
 			<true/>
 		</dict>
+		<key>Resources/gRPC_grpcWrapper.bundle/Contents/Info.plist</key>
+		<data>
+		aG9jgEAffzlOmZaCS+cRxRpu4b0=
+		</data>
+		<key>Resources/gRPC_grpcWrapper.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		U7WM6H59FffP9Htm/es+F6Fe4q4=
+		</data>
+		<key>Resources/gRPC_grpcppWrapper.bundle/Contents/Info.plist</key>
+		<data>
+		rBf+fxrL1YsKW4zVKFTv7ThRRUY=
+		</data>
+		<key>Resources/gRPC_grpcppWrapper.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		U7WM6H59FffP9Htm/es+F6Fe4q4=
+		</data>
+		<key>Resources/gRPC_opensslWrapper.bundle/Contents/Info.plist</key>
+		<data>
+		nkk6h8EmrqlM3JUUHOc3+1HMARQ=
+		</data>
+		<key>Resources/gRPC_opensslWrapper.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		U7WM6H59FffP9Htm/es+F6Fe4q4=
+		</data>
 		<key>Resources/id.lproj/Localizable.strings</key>
 		<dict>
 			<key>hash</key>
@@ -1176,6 +1324,22 @@
 			<key>optional</key>
 			<true/>
 		</dict>
+		<key>Resources/leveldb_leveldb.bundle/Contents/Info.plist</key>
+		<data>
+		mWkjN0TZWi5AAVgB9+ce+YxlQJA=
+		</data>
+		<key>Resources/leveldb_leveldb.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		JTGYQTSkuJ7uGfD1SfjQTq3ngyk=
+		</data>
+		<key>Resources/nanopb_nanopb.bundle/Contents/Info.plist</key>
+		<data>
+		7gQmVcYYTtFn8SawaJBJ/PcKhOM=
+		</data>
+		<key>Resources/nanopb_nanopb.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<data>
+		KY5lfwC2TvsgFj4wt7hkMmainbs=
+		</data>
 		<key>Resources/nl.lproj/Localizable.strings</key>
 		<dict>
 			<key>hash</key>
@@ -1260,6 +1424,42 @@
 	</dict>
 	<key>files2</key>
 	<dict>
+		<key>Frameworks/FirebaseAnalytics.framework</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			GKjHI7YHgrRJNEmq08NXe484834=
+			</data>
+			<key>requirement</key>
+			<string>identifier "org.cocoapods.FirebaseAnalytics" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
+		</dict>
+		<key>Frameworks/FirebaseFirestoreInternal.framework</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			ughADkdfM6HJE/6DchcYwE0H348=
+			</data>
+			<key>requirement</key>
+			<string>identifier "org.cocoapods.FirebaseFirestoreInternal" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
+		</dict>
+		<key>Frameworks/GoogleAppMeasurement.framework</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			HURXp8CGRSeU2VG5PseJR5M0P54=
+			</data>
+			<key>requirement</key>
+			<string>identifier "org.cocoapods.GoogleAppMeasurement" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
+		</dict>
+		<key>Frameworks/GoogleAppMeasurementIdentitySupport.framework</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			7ttylNolYFOMSrJEBv6wktI7bSo=
+			</data>
+			<key>requirement</key>
+			<string>identifier "org.cocoapods.GoogleAppMeasurementIdentitySupport" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
+		</dict>
 		<key>Frameworks/Sparkle.framework</key>
 		<dict>
 			<key>cdhash</key>
@@ -1268,6 +1468,42 @@
 			</data>
 			<key>requirement</key>
 			<string>identifier "org.sparkle-project.Sparkle" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
+		</dict>
+		<key>Frameworks/absl.framework</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			dVZ3fWsib4mxZPQtNSLmDvQAFHI=
+			</data>
+			<key>requirement</key>
+			<string>identifier "org.cocoapods.absl" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
+		</dict>
+		<key>Frameworks/grpc.framework</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			oNe6Ee/4nmviUY5It1/D6WdPOfs=
+			</data>
+			<key>requirement</key>
+			<string>identifier "org.cocoapods.grpc" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
+		</dict>
+		<key>Frameworks/grpcpp.framework</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			414+jbBxJ0tuQKYG4IAxgOR1FFY=
+			</data>
+			<key>requirement</key>
+			<string>identifier "org.cocoapods.grpcpp" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
+		</dict>
+		<key>Frameworks/openssl_grpc.framework</key>
+		<dict>
+			<key>cdhash</key>
+			<data>
+			Vg51vdgGKsJWuwyjD4WfJsRWhTw=
+			</data>
+			<key>requirement</key>
+			<string>identifier "org.cocoapods.openssl-grpc" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = VPGVF647K2</string>
 		</dict>
 		<key>Resources/AppIcon.icns</key>
 		<dict>
@@ -1281,6 +1517,195 @@
 			<key>hash2</key>
 			<data>
 			PfZ57WCnYieDZdW0jw5mb5MuGbGPBijoceo+V48f6U0=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseCore.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			IKCLSzroYKZbUYzfKi5yt6x6qCEFJqGWPEaINE8OiKY=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseCore.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			EeMfX2tg6A69WQFUn85QQ/mvPmg/h0AilFAAtAUwbD8=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseCoreExtension.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			sDhdqPSQhRplnjJl6edpLx9JqhyeTg+ZUN61CL8yU9Y=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseCoreExtension.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			E3fszt/4+DIPeAQOnJ0+F+zA6laVlLVq8O8XvkQZfHo=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseCoreInternal.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			fED0Ujf6gH026grzsucl0MgL6Bo6S9HNnMeloBICblg=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseCoreInternal.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			W3/peUI97ePgivwppC8A9ghiddxUioTCl3QjWGPu0+8=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseFirestore.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			wIti7YUpK87JuVgA3quM8z/1tJ+dJhFmeW4wnx9Wj4M=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseFirestore.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			z7s8T3ambVNpi66R9xEMAPIUjm5vE619MlkpCbwBDlE=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseInstallations.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			7UzAPnkU/rTxgefbrZayHl78i3/t2bgFh1//gx2n0c8=
+			</data>
+		</dict>
+		<key>Resources/Firebase_FirebaseInstallations.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			z7s8T3ambVNpi66R9xEMAPIUjm5vE619MlkpCbwBDlE=
+			</data>
+		</dict>
+		<key>Resources/GoogleService-Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			25yGy2WtUgnhPZ8uK3XVWSgDjUYfpvJn2mbgehCWePk=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-AppDelegateSwizzler.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Rn2c9brG8XfU6yyGCzdP5Hg+SSERuUw6jbrsFRaGHQc=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-AppDelegateSwizzler.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			E3fszt/4+DIPeAQOnJ0+F+zA6laVlLVq8O8XvkQZfHo=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Environment.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			F1mgFcGFKp5BKZV7DoR8SlT+nzVvOe0yyxHEaRfarVQ=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Environment.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			sIJz1oc3k5R5L3HJTBCDYWoEr4r6o5bYBYmA9ETPs9Q=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Logger.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			4EMjZJeKUxIWzSb/cdRwXuZ9YTdMB77wspkVfIjKwcM=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Logger.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			E3fszt/4+DIPeAQOnJ0+F+zA6laVlLVq8O8XvkQZfHo=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-MethodSwizzler.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			FCI6sDzZ7Vk3S+xcJVvMVwemDGxEIE/cb7QTTITddFA=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-MethodSwizzler.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			E3fszt/4+DIPeAQOnJ0+F+zA6laVlLVq8O8XvkQZfHo=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-NSData.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			GfIEjfRJdbzYYK6PUJhg8JG7wVdaYCZ9lc+7fRAfyW4=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-NSData.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			E3fszt/4+DIPeAQOnJ0+F+zA6laVlLVq8O8XvkQZfHo=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Network.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			zJH8ACr7x9ZWdC7hi0+969AvaP/j0bC+U18UNmHUFBI=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Network.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			CsAKC37/AHnc4lLimrQdcc9YxslP5OROoRDO9cYpcOE=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Reachability.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			YKp2D0pHRgeyqnJZrbLpD8GBbnPUeIXfA2ogiDZ0dAk=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-Reachability.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			E3fszt/4+DIPeAQOnJ0+F+zA6laVlLVq8O8XvkQZfHo=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-UserDefaults.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			hGvWLn6kkbV8wo7ajkGaNTCr4xnTwzdowuyq0BlBw+w=
+			</data>
+		</dict>
+		<key>Resources/GoogleUtilities_GoogleUtilities-UserDefaults.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			+sUHxRCrp4hOgF+1/v8aio0Mf0LAHRdPknor36pxMLQ=
 			</data>
 		</dict>
 		<key>Resources/Highlightr_Highlightr.bundle/Contents/Info.plist</key>
@@ -3194,6 +3619,34 @@
 			9ja9bjrr+HCCoDHrTHL4Syezb8fe/kWMCRqH6tiN5uQ=
 			</data>
 		</dict>
+		<key>Resources/Promises_FBLPromises.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			lEUNKnZoxnKA1uFLoFFXtnOV1lI14jwZxBcjNMnjvw0=
+			</data>
+		</dict>
+		<key>Resources/Promises_FBLPromises.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			dLDNcvwjwe8wLyLuJ1P2GBfNxa8P96fy0GMrUk+4rOo=
+			</data>
+		</dict>
+		<key>Resources/abseil_abslWrapper.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			ouN2t9J20Rzv6HE9W1Ubk/MODktejj4D6cFoTt6Qk/4=
+			</data>
+		</dict>
+		<key>Resources/abseil_abslWrapper.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			d0leynC0pf0GEIoiuyaD3rwNsl7LO96KVGLjIa6+y5o=
+			</data>
+		</dict>
 		<key>Resources/de.lproj/Localizable.strings</key>
 		<dict>
 			<key>hash2</key>
@@ -3230,6 +3683,48 @@
 			<key>optional</key>
 			<true/>
 		</dict>
+		<key>Resources/gRPC_grpcWrapper.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Ya5ovCSMCB8dhiFWY+q2zdeIdR6vK+f+qs034lYH1Dg=
+			</data>
+		</dict>
+		<key>Resources/gRPC_grpcWrapper.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			SMwLNyeKt9zx4V4Bagi8Dg1kPZyuLQYcTZQlPy1SyIo=
+			</data>
+		</dict>
+		<key>Resources/gRPC_grpcppWrapper.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			Y1zjaSFncMdVZA2JDlz3O5b7bpxbZE0OITsPWN3oLcg=
+			</data>
+		</dict>
+		<key>Resources/gRPC_grpcppWrapper.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			SMwLNyeKt9zx4V4Bagi8Dg1kPZyuLQYcTZQlPy1SyIo=
+			</data>
+		</dict>
+		<key>Resources/gRPC_opensslWrapper.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			cEPl+cDpODUt5xXbBQrQuu6kIvfZoHZeBQSbLxXkdsk=
+			</data>
+		</dict>
+		<key>Resources/gRPC_opensslWrapper.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			SMwLNyeKt9zx4V4Bagi8Dg1kPZyuLQYcTZQlPy1SyIo=
+			</data>
+		</dict>
 		<key>Resources/id.lproj/Localizable.strings</key>
 		<dict>
 			<key>hash2</key>
@@ -3265,6 +3760,34 @@
 			</data>
 			<key>optional</key>
 			<true/>
+		</dict>
+		<key>Resources/leveldb_leveldb.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			kbGc4PhayA16C+8EsJ/5ZLtlf2or4CrRsjkmw2dilnk=
+			</data>
+		</dict>
+		<key>Resources/leveldb_leveldb.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			CsAKC37/AHnc4lLimrQdcc9YxslP5OROoRDO9cYpcOE=
+			</data>
+		</dict>
+		<key>Resources/nanopb_nanopb.bundle/Contents/Info.plist</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			FHsJAJxoiPqRcFWbe3pSJA82Xgm1lnxKnBJX0H+DFWQ=
+			</data>
+		</dict>
+		<key>Resources/nanopb_nanopb.bundle/Contents/Resources/PrivacyInfo.xcprivacy</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			cpujy9D0WMeM1h7fFzUO2v4ONMqG4xTsZMjLIszSG1Q=
+			</data>
 		</dict>
 		<key>Resources/nl.lproj/Localizable.strings</key>
 		<dict>

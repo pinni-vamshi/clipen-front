@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Sparkle
+import FirebaseCore
 
 @main
 struct pasteApp: App {
@@ -56,8 +57,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingUpdateInstall: (() -> Void)?
     private var pendingUpdateTimer: Timer?
 
+    private static let pendingUpdateVersionKey = "clipen.sparkle.pendingUpdateVersion"
+
+    /// The only way to know whether a Sparkle install actually landed:
+    /// `willInstallUpdateOnQuit` (below) only marks the INTENT to install,
+    /// not the outcome — a failed unpack/relaunch, or the process never
+    /// coming back up, would otherwise look identical to success. This
+    /// compares the version this launch is actually running against
+    /// whatever version a prior launch expected to land on, stashed right
+    /// before quitting to install.
+    private static func confirmPendingUpdateOutcome() {
+        let d = UserDefaults.standard
+        guard let expected = d.string(forKey: pendingUpdateVersionKey) else { return }
+        d.removeObject(forKey: pendingUpdateVersionKey)
+        let running = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        if running == expected {
+            AuthManager.shared.registerActionUsage(actionID: "action.sparkle_update_confirmed")
+        } else {
+            AuthManager.shared.registerActionUsage(actionID: "fail.sparkle_update_did_not_land")
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
+        FirebaseApp.configure()
         WakeGuard.install()
         Self.refreshLaunchServicesIfNewBuild()
         Self.sweepStaleTempDirectories()
@@ -95,6 +118,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         AuthManager.shared.registerActionUsage(actionID: "session.open")
+        Self.confirmPendingUpdateOutcome()
 
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
@@ -321,6 +345,7 @@ extension AppDelegate: SPUUpdaterDelegate {
         // to make version-adoption after a release visible: this event marks
         // the moment of transition, app_version on the NEXT ping confirms landing.
         AuthManager.shared.registerActionUsage(actionID: "action.sparkle_update_installed")
+        UserDefaults.standard.set(item.displayVersionString, forKey: Self.pendingUpdateVersionKey)
         pendingUpdateInstall = immediateInstallationBlock
         installPendingUpdateWhenIdle()
         return true
@@ -353,7 +378,9 @@ extension AppDelegate: SPUUpdaterDelegate {
         return true
     }
 
-    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) { }
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
+        AuthManager.shared.registerActionUsage(actionID: "action.sparkle_check_up_to_date")
+    }
 
     /// The overwhelming majority of aborts here are the Mac simply having no
     /// internet at the exact moment Sparkle's silent background timer fires

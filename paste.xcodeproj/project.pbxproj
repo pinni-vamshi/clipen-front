@@ -12,14 +12,6 @@
 		B10000000000000000000003 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* Color+Hex.swift */; };
 		B10000000000000000000005 /* FileSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* FileSnapshotStore.swift */; };
 		B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ItemPreviewPanel.swift */; };
-		B10000000000000000000100 /* ContentPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000100 /* ContentPreviewView.swift */; };
-		B10000000000000000000101 /* TextContentPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000101 /* TextContentPreviews.swift */; };
-		B10000000000000000000102 /* FilePreviewRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000102 /* FilePreviewRenderers.swift */; };
-		B10000000000000000000103 /* TextInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000103 /* TextInsights.swift */; };
-		B10000000000000000000104 /* InlineEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000104 /* InlineEditors.swift */; };
-		B10000000000000000000105 /* NudgeLessonPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000105 /* NudgeLessonPanel.swift */; };
-		B10000000000000000000110 /* WakeGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* WakeGuard.swift */; };
-		B10000000000000000000111 /* PreviewPrefetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000111 /* PreviewPrefetch.swift */; };
 		B10000000000000000000007 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Keychain.swift */; };
 		B10000000000000000000008 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000008 /* MainWindowView.swift */; };
 		B1000000000000000000000A /* pasteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000000A /* pasteApp.swift */; };
@@ -56,16 +48,27 @@
 		B1000000000000000000002E /* ImageCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002E /* ImageCodec.swift */; };
 		B1000000000000000000002F /* MarkedToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002F /* MarkedToolRegistry.swift */; };
 		B10000000000000000000030 /* AppContextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000030 /* AppContextService.swift */; };
-		B10000000000000000000106 /* InteractionDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000106 /* InteractionDemo.swift */; };
-		B10000000000000000000107 /* InteractionLabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000107 /* InteractionLabController.swift */; };
-		B10000000000000000000108 /* InteractionLabViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000108 /* InteractionLabViews.swift */; };
-		B10000000000000000000109 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000109 /* SettingsView.swift */; };
 		B10000000000000000000032 /* QuickLookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000032 /* QuickLookPreview.swift */; };
 		B10000000000000000000033 /* SharePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000033 /* SharePanel.swift */; };
 		B10000000000000000000034 /* InteractionToneGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* InteractionToneGenerator.swift */; };
 		B10000000000000000000035 /* ClipboardManager+Nudges.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* ClipboardManager+Nudges.swift */; };
 		B10000000000000000000036 /* ProGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000036 /* ProGate.swift */; };
 		B10000000000000000000099 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000099 /* Localizable.xcstrings */; };
+		B10000000000000000000200 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000200 /* GoogleService-Info.plist */; };
+		B10000000000000000000100 /* ContentPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000100 /* ContentPreviewView.swift */; };
+		B10000000000000000000101 /* TextContentPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000101 /* TextContentPreviews.swift */; };
+		B10000000000000000000102 /* FilePreviewRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000102 /* FilePreviewRenderers.swift */; };
+		B10000000000000000000103 /* TextInsights.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000103 /* TextInsights.swift */; };
+		B10000000000000000000104 /* InlineEditors.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000104 /* InlineEditors.swift */; };
+		B10000000000000000000105 /* NudgeLessonPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000105 /* NudgeLessonPanel.swift */; };
+		B10000000000000000000106 /* InteractionDemo.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000106 /* InteractionDemo.swift */; };
+		B10000000000000000000107 /* InteractionLabController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000107 /* InteractionLabController.swift */; };
+		B10000000000000000000108 /* InteractionLabViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000108 /* InteractionLabViews.swift */; };
+		B10000000000000000000109 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000109 /* SettingsView.swift */; };
+		B10000000000000000000110 /* WakeGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* WakeGuard.swift */; };
+		B10000000000000000000111 /* PreviewPrefetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000111 /* PreviewPrefetch.swift */; };
+		B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */; };
+		B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC7302505C7008E5DD1 /* FirebaseFirestore */; };
 		EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68612FB7847C002CA5C3 /* Sparkle */; };
 		EE8C68652FB7847C002CA5C3 /* webp in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68642FB7847C002CA5C3 /* webp */; };
 		FE00000000000000000003 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = FE00000000000000000002 /* Highlightr */; };
@@ -77,14 +80,6 @@
 		A10000000000000000000003 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		A10000000000000000000005 /* FileSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSnapshotStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* ItemPreviewPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemPreviewPanel.swift; sourceTree = "<group>"; };
-		A10000000000000000000100 /* ContentPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentPreviewView.swift; sourceTree = "<group>"; };
-		A10000000000000000000101 /* TextContentPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextContentPreviews.swift; sourceTree = "<group>"; };
-		A10000000000000000000102 /* FilePreviewRenderers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePreviewRenderers.swift; sourceTree = "<group>"; };
-		A10000000000000000000103 /* TextInsights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInsights.swift; sourceTree = "<group>"; };
-		A10000000000000000000104 /* InlineEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineEditors.swift; sourceTree = "<group>"; };
-		A10000000000000000000105 /* NudgeLessonPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NudgeLessonPanel.swift; sourceTree = "<group>"; };
-		A10000000000000000000110 /* WakeGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeGuard.swift; sourceTree = "<group>"; };
-		A10000000000000000000111 /* PreviewPrefetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPrefetch.swift; sourceTree = "<group>"; };
 		A10000000000000000000007 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		A10000000000000000000008 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
 		A1000000000000000000000A /* pasteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = pasteApp.swift; sourceTree = "<group>"; };
@@ -105,6 +100,7 @@
 		A1000000000000000000001B /* ToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRegistry.swift; sourceTree = "<group>"; };
 		A1000000000000000000001C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001D /* paste.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = paste.entitlements; sourceTree = "<group>"; };
+		A10000000000000000000200 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		A1000000000000000000001E /* ClipboardTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardTag.swift; sourceTree = "<group>"; };
 		A1000000000000000000001F /* TagDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* PageRangePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageRangePanel.swift; sourceTree = "<group>"; };
@@ -122,16 +118,24 @@
 		A1000000000000000000002E /* ImageCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCodec.swift; sourceTree = "<group>"; };
 		A1000000000000000000002F /* MarkedToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkedToolRegistry.swift; sourceTree = "<group>"; };
 		A10000000000000000000030 /* AppContextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContextService.swift; sourceTree = "<group>"; };
-		A10000000000000000000106 /* InteractionDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionDemo.swift; sourceTree = "<group>"; };
-		A10000000000000000000107 /* InteractionLabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionLabController.swift; sourceTree = "<group>"; };
-		A10000000000000000000108 /* InteractionLabViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionLabViews.swift; sourceTree = "<group>"; };
-		A10000000000000000000109 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000032 /* QuickLookPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPreview.swift; sourceTree = "<group>"; };
 		A10000000000000000000033 /* SharePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharePanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000034 /* InteractionToneGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionToneGenerator.swift; sourceTree = "<group>"; };
 		A10000000000000000000035 /* ClipboardManager+Nudges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Nudges.swift"; sourceTree = "<group>"; };
 		A10000000000000000000036 /* ProGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProGate.swift; sourceTree = "<group>"; };
 		A10000000000000000000099 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		A10000000000000000000100 /* ContentPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentPreviewView.swift; sourceTree = "<group>"; };
+		A10000000000000000000101 /* TextContentPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextContentPreviews.swift; sourceTree = "<group>"; };
+		A10000000000000000000102 /* FilePreviewRenderers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilePreviewRenderers.swift; sourceTree = "<group>"; };
+		A10000000000000000000103 /* TextInsights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInsights.swift; sourceTree = "<group>"; };
+		A10000000000000000000104 /* InlineEditors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineEditors.swift; sourceTree = "<group>"; };
+		A10000000000000000000105 /* NudgeLessonPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NudgeLessonPanel.swift; sourceTree = "<group>"; };
+		A10000000000000000000106 /* InteractionDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionDemo.swift; sourceTree = "<group>"; };
+		A10000000000000000000107 /* InteractionLabController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionLabController.swift; sourceTree = "<group>"; };
+		A10000000000000000000108 /* InteractionLabViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionLabViews.swift; sourceTree = "<group>"; };
+		A10000000000000000000109 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		A10000000000000000000110 /* WakeGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeGuard.swift; sourceTree = "<group>"; };
+		A10000000000000000000111 /* PreviewPrefetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPrefetch.swift; sourceTree = "<group>"; };
 		EE8C684D2FB7847A002CA5C3 /* Clipen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipen.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -142,6 +146,8 @@
 			files = (
 				EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */,
 				EE8C68652FB7847C002CA5C3 /* webp in Frameworks */,
+				B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */,
+				B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */,
 				FE00000000000000000003 /* Highlightr in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -149,6 +155,13 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		B670AEC4302505C0008E5DD1 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		C10000000000000000000001 /* Detection */ = {
 			isa = PBXGroup;
 			children = (
@@ -186,6 +199,7 @@
 			isa = PBXGroup;
 			children = (
 				EE8C684F2FB7847A002CA5C3 /* paste */,
+				B670AEC4302505C0008E5DD1 /* Frameworks */,
 				EE8C684E2FB7847A002CA5C3 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -244,6 +258,7 @@
 				A10000000000000000000022 /* FastPasteHintPanel.swift */,
 				A1000000000000000000000C /* TransformPanel.swift */,
 				A1000000000000000000001D /* paste.entitlements */,
+				A10000000000000000000200 /* GoogleService-Info.plist */,
 			);
 			path = paste;
 			sourceTree = "<group>";
@@ -268,6 +283,8 @@
 				EE8C68612FB7847C002CA5C3 /* Sparkle */,
 				EE8C68642FB7847C002CA5C3 /* webp */,
 				FE00000000000000000002 /* Highlightr */,
+				B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */,
+				B670AEC7302505C7008E5DD1 /* FirebaseFirestore */,
 			);
 			productName = paste;
 			productReference = EE8C684D2FB7847A002CA5C3 /* Clipen.app */;
@@ -317,6 +334,7 @@
 				EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp" */,
 				FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */,
+				B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EE8C684E2FB7847A002CA5C3 /* Products */;
@@ -335,6 +353,7 @@
 			files = (
 				B1000000000000000000001C /* Assets.xcassets in Resources */,
 				B10000000000000000000099 /* Localizable.xcstrings in Resources */,
+				B10000000000000000000200 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -542,7 +561,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 376;
+				CURRENT_PROJECT_VERSION = 377;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -561,7 +580,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.20;
+				MARKETING_VERSION = 1.4.21;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -582,7 +601,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 376;
+				CURRENT_PROJECT_VERSION = 377;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -601,7 +620,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.20;
+				MARKETING_VERSION = 1.4.21;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -638,6 +657,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.17.0;
+			};
+		};
 		EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -665,6 +692,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
+		B670AEC7302505C7008E5DD1 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
 		EE8C68612FB7847C002CA5C3 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */;

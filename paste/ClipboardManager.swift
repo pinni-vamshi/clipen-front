@@ -178,7 +178,10 @@ class ClipboardManager: ObservableObject {
 
     func setRingSize(_ size: Int) {
         let clamped = min(max(size, 1), AuthManager.shared.ringLimit)
-        if clamped != maxItems { AuthManager.shared.registerActionUsage(actionID: "setting.ring_size") }
+        if clamped != maxItems {
+            AuthManager.shared.registerActionUsage(actionID: "setting.ring_size")
+            AuthManager.shared.registerSettingValue(id: "ring_size", value: clamped)
+        }
         maxItems = clamped
         UserDefaults.standard.set(clamped, forKey: "preferredRingSize")
     }
@@ -1560,9 +1563,9 @@ enum GestureSpeed: String, CaseIterable, Identifiable {
     }
     var holdSeconds: TimeInterval {
         switch self {
-        case .fast:   return 0.15
-        case .medium: return 0.2
-        case .slow:   return 0.35
+        case .fast:   return 0.18
+        case .medium: return 0.35
+        case .slow:   return 0.55
         }
     }
     var doubleTapSeconds: TimeInterval {
