@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum TextTools {
@@ -223,13 +224,91 @@ enum TextTools {
         }
     )
 
+    /// Only counts as "has formatting" if the item genuinely carries styling
+    /// beyond its plain text — being *stored* as richText/html/rtfd isn't
+    /// enough, since plenty of sources (Notes, browsers, many editors) emit
+    /// a rich pasteboard flavor even for completely unstyled text. Showing
+    /// "Paste as Plain Text" for something that has nothing to strip would
+    /// be a no-op the user can't tell apart from a broken tool.
     private static func richPlainText(for item: ClipboardItem) -> String? {
         switch item.content {
-        case .richText(_, plain: let s), .html(_, plain: let s), .rtfd(_, plain: let s):
-            return s.isEmpty ? nil : s
+        case .richText(let attr, plain: let s):
+            guard !s.isEmpty, hasRealFormatting(attr) else { return nil }
+            return s
+        case .html(let html, plain: let s):
+            guard !s.isEmpty, htmlHasRealFormatting(html) else { return nil }
+            return s
+        case .rtfd(let data, plain: let s):
+            guard !s.isEmpty,
+                  let attr = NSAttributedString(rtfd: data, documentAttributes: nil),
+                  hasRealFormatting(attr) else { return nil }
+            return s
         default:
             return nil
         }
+    }
+
+    /// Real styling signal only — bold/italic, underline/strikethrough,
+    /// links, embedded attachments, or a highlight background. Deliberately
+    /// NOT checking foregroundColor alone: many sources set an explicit
+    /// (but still default-looking) text color on every run regardless of
+    /// whether anything is actually styled, which would make this always
+    /// true and defeat the whole point of the check.
+    private static func hasRealFormatting(_ attr: NSAttributedString) -> Bool {
+        guard attr.length > 0 else { return false }
+        var found = false
+        attr.enumerateAttributes(in: NSRange(location: 0, length: attr.length)) { attrs, _, stop in
+            if let font = attrs[.font] as? NSFont {
+                let traits = font.fontDescriptor.symbolicTraits
+                if traits.contains(.bold) || traits.contains(.italic) { found = true }
+            }
+            if let underline = attrs[.underlineStyle] as? Int, underline != 0 { found = true }
+            if let strikethrough = attrs[.strikethroughStyle] as? Int, strikethrough != 0 { found = true }
+            if attrs[.link] != nil { found = true }
+            if attrs[.attachment] != nil { found = true }
+            if attrs[.backgroundColor] != nil { found = true }
+            if found { stop.pointee = true }
+        }
+        return found
+    }
+
+    /// Heuristic, not a full parser — real clipboard HTML is almost always
+    /// simple markup, so scanning for the tags/properties that actually
+    /// produce visible styling is enough to tell "styled" from "a bare
+    /// wrapper around plain text" without pulling in an HTML/CSS engine.
+    private static func htmlHasRealFormatting(_ html: String) -> Bool {
+        let lower = html.lowercased()
+        let markers = [
+            "<b>", "<b ", "<strong", "<i>", "<i ", "<em", "<u>", "<u ",
+            "<s>", "<strike", "<del", "<h1", "<h2", "<h3", "<h4", "<h5", "<h6",
+            "<a ", "<ul", "<ol", "<li", "font-weight", "font-style: italic",
+            "text-decoration", "color:", "background-color",
+        ]
+        return markers.contains { lower.contains($0) }
+    }
+
+    /// The `.text` counterpart to `richPlainText` — plain strings have no
+    /// separate styled representation to compare against, so the only real
+    /// "formatting" that can exist is markdown SYNTAX within the string
+    /// itself (already tagged `.markdown` by the content detector). Uses
+    /// Apple's own markdown parser rather than hand-rolled regex stripping —
+    /// safer against edge cases (escaped markers, nested emphasis, code
+    /// spans that happen to contain `**`) than pattern-matching would be.
+    /// Returns nil (nothing to strip) if parsing changes nothing, which
+    /// doubles as the "was real markdown actually detected" signal.
+    private static func markdownStrippedPlainText(for item: ClipboardItem) -> String? {
+        guard case .text(let raw) = item.content, case .markdown = item.detectedType else { return nil }
+        guard let parsed = try? AttributedString(markdown: raw, options: .init(interpretedSyntax: .full))
+        else { return nil }
+        let stripped = String(parsed.characters)
+        return stripped != raw ? stripped : nil
+    }
+
+    /// Everything "Paste as Plain Text" can act on: real rich-source
+    /// formatting, OR markdown syntax in an otherwise-plain string. The two
+    /// are mutually exclusive by content case, so order doesn't matter.
+    private static func pastePlainEligibleText(for item: ClipboardItem) -> String? {
+        richPlainText(for: item) ?? markdownStrippedPlainText(for: item)
     }
 
     /// Read the pure-paste setting from UserDefaults (thread-safe) rather than
@@ -251,7 +330,7 @@ enum TextTools {
             return .item(ClipboardItem(content: .html(table.html, plain: table.plain)),
                          message: "Pasted without formatting.")
         }
-        guard let plain = richPlainText(for: item) else { return nil }
+        guard let plain = pastePlainEligibleText(for: item) else { return nil }
         return .text(plain)
     }
 
@@ -262,7 +341,8 @@ enum TextTools {
         group: "PASTE",
         preview: { item in
             guard !pastePlainDefault else { return nil }
-            return richPlainText(for: item)
+            if let table = TableCellExtractor.plainTableHTML(for: item) { return table.plain }
+            return pastePlainEligibleText(for: item)
         },
         runSync: { item in plainOutput(for: item) },
         runAsync: { item in plainOutput(for: item) }

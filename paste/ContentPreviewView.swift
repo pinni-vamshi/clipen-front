@@ -585,8 +585,12 @@ final class WebsitePreviewPool {
 
     private var entries: [String: Entry] = [:]
     // The currently-displayed preview's view is always one of these entries
-    // too — capacity covers it plus up to 3 neighbors on one side.
-    private let maxPoolSize = 4
+    // too, and prefetchNeighborPreviews() warms up to 3 items before AND 3
+    // after the current selection — so up to 7 URLs can legitimately want a
+    // pooled view at once. A smaller cap here means the LRU eviction below
+    // silently cancels an earlier prefetch to make room for a later one in
+    // the very same neighbor loop, undoing its own work.
+    private let maxPoolSize = 7
 
     private func makeWebView() -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())

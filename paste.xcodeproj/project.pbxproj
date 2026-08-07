@@ -54,7 +54,6 @@
 		B10000000000000000000035 /* ClipboardManager+Nudges.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* ClipboardManager+Nudges.swift */; };
 		B10000000000000000000036 /* ProGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000036 /* ProGate.swift */; };
 		B10000000000000000000099 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000099 /* Localizable.xcstrings */; };
-		B10000000000000000000200 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000200 /* GoogleService-Info.plist */; };
 		B10000000000000000000100 /* ContentPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000100 /* ContentPreviewView.swift */; };
 		B10000000000000000000101 /* TextContentPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000101 /* TextContentPreviews.swift */; };
 		B10000000000000000000102 /* FilePreviewRenderers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000102 /* FilePreviewRenderers.swift */; };
@@ -67,8 +66,10 @@
 		B10000000000000000000109 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000109 /* SettingsView.swift */; };
 		B10000000000000000000110 /* WakeGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* WakeGuard.swift */; };
 		B10000000000000000000111 /* PreviewPrefetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000111 /* PreviewPrefetch.swift */; };
+		B10000000000000000000200 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000200 /* GoogleService-Info.plist */; };
 		B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */; };
 		B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC7302505C7008E5DD1 /* FirebaseFirestore */; };
+		B670AECB302521BD008E5DD1 /* LaTeXSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = B670AECA302521BD008E5DD1 /* LaTeXSwiftUI */; };
 		EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68612FB7847C002CA5C3 /* Sparkle */; };
 		EE8C68652FB7847C002CA5C3 /* webp in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68642FB7847C002CA5C3 /* webp */; };
 		FE00000000000000000003 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = FE00000000000000000002 /* Highlightr */; };
@@ -100,7 +101,6 @@
 		A1000000000000000000001B /* ToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolRegistry.swift; sourceTree = "<group>"; };
 		A1000000000000000000001C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1000000000000000000001D /* paste.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = paste.entitlements; sourceTree = "<group>"; };
-		A10000000000000000000200 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		A1000000000000000000001E /* ClipboardTag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardTag.swift; sourceTree = "<group>"; };
 		A1000000000000000000001F /* TagDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* PageRangePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageRangePanel.swift; sourceTree = "<group>"; };
@@ -136,6 +136,7 @@
 		A10000000000000000000109 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000110 /* WakeGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeGuard.swift; sourceTree = "<group>"; };
 		A10000000000000000000111 /* PreviewPrefetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPrefetch.swift; sourceTree = "<group>"; };
+		A10000000000000000000200 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		EE8C684D2FB7847A002CA5C3 /* Clipen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipen.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -149,6 +150,7 @@
 				B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */,
 				B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */,
 				FE00000000000000000003 /* Highlightr in Frameworks */,
+				B670AECB302521BD008E5DD1 /* LaTeXSwiftUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -285,6 +287,7 @@
 				FE00000000000000000002 /* Highlightr */,
 				B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */,
 				B670AEC7302505C7008E5DD1 /* FirebaseFirestore */,
+				B670AECA302521BD008E5DD1 /* LaTeXSwiftUI */,
 			);
 			productName = paste;
 			productReference = EE8C684D2FB7847A002CA5C3 /* Clipen.app */;
@@ -335,6 +338,7 @@
 				EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp" */,
 				FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */,
 				B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				B670AEC9302521BD008E5DD1 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EE8C684E2FB7847A002CA5C3 /* Products */;
@@ -561,7 +565,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 378;
+				CURRENT_PROJECT_VERSION = 379;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -580,7 +584,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.22;
+				MARKETING_VERSION = 1.4.23;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -601,7 +605,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 378;
+				CURRENT_PROJECT_VERSION = 379;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -620,7 +624,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.22;
+				MARKETING_VERSION = 1.4.23;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -665,6 +669,14 @@
 				minimumVersion = 12.17.0;
 			};
 		};
+		B670AEC9302521BD008E5DD1 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/colinc86/LaTeXSwiftUI";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 		EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -701,6 +713,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
+		};
+		B670AECA302521BD008E5DD1 /* LaTeXSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B670AEC9302521BD008E5DD1 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */;
+			productName = LaTeXSwiftUI;
 		};
 		EE8C68612FB7847C002CA5C3 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;

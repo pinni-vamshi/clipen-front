@@ -48,9 +48,7 @@ struct AsyncDelimitedFilePreview: View {
                 isTruncated = cached.isTruncated
                 return
             }
-            let loaded = await Task.detached(priority: .userInitiated) {
-                FilePreviewCache.loadDelimitedRows(for: url)
-            }.value
+            let loaded = await FilePreviewCache.loadDelimitedRows(for: url)
             guard !Task.isCancelled else { return }
             guard let loaded else { loadFailed = true; return }
             rows = loaded.rows
@@ -106,9 +104,7 @@ struct AsyncTextFilePreview: View {
                 isTruncated = cached.isTruncated
                 return
             }
-            let loaded = await Task.detached(priority: .userInitiated) {
-                FilePreviewCache.loadText(for: url)
-            }.value
+            let loaded = await FilePreviewCache.loadText(for: url)
             guard !Task.isCancelled else { return }
             if let loaded {
                 text = loaded.text
@@ -944,9 +940,7 @@ struct AsyncImageFilePreview: View {
                 image = cached
                 return
             }
-            let loaded = await Task.detached(priority: .userInitiated) {
-                FilePreviewCache.loadImage(for: url)
-            }.value
+            let loaded = await FilePreviewCache.loadImage(for: url)
             guard !Task.isCancelled else { return }
             image = loaded
         }
@@ -979,9 +973,7 @@ struct AsyncPDFFilePreview: View {
                 document = cached
                 return
             }
-            let loaded = await Task.detached(priority: .userInitiated) {
-                FilePreviewCache.loadPDF(for: url)
-            }.value
+            let loaded = await FilePreviewCache.loadPDF(for: url)
             guard !Task.isCancelled else { return }
             if let loaded { document = loaded } else { failed = true }
         }
@@ -1015,9 +1007,7 @@ struct AsyncGIFFilePreview: View {
                 loaded = cached
                 return
             }
-            let result = await Task.detached(priority: .userInitiated) {
-                FilePreviewCache.loadGIF(for: url)
-            }.value
+            let result = await FilePreviewCache.loadGIF(for: url)
             guard !Task.isCancelled else { return }
             if let result { loaded = result } else { failed = true }
         }

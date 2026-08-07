@@ -140,8 +140,27 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         }
     }
 
+    /// Prefers the row's REAL measured on-screen position (reported by
+    /// PopoverPreviewView's GeometryReader via `SelectedRowFramePreferenceKey`
+    /// — see `ClipboardManager.selectedRowMeasuredFrame`) over computing a
+    /// guess. The formula this replaced modeled the row area as if it
+    /// shrank to fit however many items were actually in the list; in
+    /// reality the row area is always a fixed height (`rowH *
+    /// visibleRowCount`, set once when the popup opens) with its real
+    /// SwiftUI content top-anchored inside it — so for any collection
+    /// shorter than a full screen's worth of rows, the formula and the
+    /// real layout disagreed, sometimes by several rows' worth of pixels.
+    /// The formula is kept only as a bootstrap fallback for the narrow
+    /// window before SwiftUI has measured anything yet (the very first
+    /// call right as the popup opens).
     func selectedRowAnchorPoint(selectedIndex: Int, totalItems: Int) -> NSPoint {
         guard totalItems > 0 else { return NSPoint(x: frame.maxX, y: frame.midY) }
+
+        if let measured = ClipboardManager.shared.selectedRowMeasuredFrame,
+           let view = popover.contentViewController?.view, let win = view.window {
+            let screenRect = win.convertToScreen(view.convert(measured, to: nil))
+            return NSPoint(x: frame.maxX, y: screenRect.midY)
+        }
 
         let win: CGFloat    = CGFloat(min(max(1, visibleRowCount), totalItems))
         let rowH: CGFloat   = 72
@@ -156,6 +175,18 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         let rowCenterY      = rowsBottomY + rowH * (win - i - 0.5 + scrollTopRows)
 
         return NSPoint(x: frame.maxX, y: rowCenterY)
+    }
+}
+
+/// Reports the currently-selected ring row's real frame (in SwiftUI's
+/// `.global` space, i.e. relative to the popover's own hosting view) up to
+/// `PopoverPreviewView`, which forwards it to `ClipboardManager` — see
+/// `selectedRowAnchorPoint` above for why this replaced a hand-computed
+/// approximation.
+private struct SelectedRowFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect? = nil
+    static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
+        if let next = nextValue() { value = next }
     }
 }
 
@@ -192,6 +223,17 @@ struct PopoverPreviewView: View {
                 rowArea
                 Divider()
                 footer
+            }
+            .onPreferenceChange(SelectedRowFramePreferenceKey.self) { frame in
+                guard manager.selectedRowMeasuredFrame != frame else { return }
+                manager.selectedRowMeasuredFrame = frame
+                // The panel that first opened (e.g. right when selectedIndex
+                // changed) necessarily used whatever anchor was available at
+                // that synchronous moment — which, on a fresh selection, is
+                // one render behind this real measurement. Repositioning here
+                // the instant the real frame lands corrects it within the same
+                // render pass instead of leaving it wrong until the next step.
+                manager.repositionAnchoredSidePanelForMeasuredRow()
             }
         }
     }
@@ -331,6 +373,20 @@ struct PopoverPreviewView: View {
                                                ? manager.editDeniedShake?.generation ?? 0 : 0)
                                     .equatable()
                                     .id(item.id)
+                                    // Reports the SELECTED row's real frame
+                                    // up via SelectedRowFramePreferenceKey —
+                                    // applied after .equatable() so it isn't
+                                    // skipped by that optimization, and
+                                    // conditioned on idx == selectedIndex so
+                                    // only one row's GeometryReader ever
+                                    // reports a non-nil value.
+                                    .background(
+                                        GeometryReader { geo in
+                                            Color.clear.preference(
+                                                key: SelectedRowFramePreferenceKey.self,
+                                                value: idx == selectedIndex ? geo.frame(in: .global) : nil)
+                                        }
+                                    )
                                     .contentShape(Rectangle())
                                     .onTapGesture(count: 2) {
                                         manager.uiSelectItem(at: idx)
@@ -357,9 +413,17 @@ struct PopoverPreviewView: View {
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            proxy.scrollTo(items[newIdx].id, anchor: .center)
-                        }
+                        // Deliberately NOT wrapped in withAnimation: rows have
+                        // different heights depending on their content (1-3
+                        // lines), so scrolling a taller/shorter row into
+                        // place shifts every row's position by a different
+                        // amount each time. Animating that shift dragged the
+                        // whole list — text included — along a flat 0.12s
+                        // ease-out that fought with PopoverRow's own spring
+                        // bounce on the selection box, since the two were
+                        // never coordinated. Instant here means only the
+                        // box's own explicit animation (below) ever bounces.
+                        proxy.scrollTo(items[newIdx].id, anchor: .center)
                     }
                     .onAppear {
                         guard items.indices.contains(selectedIndex) else { return }
@@ -522,10 +586,10 @@ struct PopoverRow: View, Equatable {
     /// so it has to stay small (unselected rows shouldn't carry extra
     /// left/right margin just to make room for a scale-up that only the
     /// selected row uses). Chosen together so the popped box still stays
-    /// inside the fixed 420pt popup: (420 − 2·12)·1.035 = 409.86 ≤ 420.
+    /// inside the fixed 420pt popup: (420 − 2·12)·1.05 = 415.8 ≤ 420.
     /// See the body's comment for the full derivation.
     private static let horizontalInset: CGFloat = 12
-    private static let selectedScale:   CGFloat = 1.035
+    private static let selectedScale:   CGFloat = 1.05
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -546,8 +610,8 @@ struct PopoverRow: View, Equatable {
         // transform that draws OUTSIDE layout bounds, so containment depends on
         // exactly one thing: boxWidth · SELECTED_SCALE must stay ≤ popup width.
         //   Popup width is a fixed 420 (see showAnchored's contentSize).
-        //   box = 420 − 2·12 = 396  →  396 · 1.035 = 409.86 ≤ 420
-        // → the popped box stays inside with ~5pt of gap on each edge, and the
+        //   box = 420 − 2·12 = 396  →  396 · 1.05 = 415.8 ≤ 420
+        // → the popped box stays inside with ~4pt of gap on each edge, and the
         //   12pt baseline inset (versus the old 16-20pt) keeps EVERY row's
         //   resting left/right margin small, since only the selected row
         //   actually needs the scale-up clearance.
@@ -555,9 +619,14 @@ struct PopoverRow: View, Equatable {
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(.horizontal, Self.horizontalInset)
         .scaleEffect(isSelected ? Self.selectedScale : 1.0)
+        // A glow that pops in alongside the scale-up, on the SAME animation
+        // below — depth cue reinforcing that the row is lifting forward,
+        // not just growing.
+        .shadow(color: Color.accentColor.opacity(isSelected ? 0.45 : 0),
+                radius: isSelected ? 10 : 0, y: isSelected ? 3 : 0)
         .offset(x: shakeOffsetX)
         .animation(isSelected
-                   ? .spring(response: 0.32, dampingFraction: 0.5)
+                   ? .spring(response: 0.36, dampingFraction: 0.45)
                    : .easeOut(duration: 0.22),
                    value: isSelected)
         .overlay(alignment: .topTrailing) { trailingIndicators }

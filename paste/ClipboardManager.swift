@@ -605,6 +605,24 @@ class ClipboardManager: ObservableObject {
     var popupOpenedAt: Date? = nil
     var popupSessionPasted = false
 
+    /// The selected ring row's real measured on-screen frame (SwiftUI
+    /// `.global` space — i.e. relative to the popover's own hosting view),
+    /// kept fresh by PopoverPreviewView's GeometryReader/preference-key
+    /// reporting. Not `@Published` on purpose: nothing renders from this
+    /// directly, it's read imperatively by
+    /// PreviewOverlayWindow.selectedRowAnchorPoint(), and making it
+    /// `@Published` would trigger a manager-wide objectWillChange on every
+    /// scroll-settle for no reason.
+    var selectedRowMeasuredFrame: CGRect? = nil
+
+    /// Items already prefetched (or currently being prefetched) for the
+    /// item-preview neighbor window — see prefetchNeighborPreviews() in
+    /// ClipboardManager+Panels.swift. Lets each navigation step call
+    /// PreviewPrefetcher.prefetch() only for the one genuinely new item
+    /// entering the window, instead of re-calling it on all 6 neighbors
+    /// every time and relying on their own caches to bail out cheaply.
+    var prefetchedNeighborIDs: Set<UUID> = []
+
     // Onboarding-nudge state — see ClipboardManager+Nudges.swift.
     var nudgeIsShowing = false
     /// True while the "Learned!" confirmation is playing and the lesson is

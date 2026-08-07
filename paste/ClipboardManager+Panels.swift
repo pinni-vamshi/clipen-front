@@ -433,6 +433,22 @@ extension ClipboardManager {
         return previewWindow.selectedRowAnchorPoint(selectedIndex: selectedIndex, totalItems: displayItems.count)
     }
 
+    /// Called from PopoverPreviewView the moment the real selected-row
+    /// frame becomes known/changes — re-anchors whichever side panel is
+    /// currently open using that fresh measurement. Each call below is
+    /// already safe to call redundantly (both self-guard on their own
+    /// visibility/stage and reposition-only when nothing else changed), so
+    /// no extra guarding is needed here beyond what they already do.
+    func repositionAnchoredSidePanelForMeasuredRow() {
+        guard previewWindow.isVisible else { return }
+        if itemPreviewPanel.isVisible {
+            showSelectedItemPreview()
+        }
+        if inTransformStage {
+            updateTransformPanel()
+        }
+    }
+
     // MARK: - Inline edit (E on the popup)
 
     // MARK: - L/U instant case transforms
@@ -827,13 +843,34 @@ extension ClipboardManager {
     /// preview update, so it's purely a "the next few V-taps won't feel
     /// like they're loading" optimization while you're already browsing
     /// with preview open — never anything else.
+    ///
+    /// Called on every navigation step, so the window recomputes from
+    /// scratch each time — but `prefetchedNeighborIDs` means only the ONE
+    /// genuinely new item at the leading edge actually gets
+    /// `PreviewPrefetcher.prefetch()` called on it. Without this, every
+    /// step re-called prefetch on all 6 neighbors and relied on each of
+    /// their own caches (TableCellExtractor, TextInsightService,
+    /// FilePreviewCache, …) to bail out cheaply — correct, but real
+    /// redundant calls (and, for file items, a redundant background Task
+    /// spawn) on every step regardless.
     private func prefetchNeighborPreviews() {
         guard itemPreviewPanel.isVisible, !displayItems.isEmpty else { return }
         let lower = max(0, selectedIndex - 3)
         let upper = min(displayItems.count - 1, selectedIndex + 3)
         guard lower <= upper else { return }
+
+        let windowIDs = Set((lower...upper).filter { $0 != selectedIndex }.map { displayItems[$0].id })
+        // Drop anything that's fallen out of the window — if the user
+        // comes back to it later, re-prefetching is both safe (every
+        // underlying cache checks itself first) and correct (it may have
+        // been genuinely evicted from those caches by then).
+        prefetchedNeighborIDs.formIntersection(windowIDs)
+
         for idx in lower...upper where idx != selectedIndex {
-            PreviewPrefetcher.prefetch(displayItems[idx])
+            let item = displayItems[idx]
+            guard !prefetchedNeighborIDs.contains(item.id) else { continue }
+            prefetchedNeighborIDs.insert(item.id)
+            PreviewPrefetcher.prefetch(item)
         }
     }
 

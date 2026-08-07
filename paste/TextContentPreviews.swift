@@ -1,6 +1,7 @@
 import AppKit
 import AVKit
 import Highlightr
+import LaTeXSwiftUI
 import ModelIO
 import NaturalLanguage
 import Quartz
@@ -66,7 +67,7 @@ struct RichTextContentPreview: View {
                 case .json:
                     CodeSyntaxPreview(text: text, language: "json")
                 case .latex:
-                    CodeSyntaxPreview(text: text, language: "latex")
+                    LaTeXRenderedPreview(text: text)
                 default:
                     ScrollView {
                         Text(text)
@@ -180,12 +181,15 @@ struct MarkdownTextPreview: View {
 /// exports) or an embedded newline inside a quoted field. This walks the
 /// text character-by-character tracking quote state, per RFC 4180.
 enum DelimitedTableParser {
-    static func detectDelimiter(_ text: String) -> Character {
+    // Pure string parsing, no shared state — safe to call from any
+    // isolation context, including the background prefetch path in
+    // PreviewPrefetch.swift.
+    nonisolated static func detectDelimiter(_ text: String) -> Character {
         let firstLine = text.prefix(while: { $0 != "\n" && $0 != "\r" })
         return firstLine.contains("\t") ? "\t" : ","
     }
 
-    static func parse(_ text: String, delimiter: Character) -> [[String]] {
+    nonisolated static func parse(_ text: String, delimiter: Character) -> [[String]] {
         var rows: [[String]] = []
         var currentRow: [String] = []
         var field = ""
@@ -272,6 +276,47 @@ struct DelimitedTablePreview: View {
     var body: some View {
         let delimiter = DelimitedTableParser.detectDelimiter(text)
         StyledTablePreview(rows: DelimitedTableParser.parse(text, delimiter: delimiter))
+    }
+}
+
+/// Renders `.latex`-tagged captures as actual typeset math (via
+/// LaTeXSwiftUI/MathJax) instead of the syntax-highlighted-source treatment
+/// every other code-like type gets. The detector that assigns `.latex`
+/// (`isLatex` in TextTraditionalDetectors.swift) only checks for math-mode
+/// keywords/delimiters, not a full `\documentclass` — so this is always a
+/// math expression, never a whole document, which is exactly what this
+/// package renders (it doesn't compile full LaTeX documents).
+struct LaTeXRenderedPreview: View {
+    let text: String
+
+    /// Bare math source (e.g. copied `\frac{a}{b}` with no `$`/`\[` wrapper)
+    /// needs to be wrapped for the renderer to treat it as an equation
+    /// instead of literal prose — only wrap if it isn't already delimited.
+    private var normalizedSource: String {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let alreadyDelimited = t.hasPrefix("$") || t.hasPrefix("\\[") || t.hasPrefix("\\(")
+        return alreadyDelimited ? t : "\\[\n\(t)\n\\]"
+    }
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            // `.font(NSFont)` is only defined as an extension on the
+            // concrete `LaTeX` type, not `View` — it must be the first
+            // modifier applied, before anything else erases the type to
+            // `some View`, or overload resolution silently falls back to
+            // SwiftUI's own `.font(Font?)` and fails to compile against NSFont.
+            LaTeX(normalizedSource)
+                .font(NSFont.systemFont(ofSize: 15))
+                .parsingMode(.onlyEquations)
+                .blockMode(.blockViews)
+                // Malformed/partial LaTeX (a copy cut off mid-expression)
+                // falls back to the original source instead of an error
+                // glyph, so a bad parse never looks like a broken preview.
+                .errorMode(.original)
+                .foregroundColor(.primary)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
