@@ -648,8 +648,19 @@ struct PopoverRow: View, Equatable {
                 // block above, with its own explicit local animation, so
                 // this scale still animates smoothly even though the block
                 // it wraps deliberately blocks inherited animation.
+                //
+                // Spring here on purpose, unlike the box's travel and the
+                // scroll (both stay a flat easeInOut below): a spring on
+                // POSITION (something moving between two different
+                // coordinates) is what caused the earlier "moving up and
+                // down" complaint — its overshoot wobbles the actual
+                // on-screen location. This is a pure scale anchored at one
+                // fixed spot, no position change at all, so the same spring
+                // can only make the SIZE briefly overshoot past
+                // `selectedScale` and settle — the lively "pop" from the
+                // original per-row version — without any positional wobble.
                 .scaleEffect(isSelected ? Self.selectedScale : 1.0)
-                .animation(.easeInOut(duration: 0.16), value: isSelected)
+                .animation(.spring(response: 0.32, dampingFraction: 0.5), value: isSelected)
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
         .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
