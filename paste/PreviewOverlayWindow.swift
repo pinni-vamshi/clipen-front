@@ -428,19 +428,15 @@ struct PopoverPreviewView: View {
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
-                        // Same exact spring as the LazyVStack's own
-                        // `.animation(value: selectedIndex)` above, which
-                        // drives the selection box's matchedGeometryEffect
-                        // travel — using the same curve for both means the
-                        // box and the list it's riding on move as one
-                        // physical motion instead of two independently-timed
-                        // animations fighting each other. The previous bug
-                        // here wasn't animating the scroll itself — it was
-                        // animating it with a DIFFERENT, faster curve
-                        // (0.12s ease-out) than the box's spring, so the two
-                        // visibly disagreed. Matching curves removes that
-                        // mismatch rather than avoiding animation entirely.
-                        withAnimation(.spring(response: 0.36, dampingFraction: 0.45)) {
+                        // Deliberately NOT the same spring as the selection
+                        // box's matchedGeometryEffect (LazyVStack's
+                        // `.animation(value: selectedIndex)` above) — the
+                        // box is meant to visibly bounce, but the list
+                        // itself moving up/down should read as a plain,
+                        // level scroll with no spring overshoot. A smooth
+                        // ease-out gets the "move together" timing without
+                        // giving the row motion its own bounce.
+                        withAnimation(.easeOut(duration: 0.3)) {
                             proxy.scrollTo(items[newIdx].id, anchor: .center)
                         }
                     }
@@ -627,6 +623,15 @@ struct PopoverRow: View, Equatable {
                 .frame(maxHeight: .infinity)
             rowContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                // Hard block, not just `.animation(nil, value:)` (which only
+                // cancels animation tied to one specific value) — this row's
+                // text must never animate no matter what ambient animation
+                // is active around it: not the selection box's spring, not
+                // the scroll's ease-out, not a newly-materializing row's own
+                // first-appearance transaction as LazyVStack scrolls it
+                // into range. `.transaction` zeroes out inherited animation
+                // for this subtree entirely, regardless of source.
+                .transaction { $0.animation = nil }
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
         .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
