@@ -197,6 +197,9 @@ struct PopoverPreviewView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var pro = ProGate.shared
     private let auth = AuthManager.shared
+    /// Shared with every PopoverRow so the selection box can travel between
+    /// them via matchedGeometryEffect — see PopoverRow's background.
+    @Namespace private var selectionNamespace
 
     private var items: [ClipboardItem] { manager.displayItems }
     private var selectedIndex: Int     { manager.selectedIndex }
@@ -363,12 +366,23 @@ struct PopoverPreviewView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: true) {
+                        // Drives the matchedGeometryEffect box's travel
+                        // between rows. Needed here, not just on each row's
+                        // own `.animation(value: isSelected)`: selectedIndex
+                        // changes originate outside SwiftUI (keyboard
+                        // handling in ClipboardManager), so there's no
+                        // withAnimation at the source — this ancestor-level
+                        // animation is what gives the transition a
+                        // consistent curve to interpolate under. Same spring
+                        // as each row's own scale bounce, so the box's
+                        // travel and the landing row's pop stay in sync.
                         LazyVStack(spacing: 0) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                                 PopoverRow(item: item, index: idx,
                                            isSelected: idx == selectedIndex,
                                            markOrder: manager.markOrder(for: item.id),
                                            showColorSwatches: manager.showColorSwatches,
+                                           selectionNamespace: selectionNamespace,
                                            shakeGeneration: manager.editDeniedShake?.itemID == item.id
                                                ? manager.editDeniedShake?.generation ?? 0 : 0)
                                     .equatable()
@@ -410,20 +424,25 @@ struct PopoverPreviewView: View {
                                 }
                             }
                         }
+                        .animation(.spring(response: 0.36, dampingFraction: 0.45), value: selectedIndex)
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
-                        // Deliberately NOT wrapped in withAnimation: rows have
-                        // different heights depending on their content (1-3
-                        // lines), so scrolling a taller/shorter row into
-                        // place shifts every row's position by a different
-                        // amount each time. Animating that shift dragged the
-                        // whole list — text included — along a flat 0.12s
-                        // ease-out that fought with PopoverRow's own spring
-                        // bounce on the selection box, since the two were
-                        // never coordinated. Instant here means only the
-                        // box's own explicit animation (below) ever bounces.
-                        proxy.scrollTo(items[newIdx].id, anchor: .center)
+                        // Same exact spring as the LazyVStack's own
+                        // `.animation(value: selectedIndex)` above, which
+                        // drives the selection box's matchedGeometryEffect
+                        // travel — using the same curve for both means the
+                        // box and the list it's riding on move as one
+                        // physical motion instead of two independently-timed
+                        // animations fighting each other. The previous bug
+                        // here wasn't animating the scroll itself — it was
+                        // animating it with a DIFFERENT, faster curve
+                        // (0.12s ease-out) than the box's spring, so the two
+                        // visibly disagreed. Matching curves removes that
+                        // mismatch rather than avoiding animation entirely.
+                        withAnimation(.spring(response: 0.36, dampingFraction: 0.45)) {
+                            proxy.scrollTo(items[newIdx].id, anchor: .center)
+                        }
                     }
                     .onAppear {
                         guard items.indices.contains(selectedIndex) else { return }
@@ -545,6 +564,12 @@ struct PopoverRow: View, Equatable {
     let isSelected: Bool
     let markOrder:  Int?
     let showColorSwatches: Bool
+    /// Shared across every row in the list — lets the ONE selection box
+    /// below travel and resize between rows via `matchedGeometryEffect`
+    /// instead of each row independently drawing its own static
+    /// pop-in/pop-out box. A `Namespace.ID` never changes after creation,
+    /// so it's safe to leave out of `==` below.
+    let selectionNamespace: Namespace.ID
     /// Nonzero (and changed) means "shake now" — a refused action (E on a
     /// non-editable item) on this row. 0 for every row except the one that
     /// was just refused.
@@ -615,15 +640,25 @@ struct PopoverRow: View, Equatable {
         //   12pt baseline inset (versus the old 16-20pt) keeps EVERY row's
         //   resting left/right margin small, since only the selected row
         //   actually needs the scale-up clearance.
-        .background(isSelected ? Color.accentColor : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        //
+        // Only the SELECTED row ever hosts the box, tagged with the shared
+        // namespace — SwiftUI interpolates its frame between whichever two
+        // rows hold that tag across a selection change, producing one box
+        // that visibly travels and resizes to the new row rather than one
+        // box disappearing while a separate one pops in elsewhere. Needs a
+        // real "from" view still on screen to interpolate from — LazyVStack
+        // only keeps nearby rows materialized, so a selection jump far
+        // outside the currently-rendered range falls back to a plain
+        // cross-fade instead of a visible slide for that one jump.
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.accentColor)
+                    .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace)
+            }
+        }
         .padding(.horizontal, Self.horizontalInset)
         .scaleEffect(isSelected ? Self.selectedScale : 1.0)
-        // A glow that pops in alongside the scale-up, on the SAME animation
-        // below — depth cue reinforcing that the row is lifting forward,
-        // not just growing.
-        .shadow(color: Color.accentColor.opacity(isSelected ? 0.45 : 0),
-                radius: isSelected ? 10 : 0, y: isSelected ? 3 : 0)
         .offset(x: shakeOffsetX)
         .animation(isSelected
                    ? .spring(response: 0.36, dampingFraction: 0.45)
