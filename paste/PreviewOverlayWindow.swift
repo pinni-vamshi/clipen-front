@@ -616,7 +616,7 @@ struct PopoverRow: View, Equatable {
     /// popped WHOLE row (box, rail, divider, content together) still stays
     /// inside the fixed 420pt popup — see the body's containment-math
     /// comment for the exact numbers.
-    private static let horizontalInset: CGFloat = 20
+    private static let horizontalInset: CGFloat = 28
     private static let selectedScale:   CGFloat = 1.10
 
     var body: some View {
@@ -665,14 +665,21 @@ struct PopoverRow: View, Equatable {
         // bleed past a neighbor that stayed a different size — there's no
         // "static" part left for a "growing" part to run into.
         //   Popup width is a fixed 420 (see showAnchored's contentSize).
-        //   box = 420 − 2·20 = 380  →  380 · 1.10 = 418 ≤ 420
-        // → stays inside with ~1pt of gap on each edge at the popped size.
+        //   box = 420 − 2·28 = 364  →  364 · 1.10 = 400.4 ≤ 420
+        // → stays inside with ~10pt of gap on each edge at the popped size,
+        //   on top of the ~28pt resting gap from horizontalInset itself.
         .scaleEffect(isSelected ? Self.selectedScale : 1.0)
-        // Spring here (not the box travel/scroll's flat easeInOut below,
-        // which move POSITION and would visibly wobble if springy) — this
-        // is one rigid shape popping in place, so the spring's overshoot
-        // just makes the whole card feel lively, no positional side effect.
-        .animation(.spring(response: 0.32, dampingFraction: 0.5), value: isSelected)
+        // Asymmetric on purpose: becoming selected keeps the springy pop
+        // (unchanged, that direction was already right) — but a row
+        // FALLING BACK to resting size doesn't need that same bounce/
+        // overshoot; it read as loose/uncontrolled rather than lively.
+        // easeOut here has zero overshoot and a shorter duration (~25%
+        // less than the spring's own response), so the previous row settles
+        // back down cleanly instead of wobbling on the way down.
+        .animation(isSelected
+                   ? .spring(response: 0.32, dampingFraction: 0.5)
+                   : .easeOut(duration: 0.24),
+                   value: isSelected)
         .offset(x: shakeOffsetX)
         .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
