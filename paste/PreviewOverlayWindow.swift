@@ -424,19 +424,25 @@ struct PopoverPreviewView: View {
                                 }
                             }
                         }
-                        .animation(.spring(response: 0.36, dampingFraction: 0.45), value: selectedIndex)
+                        // Non-bouncy on purpose: a spring's whole defining
+                        // trait is that it overshoots the target and wobbles
+                        // back before settling — that oscillation is exactly
+                        // what read as the box "moving up and down" instead
+                        // of traveling in one clean motion. easeInOut still
+                        // gives the box's matchedGeometryEffect travel a
+                        // smooth accelerate-then-decelerate feel (the "3D
+                        // lift" quality), just with no overshoot/wobble.
+                        .animation(.easeInOut(duration: 0.3), value: selectedIndex)
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
-                        // Deliberately NOT the same spring as the selection
-                        // box's matchedGeometryEffect (LazyVStack's
-                        // `.animation(value: selectedIndex)` above) — the
-                        // box is meant to visibly bounce, but the list
-                        // itself moving up/down should read as a plain,
-                        // level scroll with no spring overshoot. A smooth
-                        // ease-out gets the "move together" timing without
-                        // giving the row motion its own bounce.
-                        withAnimation(.easeOut(duration: 0.3)) {
+                        // Same curve and duration as the box's travel above
+                        // (LazyVStack's `.animation(value: selectedIndex)`)
+                        // — so the box gliding to the new row and the list
+                        // scrolling to reveal it move as one continuous
+                        // motion, neither one bouncing independently of
+                        // the other.
+                        withAnimation(.easeInOut(duration: 0.3)) {
                             proxy.scrollTo(items[newIdx].id, anchor: .center)
                         }
                     }
@@ -665,10 +671,12 @@ struct PopoverRow: View, Equatable {
         .padding(.horizontal, Self.horizontalInset)
         .scaleEffect(isSelected ? Self.selectedScale : 1.0)
         .offset(x: shakeOffsetX)
-        .animation(isSelected
-                   ? .spring(response: 0.36, dampingFraction: 0.45)
-                   : .easeOut(duration: 0.22),
-                   value: isSelected)
+        // Same non-bouncy curve for both directions (becoming selected and
+        // un-selecting), and matching the LazyVStack/scroll animations above
+        // — a spring here would overshoot past `selectedScale` and wobble
+        // back, which is exactly the "moving up and down" this row's own
+        // pop was contributing to alongside the box's travel.
+        .animation(.easeInOut(duration: 0.3), value: isSelected)
         .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
             if ClipboardManager.shared.markedItemIDs.count > 1 {
