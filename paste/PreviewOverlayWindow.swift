@@ -432,7 +432,7 @@ struct PopoverPreviewView: View {
                         // gives the box's matchedGeometryEffect travel a
                         // smooth accelerate-then-decelerate feel (the "3D
                         // lift" quality), just with no overshoot/wobble.
-                        .animation(.easeInOut(duration: 0.3), value: selectedIndex)
+                        .animation(.easeInOut(duration: 0.16), value: selectedIndex)
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
@@ -442,7 +442,7 @@ struct PopoverPreviewView: View {
                         // scrolling to reveal it move as one continuous
                         // motion, neither one bouncing independently of
                         // the other.
-                        withAnimation(.easeInOut(duration: 0.3)) {
+                        withAnimation(.easeInOut(duration: 0.16)) {
                             proxy.scrollTo(items[newIdx].id, anchor: .center)
                         }
                     }
@@ -676,7 +676,7 @@ struct PopoverRow: View, Equatable {
         // — a spring here would overshoot past `selectedScale` and wobble
         // back, which is exactly the "moving up and down" this row's own
         // pop was contributing to alongside the box's travel.
-        .animation(.easeInOut(duration: 0.3), value: isSelected)
+        .animation(.easeInOut(duration: 0.16), value: isSelected)
         .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
             if ClipboardManager.shared.markedItemIDs.count > 1 {
