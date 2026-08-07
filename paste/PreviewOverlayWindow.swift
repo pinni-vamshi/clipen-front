@@ -612,10 +612,13 @@ struct PopoverRow: View, Equatable {
     /// selected row pops. This inset applies to EVERY row, selected or not —
     /// so it has to stay small (unselected rows shouldn't carry extra
     /// left/right margin just to make room for a scale-up that only the
-    /// selected row uses). Chosen together so the popped box still stays
-    /// inside the fixed 420pt popup: (420 − 2·12)·1.05 = 415.8 ≤ 420.
-    /// See the body's comment for the full derivation.
+    /// selected row uses).
     private static let horizontalInset: CGFloat = 12
+    /// Only `rowContent` scales by this — the box, rail, and divider stay
+    /// completely static. No containment math needed here (unlike when the
+    /// whole row used to scale): rowContent already sits inside the row's
+    /// fixed layout bounds, so scaling just it draws slightly outside its
+    /// own bounds without ever approaching the popup's edge.
     private static let selectedScale:   CGFloat = 1.05
 
     var body: some View {
@@ -631,36 +634,36 @@ struct PopoverRow: View, Equatable {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 // Hard block, not just `.animation(nil, value:)` (which only
                 // cancels animation tied to one specific value) — this row's
-                // text must never animate no matter what ambient animation
-                // is active around it: not the selection box's spring, not
-                // the scroll's ease-out, not a newly-materializing row's own
-                // first-appearance transaction as LazyVStack scrolls it
-                // into range. `.transaction` zeroes out inherited animation
-                // for this subtree entirely, regardless of source.
+                // text must never animate its own reflow no matter what
+                // ambient animation is active around it: not the selection
+                // box's travel, not the scroll's ease-out, not a newly-
+                // materializing row's own first-appearance transaction as
+                // LazyVStack scrolls it into range. `.transaction` zeroes
+                // out inherited animation for this subtree entirely.
                 .transaction { $0.animation = nil }
+                // The pop lives HERE, on the content only — not the row, not
+                // the box, not the rail/divider — so only the icon/text
+                // visibly elevates while everything else around it stays
+                // completely static. Applied outside the `.transaction`
+                // block above, with its own explicit local animation, so
+                // this scale still animates smoothly even though the block
+                // it wraps deliberately blocks inherited animation.
+                .scaleEffect(isSelected ? Self.selectedScale : 1.0)
+                .animation(.easeInOut(duration: 0.16), value: isSelected)
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
         .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
-        // The blue selection box draws at this view's bounds. Its layout width
-        // is (popupWidth − 2 · horizontalInset). `scaleEffect` is a rendering
-        // transform that draws OUTSIDE layout bounds, so containment depends on
-        // exactly one thing: boxWidth · SELECTED_SCALE must stay ≤ popup width.
-        //   Popup width is a fixed 420 (see showAnchored's contentSize).
-        //   box = 420 − 2·12 = 396  →  396 · 1.05 = 415.8 ≤ 420
-        // → the popped box stays inside with ~4pt of gap on each edge, and the
-        //   12pt baseline inset (versus the old 16-20pt) keeps EVERY row's
-        //   resting left/right margin small, since only the selected row
-        //   actually needs the scale-up clearance.
-        //
-        // Only the SELECTED row ever hosts the box, tagged with the shared
-        // namespace — SwiftUI interpolates its frame between whichever two
-        // rows hold that tag across a selection change, producing one box
-        // that visibly travels and resizes to the new row rather than one
-        // box disappearing while a separate one pops in elsewhere. Needs a
-        // real "from" view still on screen to interpolate from — LazyVStack
-        // only keeps nearby rows materialized, so a selection jump far
-        // outside the currently-rendered range falls back to a plain
-        // cross-fade instead of a visible slide for that one jump.
+        // The blue selection box draws at this view's bounds and never
+        // scales — it's the one fixed, static element (rail and divider
+        // are the same). Only the SELECTED row ever hosts it, tagged with
+        // the shared namespace — SwiftUI interpolates its frame between
+        // whichever two rows hold that tag across a selection change,
+        // producing one box that visibly travels to the new row rather
+        // than one box disappearing while a separate one pops in
+        // elsewhere. Needs a real "from" view still on screen to
+        // interpolate from — LazyVStack only keeps nearby rows
+        // materialized, so a selection jump far outside the currently-
+        // rendered range falls back to a plain cross-fade for that jump.
         .background {
             if isSelected {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -669,14 +672,7 @@ struct PopoverRow: View, Equatable {
             }
         }
         .padding(.horizontal, Self.horizontalInset)
-        .scaleEffect(isSelected ? Self.selectedScale : 1.0)
         .offset(x: shakeOffsetX)
-        // Same non-bouncy curve for both directions (becoming selected and
-        // un-selecting), and matching the LazyVStack/scroll animations above
-        // — a spring here would overshoot past `selectedScale` and wobble
-        // back, which is exactly the "moving up and down" this row's own
-        // pop was contributing to alongside the box's travel.
-        .animation(.easeInOut(duration: 0.16), value: isSelected)
         .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
             if ClipboardManager.shared.markedItemIDs.count > 1 {
