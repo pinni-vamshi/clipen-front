@@ -608,15 +608,15 @@ struct PopoverRow: View, Equatable {
     private static let minRowHeight: CGFloat = 56
     private static let maxRowHeight: CGFloat = 104
 
-    /// Horizontal inset on each side of the selection box, and how much the
-    /// selected row pops. This inset applies to EVERY row, selected or not —
-    /// so it has to stay small (unselected rows shouldn't carry extra
-    /// left/right margin just to make room for a scale-up that only the
-    /// selected row uses). Chosen together with `selectedScale` so the
+    /// Horizontal inset on each side of the selection box, applied ONLY to
+    /// the selected row — chosen together with `selectedScale` so the
     /// popped WHOLE row (box, rail, divider, content together) still stays
-    /// inside the fixed 420pt popup — see the body's containment-math
-    /// comment for the exact numbers.
+    /// inside the fixed 420pt popup, see the body's containment-math
+    /// comment for the exact numbers. Every OTHER row uses `restingInset`
+    /// instead: it doesn't need clearance for a scale-up it never does, so
+    /// it can sit much closer to the popup's edges and use the space.
     private static let horizontalInset: CGFloat = 28
+    private static let restingInset:    CGFloat = 8
     private static let selectedScale:   CGFloat = 1.10
 
     var body: some View {
@@ -657,7 +657,7 @@ struct PopoverRow: View, Equatable {
                     .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace)
             }
         }
-        .padding(.horizontal, Self.horizontalInset)
+        .padding(.horizontal, isSelected ? Self.horizontalInset : Self.restingInset)
         // The pop is on the WHOLE row here — icon, divider, content, and the
         // box all scale up together as one unit, not just the text. This is
         // also what fixes the overlap bug from scaling content alone: since
