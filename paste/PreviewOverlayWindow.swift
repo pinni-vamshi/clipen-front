@@ -612,15 +612,12 @@ struct PopoverRow: View, Equatable {
     /// selected row pops. This inset applies to EVERY row, selected or not —
     /// so it has to stay small (unselected rows shouldn't carry extra
     /// left/right margin just to make room for a scale-up that only the
-    /// selected row uses).
-    private static let horizontalInset: CGFloat = 12
-    /// Only `rowContent` scales by this — the box, rail, and divider stay
-    /// completely static. No containment math needed here (unlike when the
-    /// whole row used to scale): rowContent already sits inside the row's
-    /// fixed layout bounds, so scaling just it draws slightly outside its
-    /// own bounds without ever approaching the popup's edge. Deliberately
-    /// large — meant to read as an obvious pop, not a subtle nudge.
-    private static let selectedScale:   CGFloat = 1.18
+    /// selected row uses). Chosen together with `selectedScale` so the
+    /// popped WHOLE row (box, rail, divider, content together) still stays
+    /// inside the fixed 420pt popup — see the body's containment-math
+    /// comment for the exact numbers.
+    private static let horizontalInset: CGFloat = 20
+    private static let selectedScale:   CGFloat = 1.10
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -642,40 +639,17 @@ struct PopoverRow: View, Equatable {
                 // LazyVStack scrolls it into range. `.transaction` zeroes
                 // out inherited animation for this subtree entirely.
                 .transaction { $0.animation = nil }
-                // The pop lives HERE, on the content only — not the row, not
-                // the box, not the rail/divider — so only the icon/text
-                // visibly elevates while everything else around it stays
-                // completely static. Applied outside the `.transaction`
-                // block above, with its own explicit local animation, so
-                // this scale still animates smoothly even though the block
-                // it wraps deliberately blocks inherited animation.
-                //
-                // Spring here on purpose, unlike the box's travel and the
-                // scroll (both stay a flat easeInOut below): a spring on
-                // POSITION (something moving between two different
-                // coordinates) is what caused the earlier "moving up and
-                // down" complaint — its overshoot wobbles the actual
-                // on-screen location. This is a pure scale anchored at one
-                // fixed spot, no position change at all, so the same spring
-                // can only make the SIZE briefly overshoot past
-                // `selectedScale` and settle — the lively "pop" from the
-                // original per-row version — without any positional wobble.
-                .scaleEffect(isSelected ? Self.selectedScale : 1.0)
-                .animation(.spring(response: 0.32, dampingFraction: 0.5), value: isSelected)
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
         .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
-        // The blue selection box draws at this view's bounds and never
-        // scales — it's the one fixed, static element (rail and divider
-        // are the same). Only the SELECTED row ever hosts it, tagged with
-        // the shared namespace — SwiftUI interpolates its frame between
-        // whichever two rows hold that tag across a selection change,
-        // producing one box that visibly travels to the new row rather
-        // than one box disappearing while a separate one pops in
-        // elsewhere. Needs a real "from" view still on screen to
-        // interpolate from — LazyVStack only keeps nearby rows
-        // materialized, so a selection jump far outside the currently-
-        // rendered range falls back to a plain cross-fade for that jump.
+        // Only the SELECTED row ever hosts the box, tagged with the shared
+        // namespace — SwiftUI interpolates its frame between whichever two
+        // rows hold that tag across a selection change, producing one box
+        // that visibly travels to the new row rather than one box
+        // disappearing while a separate one pops in elsewhere. Needs a real
+        // "from" view still on screen to interpolate from — LazyVStack only
+        // keeps nearby rows materialized, so a selection jump far outside
+        // the currently-rendered range falls back to a plain cross-fade.
         .background {
             if isSelected {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -684,6 +658,21 @@ struct PopoverRow: View, Equatable {
             }
         }
         .padding(.horizontal, Self.horizontalInset)
+        // The pop is on the WHOLE row here — icon, divider, content, and the
+        // box all scale up together as one unit, not just the text. This is
+        // also what fixes the overlap bug from scaling content alone: since
+        // everything grows in the same proportion together, nothing can
+        // bleed past a neighbor that stayed a different size — there's no
+        // "static" part left for a "growing" part to run into.
+        //   Popup width is a fixed 420 (see showAnchored's contentSize).
+        //   box = 420 − 2·20 = 380  →  380 · 1.10 = 418 ≤ 420
+        // → stays inside with ~1pt of gap on each edge at the popped size.
+        .scaleEffect(isSelected ? Self.selectedScale : 1.0)
+        // Spring here (not the box travel/scroll's flat easeInOut below,
+        // which move POSITION and would visibly wobble if springy) — this
+        // is one rigid shape popping in place, so the spring's overshoot
+        // just makes the whole card feel lively, no positional side effect.
+        .animation(.spring(response: 0.32, dampingFraction: 0.5), value: isSelected)
         .offset(x: shakeOffsetX)
         .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
