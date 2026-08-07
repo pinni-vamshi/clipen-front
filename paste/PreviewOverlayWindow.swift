@@ -618,8 +618,9 @@ struct PopoverRow: View, Equatable {
     /// completely static. No containment math needed here (unlike when the
     /// whole row used to scale): rowContent already sits inside the row's
     /// fixed layout bounds, so scaling just it draws slightly outside its
-    /// own bounds without ever approaching the popup's edge.
-    private static let selectedScale:   CGFloat = 1.05
+    /// own bounds without ever approaching the popup's edge. Deliberately
+    /// large — meant to read as an obvious pop, not a subtle nudge.
+    private static let selectedScale:   CGFloat = 1.18
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -703,9 +704,15 @@ struct PopoverRow: View, Equatable {
         }
     }
 
+    /// Constant width regardless of state — it used to widen to 22 when
+    /// selected/marked (vs 18 at rest) to give the circular icon badge room,
+    /// but that shifted the divider and everything after it by 4pt the
+    /// moment a row was selected. Settling on one fixed width the badge
+    /// always fits within means nothing to the right of the rail ever
+    /// moves, in any state.
     private var verticalRail: some View {
         railBadge
-            .frame(width: isSelected || markOrder != nil ? 22 : 18)
+            .frame(width: 22)
             .frame(maxHeight: .infinity, alignment: .center)
             .padding(.vertical, 2)
             .clipped()
