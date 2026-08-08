@@ -655,20 +655,20 @@ struct PopoverRow: View, Equatable {
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
         .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
-        // Only the SELECTED row ever hosts the box, tagged with the shared
-        // namespace — SwiftUI interpolates its frame between whichever two
-        // rows hold that tag across a selection change, producing one box
-        // that visibly travels to the new row rather than one box
-        // disappearing while a separate one pops in elsewhere. Needs a real
-        // "from" view still on screen to interpolate from — LazyVStack only
-        // keeps nearby rows materialized, so a selection jump far outside
-        // the currently-rendered range falls back to a plain cross-fade.
+        // The box view is always present (never conditionally inserted) so
+        // exactly one row's copy has `isSource: true` at any instant — the
+        // others are `false` placeholders SwiftUI uses to interpolate the
+        // travel between. Conditionally inserting/removing the view with
+        // `if isSelected { ... }` used to trigger SwiftUI's "Multiple
+        // inserted views ... have `isSource: true`" fault: on a selection
+        // change, the old row's insertion-removal and the new row's
+        // removal-insertion land in the same transaction, and two
+        // default-`isSource: true` views briefly coexist.
         .background {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.accentColor)
-                    .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace)
-            }
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.accentColor)
+                .opacity(isSelected ? 1 : 0)
+                .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace, isSource: isSelected)
         }
         .padding(.horizontal, isSelected ? Self.horizontalInset : Self.restingInset)
         // The pop is on the WHOLE row here — icon, divider, content, and the

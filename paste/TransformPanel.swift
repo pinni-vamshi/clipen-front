@@ -435,17 +435,20 @@ struct TransformRow: View, Equatable {
             (!isSelected && isHovered) ? Color.accentColor.opacity(0.1) : Color.clear,
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
-        // Only the SELECTED row hosts the box, tagged with the shared
-        // namespace — SwiftUI interpolates its frame between whichever two
-        // rows hold that tag across a selection change, so one box visibly
-        // travels to the new row instead of one disappearing while another
-        // pops in elsewhere.
+        // The box view is always present (never conditionally inserted) so
+        // exactly one row's copy has `isSource: true` at any instant — the
+        // others are `false` placeholders SwiftUI uses to interpolate the
+        // travel between. Conditionally inserting/removing the view with
+        // `if isSelected { ... }` used to trigger SwiftUI's "Multiple
+        // inserted views ... have `isSource: true`" fault: on a selection
+        // change, the old row's insertion-removal and the new row's
+        // removal-insertion land in the same transaction, and two
+        // default-`isSource: true` views briefly coexist.
         .background {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.accentColor)
-                    .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace)
-            }
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.accentColor)
+                .opacity(isSelected ? 1 : 0)
+                .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace, isSource: isSelected)
         }
         .padding(.horizontal, isSelected ? Self.horizontalInset : Self.restingInset)
         // Anisotropic on purpose — same as the main popup: X grows with the

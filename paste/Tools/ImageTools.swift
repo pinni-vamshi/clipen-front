@@ -102,7 +102,7 @@ enum ImageTools {
         ),
         ClipboardTool(
             id: "image.remove-background",
-            icon: "person.crop.rectangle.badge.minus",
+            icon: "person.crop.rectangle.badge.xmark",
             label: "Remove Background",
             group: "VISION",
             preview: { item in
