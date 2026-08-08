@@ -374,7 +374,7 @@ struct TransformRow: View, Equatable {
 
     private static let horizontalInset: CGFloat = 20
     private static let restingInset:    CGFloat = 6
-    private static let selectedScale:   CGFloat = 1.10
+    private static let selectedScale:   CGFloat = 1.06
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {

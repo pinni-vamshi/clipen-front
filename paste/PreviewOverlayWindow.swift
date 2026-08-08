@@ -617,7 +617,7 @@ struct PopoverRow: View, Equatable {
     /// it can sit much closer to the popup's edges and use the space.
     private static let horizontalInset: CGFloat = 28
     private static let restingInset:    CGFloat = 8
-    private static let selectedScale:   CGFloat = 1.10
+    private static let selectedScale:   CGFloat = 1.06
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -666,9 +666,10 @@ struct PopoverRow: View, Equatable {
         // "static" part left for a "growing" part to run into. (Height is
         // pinned separately below — see the scaleEffect comment.)
         //   Popup width is a fixed 420 (see showAnchored's contentSize).
-        //   box = 420 − 2·28 = 364  →  364 · 1.10 = 400.4 ≤ 420
-        // → stays inside with ~10pt of gap on each edge at the popped size,
-        //   on top of the ~28pt resting gap from horizontalInset itself.
+        //   box = 420 − 2·28 = 364  →  364 · 1.06 = 385.8 ≤ 420
+        // → stays inside with well over a 17pt gap on each edge at the
+        //   popped size, on top of the ~28pt resting gap from
+        //   horizontalInset itself.
         // Anisotropic on purpose: X grows with the spring (the visible
         // "elevation" pop), Y is pinned to 1.0 always. `scaleEffect` scales
         // both axes around the row's own center, so a spring on the Y axis

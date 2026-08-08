@@ -225,7 +225,7 @@ private struct ShareRow: View, Equatable {
 
     private static let horizontalInset: CGFloat = 18
     private static let restingInset:    CGFloat = 6
-    private static let selectedScale:   CGFloat = 1.10
+    private static let selectedScale:   CGFloat = 1.06
 
     var body: some View {
         HStack(spacing: 10) {
