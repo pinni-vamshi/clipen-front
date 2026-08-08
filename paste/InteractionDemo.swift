@@ -7,10 +7,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
     case cycle, pinnedOpen, multiPaste, search, nextCategory
     case spacePreview, pinPreview, transform, moveToFront, delete, reverseCycle
     case cyclePinned, pinItem, group, collections
-    // Tutorial-only demos — three distinct paste animations, one per element,
-    // each with a progressively larger V-tap count (×1, ×2, ×3). Deliberately
-    // NOT reusing `.cycle`: they teach "reach the Nth item with N taps" and are
-    // wired only into the how-to-use flow, never the Settings interactions list.
+
     case pasteOne, pasteTwo, pasteThree
 
     var id: String { rawValue }
@@ -132,10 +129,6 @@ enum LabKey: String, Identifiable, Hashable {
 
     var isWide: Bool { self == .space }
 
-    /// The real MacBook-keyboard key id(s) (`KBKey.id` in InteractionLab's
-    /// keyboard panel) that light up in sync with this lab key's press
-    /// animation, so the actual keyboard visibly "plays along" with the demo
-    /// instead of only the popup's own small keycap row moving.
     var kbKeyIDs: [String] {
         switch self {
         case .cmd:       return ["LCMD"]

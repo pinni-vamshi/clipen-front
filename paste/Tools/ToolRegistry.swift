@@ -8,8 +8,7 @@ enum ToolRegistry {
 
     private struct ResolvedTools {
         let itemID: UUID
-        /// Collection state folded into the key: the destination tools are
-        /// built from it, so a rename/add/switch must not serve a stale list.
+
         let collectionSignature: String
         let entries: [(tool: ClipboardTool, preview: String?)]
     }
@@ -18,10 +17,7 @@ enum ToolRegistry {
 
     private static func collectionSignature(for item: ClipboardItem) -> String {
         let manager = ClipboardManager.shared
-        // Includes anything a tool's `preview` closure reads outside the item
-        // itself. The paste-plain toggle flips which of the two mutually-
-        // exclusive paste tools surfaces (see TextTools.pastePlainDefault) —
-        // stale cache here made the transform panel ignore that setting.
+
         let plainDefault = UserDefaults.standard.bool(forKey: "pastePlainTextByDefault")
         return manager.collections.joined(separator: "\u{1}")
             + "\u{2}" + (manager.activeCollection ?? "")
@@ -64,26 +60,12 @@ enum ToolRegistry {
         return entries
     }
 
-    /// Every registered tool, from every domain file, considered for every
-    /// item regardless of its content type. There is no outer type-based
-    /// routing here on purpose: each tool's own `preview` closure is already
-    /// the sole authority on whether it applies to a given item (see
-    /// `ImageService.imageInput(for:)`, `PDFTools.pdfInput(for:)`,
-    /// `FileTools.fileURLs(for:)`, `TextTools.input(for:)` — every one of
-    /// them independently inspects the item and returns nil when it doesn't
-    /// apply). A tool is just a tool; it isn't filed under "the image tools"
-    /// or "the text tools" as a precondition for showing up somewhere, and
-    /// ranking (`AuthManager.toolImportanceScore(for: tool.id)`) already
-    /// operates purely per-tool-id, with no notion of which array declared it.
     private static let allTools: [ClipboardTool] =
         TextTools.all + ImageTools.all + FileTools.all + PDFTools.all + MediaTools.all + GroupTools.all
 
     private static func toolPool(for item: ClipboardItem) -> [ClipboardTool] {
         if case .blob = item.content { return [] }
-        // A group only ever offers the group tools (ungroup / type-specific
-        // paste) — not the per-type text/image transforms, which don't apply
-        // to the bundle as a whole.
-        // Collection filing applies to every content type, groups included.
+
         if case .group = item.content { return GroupTools.all + CollectionTools.all(for: item) }
         return allTools + CollectionTools.all(for: item)
     }

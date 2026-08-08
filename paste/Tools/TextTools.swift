@@ -140,7 +140,7 @@ enum TextTools {
         },
         runSync: { item in
             guard ClipboardManager.editablePlainText(for: item) != nil else { return nil }
-            // Registration + opening the editor happen inside beginInlineEdit.
+
             ClipboardManager.shared.beginInlineEdit(for: item)
             return .status("Editing inline…")
         },
@@ -169,17 +169,6 @@ enum TextTools {
         runAsync: { _ in nil }
     )
 
-    // Deliberately NOT wired to applyCaseTransformForSelection (that stays
-    // reserved for the direct L/U keypress, which mutates the item in place
-    // and keeps the popup open for toggling). From the Transform panel,
-    // release-⌘ is expected to PASTE the result like every other tool here —
-    // these used to return `.status(...)`, the same "nothing to paste, just a
-    // message" category as an OCR failure, which is why selecting Uppercase/
-    // lowercase from the panel and releasing ⌘ only ever flashed a status and
-    // left the result sitting in the preview instead of pasting it. Following
-    // the same plain, stateless `make(...)` pattern as every sibling CASE tool
-    // (e.g. Title Case just above) fixes that: compute the value, return
-    // `.text`, and the normal transform-paste path takes it from there.
     private static let uppercaseTool = ClipboardTool(
         id: "text.uppercase",
         icon: "arrow.up.to.line.compact",
@@ -224,12 +213,6 @@ enum TextTools {
         }
     )
 
-    /// Only counts as "has formatting" if the item genuinely carries styling
-    /// beyond its plain text — being *stored* as richText/html/rtfd isn't
-    /// enough, since plenty of sources (Notes, browsers, many editors) emit
-    /// a rich pasteboard flavor even for completely unstyled text. Showing
-    /// "Paste as Plain Text" for something that has nothing to strip would
-    /// be a no-op the user can't tell apart from a broken tool.
     private static func richPlainText(for item: ClipboardItem) -> String? {
         switch item.content {
         case .richText(let attr, plain: let s):
@@ -248,12 +231,6 @@ enum TextTools {
         }
     }
 
-    /// Real styling signal only — bold/italic, underline/strikethrough,
-    /// links, embedded attachments, or a highlight background. Deliberately
-    /// NOT checking foregroundColor alone: many sources set an explicit
-    /// (but still default-looking) text color on every run regardless of
-    /// whether anything is actually styled, which would make this always
-    /// true and defeat the whole point of the check.
     private static func hasRealFormatting(_ attr: NSAttributedString) -> Bool {
         guard attr.length > 0 else { return false }
         var found = false
@@ -272,10 +249,6 @@ enum TextTools {
         return found
     }
 
-    /// Heuristic, not a full parser — real clipboard HTML is almost always
-    /// simple markup, so scanning for the tags/properties that actually
-    /// produce visible styling is enough to tell "styled" from "a bare
-    /// wrapper around plain text" without pulling in an HTML/CSS engine.
     private static func htmlHasRealFormatting(_ html: String) -> Bool {
         let lower = html.lowercased()
         let markers = [
@@ -287,15 +260,6 @@ enum TextTools {
         return markers.contains { lower.contains($0) }
     }
 
-    /// The `.text` counterpart to `richPlainText` — plain strings have no
-    /// separate styled representation to compare against, so the only real
-    /// "formatting" that can exist is markdown SYNTAX within the string
-    /// itself (already tagged `.markdown` by the content detector). Uses
-    /// Apple's own markdown parser rather than hand-rolled regex stripping —
-    /// safer against edge cases (escaped markers, nested emphasis, code
-    /// spans that happen to contain `**`) than pattern-matching would be.
-    /// Returns nil (nothing to strip) if parsing changes nothing, which
-    /// doubles as the "was real markdown actually detected" signal.
     private static func markdownStrippedPlainText(for item: ClipboardItem) -> String? {
         guard case .text(let raw) = item.content, case .markdown = item.detectedType else { return nil }
         guard let parsed = try? AttributedString(markdown: raw, options: .init(interpretedSyntax: .full))
@@ -304,27 +268,14 @@ enum TextTools {
         return stripped != raw ? stripped : nil
     }
 
-    /// Everything "Paste as Plain Text" can act on: real rich-source
-    /// formatting, OR markdown syntax in an otherwise-plain string. The two
-    /// are mutually exclusive by content case, so order doesn't matter.
     private static func pastePlainEligibleText(for item: ClipboardItem) -> String? {
         richPlainText(for: item) ?? markdownStrippedPlainText(for: item)
     }
 
-    /// Read the pure-paste setting from UserDefaults (thread-safe) rather than
-    /// ClipboardManager.shared, because tool previews are evaluated by
-    /// ToolRegistry on background queues (async apply/capture paths) and the
-    /// manager's @Published property is main-actor state.
     private static var pastePlainDefault: Bool {
         UserDefaults.standard.object(forKey: "pastePlainTextByDefault") as? Bool ?? false
     }
 
-    /// A real table must still paste as a table — flattening it to tab text
-    /// only reads back as columns in a spreadsheet; anywhere else (Word,
-    /// Pages, Notes, Mail) it lands as bare text with visible tab gaps and
-    /// the table is simply gone. So a table gets a fresh, un-styled HTML
-    /// table (structure kept, every bold/color/font stripped); anything else
-    /// falls back to the flat plain-text string as before.
     private static func plainOutput(for item: ClipboardItem) -> TransformOutput? {
         if let table = TableCellExtractor.plainTableHTML(for: item) {
             return .item(ClipboardItem(content: .html(table.html, plain: table.plain)),

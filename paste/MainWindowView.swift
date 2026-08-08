@@ -22,12 +22,7 @@ private struct WindowMinSizeConfigurator: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             window?.minSize = NSSize(width: 900, height: 620)
-            // The window itself defaults to an opaque backing, so the native
-            // toolbar strip (which sits above our SwiftUI content, not inside
-            // it) has nothing translucent behind it and its .regularMaterial
-            // renders as flat solid instead of a real blur. Making the window
-            // non-opaque lets that material actually blend with what's behind
-            // it, matching the body's own VisualEffectBackground.
+
             window?.isOpaque = false
             window?.backgroundColor = .clear
         }
@@ -93,9 +88,7 @@ struct MainWindowView: View {
             VisualEffectBackground().ignoresSafeArea()
             WindowMinSizeConfigurator().frame(width: 0, height: 0)
                 .onDisappear {
-                    // The window can be hidden/reordered without its SwiftUI
-                    // state being torn down, so clear the search field here
-                    // rather than relying on a fresh view instance.
+
                     searchText = ""
                     debouncedSearchText = ""
                 }
@@ -152,10 +145,7 @@ struct MainWindowView: View {
                 ToolbarItem(placement: .primaryAction) { toolbarActions }
             }
         }
-        // Give the toolbar its own real, opaque material — one tier lighter
-        // than the body's translucency, not the fully-hidden/see-through
-        // chrome it had before, so it reads as slightly less solid than the
-        // body while never becoming transparent.
+
         .toolbarBackground(.regularMaterial, for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .sheet(isPresented: $showTutorial) {
@@ -181,17 +171,8 @@ struct MainWindowView: View {
                 .tracking(3)
                 .foregroundStyle(Color(hex: "#4E8DF7"))
 
-            // Plan badge is deliberately gated, not shown unconditionally for
-            // everyone — the paywall itself is inert for real users right now,
-            // and there's no plan to display until it isn't. Visible whenever
-            // EITHER this machine is actually paywall-gated (shows FREE) OR the
-            // server has confirmed a real paid plan (shows PRO) — checking only
-            // paywallApplies would hide the badge for a genuine subscriber,
-            // since a paid plan makes their own paywall check read false too.
             if proGate.paywallApplies || proGate.isPro {
-                // Oversized dot as the separator between the wordmark and the
-                // plan. Nudged down so its optical centre sits on the cap-height
-                // baseline of CLIPEN rather than riding low like a period.
+
                 Text(".")
                     .font(.system(size: 26, weight: .heavy))
                     .foregroundStyle(Color(hex: "#4E8DF7"))
@@ -270,14 +251,10 @@ struct MainWindowView: View {
 
             if manager.items.isEmpty {
                 if manager.hasLoadedHistoryOnce {
-                    // Truly empty history — new install or user cleared it.
+
                     OnboardingView()
                 } else {
-                    // History load still in flight — this used to be a bare
-                    // Color.clear (chosen so onboarding animations wouldn't
-                    // flash on every ordinary launch), but on a large/older
-                    // history the load itself can take real time, and a blank
-                    // window read as the app being broken rather than working.
+
                     historyLoadingView
                 }
             } else {
@@ -301,8 +278,7 @@ struct MainWindowView: View {
                 debouncedSearchText = ""
                 return
             }
-            // Count a SEARCH SESSION (typing into an empty field), not every
-            // debounce pause — one mental search used to log 2–3 events.
+
             if oldValue.isEmpty {
                 AuthManager.shared.registerActionUsage(actionID: "action.window-search")
             }
@@ -743,12 +719,7 @@ private struct ItemDetailView: View {
     private var pinnedContent: some View {
         switch item.content {
         case .text, .image, .file, .richText, .html, .rtfd:
-            // These content types now render through renderers that scroll
-            // internally (RichTextContentPreview's ScrollView / CodeSyntaxPreview /
-            // AttributedTextPreview's NSTextView / HTMLStringPreview's WKWebView).
-            // Nesting them inside an outer SwiftUI ScrollView proposes unbounded
-            // height to an NSViewRepresentable with no intrinsic size, which
-            // collapses it to zero height — a blank preview pane.
+
             contentBlock
         default:
             ScrollView { contentBlock }
@@ -759,18 +730,10 @@ private struct ItemDetailView: View {
     private var contentBlock: some View {
         switch item.content {
         case .text:
-            // Route through ContentPreviewView so detected types (.json /
-            // .code(lang) / .latex / .markdown / .table) get the same real
-            // renderers the popup preview uses — plain unstyled text was a
-            // regression for anything the detector identified.
+
             ContentPreviewView(item: item, chrome: .panel)
         case .richText, .html, .rtfd:
-            // Route through the same NSTextView-backed renderer the popup's
-            // larger preview panel uses (ItemPreviewPanel.swift) instead of
-            // a plain Text(plain) — that's the only renderer in the app that
-            // draws embedded NSTextAttachment images inline, and it also
-            // renders real tables via AppKit's own NSTextTableBlock layout
-            // rather than the simplified MiniTablePreview grid.
+
             ContentPreviewView(item: item, chrome: .panel)
         case .image(let img, let data, let dataType):
             Group {
@@ -979,16 +942,6 @@ private struct ItemDetailView: View {
     }
 }
 
-/// One member of a group, rendered with its real content — not just a
-/// truncated one-line label — so scrolling the group's preview actually shows
-/// what each item holds. Deliberately does NOT reuse ZoomableImagePreview for
-/// image members: that view always kicks off a second full-resolution decode
-/// of the same bytes on a background queue (see ItemPreviewPanel.swift's
-/// decodeFullRes), and doing that for up to `maxGroupItems` members at once
-/// would be the exact redundant-decode cost this file's detail pane already
-/// pays once, multiplied by the group size. A cached downsampled thumbnail is
-/// enough for a compact card; the user can still open the member on its own
-/// to zoom.
 private struct GroupChildPreviewCard: View {
     let child: ClipboardItem
 
@@ -1062,9 +1015,7 @@ private struct GroupChildPreviewCard: View {
             }
 
         case .group:
-            // Groups are flattened one level on creation (groupMarkedItems) —
-            // a member is never itself a group. Kept only as a defensive
-            // fallback so an unexpected nested group still renders something.
+
             Text(child.previewText).font(.system(size: 12)).foregroundColor(.textPri).lineLimit(2)
         }
     }
@@ -1177,9 +1128,6 @@ private struct CompactItemRow: View, Equatable {
 
     @State private var isHovered = false
 
-    // Exact footprint of the trailing icon zone (pin badge / delete+pin hover
-    // buttons) plus its own trailing padding — the text is capped to stop
-    // exactly before this zone starts.
     private static let iconZoneWidth: CGFloat = 20 + 4 + 20 + 12
 
     static func == (l: CompactItemRow, r: CompactItemRow) -> Bool {

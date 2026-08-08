@@ -3,7 +3,6 @@ import AppKit
 import Combine
 import UniformTypeIdentifiers
 
-
 @MainActor
 final class InteractionLabController: ObservableObject {
 
@@ -23,10 +22,6 @@ final class InteractionLabController: ObservableObject {
     @Published var selectedDemo: InteractionDemo = .cycle
     @Published var isPlaying = false
 
-    /// When true (the default), the InteractionLab keyboard panel mirrors
-    /// pressedKeys onto the REAL keyboard tiles instead of the popup's own
-    /// small keycap row — the two are mutually exclusive so only one thing
-    /// is visibly "playing" the gesture at a time.
     @Published var syncRealKeyboard = true
 
     @Published var pressedKeys: Set<LabKey> = []
@@ -47,9 +42,6 @@ final class InteractionLabController: ObservableObject {
     @Published var resultText: String? = nil
     @Published var instruction: LocalizedStringKey? = nil
 
-    /// Drives the small "tap counter" pips shown during the paste demos:
-    /// `pasteTapTarget` is how many V taps this element needs (0 = not a paste
-    /// demo, hide the pips), `pasteTapDone` is how many have played so far.
     @Published var pasteTapTarget = 0
     @Published var pasteTapDone = 0
 
@@ -75,19 +67,7 @@ final class InteractionLabController: ObservableObject {
         stageKeys = demo.heroKeys
         isPlaying = true
         task = Task { [weak self] in
-            // Real run-loop turns, not a guessed sleep: on a cold mount the
-            // hosting popover/window's own presentation and first layout
-            // pass can still be in flight, so firing withAnimation here
-            // immediately runs it into a subtree that isn't attached/
-            // observing yet — the very first playthrough silently has no
-            // visible animation, only recovering once everything is warm
-            // on the next open. Waiting for AppKit's pending window-
-            // ordering/layout work to actually drain survives however long
-            // that takes, instead of guessing a millisecond count. This is
-            // the one place every caller (KeyDemoPopup, NudgeLessonPanel,
-            // the onboarding practice page, and InteractionLabStage's own
-            // self-driving fallback) funnels through, so fixing it here
-            // fixes the race everywhere at once.
+
             await Self.nextRunLoopTurn()
             await Self.nextRunLoopTurn()
             await Self.nextRunLoopTurn()
@@ -113,21 +93,6 @@ final class InteractionLabController: ObservableObject {
         isPlaying = false
     }
 
-    /// Like `stop()`, but a no-op if `lab` has already moved on to a
-    /// different demo by the time this runs. Two popovers driven by the
-    /// same `activeKeyID`/`activeGesture` switch can share one
-    /// `InteractionLabController` (KeyDemoPopup's `lab` is passed in, not
-    /// owned per-popup) — tapping key B while key A's popup is still open
-    /// flips that ID straight from A to B in one change, and SwiftUI
-    /// doesn't guarantee A's `.onDisappear` (which used to call plain
-    /// `stop()`) runs before B's `.task` (which calls `select`/`play`). If
-    /// B wins that race and starts playing first, A's now-stale teardown
-    /// would otherwise cancel B's brand-new task and leave nothing to
-    /// restart it — the popup opens but never animates until closed and
-    /// reopened. Checking that `selectedDemo` still matches what THIS
-    /// caller started lets a late, stale stop from the closing popup
-    /// recognize it's no longer current and back off instead of clobbering
-    /// whoever took over.
     func stopIfStillPlaying(_ demo: InteractionDemo) {
         guard selectedDemo == demo else { return }
         stop()
@@ -217,15 +182,6 @@ final class InteractionLabController: ObservableObject {
         }
     }
 
-    // MARK: - Tutorial paste demos (distinct from runCycle)
-    //
-    // Three separate animations, one per element. Each reaches a deeper item
-    // by adding one more V tap: element 1 = one tap, element 2 = two taps,
-    // element 3 = three taps. Kept as their own functions on purpose so the
-    // choreography (tap count, pacing, the counter pips) can differ per element
-    // without ever touching the shared `.cycle` demo.
-
-    /// Element 1 — a single V tap lands on the top item.
     private func runPasteOne() async throws {
         stageKeys = [.cmd, .v]
         pasteTapTarget = 1
@@ -248,7 +204,6 @@ final class InteractionLabController: ObservableObject {
         pasteTapTarget = 0
     }
 
-    /// Element 2 — two V taps step down to the second item.
     private func runPasteTwo() async throws {
         stageKeys = [.cmd, .v]
         pasteTapTarget = 2
@@ -275,7 +230,6 @@ final class InteractionLabController: ObservableObject {
         pasteTapTarget = 0
     }
 
-    /// Element 3 — three V taps walk all the way to the third item.
     private func runPasteThree() async throws {
         stageKeys = [.cmd, .v]
         pasteTapTarget = 3
@@ -394,8 +348,7 @@ final class InteractionLabController: ObservableObject {
     }
 
     private func runNextCategory() async throws {
-        // Show all three keys: ⌘ opens, V lights up as the popup appears, then
-        // ` steps through the categories one at a time.
+
         stageKeys = [.cmd, .v, .grave]
         press(.cmd)
         try await pause(350)
@@ -405,7 +358,7 @@ final class InteractionLabController: ObservableObject {
         try await pause(650)
         hint("Tap ` for the next category")
         try await pause(250)
-        // Start on Recents, step to each category one tap at a time, then wrap.
+
         for tab in [1, 0] {
             try await tap(.grave)
             withAnimation(.easeOut(duration: 0.15)) {
@@ -632,13 +585,13 @@ final class InteractionLabController: ObservableObject {
         try await tap(.v)
         try await pause(300)
         hint("Hold V to mark items")
-        // Mark the first item.
+
         press(.v)
         try await pause(550)
         release(.v)
         withAnimation(.easeOut(duration: 0.15)) { items[0].mark = 1 }
         try await pause(400)
-        // Move down and mark the second.
+
         try await tap(.v)
         selectItem(1)
         try await pause(300)
@@ -649,7 +602,7 @@ final class InteractionLabController: ObservableObject {
         try await pause(500)
         hint("Tap G to group them")
         try await tap(.g)
-        // Collapse the marked items into a single group entry.
+
         withAnimation(.easeOut(duration: 0.35)) {
             items = [LabItem(title: "Group · 2 items")]
             selectedIndex = 0
@@ -661,15 +614,12 @@ final class InteractionLabController: ObservableObject {
         finish("2 items folded into one group")
     }
 
-    /// 1–5 swaps which collection the ring is showing. The demo starts in
-    /// "All", narrows to a collection, then flips back with the same key.
     private func runCollections() async throws {
         stageKeys = [.cmd, .v, .one, .two]
         press(.cmd)
         try await pause(400)
         showPanel(true)
-        // Same opening as every other gesture: ⌘ held, then a V tap actually
-        // opens the ring. Only then do the number keys come into play.
+
         try await tap(.v)
         try await pause(400)
         hint("All — your whole clipboard")

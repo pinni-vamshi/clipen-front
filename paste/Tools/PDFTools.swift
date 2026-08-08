@@ -176,10 +176,7 @@ enum PDFService {
                     urls.reserveCapacity(backgroundPDF.pageCount)
 
                     for pageIndex in 0..<backgroundPDF.pageCount {
-                        // Drain per page: each render allocates a full-page RGBA
-                        // bitmap + an autoreleased NSBitmapImageRep for the PNG.
-                        // Without this they accumulate across every page of a
-                        // large PDF before the queue block's pool would drain.
+
                         try autoreleasepool {
                             guard let page = backgroundPDF.page(at: pageIndex),
                                   let pngData = render(page: page, scale: 2.0) else { return }

@@ -89,19 +89,11 @@ struct TutorialSheet: View {
     @State private var pasteBoxes: [String] = ["", "", ""]
     @FocusState private var focusedPasteBox: Int?
 
-    /// Page-1 intro choreography: the philosophy pitch shows on its own first,
-    /// then springs aside (smaller, kept visible) while the three copy targets
-    /// stagger into place. `revealedRows` gates the one-by-one row entrance;
-    /// `promptPulse` drives the slow "copy these" impulse.
     @State private var introRevealed = false
     @State private var revealedRows = 0
     @State private var promptPulse = false
     @State private var wordsShown = 0
 
-    /// The big opening line, revealed one word at a time with a smooth ease.
-    /// The two full lines are localized at runtime, then split into words so
-    /// the reveal follows each language's own wording/order. (Scripts without
-    /// spaces just reveal the whole line as one smooth chunk.)
     private static let philosophyLineKeys = ["A new interaction", "behind every paste."]
     private var philosophyWords: [[String]] {
         Self.philosophyLineKeys.map { key in
@@ -118,9 +110,6 @@ struct TutorialSheet: View {
 
     private static let totalPages = 3
 
-    /// The three example lines. Localized at runtime so the text the user
-    /// copies (and later pastes/matches) is in their language — the URL has no
-    /// translation, so it falls back to itself.
     private static let copyTargetKeys = [
         "Hello from Clipen",
         "https://clipen.app",
@@ -130,13 +119,8 @@ struct TutorialSheet: View {
         Self.copyTargetKeys.map { String(localized: String.LocalizationValue($0)) }
     }
 
-    /// Paste practice targets — the copied lines newest-first, so box 1 (the
-    /// most recent copy) is reached with the fewest V taps and box 3 (the
-    /// oldest) needs the most. That ordering is what makes the ×1 / ×2 / ×3
-    /// paste animations line up with what the user actually has to do.
     private var pasteTargets: [String] { copyTargets.reversed() }
 
-    /// Small header shown above each paste box — spells out the tap count.
     private static let pasteBoxLabelKeys = ["Box 1 — tap V once",
                                             "Box 2 — tap V twice",
                                             "Box 3 — tap V three times"]
@@ -156,7 +140,7 @@ struct TutorialSheet: View {
         pasteBoxes[i].trimmingCharacters(in: .whitespacesAndNewlines)
             == pasteTargets[i].trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    /// The first box not yet filled correctly (0–2), or 3 when all are done.
+
     private var currentPasteTarget: Int {
         for i in 0..<3 where !isPasted(i) { return i }
         return 3
@@ -171,8 +155,7 @@ struct TutorialSheet: View {
     }
 
     private func selectDemoForCurrentPage() {
-        // Only the paste-practice page (1) shows the live animation now;
-        // the final page is a static feature summary.
+
         if page == 1 { lab.select(pasteDemoForTarget) } else { lab.stop() }
     }
 
@@ -206,7 +189,7 @@ struct TutorialSheet: View {
             if newTarget < 3 {
                 focusedPasteBox = newTarget
             } else {
-                // All three pasted — auto-advance to the final page.
+
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                     guard page == 1, allPasted else { return }
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { page = 2 }
@@ -215,8 +198,6 @@ struct TutorialSheet: View {
         }
     }
 
-    // Overlaid on the current page (not its own row) so it sits level with
-    // the page's heading line instead of floating above it with a gap.
     private var closeButton: some View {
         Button { isPresented = false } label: {
             Image(systemName: "xmark.circle.fill").font(.system(size: 20)).foregroundColor(.textSec)
@@ -242,9 +223,7 @@ struct TutorialSheet: View {
                 }
                 .buttonStyle(.plain)
             }
-            // Pages 0 and 1 auto-advance the moment their gate is met (all
-            // lines copied / all boxes pasted), so they show a hint instead of
-            // a Continue button. Only the final page keeps an explicit Done.
+
             switch page {
             case 0:
                 Text("Copy all three to continue")
@@ -257,8 +236,7 @@ struct TutorialSheet: View {
                     .foregroundColor(.textDim)
                     .padding(.vertical, 9)
             default:
-                // Final page: the primary action opens Settings' full
-                // interactions list instead of just closing.
+
                 Button {
                     isPresented = false
                     onSeeMore()
@@ -281,9 +259,7 @@ struct TutorialSheet: View {
 
     private var copyGatePage: some View {
         VStack(alignment: .leading, spacing: introRevealed ? 18 : 12) {
-            // Big opening line — each word eases in smoothly, one after another.
-            // Once read, it shrinks up into the corner and the copy section
-            // animates in beneath it.
+
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(philosophyWords.enumerated()), id: \.offset) { lineIdx, line in
                     HStack(spacing: 11) {
@@ -299,10 +275,7 @@ struct TutorialSheet: View {
                     }
                 }
             }
-            // Fixed font + scale shrink keeps the size change smooth (SwiftUI
-            // can't tween font size); the negative padding pulls the copy block
-            // up to absorb the empty space the two-line shrink leaves behind.
-            // Even after shrinking it stays large and prominent.
+
             .scaleEffect(introRevealed ? 0.66 : 1.0, anchor: .topLeading)
             .padding(.bottom, introRevealed ? -34 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -316,7 +289,7 @@ struct TutorialSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { startIntroChoreography() }
         .onChange(of: canAdvance) { _, done in
-            // Auto-advance to the paste page once all three lines are captured.
+
             guard done, page == 0 else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                 guard page == 0 else { return }
@@ -332,15 +305,14 @@ struct TutorialSheet: View {
                 promptPulse = true
             }
         }
-        // Reveal the tagline one word at a time, each easing in smoothly…
+
         let wordGap = 0.32
         for i in 1...philosophyWordCount {
             DispatchQueue.main.asyncAfter(deadline: .now() + wordGap * Double(i)) {
                 withAnimation(.easeOut(duration: 0.5)) { wordsShown = i }
             }
         }
-        // …then, after a beat to let it land, shrink it aside and stagger the
-        // copy targets + hints in.
+
         let afterWords = wordGap * Double(philosophyWordCount) + 0.9
         DispatchQueue.main.asyncAfter(deadline: .now() + afterWords) {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.76)) { introRevealed = true }
@@ -354,7 +326,7 @@ struct TutorialSheet: View {
 
     private var copyColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Description — full width, edge to edge, under the tagline.
+
             Text("Clipen isn't a list you scroll — it's a keyboard-first ring. Hold ⌘, tap V to cycle, release to paste. Let's feel it in three quick steps.")
                 .font(.system(size: 12)).foregroundColor(.textSec)
                 .fixedSize(horizontal: false, vertical: true)
@@ -362,10 +334,6 @@ struct TutorialSheet: View {
 
             Divider().background(Color.border)
 
-            // Two halves — instruction on the left, the three stacked cards
-            // on the right. `.center` (not `.top`) so the shorter left column
-            // vertically centers itself against however tall the card column
-            // ends up being — dynamic, no hardcoded height needed.
             HStack(alignment: .center, spacing: 28) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Copy these 3 lines")
@@ -393,9 +361,6 @@ struct TutorialSheet: View {
                             .offset(y: idx < revealedRows ? 0 : 14)
                     }
 
-                    // Same text/logic/localization as before — just moved to
-                    // sit under the three copy targets instead of the left
-                    // instruction column.
                     Text(canAdvance
                          ? "Nice! Taking you to pasting them back…"
                          : "Copied \(copiedCount) of \(copyTargets.count).")
@@ -430,11 +395,7 @@ struct TutorialSheet: View {
                 }
                 .foregroundColor(.green)
             } else {
-                // Lets someone finish this step with a click instead of
-                // needing to select the text and press ⌘C themselves —
-                // writes straight to the pasteboard, which Clipen's own
-                // clipboard watcher picks up exactly like a real copy,
-                // so `isCopied` flips true the same way either path.
+
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
@@ -454,8 +415,6 @@ struct TutorialSheet: View {
             .stroke(copied ? Color.green.opacity(0.55) : Color.border, lineWidth: 1))
         .animation(.spring(response: 0.3), value: copied)
     }
-
-    // MARK: - Page 2 · Paste the three items back
 
     private var pastePracticePage: some View {
         HStack(alignment: .top, spacing: 26) {
@@ -499,7 +458,7 @@ struct TutorialSheet: View {
         let done = isPasted(index)
         let isCurrent = currentPasteTarget == index
         return HStack(spacing: 10) {
-            // Arrow that points at the box you should paste into next.
+
             Image(systemName: "arrow.right")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(.accent)
@@ -538,8 +497,6 @@ struct TutorialSheet: View {
         }
     }
 
-    // MARK: - Page 3 · More useful moves, then jump to all interactions
-
     private var spacePreviewFinalPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
@@ -559,11 +516,6 @@ struct TutorialSheet: View {
 
 }
 
-/// The four gestures this page teaches, in the fixed order they appear in
-/// the demo's key column. Each maps to a `ClipenSettingsView.KBKey` wired
-/// to the exact same `KeyDemoPopup` the Settings keyboard-interaction demo
-/// uses — clicking a button here opens the real thing, not a second
-/// reimplementation of it.
 private enum PopupDemoGesture: String, CaseIterable, Identifiable {
     case holdV, space, x, del
     var id: String { rawValue }
@@ -587,22 +539,13 @@ private enum PopupDemoGesture: String, CaseIterable, Identifiable {
     }
 }
 
-/// A fixed mock popup on the left, the four gesture keys in the middle, and
-/// — on click — the exact same `KeyDemoPopup` the Settings keyboard demo
-/// already uses, reused directly rather than rebuilt a second time.
-/// Deliberately click-driven, not hover-driven: hover fired on every
-/// incidental mouse pass over the keys, which is what made the previous
-/// version read as jittery/unstable rather than a deliberate interaction.
 private struct PopupGestureDemo: View {
     private static let items: [LocalizedStringKey] = ["Item One", "Item Two", "Item Three", "Item Four"]
     private static let selectedIndex = 0
 
-    // Shared with KeyDemoPopup exactly like KeyboardInteractionPanel shares
-    // its own — one controller per demo session, not one per key.
     @StateObject private var lab = InteractionLabController()
     @State private var activeGesture: PopupDemoGesture? = nil
-    // Idle "these are clickable" affordance — a slow breathing border,
-    // unrelated to hover/click state, always running while this page is up.
+
     @State private var pulse = false
 
     var body: some View {
@@ -653,10 +596,6 @@ private struct PopupGestureDemo: View {
         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.border, lineWidth: 1))
     }
 
-    /// One square, macOS-keycap-style button per gesture — pulses gently
-    /// while idle and snaps to a solid pressed look on click. Clicking opens
-    /// `KeyDemoPopup` (the real Settings demo popup) anchored to this key,
-    /// exactly like `KeyCapView` does in Settings.
     private func demoKey(_ gesture: PopupDemoGesture) -> some View {
         let isActive = activeGesture == gesture
         return Text(gesture.label)

@@ -17,13 +17,6 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     private var shownStrip: NSRect? = nil
     private var wantsVisible = false
 
-    /// Fires whenever `wantsVisible` actually changes — the one place that
-    /// happens is inside `present(...)`/`hide()` below, so this is a single
-    /// choke point rather than something every one of this panel's 20+
-    /// external call sites would need to remember to report separately.
-    /// Lets ClipboardManager mirror this into a real `@Published` property
-    /// (`isItemPreviewVisible`) for SwiftUI to react to — this class itself
-    /// isn't an ObservableObject, so nothing here is reactive on its own.
     var onVisibilityChange: ((Bool) -> Void)?
 
     var isVisible: Bool { wantsVisible && popover.isShown }
@@ -44,21 +37,9 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         let mainPopupVisible = ClipboardManager.shared.previewWindow.isVisible
         let quickClipVisible = ClipboardManager.shared.hasVisibleQuickClipPanel
         if !mainPopupVisible && !quickClipVisible {
-            NSLog("[ClipenPreviewDebug] itemPreviewPanel.popoverDidShow self-closing (mainPopupVisible=false, quickClipVisible=false)")
             popover.performClose(nil)
             anchorPanel.orderOut(nil)
         }
-    }
-
-    // TEMPORARY diagnostic logging — see PreviewOverlayWindow's matching
-    // comment. Remove once the orphaned-panel bug is found. Search
-    // Console.app for "ClipenPreviewDebug".
-    func popoverWillClose(_ notification: Notification) {
-        NSLog("[ClipenPreviewDebug] itemPreviewPanel.popoverWillClose fired (wantsVisible=\(wantsVisible))")
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        NSLog("[ClipenPreviewDebug] itemPreviewPanel.popoverDidClose fired (wantsVisible=\(wantsVisible))")
     }
 
     override init() {
@@ -88,8 +69,6 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
                 near: popupFrame, anchorPoint: anchorPoint)
     }
 
-    /// Opens the inline editor at the item's position, side-by-side with the
-    /// popup — replaces the old QuickClip-panel edit flow entirely.
     func showEditor(for item: ClipboardItem,
                     initialText: String,
                     near popupFrame: NSRect,
@@ -106,10 +85,6 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
                 near: popupFrame, anchorPoint: anchorPoint)
     }
 
-    /// Table content (a real table structure — richText/RTFD/HTML — not a
-    /// plain-text blob) gets edited cell-by-cell instead of being flattened
-    /// through the flat text editor above, which would destroy the table
-    /// structure by replacing the whole rich container with a plain string.
     func showTableEditor(initialRows: [[String]],
                          near popupFrame: NSRect,
                          anchorPoint: NSPoint? = nil,
@@ -194,14 +169,8 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
         shownStrip = desiredStrip
         let edge: NSRectEdge = placeRight ? .maxX : .minX
-        NSLog("[ClipenPreviewDebug] itemPreviewPanel.present() scheduling popover.show via WakeGuard")
         WakeGuard.afterWakeSettle { [popover, anchorView, weak self] in
-            NSLog("[ClipenPreviewDebug] itemPreviewPanel deferred popover.show closure firing (wantsVisible=\(self?.wantsVisible.description ?? "self is nil"))")
-            // A hide() can land between scheduling this and it running (the
-            // post-wake path really does defer across runloop turns), and
-            // showing here anyway would put the panel back on screen with
-            // nothing left to close it — another way to strand it. Bail if
-            // the intent was revoked in the meantime.
+
             guard let self, self.wantsVisible else { return }
             popover.animates = false
             popover.show(relativeTo: rowRect, of: anchorView, preferredEdge: edge)
@@ -212,15 +181,13 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
 
     func hide() {
         let wasVisible = wantsVisible
-        NSLog("[ClipenPreviewDebug] itemPreviewPanel.hide() called (wasVisible=\(wasVisible), popover.isShown=\(popover.isShown))")
         wantsVisible = false
         if wasVisible { onVisibilityChange?(false) }
         if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
             hostingController.rootView = AnyView(EmptyView())
         }
         if popover.isShown {
-            // Snap-close to avoid the animated fade visually overlapping
-            // whatever panel replaces it (transform, share).
+
             popover.animates = false
             popover.performClose(nil)
             popover.animates = true
@@ -233,28 +200,13 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
 struct MultiItemPreviewView: View {
     let items: [ClipboardItem]
     var currentItemID: UUID? = nil
-    /// A saved `.group` item is shown through TWO nested views: the outer
-    /// `ItemPreviewView` (full, non-compact) already draws its own header
-    /// from `item.tags` — which includes a "Group" tag chip — before this
-    /// view's `content` even starts. Drawing a SECOND header here for that
-    /// case produced two stacked bars, one right under the other, both
-    /// saying "Group" in slightly different ways. `ContentPreviewView`'s
-    /// `.group` case passes `showsHeader: false` to suppress this one; the
-    /// item count instead shows next to the outer tag via
-    /// `ClipboardItem.metadataSummary`'s `.group` case. The ad-hoc "Marked"
-    /// case (`showSelectedItemPreview()`) has no such outer wrapper — this
-    /// view IS the top-level content there — so it keeps its own header.
+
     var showsHeader: Bool = true
 
     private var markedCount: Int {
         currentItemID == nil ? items.count : items.count - 1
     }
 
-    /// Called without `currentItemID` for a saved `.group` item (see
-    /// `ContentPreviewView`'s `.group` case); called WITH it for an active
-    /// multi-mark selection (see `showSelectedItemPreview()`), where the
-    /// currently-viewed item sits in `items` alongside the marked ones but
-    /// isn't itself counted as "marked".
     private var isGroupPreview: Bool { currentItemID == nil }
 
     var body: some View {

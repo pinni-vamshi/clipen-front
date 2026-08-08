@@ -1,18 +1,11 @@
 import AVFoundation
 
-/// Plays a short synthesized sine-wave tone — a true single "ping" with a
-/// hard linear fade-out and no resonant tail, unlike every stock macOS
-/// system sound (all of which ring down after the initial hit). Distinct
-/// interaction gestures get distinct pitches from the same clean waveform.
 final class InteractionToneGenerator {
     static let shared = InteractionToneGenerator()
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
-    /// The player is connected with this exact format (not `nil`) so there's
-    /// never a format mismatch between the connection and the buffers we
-    /// schedule into it — that ambiguity is what crashed
-    /// `scheduleBuffer(...)` with an NSException in practice.
+
     private let toneFormat: AVAudioFormat?
 
     private init() {
@@ -35,15 +28,10 @@ final class InteractionToneGenerator {
         let total = Float(frameCount)
         for i in 0..<Int(frameCount) {
             let t = Float(i) / sampleRate
-            let envelope = 1.0 - Float(i) / total   // straight fade-out, no ring
+            let envelope = 1.0 - Float(i) / total
             channel[i] = sinf(2.0 * .pi * Float(frequency) * t) * envelope * volume
         }
 
-        // Only ever schedule/play once the engine has actually confirmed it's
-        // running — `try?` on its own discards a thrown startup failure
-        // (missing/changed audio route, sandbox hiccup, etc.) while letting
-        // execution continue as if it succeeded, which is exactly what led
-        // to scheduleBuffer being called on a non-running engine and crashing.
         if !engine.isRunning {
             do {
                 try engine.start()

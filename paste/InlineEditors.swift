@@ -10,13 +10,6 @@ import SwiftUI
 import WebKit
 @preconcurrency import PDFKit
 
-
-// ============================================================================
-// Inline editor — E on the popup opens this. Positioned like ItemPreviewView
-// (side of the popup, anchored to the selected row), NSTextView-backed, with
-// Enter to save, Shift+Enter for a literal newline, Esc to cancel.
-// ============================================================================
-
 struct InlineRichEditView: View {
     let initialAttributedString: NSAttributedString
     let onCommit: (NSAttributedString) -> Void
@@ -353,17 +346,6 @@ struct InlineTableEditView: View {
     }
 }
 
-/// A standalone, centered window that teaches one gesture at a time.
-/// Deliberately NOT built on the shared popover/`present(...)` machinery every
-/// other panel in this file uses — those are all anchored to and torn down
-/// with the ring popup, which is exactly the coupling that made the old
-/// nudge design unusable (see ClipboardManager+Nudges.swift): a fluent user's
-/// popup session could end, and take the lesson down with it, before there
-/// was ever a real chance to read it. This panel owns its own NSPanel,
-/// floats above every space, and only closes via its own "Learned"/"Later"
-/// buttons or automatic natural-use detection — it does not know or care
-/// whether the ring popup is open.
-
 struct InlineEditView: View {
     let item: ClipboardItem
     let initialText: String
@@ -440,9 +422,7 @@ private struct EditableTextArea: NSViewRepresentable {
 
         DispatchQueue.main.async {
             if let win = tv.window { win.makeFirstResponder(tv) }
-            // Cursor placed at the end, not a select-all — pressing E should
-            // drop the user straight into typing/appending, with the blinking
-            // caret already live, no extra click needed to start writing.
+
             let end = (tv.string as NSString).length
             tv.setSelectedRange(NSRange(location: end, length: 0))
         }
@@ -469,23 +449,11 @@ private final class InlineEditTextView: NSTextView {
     var commitAndPasteHandler: (() -> Void)?
     var cancelHandler: (() -> Void)?
 
-    /// A bare Return doesn't commit right away — it waits this long for a
-    /// second Return. If one lands in time, that's "Save & Paste"; if not,
-    /// the pending commit fires on its own as a plain Save. This is the only
-    /// way to detect a double-tap at all, since a naive immediate-commit
-    /// would tear the editor down on the first Return and leave nothing
-    /// alive to catch the second.
     private static let doubleEnterWindow: TimeInterval = 0.35
     private var pendingCommit: DispatchWorkItem?
 
-    // NSTextView's default class isn't overridable through
-    // scrollableTextView() — but the constructor stores an NSTextView, which
-    // we replace with a real InlineEditTextView subclass instance via a swap
-    // in scrollableTextView (see the extension below).
-
     override func keyDown(with event: NSEvent) {
-        // Return alone commits (or commits+pastes on a fast double-tap);
-        // Shift/Option+Return inserts a literal newline.
+
         if event.keyCode == 36 || event.keyCode == 76 {
             if event.modifierFlags.contains(.shift) || event.modifierFlags.contains(.option) {
                 super.keyDown(with: event)
@@ -505,8 +473,7 @@ private final class InlineEditTextView: NSTextView {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.doubleEnterWindow, execute: work)
             return
         }
-        // Escape cancels — NSTextView's default cancelOperation would only
-        // dismiss the completion window if any, so we override outright.
+
         if event.keyCode == 53 {
             pendingCommit?.cancel()
             pendingCommit = nil
@@ -523,8 +490,6 @@ private final class InlineEditTextView: NSTextView {
     }
 }
 
-// Route NSTextView.scrollableTextView() through our subclass so the returned
-// scroll view already contains an InlineEditTextView document view.
 private extension NSTextView {
     static func inlineEditScrollableTextView() -> NSScrollView {
         let scroll = NSScrollView()

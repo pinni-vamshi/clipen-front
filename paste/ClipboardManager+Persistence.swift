@@ -69,33 +69,20 @@ extension ClipboardManager {
     }
 
     static func editablePlainText(for item: ClipboardItem) -> String? {
-        // A copied file (.txt, .html, .md, .json, .csv, code files, …) is
-        // stored as a URL, not a string — but it's always Clipen's OWN private
-        // snapshot copy (FileSnapshotStore clones it before it ever becomes a
-        // ClipboardItem), never the user's original file elsewhere on disk, so
-        // reading — and later overwriting — it is safe. Binary-ish "text-like"
-        // formats (.webarchive) are deliberately excluded via isTextFile.
+
         if case .file(let url) = item.content, FileKindDetector.isTextFile(url) {
             return try? String(contentsOf: url, encoding: .utf8)
         }
         return item.content.plainText
     }
 
-    /// Commits an edit to a file-backed item (see `editablePlainText` above)
-    /// by overwriting Clipen's own snapshot copy in place. The item's content
-    /// stays `.file(url)` — only the bytes at that path change — so every
-    /// preview surface just needs to re-read the same URL, which the existing
-    /// hide()-then-reshow on every edit commit already forces.
     func updateFileItemText(id: UUID, newText: String) {
         guard let idx = items.firstIndex(where: { $0.id == id }),
               case .file(let url) = items[idx].content,
               FileKindDetector.isTextFile(url) else { return }
 
         if items[idx].originalFileURL == nil {
-            // FIRST edit — never touch the original. Preserve it exactly where
-            // it is and write the edit to a NEW sibling file, then point the
-            // item at that edited copy. "Revert to Original" can later throw
-            // the edit away and bring the original back.
+
             let original = url
             guard (try? String(contentsOf: original, encoding: .utf8)) != newText else { return }
             let stem = original.deletingPathExtension().lastPathComponent
@@ -113,8 +100,7 @@ extension ClipboardManager {
                 items[i].originalFileURL = original
             }
         } else {
-            // RE-EDIT — `url` is already the edited copy; overwrite just it and
-            // leave the original untouched.
+
             guard (try? String(contentsOf: url, encoding: .utf8)) != newText else { return }
             do {
                 try newText.write(to: url, atomically: true, encoding: .utf8)
@@ -128,9 +114,6 @@ extension ClipboardManager {
         }
     }
 
-    /// "Revert to Original" — throw away a file edit: delete the edited copy on
-    /// disk and point the item back at its preserved original. No-op on any
-    /// item that isn't an edited file.
     func revertFileEdit(id: UUID) {
         guard let idx = items.firstIndex(where: { $0.id == id }),
               let original = items[idx].originalFileURL,
@@ -151,17 +134,10 @@ extension ClipboardManager {
         let old = items[idx]
         guard Self.editablePlainText(for: old) != nil,
               Self.editablePlainText(for: old) != newText else { return }
-        // Rich content must survive the edit as rich content — otherwise the
-        // "Paste with Formatting" transform quietly disappears from every
-        // item the user has ever edited. Re-serialize the new plain string
-        // into the SAME container the original used, carrying the original's
-        // dominant character attributes forward.
+
         replaceItemContent(id: id, newContent: Self.reboundEditedContent(old: old.content, newText: newText))
     }
 
-    /// Splice `newText` into the container of `old`, preserving the original's
-    /// formatting (font, color, paragraph attributes) as best-effort. Falls
-    /// back to plain text if the original had no rich container to keep.
     private static func reboundEditedContent(old: ClipboardContent, newText: String) -> ClipboardContent {
         switch old {
         case .richText(let attr, plain: _):
@@ -169,8 +145,7 @@ extension ClipboardManager {
             if mutable.length == 0 {
                 return .text(newText)
             }
-            // Replace the entire body — NSAttributedString extends the leading
-            // attribute run across the new string, keeping font/color/etc.
+
             mutable.replaceCharacters(in: NSRange(location: 0, length: mutable.length), with: newText)
             return .richText(NSAttributedString(attributedString: mutable), plain: newText)
 
@@ -196,9 +171,7 @@ extension ClipboardManager {
             return .text(newText)
 
         case .html(_, plain: _):
-            // HTML edits are rare enough (Notes copies etc.) that a minimal
-            // wrapper preserves the "this is HTML" identity — enough for the
-            // Paste with Formatting tool to keep surfacing.
+
             let escaped = newText.htmlEscaped
             let html = "<p>" + escaped.replacingOccurrences(of: "\n", with: "<br>") + "</p>"
             return .html(html, plain: newText)
@@ -217,8 +190,7 @@ extension ClipboardManager {
         let html = "<table>" + cleanRows.map(htmlRow).joined() + "</table>"
         let plain = cleanRows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
         replaceItemContent(id: id, newContent: .html(html, plain: plain))
-        // Otherwise re-editing this item would show the stale pre-edit cells —
-        // TableCellExtractor's cache is keyed by item id, which doesn't change.
+
         TableCellExtractor.invalidate(itemID: id)
     }
 
@@ -306,9 +278,7 @@ extension ClipboardManager {
         case .files(let us): urls = us
         default:             return
         }
-        // An edited file item also has a preserved original alongside it —
-        // clean both up (they're normally siblings, so removing either's parent
-        // dir already gets both, but include it explicitly to be safe).
+
         if let original = item.originalFileURL { urls.append(original) }
         let appSupport = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -420,14 +390,11 @@ extension ClipboardManager {
         var userNote: String? = nil
         var ocrText: String? = nil
         var sidecarBlob: String? = nil
-        // Members of a ⌘+G group, persisted recursively (a struct array of
-        // itself is fine for Codable — no `indirect` needed).
+
         var groupChildren: [PersistedItem]? = nil
-        // User-defined collections this clip belongs to (multi-membership).
+
         var collections: [String]? = nil
-        // Set only on an edited file item — the preserved original alongside
-        // the edited copy (`filePath`). Optional-with-default so older
-        // manifests without this key still decode cleanly (no false quarantine).
+
         var originalFilePath: String? = nil
 
         static func make(from item: ClipboardItem,
@@ -465,18 +432,10 @@ extension ClipboardManager {
         historyDir.appendingPathComponent("history.clip")
     }
 
-    /// Tiny sidecar holding just the first-screen items (the same selection
-    /// the loader prioritizes). Written on every save; read FIRST on launch so
-    /// the window paints real, usable items in O(45) instead of waiting for the
-    /// whole encrypted manifest — with every inline RTF blob — to decode.
     var historyHeadURL: URL {
         historyDir.appendingPathComponent("history.head.clip")
     }
 
-    /// How many unpinned items ride in the priority/head batch (pinned items
-    /// are always included on top of this). Save and load MUST use the same
-    /// selection so the head paint and the full load's priority publish share
-    /// identical ids/order — that's what makes the hand-off flash-free.
     static let historyPriorityUnpinnedCount = 40
 
     private static func historyPrioritySlice(_ items: [PersistedItem]) -> [PersistedItem] {
@@ -537,9 +496,7 @@ extension ClipboardManager {
             self?.sidecarBlobCache[id] = nil
             self?.blobPurgeNeeded = true
         }
-        // An edit reuses the same item.id with new content — the RTFD preview
-        // cache keyed on that id must drop its stale decoded/adjusted string
-        // or an edited item would keep showing its pre-edit rendering.
+
         AdjustedAttrCache.shared.invalidate(itemID: id)
     }
 
@@ -587,14 +544,7 @@ extension ClipboardManager {
     }
 
     func saveHistory(snapshot: [ClipboardItem]? = nil) {
-        // While the async load is still filling in `items` (head-paint batch,
-        // then the priority batch, then background chunks — see
-        // isHistoryFullyLoaded's doc comment), `items` is only a PARTIAL view
-        // of the real history. Saving here — from ANY call site, not just the
-        // debounced auto-save — would silently overwrite the real encrypted
-        // history on disk with that partial slice. Once the load finishes it
-        // republishes `items`, which reschedules the debounced save and any
-        // callers that skipped saving here can simply call it again.
+
         guard snapshot != nil || isHistoryFullyLoaded else { return }
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
@@ -623,10 +573,7 @@ extension ClipboardManager {
         if historyLoadedCleanly, !itemsToSave.isEmpty {
             try? cipher.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
         }
-        // Refresh the instant-paint head sidecar from the same snapshot, using
-        // the exact same priority selection the loader will use. Its blobs are
-        // a subset of `referencedBlobs` above, so they're never purged out from
-        // under it.
+
         let head = Self.historyPrioritySlice(persisted)
         if let headPlain = try? enc.encode(head),
            let headCipher = HistoryCrypto.encrypt(headPlain) {
@@ -639,9 +586,6 @@ extension ClipboardManager {
         }
     }
 
-    /// Reconstruct a persisted item's content, recursing into group members.
-    /// Group children read their blobs inline and are intentionally not seeded
-    /// into the top-level blob caches (they're re-referenced on the next save).
     private func decodeContent(_ p: PersistedItem) -> ClipboardContent? {
         switch p.type {
         case "text":  return p.text.map { .text($0) }
@@ -730,9 +674,7 @@ extension ClipboardManager {
                 return .make(from: item, type: "blob", imageBlob: rel)
 
             case .group(let items):
-                // Persist each member recursively (their image blobs get written
-                // and marked referenced through the same inout set, so they're
-                // never purged while the group lives).
+
                 let children = items.compactMap {
                     persistedBase(for: $0, referencedBlobs: &referencedBlobs)
                 }
@@ -767,13 +709,6 @@ extension ClipboardManager {
         return persisted
     }
 
-    /// Scans `history.clip.corrupt-*` quarantine files and, if one decodes
-    /// cleanly against the current schema and holds MORE items than what we
-    /// currently have, merges it back into `current` (deduped by id, newest
-    /// first, capped to the user's ring size), persists the result, and
-    /// returns it. Each quarantine file is attempted at most once ever, so on
-    /// a normal launch (no quarantine files) this is an immediate no-op.
-    /// Returns nil when there's nothing better to recover.
     private func recoverFromQuarantineIfBetter(current: [PersistedItem],
                                                dec: JSONDecoder) -> [PersistedItem]? {
         let attemptedKey = "clipen.recoveryAttemptedQuarantines"
@@ -788,7 +723,6 @@ extension ClipboardManager {
         }
         guard !candidates.isEmpty else { return nil }
 
-        // Pick the quarantine file that decodes cleanly and holds the most.
         var best: [PersistedItem] = []
         for f in candidates {
             attempted.insert(f.lastPathComponent)
@@ -797,21 +731,14 @@ extension ClipboardManager {
             }
         }
 
-        // Only worth recovering if a quarantine genuinely has MORE than now.
         guard best.count > current.count else {
             d.set(Array(attempted), forKey: attemptedKey)
             return nil
         }
 
-        // Merge: keep everything current (it's newer) ahead of recovered items
-        // not already present — deduped by id so nothing is duplicated.
         let currentIDs = Set(current.map(\.id))
         let merged = current + best.filter { !currentIDs.contains($0.id) }
 
-        // Respect the user's ring size: keep all pinned + the newest N unpinned
-        // (same rule normal eviction uses), preserving order. Read the size
-        // straight from defaults — self.maxItems may not be applied yet this
-        // early in launch. 500 is the hard plan cap.
         let ringSize = min(max(1, d.object(forKey: "preferredRingSize") as? Int ?? 20), 500)
         var capped: [PersistedItem] = []
         var unpinnedKept = 0
@@ -823,11 +750,6 @@ extension ClipboardManager {
             }
         }
 
-        // Persist the recovery to disk IMMEDIATELY (before marking the sources
-        // attempted) so it survives even an instant quit — never lose the
-        // recovery to a crash between restoring and the normal post-load save.
-        // The originating `history.clip.corrupt-*` file is left untouched on
-        // disk, so the older items beyond the ring size stay retrievable.
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         guard let plain = try? enc.encode(capped),
@@ -839,10 +761,6 @@ extension ClipboardManager {
         return capped
     }
 
-    /// Kicks off history load in the background. The app was freezing 1-20 s
-    /// on launch because the manifest read + decrypt + JSON decode + N per-
-    /// item blob reads all ran on the main thread. The window can now open
-    /// with an empty ring immediately; items populate a beat later.
     func loadHistory() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.performHistoryLoadOffMain()
@@ -857,9 +775,6 @@ extension ClipboardManager {
         let migratedInlineEmbedding: Bool
     }
 
-    /// Turns persisted rows into live `ClipboardItem`s. This is the per-item
-    /// expensive part — image bitmap decode, RTF/RTFD parse, per-blob decrypt —
-    /// so callers run it on a background queue and keep each batch small.
     private func decodeHistoryBatch(_ batch: [PersistedItem],
                                     loadedEmbeddings: [String: [Float]]) -> HistoryDecodedBatch {
         var seedImage:   [UUID: (path: String, bytes: Int)] = [:]
@@ -919,11 +834,9 @@ extension ClipboardManager {
                                      urlTitle: p.urlTitle, sourceAppName: p.sourceAppName,
                                      userNote: p.userNote, ocrText: p.ocrText)
             item.isPinned = p.isPinned
-            // Unfiled is the normal resting state — histories written before
-            // Collections existed simply stay unfiled and show under All.
+
             item.collections = Set(p.collections ?? [])
-            // Restore the edited-file marker so "Revert to Original" still works
-            // after a relaunch.
+
             if let orig = p.originalFilePath { item.originalFileURL = URL(fileURLWithPath: orig) }
             item.sourceBundleID = p.sourceBundleID
             item.pastedToAppName  = p.pastedToAppName
@@ -970,14 +883,6 @@ extension ClipboardManager {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
 
-        // ---- INSTANT HEAD PAINT ----
-        // Read the tiny head sidecar FIRST and paint it immediately. Decoding
-        // ~45 items is near-instant regardless of total history size, so the
-        // window shows real, fully-usable clips right away instead of a blank
-        // placeholder — no waiting on the whole encrypted manifest (with every
-        // inline RTF blob) to decode. Embeddings are skipped here; the full
-        // load's priority publish below carries them, and supersedes this with
-        // an identical id/order set (no flash) before any search can run.
         var shownHeadIDs = Set<UUID>()
         if let headPersisted = readManifest(at: historyHeadURL, dec: dec), !headPersisted.isEmpty {
             let headBatch = decodeHistoryBatch(headPersisted, loadedEmbeddings: [:])
@@ -1031,15 +936,6 @@ extension ClipboardManager {
             }
         }
 
-        // Auto-recover wrongly-quarantined history. A `history.clip.corrupt-*`
-        // file is only quarantined on a decode failure — but that failure can
-        // be transient or schema-related (an older manifest the decoder of the
-        // day rejected), NOT actual corruption. If such a file decodes cleanly
-        // against TODAY's schema and holds more than we currently have, it's
-        // real data that was lost — merge it back automatically so the user
-        // never has to restore anything by hand. Each corrupt file is tried at
-        // most once ever (tracked in UserDefaults), so this is free on every
-        // normal launch (no corrupt files ⇒ instant no-op).
         if let recovered = recoverFromQuarantineIfBetter(current: persisted ?? [], dec: dec) {
             persisted = recovered
         }
@@ -1049,8 +945,7 @@ extension ClipboardManager {
                 self?.historyLoadedCleanly = !primaryExisted
                 self?.hasLoadedHistoryOnce = true
                 self?.isHistoryFullyLoaded = true
-                // Even an empty ring should trigger embedding init lazily so
-                // the first search after populating doesn't cold-start it.
+
                 self?.recomputeEmbeddingsInBackground()
             }
             return
@@ -1061,11 +956,6 @@ extension ClipboardManager {
         }
         let loadedEmbeddings = readEmbeddingsFile()
 
-        // The priority batch is decoded and published first, then the rest
-        // streams in as background chunks. The head paint above already
-        // showed these same priority items (from the sidecar) — this publish
-        // supersedes them with an identical id/order set that also carries
-        // embeddings, so there's no visible change, just a silent upgrade.
         let unpinnedPersisted  = persisted.filter { !$0.isPinned }
         let priorityPersisted  = Self.historyPrioritySlice(persisted)
         let deferredPersisted  = Array(unpinnedPersisted.dropFirst(Self.historyPriorityUnpinnedCount))
@@ -1075,14 +965,10 @@ extension ClipboardManager {
         let publish = firstBatch.items.filter(\.isPinned) + firstBatch.items.filter { !$0.isPinned }
         let publishIDs = Set(publish.map(\.id))
 
-        // Every @Published mutation MUST land back on main.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.historyLoadedCleanly = cleanLoad
-            // Keep genuine live captures (copied during load — ids in neither
-            // the head paint nor the manifest); drop the provisional head
-            // items (superseded by `publish`, same ids + embeddings) and any
-            // stale head item no longer present in the manifest.
+
             let liveCaptures = self.items.filter {
                 !shownHeadIDs.contains($0.id) && !publishIDs.contains($0.id)
             }
@@ -1092,22 +978,15 @@ extension ClipboardManager {
             self.hasLoadedHistoryOnce = true
             Self.markEmbeddingSchemaCurrent()
             if deferredPersisted.isEmpty {
-                // Nothing deferred — this publish already IS the complete
-                // history, so it's now safe for auto-save/eviction to run.
+
                 self.isHistoryFullyLoaded = true
-                // Now that items are populated, kick off the embedding backfill
-                // — it also lazily wakes the Neural-Engine model, on background.
+
                 self.recomputeEmbeddingsInBackground()
             }
         }
 
         guard !deferredPersisted.isEmpty else { return }
 
-        // Everything past the priority batch decodes in the background, in
-        // chunks, appended to `items` as each chunk finishes — so a very
-        // large history keeps arriving progressively instead of holding up
-        // the embedding backfill (and the rest of startup) behind one giant
-        // decode pass.
         let deferredChunkSize = 100
         var start = 0
         while start < deferredPersisted.count {
@@ -1123,8 +1002,7 @@ extension ClipboardManager {
                 self.items.append(contentsOf: newOnes)
                 self.embeddedItemCount = self.items.reduce(0) { $1.embedding == nil ? $0 : $0 + 1 }
                 if isLastChunk {
-                    // Every deferred chunk has now landed — the full history
-                    // is finally in `items`, so auto-save/eviction may run.
+
                     self.isHistoryFullyLoaded = true
                     self.recomputeEmbeddingsInBackground()
                 }
@@ -1133,9 +1011,6 @@ extension ClipboardManager {
         }
     }
 
-    /// Undoes beta 1.0.252's pre-made "Personal" collection: drops it from the
-    /// collection list and unstamps it from every clip, exactly once. Scoped to
-    /// that one name so collections the user made themselves are untouched.
     private func purgeLegacyDefaultCollection() {
         let key = "clipen.purgedLegacyDefaultCollection"
         guard !UserDefaults.standard.bool(forKey: key) else { return }
@@ -1149,9 +1024,6 @@ extension ClipboardManager {
         }
         if activeCollection == legacy { activeCollection = nil }
 
-        // Only mark the purge done once the unstamped items are actually on
-        // disk — otherwise a quit before the next save would strand the flag
-        // set and the stamps still persisted.
         guard changed else {
             UserDefaults.standard.set(true, forKey: key)
             return
@@ -1162,9 +1034,6 @@ extension ClipboardManager {
         }
     }
 
-    // v3: embeddings now come from ClipenEmbedder (Neural-Engine contextual
-    // model when available) — different dimensionality than the old sentence
-    // embedding, so bump the version to discard stale vectors and re-index.
     private static let embeddingSchemaVersion = 3
     private static let embeddingSchemaKey = "clipen.embeddingSchemaVersion"
 

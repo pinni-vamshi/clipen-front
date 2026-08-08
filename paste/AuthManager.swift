@@ -4,14 +4,6 @@ import FirebaseAnalytics
 import Foundation
 import SwiftUI
 
-// ============================================================================
-// TrackingService — the ONE place all telemetry is collected, stored, and sent.
-// Every other file reports events here (via the AuthManager façade below, so
-// existing call sites keep working). Schema v3: one user row keyed by the
-// hardware UUID, all daily data date-keyed, 150-day retention, no derived
-// psychology scores.
-// ============================================================================
-
 final class TrackingService {
     static let shared = TrackingService()
 
@@ -19,32 +11,22 @@ final class TrackingService {
     static let retentionDays = 150
     private static let baseURL = URL(string: "https://clipen-backend.onrender.com")!
 
-    // MARK: - Store
-
     struct DayData: Codable {
         var cmdVPastes = 0
         var fastPastes = 0
-        var positions: [String: Int] = [:]      // exact popup index -> paste count
-        var hours: [String: Int] = [:]          // hour of day -> paste count
-        var toolUses: [String: Int] = [:]       // tool id (incl. share.*, ai.translate.<lang>) -> count
-        var markedBatches: [String: [Int]] = [:]// marked tool id -> batch sizes
-        var captures: [String: Int] = [:]       // capture type -> count
-        var popup: [String: Int] = [:]          // opens/abandons/searches/nav
-        // One entry per popup session: how long it stayed open, in ms. RAW —
-        // the backend sums these; the client never aggregates durations.
+        var positions: [String: Int] = [:]
+        var hours: [String: Int] = [:]
+        var toolUses: [String: Int] = [:]
+        var markedBatches: [String: [Int]] = [:]
+        var captures: [String: Int] = [:]
+        var popup: [String: Int] = [:]
+
         var popupDurationsMs: [Int] = []
-        /// Every popup-open session classified into exactly one mutually
-        /// exclusive outcome: pasted / deleted / escaped / blank (silent
-        /// auto-dismiss timeout). Sums to `popup.opens` for the same date.
+
         var popupOutcomes: [String: Int] = [:]
-        var actions: [String: Int] = [:]        // marked/deleted/pinned/previews/shares/...
+        var actions: [String: Int] = [:]
         var settingsChanged: [String: Int] = [:]
-        /// Raw sequence of values a numeric setting was actually changed TO,
-        /// in order — `settingsChanged` only ever said a setting was
-        /// touched N times, never what it was touched to (e.g. ring_size
-        /// going 10 -> 25 -> 15 in a day looked identical to it going
-        /// 10 -> 11 -> 10). One entry per change, same key scheme as
-        /// `settingsChanged` (e.g. "ring_size").
+
         var settingValues: [String: [Int]] = [:]
         var failures: [String: Int] = [:]
 
@@ -57,13 +39,6 @@ final class TrackingService {
 
         init() {}
 
-        // Manual Decodable: the Swift-synthesized decoder throws on any
-        // missing key, even for properties with a default value — so adding
-        // a field here (like popupOutcomes) would make every ALREADY-SAVED
-        // tracking.json on disk fail to decode and silently reset to an
-        // empty Store, losing unflushed local data. decodeIfPresent + `??`
-        // makes every field here, and any added the same way in future,
-        // backward-compatible with files written before it existed.
         enum CodingKeys: String, CodingKey {
             case cmdVPastes, fastPastes, positions, hours, toolUses, markedBatches,
                  captures, popup, popupDurationsMs, popupOutcomes, actions,
@@ -91,11 +66,11 @@ final class TrackingService {
 
     struct Store: Codable {
         var firstSeen: String = ""
-        var versions: [String: String] = [:]    // version -> first-seen date
-        var days: [String: DayData] = [:]       // date -> data
+        var versions: [String: String] = [:]
+        var days: [String: DayData] = [:]
         var toolTotals: [String: Int] = [:]
         var toolLastUsed: [String: Double] = [:]
-        var toolBuckets: [String: Int] = [:]    // "toolID|weekday_morning" -> count (powers ranking)
+        var toolBuckets: [String: Int] = [:]
         var globalBuckets: [String: Int] = [:]
         var totalPastes = 0
         var totalFastPastes = 0
@@ -132,8 +107,6 @@ final class TrackingService {
         persistSoon()
     }
 
-    // MARK: - Recording API
-
     func recordCmdV() {
         mutateToday { day in
             day.cmdVPastes += 1
@@ -152,17 +125,12 @@ final class TrackingService {
         persistSoon()
     }
 
-    /// Exact popup position the user pasted from (index 0 = front).
     func recordPastePosition(_ index: Int) {
         guard index >= 0 else { return }
         mutateToday { $0.positions["\(index)", default: 0] += 1 }
         persistSoon()
     }
 
-    /// One call per popup session, at close time — `outcome` is one of
-    /// "pasted", "deleted", "escaped", "blank" (see ClipboardManager+Search
-    /// .dismissPreview, the single place this is called from).
-    /// One raw entry per popup session: how long it was open, in ms.
     func recordPopupDuration(ms: Int) {
         guard ms >= 0 else { return }
         mutateToday { $0.popupDurationsMs.append(ms) }
@@ -191,14 +159,10 @@ final class TrackingService {
         persistSoon()
     }
 
-    /// Day-level variant counter that must NOT affect ranking totals
-    /// (e.g. ai.translate.<lang> alongside the ranked ai.translate).
     func recordToolVariant(id: String) {
         guard !id.isEmpty else { return }
         mutateToday { $0.toolUses[id, default: 0] += 1 }
-        // Same "tool_used" name as recordToolUse — this feeds the exact same
-        // toolUses_by_date bucket the PostHog forwarder reads, so it must
-        // mirror as the same event for the two pipelines to agree.
+
         Analytics.logEvent("tool_used", parameters: ["tool_id": id, "count": 1])
         persistSoon()
     }
@@ -206,18 +170,10 @@ final class TrackingService {
     func recordMarkedBatch(id: String, size: Int) {
         guard !id.isEmpty, size > 0 else { return }
         mutateToday { $0.markedBatches[id, default: []].append(size) }
-        // Deliberately NOT mirrored to Firebase: marked_batches_by_date isn't
-        // translated by posthog_forward.py either (see day_entry_to_events),
-        // so mirroring it here would make Firebase show something PostHog
-        // never will — breaking the very cross-check this is meant to enable.
+
         persistSoon()
     }
 
-    /// Records the exact value a numeric setting was just changed TO (not
-    /// just that it changed) — e.g. `recordSettingValue(id: "ring_size",
-    /// value: 25)`. Pairs with the existing count-only `recordEvent(id:
-    /// "setting.ring_size")` call at the same call site; this is additive,
-    /// not a replacement.
     func recordSettingValue(id: String, value: Int) {
         guard !id.isEmpty else { return }
         mutateToday { $0.settingValues[id, default: []].append(value) }
@@ -225,7 +181,6 @@ final class TrackingService {
         persistSoon()
     }
 
-    /// Router for the legacy string event IDs used across the codebase.
     func recordEvent(id: String, count: Int = 1) {
         guard !id.isEmpty, count > 0 else { return }
         mutateToday { Self.route(id: id, count: count, into: &$0) }
@@ -233,15 +188,6 @@ final class TrackingService {
         persistSoon()
     }
 
-    /// Mirrors this event to Firebase Analytics using the SAME
-    /// categorization `route()` (below) uses for the backend, and the same
-    /// event names `posthog_forward.py`'s `day_entry_to_events()` forwards
-    /// to PostHog — so a given real action shows up identically in all
-    /// three places, letting a mismatch between Firebase and PostHog be
-    /// read as a real pipeline problem rather than a naming difference.
-    /// Anything `day_entry_to_events()` does NOT forward to PostHog
-    /// (paste positions, popup abandon/nav, page.* buckets) is deliberately
-    /// skipped here too, for the same reason.
     private static func logToFirebaseAnalytics(id: String, count: Int) {
         func suffix(_ prefix: String) -> String {
             String(id.dropFirst(prefix.count)).replacingOccurrences(of: "-", with: "_")
@@ -279,9 +225,7 @@ final class TrackingService {
             Analytics.logEvent("setting_changed", parameters: ["setting": suffix("setting."), "count": count])
         case id.hasPrefix("fail."):
             let kind = suffix("fail.")
-            // posthog_forward.py explicitly drops sparkle_check as noise —
-            // mirrored here so Firebase doesn't show a "failure" PostHog
-            // will never have for the same event.
+
             guard kind != "sparkle_check" else { return }
             Analytics.logEvent("failure", parameters: ["kind": kind, "count": count])
         case id.hasPrefix("pidx."), id.hasPrefix("page."):
@@ -316,7 +260,7 @@ final class TrackingService {
         case id.hasPrefix("setting."):      day.settingsChanged[suffix("setting."), default: 0] += count
         case id.hasPrefix("fail."):         day.failures[suffix("fail."), default: 0] += count
         case id.hasPrefix("pidx."):         day.positions[legacyPositionKey(suffix("pidx.")), default: 0] += count
-        case id.hasPrefix("page."):         break // paste-age buckets: dropped in v3
+        case id.hasPrefix("page."):         break
         default:                            day.actions[id.replacingOccurrences(of: ".", with: "_"), default: 0] += count
         }
     }
@@ -330,8 +274,6 @@ final class TrackingService {
         }
     }
 
-    // MARK: - Ranking inputs (read by AuthManager.toolImportanceScore)
-
     func rankingInputs() -> (totals: [String: Int], lastUsed: [String: Double],
                              toolBuckets: [String: Int], globalBuckets: [String: Int]) {
         lock.lock(); defer { lock.unlock() }
@@ -343,15 +285,10 @@ final class TrackingService {
         return store.totalFastPastes
     }
 
-    /// Lifetime ⌘V pastes. Persisted in tracking.json and back-filled from the
-    /// legacy `backendFeatureFlagsClickCount` default, so a long-time user's
-    /// real history counts toward the Pro trial rather than restarting at 0.
     var totalPastes: Int {
         lock.lock(); defer { lock.unlock() }
         return store.totalPastes
     }
-
-    // MARK: - Day bookkeeping
 
     private func mutateToday(_ change: (inout DayData) -> Void) {
         let today = Self.dateKey(Date())
@@ -375,8 +312,6 @@ final class TrackingService {
         lock.unlock()
     }
 
-    // MARK: - Persistence
-
     func persistNow() {
         lock.lock()
         let snapshot = store
@@ -394,8 +329,6 @@ final class TrackingService {
             DispatchQueue.global(qos: .utility).async { self.persistNow() }
         }
     }
-
-    // MARK: - Sending (schema v3: whole-user payload, completed days only)
 
     func flushToBackend() {
         guard !sendInFlight else { return }
@@ -435,17 +368,12 @@ final class TrackingService {
             "hardware_uuid": DeviceIdentity.installKey,
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
             "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
-            // Which of the 16 shipped languages this device is actually
-            // running in — the app's own UI language, not just the region.
-            // Nothing upstream of this call reads/sends locale today.
+
             "locale": Bundle.main.preferredLocalizations.first ?? Locale.current.identifier,
             "first_seen": store.firstSeen,
             "versions": store.versions,
             "settings": Self.settingsSnapshot(),
-            // Raw STATE snapshots only — no client-computed aggregates. All
-            // lifetime totals (total_pastes, tool_totals, active_days, …) are
-            // derived by the backend from the daily payloads; the local
-            // toolTotals/toolLastUsed stay on-device purely for tool ranking.
+
             "lifetime": Self.stateSnapshot(),
             "days": daysJSON,
         ]
@@ -477,8 +405,6 @@ final class TrackingService {
         }.resume()
     }
 
-    /// Raw facts about the ring as it looks right now — counts only, never
-    /// content, never names. Must be called on the main thread.
     private static func stateSnapshot() -> [String: Any] {
         let m = ClipboardManager.shared
         let groupCount = m.items.filter {
@@ -490,16 +416,13 @@ final class TrackingService {
             "pinned_now": m.items.filter(\.isPinned).count,
             "groups_now": groupCount,
             "collections_count": m.collections.count,
-            // Elements per collection, in slot order — counts only, the
-            // user-chosen collection names never leave the device.
+
             "collection_item_counts": m.collections.map { name in
                 m.items.filter { $0.collections.contains(name) }.count
             },
         ]
     }
 
-    /// Current value of every user-facing setting, one key per setting.
-    /// Must be called on the main thread (reads live UI state).
     private static func settingsSnapshot() -> [String: Any] {
         let m = ClipboardManager.shared
         return [
@@ -530,23 +453,14 @@ final class TrackingService {
             "interaction_sounds":      m.interactionSoundsEnabled,
             "show_popup_hints":        m.showPopupInteractionHints,
             "beta_updates":            UserDefaults.standard.bool(forKey: "SUBetaUpdatesEnabled"),
-            // Explicit in-app language override — "" means "follow system",
-            // which the top-level `locale` field already reports separately.
+
             "app_language_override":   m.appLanguageCode.isEmpty ? "system" : m.appLanguageCode,
-            // Count only, not the bundle IDs themselves — the actual app list
-            // can reveal what a user runs (banking apps, etc.), which has no
-            // place leaving the device. The count alone still answers "how
-            // many people use per-app exclusion."
+
             "excluded_apps_count":     m.excludedCaptureBundleIDs.count,
-            // Onboarding-lesson funnel: how many of the 5 taught gestures
-            // this device has completed. Previously tracked only locally
-            // (to decide which lesson to show next) and never reported.
+
             "nudges_learned_count":    m.nudgesLearnedCount,
         ]
     }
-
-    // MARK: - Remote message (the one non-telemetry backend call, kept here
-    // so this file remains the only network surface)
 
     private struct RemoteMessage: Decodable {
         let enabled: Bool
@@ -580,8 +494,6 @@ final class TrackingService {
         }.resume()
     }
 
-    // MARK: - Feedback (user -> developer, one-way; replies happen on Instagram)
-
     func sendFeedback(_ message: String, completion: @escaping (Bool) -> Void) {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { DispatchQueue.main.async { completion(false) }; return }
@@ -604,8 +516,6 @@ final class TrackingService {
         }.resume()
     }
 
-    // MARK: - Update-check cadence (every N pastes, unchanged behaviour)
-
     private func maybeTriggerUpdateCheck(totalPastes: Int) {
         let d = UserDefaults.standard
         let last = d.integer(forKey: "lastUpdateCheckAtPasteCount")
@@ -614,8 +524,6 @@ final class TrackingService {
             AppDelegate.shared?.checkForUpdatesInBackgroundIfAllowed()
         }
     }
-
-    // MARK: - One-time migration from the old scattered UserDefaults keys
 
     private static func importLegacyDefaults(into store: inout Store) {
         let d = UserDefaults.standard
@@ -642,7 +550,6 @@ final class TrackingService {
             for (k, v) in global { if let n = v as? NSNumber, n.intValue > 0 { store.globalBuckets[k] = n.intValue } }
         }
 
-        // Unsent old-format day data: "date|eventID" -> count
         if let raw = d.dictionary(forKey: "backendDailyUsageByDateTool") {
             for (compound, v) in raw {
                 guard let n = v as? NSNumber, n.intValue > 0,
@@ -672,8 +579,6 @@ final class TrackingService {
         }
     }
 
-    // MARK: - Helpers
-
     static func dateKey(_ date: Date) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
@@ -696,11 +601,6 @@ final class TrackingService {
         return "\(dayType)_\(part)"
     }
 }
-
-// ============================================================================
-// AuthManager — slim façade. Feature flags + the legacy tracking API surface,
-// all forwarding into TrackingService so no call site elsewhere changes.
-// ============================================================================
 
 final class AuthManager: ObservableObject {
     static let shared = AuthManager()
@@ -725,11 +625,7 @@ final class AuthManager: ObservableObject {
             ClipboardManager.shared.applyPlanLimits(ringLimit: self.ringLimit)
             AppDelegate.shared?.automaticallyChecksForUpdates = self.sparkleAutomaticChecks
         }
-        // Mirrors the same $set person properties the backend applies to
-        // every PostHog profile (person_set_event in posthog_forward.py) —
-        // app_version/os_version don't change mid-session, so setting them
-        // once here (rather than on every flush) is enough to keep both
-        // profiles in sync.
+
         Analytics.setUserProperty(
             Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, forName: "app_version")
         Analytics.setUserProperty(ProcessInfo.processInfo.operatingSystemVersionString, forName: "os_version")
@@ -756,8 +652,6 @@ final class AuthManager: ObservableObject {
         }
         return !alreadyStamped && !isUpgradeInstall
     }()
-
-    // MARK: Legacy API surface — forwards into TrackingService
 
     func registerCommandVAction() {
         TrackingService.shared.recordCmdV()
@@ -786,8 +680,6 @@ final class AuthManager: ObservableObject {
     func flushPendingDailyUsage() {
         TrackingService.shared.persistNow()
     }
-
-    // MARK: Tool ranking (in-app feature, not telemetry — reads the same store)
 
     func toolImportanceScore(for toolID: String, now: Date = Date()) -> Double {
         let inputs = TrackingService.shared.rankingInputs()

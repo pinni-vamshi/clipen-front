@@ -53,12 +53,6 @@ enum AppContextService {
         return value
     }
 
-    /// ASCII Record Separator (0x1E) — joins the AppleScript list explicitly
-    /// so `splitList` below has an unambiguous boundary to split on. Letting
-    /// `NSAppleScript` auto-coerce the returned list to a string instead
-    /// joins entries with a plain ", ", which silently corrupts the split
-    /// the moment any tab title or URL itself contains that substring
-    /// (extremely common — e.g. "Breaking News, Live Updates").
     private static let joinScript = "set AppleScript's text item delimiters to (ASCII character 30)\n"
         + "set joined to out as text\n"
         + "return joined"

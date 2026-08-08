@@ -4,11 +4,6 @@ import SwiftUI
 final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
     private var wantsVisible = false
 
-    /// Fired every time the popup actually goes away, regardless of which
-    /// call site triggered it — several close paths (paste-and-dismiss,
-    /// escape, etc.) call `hide()` directly without going through
-    /// `ClipboardManager.dismissPreview()`, so per-call-site cleanup was
-    /// easy to miss. Hooking `hide()` itself guarantees it always runs.
     var onHide: (() -> Void)?
 
     func popoverDidShow(_ notification: Notification) {
@@ -18,18 +13,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
             anchorPanel.orderOut(nil)
             onHide?()
         }
-    }
-
-    // TEMPORARY diagnostic logging — tracking down a bug where the main
-    // popup sometimes disappears with no corresponding `hide()` call from
-    // our own code (see if AppKit itself is closing the popover). Remove
-    // once found. Search Console.app for "ClipenPreviewDebug".
-    func popoverWillClose(_ notification: Notification) {
-        NSLog("[ClipenPreviewDebug] previewWindow.popoverWillClose fired (wantsVisible=\(wantsVisible))")
-    }
-
-    func popoverDidClose(_ notification: Notification) {
-        NSLog("[ClipenPreviewDebug] previewWindow.popoverDidClose fired (wantsVisible=\(wantsVisible))")
     }
 
     private var visibleRowCount: Int = 5
@@ -68,11 +51,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         popover.delegate = self
     }
 
-    /// The dynamic hint row — genuinely separate from the popup itself (its
-    /// own borderless, background-less panel), not a header baked into the
-    /// popup's own view. The popup's own content is search + categories +
-    /// rows, nothing else. Owned here so `show()`/`hide()` stay the single
-    /// choke points for keeping the two in sync.
     private let hintOverlay = PopupHintOverlay()
 
     func show() {
@@ -81,19 +59,8 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
     }
 
     func hide() {
-        // Gate on our OWN intent flag, not on `isVisible` — `isVisible` is
-        // `wantsVisible && popover.isShown`, and `popover.isShown` lags
-        // NSPopover's real state (see showAnchored's comment on the same
-        // flag reading stale-true mid-close; it can equally read false
-        // while a show is still settling). When it read false here, this
-        // whole teardown hook — the ONE path several close sites rely on to
-        // dismiss the side panels — was silently skipped, stranding the
-        // item preview panel on screen after the popup was gone. Keying off
-        // `wantsVisible` means onHide fires exactly once per open→close
-        // cycle regardless of what AppKit's flag happens to say, and the
-        // cleanup it runs is idempotent.
+
         let wasVisible = wantsVisible
-        NSLog("[ClipenPreviewDebug] previewWindow.hide() called (wasVisible=\(wasVisible), popover.isShown=\(popover.isShown))")
         wantsVisible = false
         if popover.isShown { popover.performClose(nil) }
         anchorPanel.orderOut(nil)
@@ -129,19 +96,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
             popover.contentViewController = NSHostingController(rootView: popoverView)
         }
 
-        // `showAnchored` is only ever reached via `show()`, and every caller
-        // of `show()` already checks the popup is currently closed before
-        // calling it — so `popover.isShown` reading true here is never a
-        // legitimate "it's already open for this session" case. It's a
-        // stale flag lagging an in-flight close animation from the PREVIOUS
-        // session (NSPopover's close is animated; `isShown` can still read
-        // true for a moment after a close was requested but hasn't visually
-        // settled). Trusting it here used to reposition the hint row and
-        // return WITHOUT ever calling `.show()` again — the hints would
-        // appear, but the ring itself would silently never (re)appear until
-        // a second attempt, once the flag had finally caught up. Forcing a
-        // close first guarantees a real `.show()` always follows below,
-        // regardless of what the flag said going in.
         if popover.isShown {
             popover.performClose(nil)
         }
@@ -154,9 +108,7 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
             popover.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: preferredEdge)
             popover.animates = true
             popover.clipenAnimateIn()
-            // The popover's real on-screen frame only exists once it's actually
-            // shown — position the hint row relative to that, one runloop turn
-            // later, rather than guessing where it'll land.
+
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.isVisible else { return }
                 self.hintOverlay.show(above: self.frame)
@@ -164,19 +116,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         }
     }
 
-    /// Prefers the row's REAL measured on-screen position (reported by
-    /// PopoverPreviewView's GeometryReader via `SelectedRowFramePreferenceKey`
-    /// — see `ClipboardManager.selectedRowMeasuredFrame`) over computing a
-    /// guess. The formula this replaced modeled the row area as if it
-    /// shrank to fit however many items were actually in the list; in
-    /// reality the row area is always a fixed height (`rowH *
-    /// visibleRowCount`, set once when the popup opens) with its real
-    /// SwiftUI content top-anchored inside it — so for any collection
-    /// shorter than a full screen's worth of rows, the formula and the
-    /// real layout disagreed, sometimes by several rows' worth of pixels.
-    /// The formula is kept only as a bootstrap fallback for the narrow
-    /// window before SwiftUI has measured anything yet (the very first
-    /// call right as the popup opens).
     func selectedRowAnchorPoint(selectedIndex: Int, totalItems: Int) -> NSPoint {
         guard totalItems > 0 else { return NSPoint(x: frame.maxX, y: frame.midY) }
 
@@ -202,11 +141,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
     }
 }
 
-/// Reports the currently-selected ring row's real frame (in SwiftUI's
-/// `.global` space, i.e. relative to the popover's own hosting view) up to
-/// `PopoverPreviewView`, which forwards it to `ClipboardManager` — see
-/// `selectedRowAnchorPoint` above for why this replaced a hand-computed
-/// approximation.
 private struct SelectedRowFramePreferenceKey: PreferenceKey {
     static var defaultValue: CGRect? = nil
     static func reduce(value: inout CGRect?, nextValue: () -> CGRect?) {
@@ -221,11 +155,9 @@ struct PopoverPreviewView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var pro = ProGate.shared
     private let auth = AuthManager.shared
-    /// Shared with every PopoverRow so the selection box can travel between
-    /// them via matchedGeometryEffect — see PopoverRow's background.
+
     @Namespace private var selectionNamespace
-    /// Same idea as `selectionNamespace`, for the category strip's chips —
-    /// see TagFilterChip's background.
+
     @Namespace private var categoryNamespace
 
     private var items: [ClipboardItem] { manager.displayItems }
@@ -234,10 +166,7 @@ struct PopoverPreviewView: View {
     private static let rowH: CGFloat = 72
 
     var body: some View {
-        // Once the free trial is spent, the popup itself becomes the paywall —
-        // same window, same ⌘V trigger, different contents. Deliberately not a
-        // separate alert: the popup is the thing the user reached for, so it's
-        // where the message belongs.
+
         if !pro.isUnlocked {
             SubscribeGateView()
         } else {
@@ -245,10 +174,7 @@ struct PopoverPreviewView: View {
                 popupSearchBar
                 categoryStrip
                 firstCycleHint
-                // A little clearance below this divider — the selected row's
-                // scale-up (see PopoverRow.body) grows its top edge upward too,
-                // and with zero gap here the very first row could crowd right
-                // against the divider when it's the selected one.
+
                 Divider().padding(.bottom, 4)
                 rowArea
                 Divider()
@@ -257,12 +183,7 @@ struct PopoverPreviewView: View {
             .onPreferenceChange(SelectedRowFramePreferenceKey.self) { frame in
                 guard manager.selectedRowMeasuredFrame != frame else { return }
                 manager.selectedRowMeasuredFrame = frame
-                // The panel that first opened (e.g. right when selectedIndex
-                // changed) necessarily used whatever anchor was available at
-                // that synchronous moment — which, on a fresh selection, is
-                // one render behind this real measurement. Repositioning here
-                // the instant the real frame lands corrects it within the same
-                // render pass instead of leaving it wrong until the next step.
+
                 manager.repositionAnchoredSidePanelForMeasuredRow()
             }
         }
@@ -305,7 +226,6 @@ struct PopoverPreviewView: View {
                 .help("Clear search (Esc)")
             }
 
-            // Active collection — the scope everything below is filtered to.
             CollectionChip(name: manager.activeCollection)
         }
         .padding(.horizontal, 12)
@@ -354,10 +274,7 @@ struct PopoverPreviewView: View {
             }
             .onChange(of: manager.popupTagFilter) { _, newValue in
                 let target: CategoryChipID = newValue.map(CategoryChipID.tag) ?? .all
-                // Same spring as SelectionHighlightStyle — see
-                // PopoverRow's identical comment — so the category strip's
-                // sliding highlight and its own scroll-to-reveal move as
-                // one continuous motion, matching the row list.
+
                 withAnimation(SelectionHighlightStyle.spring) {
                     proxy.scrollTo(target, anchor: .center)
                 }
@@ -399,20 +316,7 @@ struct PopoverPreviewView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: true) {
-                        // Drives the matchedGeometryEffect box's travel
-                        // between rows. Needed here, not just on each row's
-                        // own `.animation(value: isSelected)`: selectedIndex
-                        // changes originate outside SwiftUI (keyboard
-                        // handling in ClipboardManager), so there's no
-                        // withAnimation at the source — this ancestor-level
-                        // animation is what gives the transition a
-                        // consistent curve to interpolate under. Same spring
-                        // as each row's own scale bounce, so the box's
-                        // travel and the landing row's pop stay in sync.
-                        // Spacing here (not 0) reserves the vertical room
-                        // the selected row's height-growth needs — see
-                        // PopoverRow's scaleEffect comment — so the popped
-                        // row doesn't overlap its neighbors above/below.
+
                         LazyVStack(spacing: 10) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                                 PopoverRow(item: item, index: idx,
@@ -424,13 +328,7 @@ struct PopoverPreviewView: View {
                                                ? manager.editDeniedShake?.generation ?? 0 : 0)
                                     .equatable()
                                     .id(item.id)
-                                    // Reports the SELECTED row's real frame
-                                    // up via SelectedRowFramePreferenceKey —
-                                    // applied after .equatable() so it isn't
-                                    // skipped by that optimization, and
-                                    // conditioned on idx == selectedIndex so
-                                    // only one row's GeometryReader ever
-                                    // reports a non-nil value.
+
                                     .background(
                                         GeometryReader { geo in
                                             Color.clear.preference(
@@ -461,26 +359,14 @@ struct PopoverPreviewView: View {
                                 }
                             }
                         }
-                        // Keeps row 0's selected/elevated pop from touching
-                        // the category strip above it — without this it
-                        // sits flush against that strip's background/
-                        // divider at rest, so its pop has no room to grow
-                        // into on that side.
+
                         .padding(.top, 6)
-                        // Same spring as SelectionHighlightStyle — driving
-                        // the box's matchedGeometryEffect travel with the
-                        // identical curve used for its own scale/shadow
-                        // (see PopoverRow's `.selectionHighlight`) is what
-                        // makes fast, repeated selection changes glide
-                        // continuously instead of each one restarting its
-                        // own animation from rest.
+
                         .animation(SelectionHighlightStyle.spring, value: selectedIndex)
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
-                        // Same curve as the box's travel above so the box
-                        // gliding to the new row and the list scrolling to
-                        // reveal it move as one continuous motion.
+
                         withAnimation(SelectionHighlightStyle.spring) {
                             proxy.scrollTo(items[newIdx].id, anchor: .center)
                         }
@@ -556,20 +442,20 @@ private struct PopoverDragPreview: View {
 }
 
 private struct MultiItemDragSource: NSViewRepresentable {
-    let writers: [NSPasteboardWriting]
+    let makeWriters: () -> [NSPasteboardWriting]
 
     func makeNSView(context: Context) -> DragSourceView {
         let view = DragSourceView()
-        view.writers = writers
+        view.makeWriters = makeWriters
         return view
     }
 
     func updateNSView(_ nsView: DragSourceView, context: Context) {
-        nsView.writers = writers
+        nsView.makeWriters = makeWriters
     }
 
     final class DragSourceView: NSView, NSDraggingSource {
-        var writers: [NSPasteboardWriting] = []
+        var makeWriters: () -> [NSPasteboardWriting] = { [] }
         private var mouseDownPoint: NSPoint?
 
         override func hitTest(_ point: NSPoint) -> NSView? { self }
@@ -579,11 +465,13 @@ private struct MultiItemDragSource: NSViewRepresentable {
         }
 
         override func mouseDragged(with event: NSEvent) {
-            guard let start = mouseDownPoint, !writers.isEmpty else { return }
+            guard let start = mouseDownPoint else { return }
             let current = convert(event.locationInWindow, from: nil)
             guard hypot(current.x - start.x, current.y - start.y) > 4 else { return }
             mouseDownPoint = nil
 
+            let writers = makeWriters()
+            guard !writers.isEmpty else { return }
             let draggingItems: [NSDraggingItem] = writers.map { writer in
                 let dragItem = NSDraggingItem(pasteboardWriter: writer)
                 dragItem.setDraggingFrame(bounds, contents: nil)
@@ -605,15 +493,9 @@ struct PopoverRow: View, Equatable {
     let isSelected: Bool
     let markOrder:  Int?
     let showColorSwatches: Bool
-    /// Shared across every row in the list — lets the ONE selection box
-    /// below travel and resize between rows via `matchedGeometryEffect`
-    /// instead of each row independently drawing its own static
-    /// pop-in/pop-out box. A `Namespace.ID` never changes after creation,
-    /// so it's safe to leave out of `==` below.
+
     let selectionNamespace: Namespace.ID
-    /// Nonzero (and changed) means "shake now" — a refused action (E on a
-    /// non-editable item) on this row. 0 for every row except the one that
-    /// was just refused.
+
     var shakeGeneration: Int = 0
 
     static func == (l: PopoverRow, r: PopoverRow) -> Bool {
@@ -632,8 +514,6 @@ struct PopoverRow: View, Equatable {
 
     @State private var shakeOffsetX: CGFloat = 0
 
-    /// Classic macOS "refused" shake: a few quick alternating nudges settling
-    /// back to center — no persistent popup, just this plus the denied tone.
     private func runShake() {
         let step: TimeInterval = 0.045
         let amounts: [CGFloat] = [8, -8, 6, -6, 3, -3, 0]
@@ -647,33 +527,19 @@ struct PopoverRow: View, Equatable {
     private static let minRowHeight: CGFloat = 56
     private static let maxRowHeight: CGFloat = 104
 
-    /// Horizontal inset every row sits at, selected or not — constant on
-    /// purpose, see `SelectionHighlight.inset`. Sized so the SCALED
-    /// selected row still fits the fixed 420pt popup:
-    ///   row = 420 − 2·23 = 374  →  374 · 1.12 = 418.9 ≤ 420
-    /// Vertically, the LazyVStack's 10pt row spacing covers the tallest
-    /// row's growth (104 · 1.12 = 116.5, +12.5 → 6.25 each side).
     private static let horizontalInset: CGFloat = 23
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             verticalRail
-            // Vertical divider — turns green and thickens when the row is
-            // marked, a thin neutral hairline otherwise.
+
             RoundedRectangle(cornerRadius: 1.5)
                 .fill(markOrder != nil ? Self.markedTint : Color.secondary.opacity(0.25))
                 .frame(width: markOrder != nil ? 3 : 1)
                 .frame(maxHeight: .infinity)
             rowContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                // Hard block, not just `.animation(nil, value:)` (which only
-                // cancels animation tied to one specific value) — this row's
-                // text must never animate its own reflow no matter what
-                // ambient animation is active around it: not the selection
-                // box's travel, not the scroll's ease-out, not a newly-
-                // materializing row's own first-appearance transaction as
-                // LazyVStack scrolls it into range. `.transaction` zeroes
-                // out inherited animation for this subtree entirely.
+
                 .transaction { $0.animation = nil }
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
@@ -684,8 +550,10 @@ struct PopoverRow: View, Equatable {
         .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
             if ClipboardManager.shared.markedItemIDs.count > 1 {
-                MultiItemDragSource(
-                    writers: ClipboardManager.shared.orderedMarkedItems.map { $0.makePasteboardWriter() })
+
+                MultiItemDragSource {
+                    ClipboardManager.shared.orderedMarkedItems.map { $0.makePasteboardWriter() }
+                }
             }
         }
         .onDrag {
@@ -700,12 +568,6 @@ struct PopoverRow: View, Equatable {
         }
     }
 
-    /// Constant width regardless of state — it used to widen to 22 when
-    /// selected/marked (vs 18 at rest) to give the circular icon badge room,
-    /// but that shifted the divider and everything after it by 4pt the
-    /// moment a row was selected. Settling on one fixed width the badge
-    /// always fits within means nothing to the right of the rail ever
-    /// moves, in any state.
     private var verticalRail: some View {
         railBadge
             .frame(width: 22)
@@ -759,9 +621,7 @@ struct PopoverRow: View, Equatable {
     @ViewBuilder
     private var trailingIndicators: some View {
         HStack(spacing: 6) {
-            // The diff badge is intentionally NOT shown in the popup anymore —
-            // the exact difference is surfaced in the preview panel's insights
-            // strip instead (see ItemPreviewPanel). Keeping the popup row clean.
+
             if item.userNote != nil {
                 Image(systemName: "pencil")
                     .font(.system(size: 8, weight: .semibold))
@@ -796,9 +656,7 @@ struct PopoverRow: View, Equatable {
                 }
             }
         case .richText(_, plain: let rawPlain), .rtfd(_, plain: let rawPlain):
-            // Prefix FIRST, then strip the object-replacement chars — doing
-            // it the other way round would scan and rewrite the whole
-            // string before the cap could help.
+
             let plain = rawPlain
                 .rowPreviewPrefix()
                 .replacingOccurrences(of: "\u{FFFC}", with: "")
@@ -940,8 +798,6 @@ private struct PopoverMiniTable: View {
     }
 }
 
-/// The collection the popup is currently scoped to, shown at the right edge of
-/// the search bar. `nil` is the "All" view.
 struct CollectionChip: View {
     let name: String?
 
@@ -966,10 +822,7 @@ struct CollectionChip: View {
 struct TagFilterChip: View {
     let tag:     ClipboardTag?
     let selected: Bool
-    /// Shared across every chip in the strip — same mechanism as
-    /// PopoverRow's selection box, just horizontal: one highlight capsule
-    /// slides and resizes between chips via `matchedGeometryEffect` instead
-    /// of each chip independently swapping its own fill color.
+
     let namespace: Namespace.ID
     var customIcon:  String? = nil
     var customLabel: String? = nil
@@ -986,11 +839,7 @@ struct TagFilterChip: View {
             }
             .foregroundColor(selected ? .white : .secondary)
             .padding(.horizontal, 9).padding(.vertical, 4)
-            // The sliding highlight — always present (never conditionally
-            // inserted, same reasoning as PopoverRow's box) so exactly one
-            // chip's copy has `isSource: true` at any instant. Drawn BEHIND
-            // the content but IN FRONT of the resting capsule below, so it
-            // visibly covers that capsule once its opacity reaches 1.
+
             .background {
                 Capsule(style: .continuous)
                     .fill(Color(hex: "#4E8DF7"))
@@ -999,14 +848,11 @@ struct TagFilterChip: View {
                     .shadow(color: Color(hex: "#4E8DF7").opacity(selected ? 0.22 : 0),
                             radius: selected ? 4 : 0, x: 0, y: selected ? 1.5 : 0)
             }
-            // Resting capsule every chip shows at rest — sits behind the
-            // sliding highlight above, so it only shows through on
-            // unselected chips.
+
             .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.08)))
             .overlay(Capsule(style: .continuous)
                 .stroke(selected ? Color.clear : Color.primary.opacity(0.06), lineWidth: 1))
-            // Same spring as the row list's SelectionHighlightStyle, same
-            // subtle pop — "same kind of sliding effect", just horizontal.
+
             .scaleEffect(selected ? SelectionHighlightStyle.scale : 1.0)
             .animation(SelectionHighlightStyle.spring, value: selected)
         }
@@ -1014,26 +860,16 @@ struct TagFilterChip: View {
     }
 }
 
-/// One entry in the popup's dynamic "what can I do right now" hint row —
-/// `id` is what drives the insertion/removal animation when the set changes
-/// (e.g. "hold V - Mark" swapping out for "G - Group" once 2+ items are
-/// marked), so it must be stable across re-renders of the SAME logical hint.
 struct DynamicHint: Identifiable, Equatable {
     let id: String
     let key: String
     let label: String
 }
 
-/// Each hint is its own pill (rounded capsule background) — kept
-/// deliberately small (smaller than the first attempt at this) so it fits
-/// the available row height without needing more outer padding to avoid
-/// clipping.
 struct DynamicHintText: View {
     let key: String
     let label: String
-    /// True for the instant the real key this hint describes is actually
-    /// held down — flashes the pill blue so it reads as "you're doing that
-    /// right now", not just a static legend.
+
     var isPressed: Bool = false
 
     var body: some View {
@@ -1049,31 +885,18 @@ struct DynamicHintText: View {
         }
         .padding(.horizontal, 7.5)
         .padding(.vertical, 3.5)
-        // Solid, not translucent — the overlay panel itself has no window
-        // backing (isOpaque = false), so a low-opacity fill here let the
-        // desktop/whatever's behind Clipen show straight through the pill.
+
         .background(isPressed ? Color.accent : Color.surfaceHi, in: Capsule())
         .overlay(Capsule().stroke(isPressed ? Color.clear : Color.border, lineWidth: 1))
         .animation(.easeOut(duration: 0.1), value: isPressed)
     }
 }
 
-/// A small, genuinely separate, background-less panel that floats directly
-/// above the ring popup showing "what can I do right now." Deliberately NOT
-/// part of the popup's own window/view hierarchy — the popup's own content
-/// is search + categories + rows only. Owned and driven entirely by
-/// `PreviewOverlayWindow.show()`/`hide()`, which are already the single
-/// choke points for the popup's own visibility.
 final class PopupHintOverlay {
     private let panel: NSPanel
-    // Was 26 — right at the edge of what the text itself needs with zero
-    // vertical padding around it, which is why it read as clipped top and
-    // bottom, not just at the sides.
+
     private static let height: CGFloat = 38
-    // Inset from the popup's own edges (NOT wider than the popup — an
-    // earlier attempt made this panel wider than the popup below it, which
-    // read as the hint row spilling past the popup's own boundary instead
-    // of sitting contained within it). Centered under the popup.
+
     private static let horizontalInset: CGFloat = 14
 
     init() {
@@ -1092,8 +915,6 @@ final class PopupHintOverlay {
         panel.sharingType = .none
     }
 
-    /// `popupFrame` is the ring popup's actual current on-screen frame —
-    /// this sits directly above it, same width, same horizontal position.
     func show(above popupFrame: NSRect) {
         if panel.contentViewController == nil {
             panel.contentViewController = NSHostingController(rootView: PopupHintRow())
@@ -1110,10 +931,6 @@ final class PopupHintOverlay {
     }
 }
 
-/// Content of the separate hint overlay above. Ordered by priority, not by
-/// when each action was added — the most state-specific/important action
-/// for whatever's happening right now leads, universally-available ones
-/// (Preview, Transform, Next) trail behind it.
 private struct PopupHintRow: View {
     @ObservedObject private var manager = ClipboardManager.shared
     private let auth = AuthManager.shared
@@ -1126,14 +943,10 @@ private struct PopupHintRow: View {
         let previewOpen = manager.isItemPreviewVisible
         var hints: [DynamicHint] = []
 
-        // Highest priority: marking 2+ items unlocks Group, the one action
-        // that only exists in this state — it always leads when active.
         if markedCount > 1 {
             hints.append(DynamicHint(id: "g-group", key: "G", label: "Group"))
         }
-        // Next: once preview is already open, Pin is the natural next move —
-        // it only makes sense in this state, so it leads over the baseline
-        // preview/transform pair (but still behind an active Group).
+
         if previewOpen {
             hints.append(DynamicHint(id: "space2-pin", key: "Space ×2", label: "Pin"))
             hints.append(DynamicHint(id: "space-close", key: "Space", label: "Close preview"))
@@ -1143,9 +956,7 @@ private struct PopupHintRow: View {
         if auth.transformsEnabled {
             hints.append(DynamicHint(id: "x-transform", key: "X", label: "Transform"))
         }
-        // Only teach "hold V to mark" while nothing's marked yet — once
-        // Group has already taken the lead slot, repeating the mark hint
-        // here is redundant.
+
         if markedCount <= 1 {
             hints.append(DynamicHint(id: "holdv-mark", key: "hold V", label: "Mark"))
         }
@@ -1170,10 +981,6 @@ private struct PopupHintRow: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
-    /// Maps each hint back to the real, live key-state the event tap already
-    /// tracks (`popupHintV`/`popupHintX`/… synced from actual keydown/keyup),
-    /// so the pill lights up in step with the real keystroke instead of only
-    /// existing as a static legend.
     private func isPressed(_ hint: DynamicHint) -> Bool {
         switch hint.id {
         case "g-group":       return manager.popupHintG
@@ -1212,7 +1019,6 @@ struct FlatHint: View {
         .animation(.easeOut(duration: 0.1), value: isActive)
     }
 }
-
 
 extension NSPopover {
     func clipenAnimateIn(duration: TimeInterval = 0.17) {

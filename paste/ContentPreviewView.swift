@@ -10,7 +10,6 @@ import SwiftUI
 import WebKit
 @preconcurrency import PDFKit
 
-
 struct ContentPreviewView: View {
     enum Chrome {
         case panel
@@ -88,12 +87,7 @@ struct ContentPreviewView: View {
         case .blob(let typeMap):
             BlobContentPreview(typeMap: typeMap)
         case .group(let items):
-            // A grouped item previews its members individually, same view the
-            // popup uses when previewing a marked set. `showsHeader: false`
-            // because the enclosing ItemPreviewView already drew a header
-            // for this item (its "Group" tag chip) — see MultiItemPreviewView's
-            // doc comment for why a second one here was a real bug, not a
-            // stylistic choice.
+
             MultiItemPreviewView(items: items, showsHeader: false)
         }
     }
@@ -296,9 +290,6 @@ enum TableCellExtractor {
         return c
     }()
 
-    /// Must be called after any edit that changes an item's table content —
-    /// otherwise re-opening the item to edit again would show the stale,
-    /// pre-edit cells instead of what was just saved.
     static func invalidate(itemID: UUID) {
         cache.removeObject(forKey: itemID as NSUUID)
     }
@@ -312,16 +303,6 @@ enum TableCellExtractor {
         return result.isEmpty ? nil : result
     }
 
-    /// An un-styled re-serialization of a real table — same grid this file
-    /// already reads for editing/preview, with every bit of visual styling
-    /// (bold, color, font, borders) dropped. "Paste without formatting" needs
-    /// this instead of flat tab-separated text: tab/newline text only reads
-    /// back as real columns in a spreadsheet. Pasted into anything else
-    /// (Word, Pages, Notes, Mail) it shows as bare text with visible tab
-    /// gaps — the table itself is gone. An HTML table with no inline style
-    /// still renders as an actual table grid everywhere, carrying none of
-    /// the original formatting. Returns nil for content that isn't really a
-    /// table, so callers fall back to their existing flat-text behavior.
     static func plainTableHTML(for item: ClipboardItem) -> (html: String, plain: String)? {
         guard let rows = cells(for: item) else { return nil }
         let html = "<table>" + rows.map { row in
@@ -345,13 +326,6 @@ enum TableCellExtractor {
         }
     }
 
-    /// Tab-separated, row-per-line rendering of an attributed string's table
-    /// (if it has one) — nil when there's no real `NSTextTableBlock` to read.
-    /// A table's cells are separate paragraphs in `NSAttributedString.string`
-    /// with no column-boundary character at all, so anything that reads the
-    /// raw `.string` off a copied Pages/Numbers/Mail/TextEdit table sees every
-    /// cell run together on its own line — column structure gone entirely.
-    /// This is what capture uses to build the `plain` fallback instead.
     static func tabSeparatedPlainText(from attr: NSAttributedString) -> String? {
         guard let rows = cells(from: attr) else { return nil }
         return rows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
@@ -399,8 +373,6 @@ enum TableCellExtractor {
         }
         return rows.isEmpty ? nil : rows
     }
-
-    // MARK: - Mixed-content segmentation
 
     static func segments(for item: ClipboardItem) -> [ContentSegment]? {
         let result: [ContentSegment]?
@@ -509,11 +481,6 @@ enum TableCellExtractor {
     }
 }
 
-/// Pulls the first embedded image out of `.richText`/`.rtfd` content that
-/// mixes real text with an image (so isn't pure-image and stays as rich
-/// text) — the compact popup row otherwise has nothing but `Text(plain)` to
-/// show for such an item, which for an attachment run is just the
-/// object-replacement placeholder character rendering as a stray glyph.
 enum EmbeddedImageExtractor {
     private static let cache: NSCache<NSUUID, NSArray> = {
         let c = NSCache<NSUUID, NSArray>()
@@ -564,19 +531,6 @@ enum EmbeddedImageExtractor {
     }
 }
 
-
-/// A small, bounded pool of live WKWebView instances, each able to hold one
-/// distinct already-loaded (or loading) page at once.
-///
-/// This used to be a single shared view (building a WKWebView is 100-200 ms,
-/// and only one URL preview was ever visible at a time). That's no longer
-/// true: neighbor items now get prefetched in the background while the item
-/// preview panel is open (see `PreviewPrefetcher`), so several distinct URLs
-/// can legitimately need to be "already loaded" at once — one shared view
-/// can't do that, since loading a second URL into it throws away the first.
-///
-/// Kept intentionally small (`maxPoolSize`): each live WKWebView is real
-/// memory, comparable to an extra browser tab, for as long as it's pooled.
 final class WebsitePreviewPool {
     static let shared = WebsitePreviewPool()
     private init() {}
@@ -588,12 +542,7 @@ final class WebsitePreviewPool {
     }
 
     private var entries: [String: Entry] = [:]
-    // The currently-displayed preview's view is always one of these entries
-    // too, and prefetchNeighborPreviews() warms up to 3 items before AND 3
-    // after the current selection — so up to 7 URLs can legitimately want a
-    // pooled view at once. A smaller cap here means the LRU eviction below
-    // silently cancels an earlier prefetch to make room for a later one in
-    // the very same neighbor loop, undoing its own work.
+
     private let maxPoolSize = 7
 
     private func makeWebView() -> WKWebView {
@@ -603,9 +552,6 @@ final class WebsitePreviewPool {
         return view
     }
 
-    /// Returns the pooled view for this URL — creating and starting a load
-    /// for it if it isn't already pooled — and marks it most-recently-used
-    /// so it isn't the next one evicted.
     func webView(for url: URL) -> WKWebView {
         assert(Thread.isMainThread, "WKWebView must only be touched on the main thread")
         let k = url.absoluteString
@@ -620,13 +566,8 @@ final class WebsitePreviewPool {
         return view
     }
 
-    /// Whether `url` already has a pooled view (loading or finished) —
-    /// lets a fresh mount skip re-triggering `.load()` on a page that's
-    /// already in flight or done.
     func hasPooledView(for url: URL) -> Bool { entries[url.absoluteString] != nil }
 
-    /// Background-safe: prepares a URL nobody is looking at yet. Does
-    /// nothing if that URL is already pooled (loading or loaded).
     func prefetch(url: URL) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in self?.prefetch(url: url) }
@@ -648,8 +589,7 @@ final class WebsitePreviewPool {
 
 struct WebsitePreview: NSViewRepresentable {
     let url: URL
-    /// Bump this to force a reload even when `url` hasn't changed (e.g. a
-    /// user-triggered refresh button re-checking the same address).
+
     var reloadToken: Int = 0
 
     final class Coordinator: NSObject, WKNavigationDelegate {
@@ -689,9 +629,6 @@ struct WebsitePreview: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let container = NSView()
 
-        // May already be sitting in the pool, fully or partially loaded, if
-        // a neighbor-item prefetch got to it first — in which case getting
-        // the view here does NOT re-trigger a load.
         let wasAlreadyPooled = WebsitePreviewPool.shared.hasPooledView(for: url)
         let webView = WebsitePreviewPool.shared.webView(for: url)
         Self.attach(webView, to: container, delegate: context.coordinator)
@@ -710,8 +647,7 @@ struct WebsitePreview: NSViewRepresentable {
         context.coordinator.lastURL = url
 
         if wasAlreadyPooled && !webView.isLoading {
-            // Prefetched and already finished — show it immediately instead
-            // of flashing a spinner for a load that already happened.
+
             progress.isHidden = true
         } else {
             progress.startAnimation(nil)
@@ -733,8 +669,7 @@ struct WebsitePreview: NSViewRepresentable {
         }
 
         if !urlChanged {
-            // Same URL, reloadToken bumped — an explicit user-triggered
-            // refresh, so force a real reload even though it's pooled.
+
             context.coordinator.progressView?.isHidden = false
             context.coordinator.progressView?.startAnimation(nil)
             webView.load(URLRequest(url: url, timeoutInterval: 10))
@@ -748,15 +683,6 @@ struct WebsitePreview: NSViewRepresentable {
     }
 }
 
-// Cache adjusted attributed strings. Two keying schemes because the two call
-// sites have different identity guarantees:
-//   - .richText holds ONE stable NSAttributedString instance in the enum case
-//     across every render, so ObjectIdentifier keying already dedupes.
-//   - .rtfd holds raw Data — `NSAttributedString(rtfd:)` allocates a BRAND
-//     NEW instance every render, so ObjectIdentifier keying never hits.
-//     That path needs to key on the stable ClipboardItem.id instead, and
-//     cache the decode itself (not just the color pass) since decoding RTFD
-//     is often the heavier half of the work.
 final class AdjustedAttrCache {
     static let shared = AdjustedAttrCache()
     private let lock = NSLock()
@@ -781,9 +707,6 @@ final class AdjustedAttrCache {
         return computed
     }
 
-    /// Decodes RTFD `data` into an appearance-adjusted NSAttributedString
-    /// exactly once per (itemID, isDark) — both the decode and the color
-    /// pass are skipped on every subsequent render for that item.
     func adjustedRTFD(itemID: UUID, data: Data, isDark: Bool) -> NSAttributedString? {
         lock.lock()
         if let hit = byItemID[itemID], hit.isDark == isDark {
@@ -812,8 +735,7 @@ extension NSAttributedString {
     func adjustingColorsForCurrentAppearance() -> NSAttributedString {
         let isDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return AdjustedAttrCache.shared.adjusted(for: self, isDark: isDarkMode) {
-            // Fast path: scan once to decide whether ANY color needs changing.
-            // If not (the common case for plain-ish rich text), return self.
+
             var needsWork = false
             self.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: self.length), options: []) { value, _, stop in
                 guard let color = value as? NSColor,

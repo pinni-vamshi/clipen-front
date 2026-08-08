@@ -133,9 +133,7 @@ extension ClipboardManager {
             commitShare()
             return
         }
-        // Trial spent: swallow the paste and leave the popup up, which is
-        // already rendering the subscribe prompt. Returning here rather than
-        // falling through means no pasteboard write and no ⌘V injection.
+
         if !ProGate.shared.isUnlocked {
             markedItemIDs = []
             return
@@ -234,19 +232,12 @@ extension ClipboardManager {
                     guard let self else { return }
                     let result = await ToolRegistry.run(item: item, toolID: selectedToolID)
                     await MainActor.run {
-                        // If the popup or the transform stage was torn down while
-                        // this async tool ran (user hit Esc / pasted elsewhere),
-                        // drop the result silently. Otherwise updateTransformPanel-
-                        // Processing below would resurrect a ghost transform panel
-                        // over a dismissed popup, and the leftover inTransformStage
-                        // could wedge later auto-preview.
+
                         guard self.inTransformStage, self.previewWindow.isVisible else { return }
                         self.updateTransformPanelProcessing(false)
                         if self.isInlineEditing { return }
                         if case .status(let msg) = result {
-                            // A no-op / informational result (e.g. OCR "no text
-                            // found") still ends the transform — leave the stage
-                            // so the slot is released and auto-preview resumes.
+
                             self.setSidePanelStage(.none)
                             self.flashStatus(msg)
                             return
@@ -264,8 +255,7 @@ extension ClipboardManager {
                     return
                 }
                 if case .status(let msg) = result {
-                    // Same as the async path — a no-op result still ends the
-                    // transform and releases the slot.
+
                     setSidePanelStage(.none)
                     flashStatus(msg)
                     return
@@ -313,8 +303,6 @@ extension ClipboardManager {
         let pasteTarget = resolvedPasteTarget()
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
 
-        // A group pastes its members one after another, exactly like a marked
-        // multi-paste — that's the whole point of grouping them.
         if case .group(let children) = item.content {
             commitMultiPaste(children, target: pasteTarget, nudgeKind: .group)
             AuthManager.shared.registerCommandVAction()
@@ -337,8 +325,7 @@ extension ClipboardManager {
 
     func simulatePaste(_ item: ClipboardItem, target: NSRunningApplication?,
                               completion: (() -> Void)? = nil) {
-        // Backstop for every paste entry point (fast paste, transform results,
-        // paste-while-pinned), not just the ⌘V path guarded in commitPaste.
+
         guard ProGate.shared.isUnlocked else { completion?(); return }
         popupSessionPasted = true
         finalizePopupOutcome()
@@ -380,9 +367,6 @@ extension ClipboardManager {
         simulatePaste(item, target: resolvedPasteTarget())
     }
 
-    /// `nudgeKind` is only recorded on the outermost call (the real user
-    /// gesture); pass `nil` on the recursive self-calls below so a 5-item
-    /// multi-paste doesn't advance the nudge counters 5 times.
     func commitMultiPaste(_ itemList: [ClipboardItem], target: NSRunningApplication?,
                           nudgeKind: NudgePasteKind? = nil) {
         guard !itemList.isEmpty else {
@@ -453,10 +437,6 @@ extension ClipboardManager {
         }
     }
 
-    /// RTF bytes for `attrStr`, but only when it's safe — RTF can't carry
-    /// embedded image attachments, so this returns nil rather than silently
-    /// converting one away. Shared by the `.richText` and `.rtfd` write
-    /// cases above, which otherwise each need this exact same check.
     static func safeRTFData(for attrStr: NSAttributedString, sidecarRTF: Data? = nil) -> Data? {
         guard !attrStr.containsAttachments else { return nil }
         if let sidecarRTF { return sidecarRTF }
@@ -470,14 +450,7 @@ extension ClipboardManager {
             switch item.content {
             case .richText, .rtfd, .html:
                 let pitem = NSPasteboardItem()
-                // A real table must still land as a table in the
-                // destination — writing only `public.string` (even with
-                // tabs) reads back as real columns in a spreadsheet, but in
-                // any other app (Word, Pages, Notes, Mail) it shows as bare
-                // text with visible tab gaps and the table itself is gone.
-                // An un-styled HTML table alongside the plain fallback
-                // preserves structure while still stripping every bit of
-                // the original formatting.
+
                 if let table = TableCellExtractor.plainTableHTML(for: item) {
                     pitem.setData(Data(table.html.utf8), forType: .init("public.html"))
                     pitem.setData(Data(table.html.utf8), forType: .init("Apple HTML pasteboard type"))
@@ -520,10 +493,7 @@ extension ClipboardManager {
         case .richText(let attrStr, let plain):
             let pitem = NSPasteboardItem()
             if attrStr.containsAttachments {
-                // Plain .rtf can't carry NSTextAttachment images — build RTFD
-                // on the fly instead so there's a real image-bearing
-                // representation on the pasteboard (there's no pre-existing
-                // .rtfd data to reuse here, unlike the .rtfd case below).
+
                 let range = NSRange(location: 0, length: attrStr.length)
                 if let rtfdData = try? attrStr.data(from: range,
                                                     documentAttributes: [.documentType: NSAttributedString.DocumentType.rtfd]) {
@@ -583,10 +553,7 @@ extension ClipboardManager {
             pb.writeObjects([pitem])
 
         case .group(let children):
-            // Single-shot paste of a group as one pasteboard write: its files
-            // plus a joined-text fallback. (The normal ⌘-release paste routes a
-            // group through commitMultiPaste instead, pasting each member in
-            // turn — see commitPaste — which is the primary behavior.)
+
             var objects: [NSPasteboardWriting] = ClipboardItem.flattenedFileURLs(children)
                 .filter { FileManager.default.fileExists(atPath: $0.path) }
                 .map { makeFilePasteboardItem(for: $0) }
@@ -641,21 +608,6 @@ extension ClipboardManager {
         return item
     }
 
-    /// `itemsIndex` is a position in `items` (the raw, unfiltered array).
-    /// Every call site is a direct item action from the main window or a
-    /// reference panel — never routed through the ⌘V ring popup — so this
-    /// pastes the item straight by identity, the same way
-    /// `pasteItemKeepingPopupOpen(id:)` does, instead of going through
-    /// `commitPaste()`'s `selectedIndex`/`displayItems` machinery.
-    ///
-    /// That machinery is scoped to the popup: `displayItems` can be a
-    /// DIFFERENT set/order than `items` (pin ordering, or a tag/collection/
-    /// search filter left over from an earlier popup session that never
-    /// resets on its own). Setting `selectedIndex` to a raw `items` index
-    /// against it either pastes the wrong item, or — once resolved by id —
-    /// silently pastes nothing at all when the target isn't currently in
-    /// `displayItems`. Neither can happen when the item is looked up and
-    /// pasted directly.
     func pasteItem(at itemsIndex: Int) {
         guard items.indices.contains(itemsIndex) else { return }
         let item = items[itemsIndex]

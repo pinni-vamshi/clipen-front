@@ -3,8 +3,7 @@ import UniformTypeIdentifiers
 
 enum FileTools {
     static let all: [ClipboardTool] = [
-        // Only surfaces on an EDITED file item (its `preview` returns nil for
-        // everything else). Deletes the edited copy and restores the original.
+
         ClipboardTool(
             id: "file.revert-edit",
             icon: "arrow.uturn.backward",
@@ -14,8 +13,7 @@ enum FileTools {
                 item.originalFileURL != nil ? "Discard your edit, restore the original file" : nil
             },
             runSync: { item in
-                // Ring operation (not a paste): mutate on main, report status
-                // so the transform panel closes cleanly.
+
                 DispatchQueue.main.async { ClipboardManager.shared.revertFileEdit(id: item.id) }
                 return .status("Reverted to original.")
             },
@@ -204,10 +202,6 @@ enum FileTools {
         (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     }
 
-    /// Walks into each folder (and every subfolder, however deep) and
-    /// collects only the leaf files — never directories themselves — so the
-    /// result can be pasted as one flat run of individual files instead of
-    /// the original nested folder structure. Hidden/system files are skipped.
     private static func flattenedFiles(in folders: [URL], cap: Int = 2000) -> [URL] {
         var out: [URL] = []
         let fm = FileManager.default
@@ -240,12 +234,6 @@ enum FileTools {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    /// Short preview of a file's text WITHOUT reading the whole file. The old
-    /// preview called readableFileText (which reads up to 200 MB per text file
-    /// via Data(contentsOf:)) and then took prefix(120) — a huge main-thread
-    /// read to show 120 characters when the panel opens on a big log/CSV.
-    /// readableTextPreview streams only the first ~300 KB via FileHandle;
-    /// documents already cap at 5 000 chars in readableDocumentText.
     private static func readableFilePreview(for item: ClipboardItem) -> String? {
         guard let url = fileURLs(for: item).first else { return nil }
         if FileKindDetector.isTextFile(url) {

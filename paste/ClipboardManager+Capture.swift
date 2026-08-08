@@ -8,11 +8,7 @@ extension ClipboardManager {
 
     func startPolling() {
         lastChangeCount = NSPasteboard.general.changeCount
-        // Poll fast (100ms) so a copy is noticed almost immediately and two
-        // quick copies in a row aren't collapsed into one missed capture. The
-        // idle check is just an integer compare, so a tight interval is cheap;
-        // the actual (heavy) capture work runs off the main thread — see
-        // pollClipboard / processCapturedPasteboard.
+
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.pollClipboard()
         }
@@ -31,9 +27,6 @@ extension ClipboardManager {
             return
         }
 
-        // App-level exclusion — a coarser, user-managed safety net alongside
-        // the concealed-type check above, for sources (e.g. a browser on a
-        // banking page) that never mark their own copies as sensitive.
         if let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
            excludedCaptureBundleIDs.contains(bundleID) {
             lastChangeCount = pb.changeCount
@@ -50,16 +43,9 @@ extension ClipboardManager {
         remoteClipboardRetryCount = 0
         lastChangeCount = pb.changeCount
 
-        // Hand the heavy half (reading every representation + content detection)
-        // to a serial background queue. The copy is already "claimed" above
-        // (lastChangeCount advanced), so the main thread returns instantly and
-        // the actual work never blocks the UI or the next poll.
         captureQueue.async { [weak self] in self?.processCapturedPasteboard(pb) }
     }
 
-    /// Heavy half of capture — runs OFF the main thread (on `captureQueue`).
-    /// Reads every pasteboard representation, builds the item (which runs
-    /// content detection), and hops back to the main thread only to insert.
     func processCapturedPasteboard(_ pb: NSPasteboard) {
         let sidecarSnapshot = Self.allPasteboardTypes(from: pb)
 
@@ -88,11 +74,7 @@ extension ClipboardManager {
                 let attrStr = NSAttributedString(rtfd: rtfdData, documentAttributes: nil)
                 DispatchQueue.main.async {
                     if let attrStr, !attrStr.string.isEmpty {
-                        // A table's cells are separate paragraphs in `.string`
-                        // with no column-boundary character — reading it raw
-                        // collapses every copied table (Pages/Numbers/Mail/
-                        // TextEdit) into one column. Tab-separate real table
-                        // rows; fall back to the raw string otherwise.
+
                         let plainText = TableCellExtractor.tabSeparatedPlainText(from: attrStr) ?? attrStr.string
                         if Self.isImageOnlyAttributedString(attrStr) {
                             if case .image = fallback?.content {
@@ -172,7 +154,7 @@ extension ClipboardManager {
                 }()
                 DispatchQueue.main.async {
                     if let attrStr, !attrStr.string.isEmpty {
-                        // Same table-collapse risk as the RTFD path above.
+
                         let plainText = TableCellExtractor.tabSeparatedPlainText(from: attrStr) ?? attrStr.string
                         if Self.isImageOnlyAttributedString(attrStr) {
                             if case .image = fallback?.content {
@@ -221,14 +203,7 @@ extension ClipboardManager {
                 self?.addCaptured(item, sidecar: sidecarSnapshot)
             }
         } else if !(pb.types ?? []).isEmpty {
-            // basicItem() already falls back to wrapping ANY non-empty type
-            // as `.blob`, so reaching here with real types present means
-            // something genuinely couldn't be read — worth knowing about.
-            // But when `pb.types` itself is empty, nothing was ever offered
-            // (some apps momentarily declare-then-clear, or write only a
-            // concealed marker with no payload) — that's not a capture
-            // failure, there was nothing to capture, and logging it just
-            // buried the rare, real gaps in type coverage under noise.
+
             DispatchQueue.main.async {
                 AuthManager.shared.registerActionUsage(actionID: "fail.capture")
             }
@@ -237,25 +212,9 @@ extension ClipboardManager {
 
     static let remoteClipboardMarker = NSPasteboard.PasteboardType("com.apple.is-remote-clipboard")
 
-    /// True once at least one declared pasteboard type actually has bytes
-    /// behind it — not just once the type NAME is announced. A source can
-    /// declare types before the payload exists: Continuity/Universal
-    /// Clipboard (a copy made on another Apple device) announces itself
-    /// immediately while the real transfer is still in flight, and — the
-    /// same race, different cause — Photos.app copying an iCloud-only photo,
-    /// or Finder copying an iCloud Drive file that hasn't downloaded locally,
-    /// declares its types up front while iCloud fetches the actual bytes in
-    /// the background. Reading on the very next 100ms poll used to see
-    /// "types present, no data yet" as a genuine failure and fall straight
-    /// into the "Private clipboard data" blob catch-all — this is the retry
-    /// gate `pollClipboard` uses (`Self.maxRemoteClipboardRetries`, ~9s
-    /// budget) so that download has time to actually finish first.
     func pasteboardDataReady(_ pb: NSPasteboard) -> Bool {
         guard let types = pb.types, !types.isEmpty else { return true }
 
-        // Continuity/Universal Clipboard specifically rewrites a growing
-        // file promise as the transfer completes — file-size stability
-        // (not just non-empty data) is the only reliable "done" signal.
         if types.contains(Self.remoteClipboardMarker),
            let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
            !urls.isEmpty {
@@ -275,7 +234,6 @@ extension ClipboardManager {
             return allStable
         }
 
-        // General case: at least one declared type must actually have data.
         for t in types {
             if let data = pb.data(forType: t), !data.isEmpty { return true }
         }
@@ -321,21 +279,12 @@ extension ClipboardManager {
         switch content {
         case .richText(let attrStr, _):
             excluded.formUnion(["NSRTFPboardType"])
-            // Same reasoning as the .rtfd case: an image-bearing attributed
-            // string must not carry a stale "public.rtf" sidecar forward —
-            // the write path builds RTFD on the fly for these, and a plain
-            // .rtf re-attached here would just be a competing image-less copy.
+
             if attrStr.containsAttachments {
                 excluded.formUnion(["public.rtf"])
             }
         case .rtfd:
-            // Source apps (Notes especially) often put HTML on the pasteboard
-            // alongside RTFD for the same copy — text-only or referencing an
-            // image the source app can resolve but nothing else can. Since
-            // RTFD already carries the real image, that HTML must never ride
-            // along as a sidecar: some destination apps (WebKit/HTML-first
-            // paste handling) prefer public.html over public.rtfd when both
-            // are present, silently pasting the image-less alternative.
+
             excluded.formUnion(["com.apple.flat-rtfd", "NSRTFDPboardType",
                                 "public.rtf", "NSRTFPboardType",
                                 "public.html", "Apple HTML pasteboard type"])
@@ -538,12 +487,6 @@ extension ClipboardManager {
         return text.isEmpty
     }
 
-    /// Notes/Pages/Mail/TextEdit represent a copied image as an RTF(D)
-    /// attributed string with an `NSTextAttachment` run — the "plain text"
-    /// for that run is just the Unicode object-replacement character, never
-    /// truly empty, so a plain `.isEmpty` check on `attrStr.string` doesn't
-    /// catch it. Strip that placeholder out before judging whether there's
-    /// any real text alongside the image.
     static func isImageOnlyAttributedString(_ attrStr: NSAttributedString) -> Bool {
         guard attrStr.containsAttachments else { return false }
         let stripped = attrStr.string
@@ -552,13 +495,6 @@ extension ClipboardManager {
         return stripped.isEmpty
     }
 
-    /// Pulls the actual image out of an `NSTextAttachment` embedded in an
-    /// image-only attributed string, for apps (Notes and similar rich-text
-    /// editors) that put the picture ONLY inside the RTFD attachment and
-    /// don't also duplicate it as a raw public.png/tiff pasteboard type —
-    /// `basicItem(from:)`'s image-type scan finds nothing in that case, so
-    /// without this the item would fall back to being captured as .rtfd
-    /// with no visible image at all.
     static func imageItem(fromAttachmentIn attrStr: NSAttributedString) -> ClipboardItem? {
         var found: ClipboardItem?
         let full = NSRange(location: 0, length: attrStr.length)
@@ -609,12 +545,7 @@ extension ClipboardManager {
                                    with: " ", options: .regularExpression)
         s = s.replacingOccurrences(of: "</(p|div|br|li|tr|h[1-6])[^>]*>",
                                    with: "\n", options: [.regularExpression, .caseInsensitive])
-        // Table cells: `<td>`/`<th>` boundaries become tabs so a multi-column
-        // row survives as tab-separated plain text — the same convention
-        // Excel/Sheets/TextEdit use, and what lets a spreadsheet app read the
-        // column structure back on paste. Without this, the generic tag-to-
-        // space catchall below swallows every cell boundary, so a
-        // multi-column "paste without formatting" lands as a single column.
+
         s = s.replacingOccurrences(of: "<t[dh][^>]*>", with: "",
                                    options: [.regularExpression, .caseInsensitive])
         s = s.replacingOccurrences(of: "</t[dh][^>]*>", with: "\t",
@@ -622,9 +553,7 @@ extension ClipboardManager {
         s = s.replacingOccurrences(of: "<br[^>]*>", with: "\n",
                                    options: [.regularExpression, .caseInsensitive])
         s = s.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-        // The last cell in a row leaves a dangling tab before the newline
-        // </tr> produced above — drop it so rows don't end in an empty
-        // phantom column.
+
         s = s.replacingOccurrences(of: "\t\n", with: "\n")
         let entities: [(String, String)] = [
             ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
@@ -634,9 +563,7 @@ extension ClipboardManager {
         for (e, r) in entities { s = s.replacingOccurrences(of: e, with: r) }
         s = s.replacingOccurrences(of: "&#(\\d+);", with: " ",
                                    options: .regularExpression)
-        // Collapse repeated plain spaces only — NOT tabs, which is exactly
-        // the character the table-cell substitution above relies on to mark
-        // column boundaries.
+
         s = s.replacingOccurrences(of: " +", with: " ", options: .regularExpression)
         s = s.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
         let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -656,9 +583,7 @@ extension ClipboardManager {
             item.sourceAppName = app.localizedName
             item.sourceBundleID = app.bundleIdentifier
         }
-        // Stamp the clip with whichever collection is active as it's captured.
-        // In the "All" view nothing is active, so the clip stays unfiled — it
-        // shows in All and in no collection until filed with a transform.
+
         if item.collections.isEmpty, let activeCollection {
             item.collections = [activeCollection]
         }
@@ -741,24 +666,19 @@ extension ClipboardManager {
     private static func prewarmItem(_ item: ClipboardItem) {
         let content = item.content
 
-        // 1. Table cell extraction (rich text / HTML with tables)
         _ = TableCellExtractor.cells(for: item)
 
-        // 2. Embedded image extraction (rich text / RTFD with attachments)
         _ = EmbeddedImageExtractor.firstImage(for: item)
 
-        // 3. Text-based pre-warming: insights, links, syntax highlighting
         guard let plainText = content.plainText, !plainText.isEmpty else { return }
 
         let cacheKey = TextInsightService.cacheKey(id: item.id, text: plainText)
 
-        // 3a. Text insights (emails, names, code lines, repeated lines)
         if TextInsightService.shared.cached(forKey: cacheKey) == nil {
             let result = TextInsightExtractor.computeInsights(in: plainText)
             TextInsightService.shared.store(result, forKey: cacheKey)
         }
 
-        // 3b. Link extraction
         if TextInsightService.shared.cachedLinks(forKey: cacheKey) == nil {
             let links: [ExtractedLink]
             switch content {
@@ -778,7 +698,6 @@ extension ClipboardManager {
             TextInsightService.shared.storeLinks(links, forKey: cacheKey)
         }
 
-        // 3c. Syntax highlighting (code / JSON / LaTeX)
         let language: String? = {
             switch item.detectedType {
             case .code(let lang): return lang
@@ -833,10 +752,7 @@ extension ClipboardManager {
         if newLines.count >= 2 {
             return lineDiffBadge(newLines: newLines, against: existing)
         }
-        // Single-line text (e.g. a short note or title) can't be diffed
-        // line-by-line — fall back to word-level comparison instead, gated
-        // at a much stricter 80% similarity so unrelated short strings never
-        // get flagged as "the same item with edits".
+
         return wordDiffBadge(newText: newText, against: existing)
     }
 
@@ -858,7 +774,6 @@ extension ClipboardManager {
             let similarity = Double(shared) / Double(total)
             guard similarity >= 0.4 && similarity < 1.0 else { continue }
 
-            // Preserve original order of the added/removed lines, capped.
             let addedLines   = newLines.filter   { !existSet.contains($0) }
             let removedLines = existLines.filter { !newSet.contains($0) }
             guard !addedLines.isEmpty || !removedLines.isEmpty else { continue }
@@ -887,7 +802,7 @@ extension ClipboardManager {
             let existLines = existText.components(separatedBy: .newlines)
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
-            guard existLines.count < 2 else { continue }  // compare only against other single-line texts
+            guard existLines.count < 2 else { continue }
             let existWords = existText.split(whereSeparator: { $0.isWhitespace }).map(String.init)
             guard existWords.count >= 2 else { continue }
             let existSet = Set(existWords.map { $0.lowercased() })

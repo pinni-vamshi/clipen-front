@@ -42,11 +42,6 @@ enum TextTraditionalDetectors {
             candidates.append(.init(type: .phone, confidence: 0.9, method: .deterministic))
         }
 
-        // JSON: fully parsing to validate is O(n) and blows up on large
-        // payloads (a multi-MB JSON copy would parse the whole thing just to
-        // label it). Cap the real parse to document scan size; above that,
-        // accept it as JSON from a cheap structural check so huge JSON is still
-        // labelled — and highlighted/previewed — without parsing megabytes.
         if t.hasPrefix("{") || t.hasPrefix("[") {
             if scanDocument {
                 if (try? JSONSerialization.jsonObject(with: Data(t.utf8))) != nil {
@@ -150,18 +145,7 @@ enum TextTraditionalDetectors {
     }
 
     private static func isLatex(_ text: String) -> Bool {
-        // A full document (has its own preamble/`\documentclass`, or an
-        // explicit `\begin{document}`) isn't a math expression — it's source
-        // code the LaTeX renderer (MathJax via LaTeXSwiftUI, see
-        // LaTeXRenderedPreview) can't compile. Left unchecked, the `\begin{`
-        // keyword below matches ANY environment — `\begin{itemize}`,
-        // `\begin{tabular*}`, `\begin{center}` are exactly as common in a
-        // full document as `\begin{equation}` is in an actual math snippet —
-        // so a whole resume/paper would get tagged `.latex` and handed to a
-        // renderer that finds no real equation regions in it, silently
-        // falling back to mostly-unrendered source. Bailing out here instead
-        // lets it fall through to the existing `.code("LaTeX")` classification,
-        // which is the correct treatment for a real `.tex` file.
+
         guard !text.contains("\\documentclass"), !text.contains("\\begin{document}") else {
             return false
         }
@@ -178,19 +162,7 @@ enum TextTraditionalDetectors {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard t.count >= 3 else { return false }
         if t.hasPrefix("# ") || t.hasPrefix("## ") || t.contains("\n# ") { return true }
-        // `\s`/`[^\]]`/`[^)]` all match newlines, not just same-line
-        // whitespace — with those, a link/list pattern can span across
-        // completely unrelated lines. That's exactly what happened with a
-        // one-term-per-line LaTeX document: a lone `-` (a minus sign,
-        // split onto its own line between two `\frac{}`s) followed by
-        // `\frac{...}` on the NEXT line matched the dash-list pattern, and
-        // a lone `0.` (end of an equation like `= 0.`) followed by
-        // `\end{align}` on the next line matched the numbered-list one —
-        // both false positives strong enough to outrank the real `.code`
-        // classification and mislabel the whole document as Markdown.
-        // Restricting the marker-to-content gap (and the link brackets'
-        // contents) to same-line whitespace only closes that off while
-        // still matching genuine single-line Markdown.
+
         if t.contains("```") || DetectionRegex.matches(#"\[[^\]\n]+\]\([^)\n]+\)"#, in: t) { return true }
         if DetectionRegex.matches(#"(?m)^[ \t]*[-*][ \t]+\S+"#, in: t) ||
            DetectionRegex.matches(#"(?m)^[ \t]*\d+\.[ \t]+\S+"#, in: t) { return true }

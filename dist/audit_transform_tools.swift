@@ -1,13 +1,10 @@
 #!/usr/bin/env swift
-// Run from repo: swift paste/dist/audit_transform_tools.swift
-// Smoke-tests transform logic without the full app UI.
 
 import AppKit
 import Foundation
 import PDFKit
 import Vision
 
-// Minimal copies of transform rules for automated smoke checks.
 struct AuditResult {
     let id: String
     let ok: Bool
@@ -17,7 +14,6 @@ struct AuditResult {
 func main() {
     var results: [AuditResult] = []
 
-    // Text
     results.append(audit("text.json-pretty", jsonPretty("{\"a\":1}") != nil))
     results.append(audit("text.title-case", "hello world".capitalized == "Hello World" || true))
     results.append(audit("text.base64-roundtrip", {
@@ -25,7 +21,6 @@ func main() {
         return String(data: Data(base64Encoded: enc)!, encoding: .utf8) == "hi"
     }()))
 
-    // Image encode
     let size = NSSize(width: 64, height: 64)
     let image = NSImage(size: size)
     image.lockFocus()
@@ -35,7 +30,6 @@ func main() {
     results.append(audit("image.pngData", image.pngData() != nil))
     results.append(audit("image.tiffData", image.tiffRepresentation != nil))
 
-    // PDF
     if let doc = PDFDocument() {
         let page = PDFPage()
         doc.insert(page, at: 0)

@@ -5,10 +5,6 @@ import UniformTypeIdentifiers
 import Vision
 import webp
 
-/// Distinguishes WHY a Vision-based tool produced nothing, instead of
-/// collapsing "the engine threw an error" and "the engine ran cleanly and
-/// found nothing" into the same silent nil — that collapse is exactly what
-/// made OCR failures unattributable before.
 enum VisionOutcome<T> {
     case success(T)
     case decodeFailed
@@ -156,10 +152,7 @@ enum ImageTools {
 }
 
 enum OCRService {
-    /// Was `try?`, which swallowed any thrown Vision error (corrupt image,
-    /// unsupported color space, internal Vision failure) and made it
-    /// indistinguishable from "ran cleanly, genuinely no text in the image."
-    /// Now `try`, in a real do/catch, so those two causes report separately.
+
     static func extractText(from img: NSImage) async -> VisionOutcome<String> {
         guard let cgImage = img.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return .decodeFailed

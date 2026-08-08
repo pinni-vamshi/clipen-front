@@ -4,24 +4,29 @@ import WebKit
 import QuickLookThumbnailing
 @preconcurrency import PDFKit
 
-/// Wraps a non-Sendable reference type (NSImage, PDFDocument) so it can
-/// cross into/out of the `InFlightLoads` actor below. Safe here because
-/// every value only ever gets written once (inside the load closure) and
-/// read after that — never mutated from two places at once.
+enum PreviewWorkQueue {
+    private static let maxConcurrent: Int = {
+        let cores = ProcessInfo.processInfo.activeProcessorCount
+        return max(2, min(4, cores / 3))
+    }()
+
+    private static let queue: OperationQueue = {
+        let q = OperationQueue()
+        q.name = "com.clipen.previewwork"
+        q.maxConcurrentOperationCount = maxConcurrent
+        q.qualityOfService = .userInitiated
+        return q
+    }()
+
+    static func run(_ work: @escaping @Sendable () -> Void) {
+        queue.addOperation(work)
+    }
+}
+
 private struct UncheckedBox<T>: @unchecked Sendable {
     let value: T
 }
 
-/// Coalesces concurrent loads for the same key so a slow file's load only
-/// ever actually runs once — no matter how many times the prefetcher
-/// re-triggers for it while it's still in flight, and no matter whether
-/// the "user just arrived, need it now" caller asks at the same time as a
-/// background prefetch. Whoever asks second just awaits the first's result
-/// instead of starting a redundant, competing load of the same file. An
-/// actor rather than a lock — `NSLock` across an `await` is flagged by the
-/// compiler as unsafe (a hard error under Swift 6 mode), since suspending
-/// while holding a lock invites exactly the kind of deadlock/priority
-/// inversion this cache exists to avoid.
 private actor InFlightLoads<Value: Sendable> {
     private var tasks: [String: Task<Value?, Never>] = [:]
 
@@ -37,21 +42,8 @@ private actor InFlightLoads<Value: Sendable> {
     }
 }
 
-/// Caches the decoded/parsed result for a file-backed preview, keyed by the
-/// file's URL. Every `Async*FilePreview` view in FilePreviewRenderers.swift
-/// used to reload and reparse straight from disk on every single mount —
-/// even re-opening the SAME item a second time paid the full cost again.
-/// This cache is the reason both re-opening an item and prefetching a
-/// neighbor item ahead of time (see `PreviewPrefetcher` below) actually pay
-/// off: the expensive part only ever happens once per file.
 enum FilePreviewCache {
-    // `nonisolated(unsafe)`, not the project's default MainActor isolation:
-    // NSCache is documented thread-safe, and every one of these is read and
-    // written from background prefetch tasks as well as the main actor — the
-    // whole point of this cache is to be touched from wherever a load
-    // happens to run, which the default isolation would otherwise forbid
-    // without actually adding any real safety (NSCache already serializes
-    // its own access internally).
+
     private nonisolated(unsafe) static let images:    NSCache<NSString, NSImage> = { let c = NSCache<NSString, NSImage>(); c.countLimit = 30; return c }()
     private nonisolated(unsafe) static let pdfs:      NSCache<NSString, PDFDocument> = { let c = NSCache<NSString, PDFDocument>(); c.countLimit = 15; return c }()
     private nonisolated(unsafe) static let gifData:   NSCache<NSString, NSData> = { let c = NSCache<NSString, NSData>(); c.countLimit = 15; return c }()
@@ -69,14 +61,8 @@ enum FilePreviewCache {
 
     private nonisolated static func key(_ url: URL) -> NSString { url.absoluteString as NSString }
 
-    // MARK: Image
-
     static func image(for url: URL) -> NSImage? { images.object(forKey: key(url)) }
 
-    /// `priority` lets a foreground "user just arrived" call ask more
-    /// urgently than a background prefetch would — but if a load for this
-    /// URL is already in flight at any priority, this just awaits it rather
-    /// than starting a second one.
     @discardableResult
     static func loadImage(for url: URL, priority: TaskPriority = .userInitiated) async -> NSImage? {
         if let cached = images.object(forKey: key(url)) { return cached }
@@ -87,8 +73,6 @@ enum FilePreviewCache {
         }
         return boxed?.value
     }
-
-    // MARK: PDF
 
     static func pdf(for url: URL) -> PDFDocument? { pdfs.object(forKey: key(url)) }
 
@@ -102,8 +86,6 @@ enum FilePreviewCache {
         }
         return boxed?.value
     }
-
-    // MARK: GIF (image + raw animated data)
 
     struct GIFResult: @unchecked Sendable { let image: NSImage; let data: Data }
 
@@ -126,8 +108,6 @@ enum FilePreviewCache {
         return result.map { ($0.image, $0.data) }
     }
 
-    // MARK: Plain text file
-
     struct TextResult: @unchecked Sendable { let text: String; let isTruncated: Bool }
 
     static func text(for url: URL) -> (text: String, isTruncated: Bool)? {
@@ -148,8 +128,6 @@ enum FilePreviewCache {
         }
         return result.map { ($0.text, $0.isTruncated) }
     }
-
-    // MARK: Delimited (csv/tsv) file — rows are parsed from the same cached text
 
     struct DelimitedResult: @unchecked Sendable { let rows: [[String]]; let isTruncated: Bool }
 
@@ -175,15 +153,9 @@ enum FilePreviewCache {
     }
 }
 
-/// Silently prepares whatever a neighbor item's preview will need, so it's
-/// already there — cached content, an already-loading PDF, an already-
-/// loading website — by the time the user actually navigates to it. Called
-/// for the (up to) 3 items before and 3 after the current selection while
-/// the item preview panel is visible; see `ClipboardManager.prefetchNeighborPreviews()`.
 enum PreviewPrefetcher {
     static func prefetch(_ item: ClipboardItem) {
-        // Same lightweight metadata every capture/edit already warms —
-        // cheap, and a no-op if it's already cached.
+
         ClipboardManager.shared.prewarmPreviewCaches(for: item)
 
         switch item.content {
@@ -197,8 +169,7 @@ enum PreviewPrefetcher {
             prefetchFile(at: url)
 
         case .files(let urls):
-            // Bounded — a folder of many files dropped as one item shouldn't
-            // fan out into dozens of background loads.
+
             for url in urls.prefix(3) { prefetchFile(at: url) }
 
         default:
@@ -208,10 +179,7 @@ enum PreviewPrefetcher {
 
     private static func prefetchFile(at url: URL) {
         let ext = url.pathExtension.lowercased()
-        // Background priority: a prefetch must never outrun/starve the
-        // foreground "user just arrived" load for a DIFFERENT file, but if
-        // it's the SAME file, loadX's in-flight coalescing means the
-        // foreground call simply awaits this one instead of racing it.
+
         Task.detached(priority: .utility) {
             if ext == "pdf" {
                 await FilePreviewCache.loadPDF(for: url, priority: .utility)
@@ -224,28 +192,14 @@ enum PreviewPrefetcher {
             } else if FileKindDetector.isImageFile(url) {
                 await FilePreviewCache.loadImage(for: url, priority: .utility)
             } else if FileKindDetector.isGLTFModelFile(url) || FileKindDetector.is3DModelFile(url) {
-                // Still deliberately skipped: glTF rendering was previously
-                // removed outright after causing hangs/crashes (see
-                // FilePreviewRenderers.swift's isGLTFModelFile branch), and
-                // native SceneKit/ModelIO loading shares the same loader
-                // family. Without being able to verify what specifically
-                // caused those hangs is no longer reachable from a
-                // background prefetch path, guessing here risks
-                // reintroducing them — left alone on purpose, not an
-                // oversight.
+
                 return
             } else if FileKindDetector.isMediaFile(url) {
-                // Unlike 3D, AVFoundation's own async property loading is
-                // built exactly for this — non-blocking, no known hang
-                // history — so it's safe to warm here even though the
-                // player view itself is never preloaded.
+
                 let asset = AVURLAsset(url: url)
                 _ = try? await asset.load(.duration, .isPlayable)
             } else {
-                // Everything else (docs, spreadsheets, and any other type
-                // the system knows how to preview) falls back to QuickLook
-                // in the real preview — pre-generate its thumbnail/preview
-                // representation so that system-level cache is already warm.
+
                 let request = QLThumbnailGenerator.Request(
                     fileAt: url, size: CGSize(width: 800, height: 800),
                     scale: 2, representationTypes: .all)

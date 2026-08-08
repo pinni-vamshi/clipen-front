@@ -30,12 +30,7 @@ extension ClipboardManager {
         guard savedHash != nil else { return }
         let currentHash = Self.binaryHash()
         guard currentHash != savedHash else { return }
-        // This runs synchronously from `attemptEventTap()`, which
-        // `applicationDidFinishLaunching` calls directly on the main thread.
-        // tccutil + the TCC daemon round-trip can take a few seconds — a
-        // blocking `waitUntilExit()` here held up launch long enough that
-        // the app never created its menu bar item, i.e. "it doesn't open."
-        // Fire-and-forget on a background queue instead.
+
         DispatchQueue.global(qos: .utility).async {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
@@ -125,14 +120,6 @@ extension ClipboardManager {
             return Unmanaged.passUnretained(event)
         }
 
-        // NOTE: deliberately NO "pass everything through while the nudge
-        // lesson is open" guard here. That was tried and was exactly wrong:
-        // it disabled ⌘V globally for as long as the lesson was up, so the
-        // ring popup could not open and the gesture being taught was the one
-        // gesture that could not be practiced. The practice field takes
-        // keyboard focus on its own now (the lesson is a real titled window,
-        // so it becomes key normally) and Clipen's synthesized paste lands in
-        // it like any other text field — the tap must keep working as usual.
         if type == .flagsChanged { return handleFlagsChanged(event) }
         if type == .keyUp        { return handleKeyUp(event) }
         if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
@@ -193,10 +180,6 @@ extension ClipboardManager {
     func handleKeyUp(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         let key = Int(event.getIntegerValueField(.keyboardEventKeycode))
 
-        // Trial spent. Every branch below is a tap-hold timer firing its action
-        // on key-UP (cycle, transform, share, pin), so the key-DOWN gate never
-        // sees them — this is what let V keep walking the ring behind the
-        // subscribe prompt. Cancel the timers and run none of them.
         if previewWindow.isVisible && !ProGate.shared.isUnlocked {
             vTapHoldTimer?.invalidate();      vTapHoldTimer = nil
             firstOpenHoldTimer?.invalidate(); firstOpenHoldTimer = nil
@@ -282,9 +265,6 @@ extension ClipboardManager {
             resetAutoDismissTimer()
         }
 
-        // While the inline editor is up, keys must reach its NSTextView
-        // untouched — including Esc (which the editor turns into cancel) and
-        // Return (save). Blanket passthrough is safer than an allowlist here.
         if isInlineEditing {
             return Unmanaged.passUnretained(event)
         }
@@ -315,12 +295,6 @@ extension ClipboardManager {
             return nil
         }
 
-        // Trial spent: the popup is showing the subscribe prompt, so every
-        // interaction below this point — cycling with V, Space preview, X
-        // transforms, search, marking, delete — must be dead. Esc is handled
-        // just above so there's always a way out. Swallowing (returning nil)
-        // rather than passing through keeps these keystrokes from leaking into
-        // whatever app is frontmost.
         if previewWindow.isVisible && !ProGate.shared.isUnlocked {
             return nil
         }
@@ -401,9 +375,7 @@ extension ClipboardManager {
 
         if key == 9 {
             if isSimulatingPaste { return Unmanaged.passUnretained(event) }
-            // ⌘⌥V is macOS's own "Move here" shortcut (Finder + others). When
-            // Clipen's popup is CLOSED we should never claim it — reserving
-            // opt+V for the in-popup "jump 5" action only.
+
             if opt && !previewWindow.isVisible {
                 return Unmanaged.passUnretained(event)
             }
@@ -446,12 +418,7 @@ extension ClipboardManager {
             }
 
             if shift && !opt {
-                // Shift (⇧V) is always a plain "previous item in the main
-                // ring" shortcut — Shift+X is the separate, dedicated way to
-                // step backward within the transform panel (cycleTransformBackward,
-                // handled elsewhere via key == 7 + shift). The alternate "B"
-                // reverse-key binding is likewise always a plain "previous
-                // item" shortcut — it never touches the transform panel.
+
                 if !reverseCycleUsesB {
                     DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }
                 }
@@ -531,8 +498,6 @@ extension ClipboardManager {
             return nil
         }
 
-        // E — inline edit on the selected item (text only). Opens the editor
-        // in the side-preview slot; popup stays open until commit/cancel.
         if key == 14 && previewWindow.isVisible && !isSearchActive
            && !inTransformStage && !isInlineEditing {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
@@ -542,7 +507,6 @@ extension ClipboardManager {
             return nil
         }
 
-        // L — instant lowercase transform on the selected item. Toggle.
         if key == 37 && previewWindow.isVisible && !isSearchActive
            && !inTransformStage && !isInlineEditing {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
@@ -552,7 +516,6 @@ extension ClipboardManager {
             return nil
         }
 
-        // U — instant uppercase transform on the selected item. Toggle.
         if key == 32 && previewWindow.isVisible && !isSearchActive
            && !inTransformStage && !isInlineEditing {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
@@ -562,8 +525,6 @@ extension ClipboardManager {
             return nil
         }
 
-        // ` (grave) — step to the next category one tap at a time.
-        // ⇧` steps to the previous category instead.
         if key == 50 && previewWindow.isVisible && !isSearchActive {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
             let shiftGrave = event.flags.contains(.maskShift)
@@ -578,8 +539,6 @@ extension ClipboardManager {
             return nil
         }
 
-        // 1–9 — jump straight to that view while ⌘ is still held. 1 is always
-        // All (unfiltered); 2 onward are the collections in creation order.
         if let slot = Self.numberRowKeycodeToCollectionSlot[key],
            previewWindow.isVisible, !isSearchActive, slot <= highestCollectionSlot {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
@@ -590,7 +549,6 @@ extension ClipboardManager {
             return nil
         }
 
-        // G — fold the marked items into one group (only when ≥2 are marked).
         if key == 5 && previewWindow.isVisible && !isSearchActive && markedItemIDs.count >= 2 {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
             DispatchQueue.main.async { [weak self] in
@@ -614,9 +572,7 @@ extension ClipboardManager {
                     self.playInteractionSoundIfEnabled(.pin)
                     self.togglePin(id: id)
                     self.resetAutoDismissTimer()
-                    // Pinning reorders displayItems (applyPinOrdering), so the
-                    // same selectedIndex now points at a different item — every
-                    // panel has to re-target, not just the preview.
+
                     self.selectionDidChange()
                     AuthManager.shared.registerActionUsage(actionID: "action.pin")
                 }

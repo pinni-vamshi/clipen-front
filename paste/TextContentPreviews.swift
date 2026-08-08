@@ -11,7 +11,6 @@ import SwiftUI
 import WebKit
 @preconcurrency import PDFKit
 
-
 struct MiniTablePreview: View {
     let cells: [[String]]
     var maxRows: Int = 2
@@ -63,11 +62,7 @@ struct RichTextContentPreview: View {
                     DelimitedTablePreview(text: text)
                         .padding(10)
                 case .code(let language) where language == "LaTeX":
-                    // A whole .tex file — CodeLanguageDetector tags these
-                    // "LaTeX" the same as it would any other source file,
-                    // but raw syntax-highlighted source isn't a useful
-                    // preview for a document meant to be read. Render it as
-                    // formatted text instead (see LaTeXDocumentPreview).
+
                     LaTeXDocumentPreview(text: text)
                 case .code(let language):
                     CodeSyntaxPreview(text: text, language: language)
@@ -91,27 +86,11 @@ struct RichTextContentPreview: View {
 struct MarkdownTextPreview: View {
     let text: String
 
-    // Same identity-stability fix as `LaTeXDocumentPreview` below: `Block`
-    // gets a fresh random UUID every time `parsedBlocks` is accessed, so
-    // reading it directly from `body` would hand `ForEach` a brand-new set
-    // of view identities on every redraw. Harmless here (Text renders
-    // synchronously, so there's nothing async to interrupt) but still
-    // wasteful churn — cached the same way for consistency.
     @State private var blocks: [Block] = []
 
     var body: some View {
         ScrollView {
-            // `LazyVStack`, not `VStack`: MathJax renders through ONE
-            // shared JavaScriptCore context (`MathJax.svgRenderer`) common
-            // to every `LaTeX()` view. A plain `VStack` instantiates every
-            // block up front and fires every math render simultaneously the
-            // instant the preview appears — on a document with dozens of
-            // equations, that's dozens of renders racing the same shared
-            // context at once, which is a far better explanation for
-            // "identical equations, inconsistent results" than anything in
-            // the parsing above. Lazy loading means only the blocks
-            // actually scrolled into view (plus a small buffer) exist and
-            // start rendering at any one time.
+
             LazyVStack(alignment: .leading, spacing: 6) {
                 ForEach(blocks) { $0.view }
             }
@@ -203,16 +182,8 @@ struct MarkdownTextPreview: View {
     }
 }
 
-/// Quote-aware CSV/TSV parsing — the previous version just did
-/// `components(separatedBy: delimiter)`, which silently corrupts any file
-/// with a quoted field containing the delimiter itself (e.g. `"Smith, John"`
-/// in a comma-separated file, extremely common in real Excel/Numbers
-/// exports) or an embedded newline inside a quoted field. This walks the
-/// text character-by-character tracking quote state, per RFC 4180.
 enum DelimitedTableParser {
-    // Pure string parsing, no shared state — safe to call from any
-    // isolation context, including the background prefetch path in
-    // PreviewPrefetch.swift.
+
     nonisolated static func detectDelimiter(_ text: String) -> Character {
         let firstLine = text.prefix(while: { $0 != "\n" && $0 != "\r" })
         return firstLine.contains("\t") ? "\t" : ","
@@ -257,15 +228,10 @@ enum DelimitedTableParser {
         }
         if !field.isEmpty || !currentRow.isEmpty { endRow() }
 
-        // Drop fully-blank trailing/interstitial lines (a common artifact of
-        // a trailing newline in the source file).
         return rows.filter { !($0.count == 1 && $0[0].isEmpty) }
     }
 }
 
-/// Read-only bordered grid — visually matches EditableTableGrid (the table
-/// EDITOR's look) so a table reads the same whether you're viewing or
-/// editing it, instead of two unrelated visual languages for the same data.
 struct StyledTablePreview: View {
     let rows: [[String]]
 
@@ -308,19 +274,9 @@ struct DelimitedTablePreview: View {
     }
 }
 
-/// Renders `.latex`-tagged captures as actual typeset math (via
-/// LaTeXSwiftUI/MathJax) instead of the syntax-highlighted-source treatment
-/// every other code-like type gets. The detector that assigns `.latex`
-/// (`isLatex` in TextTraditionalDetectors.swift) explicitly excludes
-/// anything with its own `\documentclass`/`\begin{document}` — so this is
-/// always a math expression, never a whole document, which is exactly what
-/// this package renders (it doesn't compile full LaTeX documents).
 struct LaTeXRenderedPreview: View {
     let text: String
 
-    /// Bare math source (e.g. copied `\frac{a}{b}` with no `$`/`\[` wrapper)
-    /// needs to be wrapped for the renderer to treat it as an equation
-    /// instead of literal prose — only wrap if it isn't already delimited.
     private var normalizedSource: String {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let alreadyDelimited = t.hasPrefix("$") || t.hasPrefix("\\[") || t.hasPrefix("\\(")
@@ -329,18 +285,12 @@ struct LaTeXRenderedPreview: View {
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
-            // `.font(NSFont)` is only defined as an extension on the
-            // concrete `LaTeX` type, not `View` — it must be the first
-            // modifier applied, before anything else erases the type to
-            // `some View`, or overload resolution silently falls back to
-            // SwiftUI's own `.font(Font?)` and fails to compile against NSFont.
+
             LaTeX(normalizedSource)
                 .font(NSFont.systemFont(ofSize: 15))
                 .parsingMode(.onlyEquations)
                 .blockMode(.blockViews)
-                // Malformed/partial LaTeX (a copy cut off mid-expression)
-                // falls back to the original source instead of an error
-                // glyph, so a bad parse never looks like a broken preview.
+
                 .errorMode(.original)
                 .foregroundColor(.primary)
                 .padding(12)
@@ -349,18 +299,6 @@ struct LaTeXRenderedPreview: View {
     }
 }
 
-/// Serializes math rendering across every `LaTeX()` view in the app.
-/// MathJax renders through ONE shared JavaScriptCore context
-/// (`MathJax.svgRenderer`, in the LaTeXSwiftUI/MathJaxSwift dependency) —
-/// letting many equations fire their render at the exact same moment means
-/// many calls contending for that single engine simultaneously, which is
-/// the leading suspect for math-heavy documents rendering some equations
-/// and silently leaving others as raw source (see `GatedMath` below).
-/// There's no completion callback in LaTeXSwiftUI's public API to know
-/// exactly when a given render finishes, so this uses a fixed grace period
-/// per turn as a practical stand-in — long enough for a typical equation to
-/// convert, short enough that a math-heavy document still reveals its
-/// equations at a reasonable pace while scrolling.
 actor MathRenderGate {
     static let shared = MathRenderGate()
     private var isBusy = false
@@ -383,13 +321,6 @@ actor MathRenderGate {
     }
 }
 
-/// Wraps a `LaTeX()`-rendered equation so it only starts rendering once
-/// `MathRenderGate` grants it a turn, instead of every currently-visible
-/// equation requesting a render from the shared MathJax engine at once.
-/// Shows the raw source (dimmed) while waiting, matching the same
-/// error-mode fallback `LaTeX()` itself uses for a genuine parse failure —
-/// so waiting-for-a-turn and actually-failed-to-render look the same
-/// instead of introducing a third, distracting visual state.
 private struct GatedMath<Content: View>: View {
     let source: String
     @ViewBuilder let content: () -> Content
@@ -415,54 +346,14 @@ private struct GatedMath<Content: View>: View {
     }
 }
 
-/// Renders a whole `.tex` file (a real document — `\documentclass`,
-/// `\usepackage`, etc. — see `LaTeXRenderedPreview`'s doc comment for why
-/// that's routed here instead) as readable formatted text, the same idea as
-/// `MarkdownTextPreview` but for a first pass of the most common LaTeX
-/// constructs rather than the full language: sections, bold/italic, simple
-/// itemize/enumerate lists, and inline/display math. Preamble and layout
-/// commands (`\documentclass`, `\usepackage`, `\newcommand`, `\vspace`, …)
-/// carry no readable content, so they're dropped rather than shown as raw
-/// backslash-noise. Custom macros this doesn't specifically recognize (e.g.
-/// a resume template's own `\resumeItem{...}`) fall back to showing
-/// whatever text sits in the LAST brace group — not a real macro expansion,
-/// just a heuristic that happens to work for the common single-purpose-
-/// wrapper shape those tend to have.
 struct LaTeXDocumentPreview: View {
     let text: String
 
-    // `parsedBlocks` below builds a fresh `[Block]` — each with its own
-    // brand-new random UUID — every time it's accessed. Iterating it
-    // directly from `body` would mean SwiftUI sees a completely different
-    // set of view identities on every redraw (any scroll/layout pass in the
-    // ScrollView triggers one), so it tears down and recreates every child
-    // view each time, including every `LaTeX()` math renderer. That's
-    // merely wasteful for plain text, but `LaTeX()`'s render is
-    // asynchronous (real MathJax work via JavaScriptCore) — a torn-down
-    // view aborts its render and the fresh replacement starts over from
-    // scratch, so on a page with many equations some finish by pure timing
-    // luck before the next redraw kills them, and others never do,
-    // producing exactly the "identical-looking equations, some render and
-    // some silently don't" symptom this fixes. Computing the blocks ONCE
-    // per `text` value into `@State`, and having `body` read that stable
-    // array instead of the computed property directly, keeps every child
-    // view's identity — and therefore its in-flight render — intact across
-    // redraws.
     @State private var blocks: [Block] = []
 
     var body: some View {
         ScrollView {
-            // `LazyVStack`, not `VStack`: MathJax renders through ONE
-            // shared JavaScriptCore context (`MathJax.svgRenderer`) common
-            // to every `LaTeX()` view. A plain `VStack` instantiates every
-            // block up front and fires every math render simultaneously the
-            // instant the preview appears — on a document with dozens of
-            // equations, that's dozens of renders racing the same shared
-            // context at once, which is a far better explanation for
-            // "identical equations, inconsistent results" than anything in
-            // the parsing above. Lazy loading means only the blocks
-            // actually scrolled into view (plus a small buffer) exist and
-            // start rendering at any one time.
+
             LazyVStack(alignment: .leading, spacing: 6) {
                 ForEach(blocks) { $0.view }
             }
@@ -479,9 +370,6 @@ struct LaTeXDocumentPreview: View {
         let view: AnyView
     }
 
-    /// The readable content lives between `\begin{document}` and
-    /// `\end{document}` — everything before that is preamble. Falls back to
-    /// the whole text for a bare fragment with no preamble/document wrapper.
     private var documentBody: String {
         guard let start = text.range(of: "\\begin{document}") else { return text }
         let afterStart = String(text[start.upperBound...])
@@ -489,22 +377,11 @@ struct LaTeXDocumentPreview: View {
         return String(afterStart[..<end.lowerBound])
     }
 
-    /// Everything the preamble strip in `documentBody` throws away — needed
-    /// for exactly one thing: `\title{}`/`\author{}`/`\date{}` are declared
-    /// here, not in the body, so a document that calls `\maketitle` (which
-    /// otherwise renders as nothing, since it's just a noise command with no
-    /// content of its own) needs this to recover what it's supposed to
-    /// typeset.
     private var preambleText: String {
         guard let start = text.range(of: "\\begin{document}") else { return "" }
         return String(text[text.startIndex..<start.lowerBound])
     }
 
-    /// Looks up `\command{...}` in the preamble and returns its brace
-    /// content — used for `title`/`author`/`date`. Operates on ONE captured
-    /// `String` value throughout (never a fresh copy mid-lookup) so every
-    /// index stays valid for what it's used against — see `matchingBrace`'s
-    /// doc comment for why that specifically matters here.
     private func extractPreambleField(_ command: String) -> String? {
         let preamble = preambleText
         let marker = "\\\(command){"
@@ -516,29 +393,12 @@ struct LaTeXDocumentPreview: View {
         return String(preamble[preamble.index(after: braceIndex)..<closeIndex])
     }
 
-    /// Environments whose content is literal, un-interpreted text — no
-    /// LaTeX commands inside them mean anything, so they're shown as raw
-    /// monospace source (via `CodeSyntaxPreview`) rather than run through
-    /// any of the command/math parsing the rest of this preview does.
-    /// `lstlisting` can carry a trailing `[options]` (e.g.
-    /// `\begin{lstlisting}[language=Python]`), so its open marker is
-    /// deliberately a prefix rather than the exact full tag.
     private static let verbatimEnvironments: [(open: String, close: String)] = [
         ("\\begin{verbatim}", "\\end{verbatim}"),
         ("\\begin{lstlisting", "\\end{lstlisting}"),
         ("\\begin{minted}", "\\end{minted}"),
     ]
 
-    /// Multi-line display-math openers this preview specifically buffers
-    /// across lines (see `parsedBlocks`). `\[` and `\begin{equation}`/
-    /// `equation*` are recognized natively by LaTeXSwiftUI's own equation
-    /// scanner, so their content is passed through as-is. The amsmath
-    /// environments (`align`, `gather`, `eqnarray`, `multline`, `alignat`)
-    /// are NOT recognized as math on their own by that scanner — it only
-    /// looks for `$…$`, `\(…\)`, `\[…\]`, and `equation`/`equation*` — so
-    /// those need `needsDisplayWrap` to get wrapped in `\[ \]` before being
-    /// handed off; MathJax itself understands `align` etc. just fine once
-    /// it's inside a math region the scanner actually finds.
     private static let mathOpeners: [(open: String, close: String, needsDisplayWrap: Bool)] = [
         ("\\[", "\\]", false),
         ("\\begin{equation*}", "\\end{equation*}", false),
@@ -556,11 +416,7 @@ struct LaTeXDocumentPreview: View {
         ("\\begin{flalign*}",  "\\end{flalign*}",  true),
         ("\\begin{flalign}",   "\\end{flalign}",   true),
         ("\\begin{subequations}", "\\end{subequations}", true),
-        // Matrix/case environments are normally nested inside one of the
-        // delimiters above (`$\begin{pmatrix}...\end{pmatrix}$`), which
-        // already works without any of these entries. These specifically
-        // cover the same environments pasted BARE at the top level, with no
-        // outer math delimiter of their own.
+
         ("\\begin{pmatrix}",   "\\end{pmatrix}",   true),
         ("\\begin{bmatrix}",   "\\end{bmatrix}",   true),
         ("\\begin{vmatrix}",   "\\end{vmatrix}",   true),
@@ -572,13 +428,6 @@ struct LaTeXDocumentPreview: View {
         ("$$", "$$", true),
     ]
 
-    /// A standalone display-math block, rendered on its own (as opposed to
-    /// `inlineContent`'s per-line mixed prose+math handling) — `.blockViews`
-    /// gives it the same centered block treatment `LaTeXRenderedPreview`
-    /// uses for a bare equation, appropriate here since the whole block IS
-    /// the equation, not prose with math embedded in it. Gated through
-    /// `MathRenderGate` (see its doc comment) so a math-heavy document
-    /// doesn't fire every visible equation's render at once.
     private func mathBlock(_ source: String) -> some View {
         GatedMath(source: source) {
             LaTeX(source)
@@ -591,10 +440,6 @@ struct LaTeXDocumentPreview: View {
         }
     }
 
-    /// amsthm-style environments (`\newtheorem{theorem}{Theorem}` and
-    /// friends) — always `\begin{name}[Optional Title] ... \end{name}`, with
-    /// a matching display label the real document would generate via
-    /// numbering this preview doesn't attempt to reproduce.
     private static let theoremEnvironments: [String: String] = [
         "theorem": "Theorem", "lemma": "Lemma", "proposition": "Proposition",
         "corollary": "Corollary", "definition": "Definition", "remark": "Remark",
@@ -615,20 +460,11 @@ struct LaTeXDocumentPreview: View {
         "label", "maketitle",
     ]
 
-    /// A row-terminator/separator line with no cell content of its own —
-    /// booktabs' `\toprule`/`\midrule`/`\bottomrule`, plain `\hline`, and
-    /// `\cline{...}` are formatting-only, so showing them as literal
-    /// "toprule"/"midrule" text (what happened before this existed) is
-    /// exactly the kind of raw-command noise this whole preview exists to
-    /// avoid.
     private static func isTableRuleLine(_ line: String) -> Bool {
         line == "\\toprule" || line == "\\midrule" || line == "\\bottomrule" ||
         line == "\\hline" || line.hasPrefix("\\cline{")
     }
 
-    /// Splits one tabular row's source on top-level `&` column separators.
-    /// `\&` (an escaped, literal ampersand) is kept intact rather than
-    /// treated as a split point.
     private static func splitTableRow(_ raw: String) -> [String] {
         var cells: [String] = []
         var current = ""
@@ -653,12 +489,6 @@ struct LaTeXDocumentPreview: View {
         return cells
     }
 
-    /// Parses the raw lines between `\begin{tabular}...}` and
-    /// `\end{tabular}` into rows of cell text. A row's LaTeX source ends at
-    /// `\\` (optionally followed by a spacing arg like `\\[2pt]`, which is
-    /// dropped along with the terminator since it doesn't affect the
-    /// cells) — not at a source line break, since a row is free to wrap
-    /// across several source lines.
     private static func parseTabularRows(_ lines: [String]) -> [[String]] {
         var rows: [[String]] = []
         var buffer = ""
@@ -678,19 +508,12 @@ struct LaTeXDocumentPreview: View {
                 buffer = String(remainder).trimmingCharacters(in: .whitespaces)
             }
         }
-        // A tabular's LAST row often has no trailing `\\` at all (it's
-        // optional immediately before `\end{tabular}`) — anything still
-        // sitting in `buffer` once every line has been consumed is that
-        // final, unterminated row.
+
         let cells = splitTableRow(buffer).map { $0.trimmingCharacters(in: .whitespaces) }
         if cells.contains(where: { !$0.isEmpty }) { rows.append(cells) }
         return rows
     }
 
-    /// Each cell goes through `inlineContent` (not a plain `Text`) so a
-    /// numeric/math-heavy table — the most common kind — still gets real
-    /// typeset math per cell, and the first row is bolded on the (common)
-    /// assumption that it's the header.
     private func tabularGrid(_ rows: [[String]]) -> some View {
         let colCount = rows.map(\.count).max() ?? 1
         return VStack(spacing: 1) {
@@ -737,10 +560,7 @@ struct LaTeXDocumentPreview: View {
             if trimmed == "\\maketitle" {
                 let title  = extractPreambleField("title")
                 let author = extractPreambleField("author")
-                // `\date{\today}` is extremely common and can't be resolved
-                // to an actual date without running the LaTeX macro — show
-                // it only when it's a literal date the author typed in,
-                // not the `\today` placeholder itself.
+
                 let date = extractPreambleField("date").flatMap { $0 == "\\today" ? nil : $0 }
                 if title != nil || author != nil || date != nil {
                     blocks.append(Block(view: AnyView(
@@ -756,12 +576,6 @@ struct LaTeXDocumentPreview: View {
                 continue
             }
 
-            // Verbatim/code-listing environments don't contain LaTeX
-            // commands to interpret — showing their content through the
-            // normal command-parsing path would mangle any backslash or
-            // brace that happens to appear in the code. Checked before
-            // anything else here so nothing inside ever gets touched by the
-            // math/list/command handling below.
             if let vb = Self.verbatimEnvironments.first(where: { trimmed.hasPrefix($0.open) }) {
                 var codeLines: [String] = []
                 while i < lines.count {
@@ -779,13 +593,6 @@ struct LaTeXDocumentPreview: View {
                 continue
             }
 
-            // A display-math block often spans several lines — `\[ ... \]`,
-            // `$$ ... $$`, or an amsmath environment like `align`/`gather`.
-            // The per-line handling below (`inlineContent`) only sees ONE
-            // line at a time, so a block whose closing delimiter is several
-            // lines down would never get past its opening line unrendered.
-            // Buffer every line from the opener through its matching closer
-            // and hand the whole thing to the renderer as one block.
             if let opener = Self.mathOpeners.first(where: { trimmed.hasPrefix($0.open) }) {
                 var blockLines = [lines[i - 1]]
                 var closed = trimmed.dropFirst(opener.open.count).contains(opener.close)
@@ -845,9 +652,6 @@ struct LaTeXDocumentPreview: View {
                     guard itemLine.hasPrefix("\\item") else { continue }
                     var rest = itemLine.dropFirst(5)
 
-                    // `description`'s `\item[Term] definition` carries its
-                    // own bold label in brackets — distinct from the plain
-                    // bullet/number every other list item gets.
                     var label: String? = nil
                     if described, rest.first == "[", let closeBracket = rest.firstIndex(of: "]") {
                         label = String(rest[rest.index(after: rest.startIndex)..<closeBracket])
@@ -879,10 +683,6 @@ struct LaTeXDocumentPreview: View {
                 continue
             }
 
-            // `tabular*`/`tabularx` share the same row syntax as plain
-            // `tabular` — `&`-separated cells, `\\`-terminated rows — so one
-            // prefix check covers all three instead of needing a separate
-            // entry per variant.
             if trimmed.hasPrefix("\\begin{tabular") {
                 var rowLines: [String] = []
                 while i < lines.count {
@@ -900,10 +700,6 @@ struct LaTeXDocumentPreview: View {
 
             if isNoiseLine(trimmed) { continue }
 
-            // A bare `\begin{X}`/`\end{X}` for anything else (center,
-            // tabular*, document's own leftover markers, …) has no content
-            // of its own — drop just the marker and keep processing what's
-            // inside as ordinary lines.
             if trimmed.hasPrefix("\\begin{") || trimmed.hasPrefix("\\end{") { continue }
 
             blocks.append(Block(view: AnyView(inlineContent(trimmed))))
@@ -935,18 +731,6 @@ struct LaTeXDocumentPreview: View {
         }
     }
 
-    /// `openAt` is the index of the `{` itself; returns the index of its
-    /// matching `}`, accounting for nested braces (e.g. a `\textbf{}` inside
-    /// a section title).
-    ///
-    /// Generic over `StringProtocol` so it can run directly on a `Substring`
-    /// (as `formattedText` needs to, below) without first copying it into a
-    /// `String` — a `String.Index` is only valid against the exact string
-    /// value it was produced from, so returning an index computed against a
-    /// COPY and then using it to subscript the original `Substring` is
-    /// undefined behavior. That mismatch is exactly what crashed here: the
-    /// copy and the original happen to share enough representation to often
-    /// work, until they don't.
     private func matchingBrace<S: StringProtocol>(in s: S, openAt: Int) -> S.Index? {
         var depth = 0
         var idx = s.index(s.startIndex, offsetBy: openAt)
@@ -967,13 +751,6 @@ struct LaTeXDocumentPreview: View {
         return Self.noiseCommands.contains(String(name))
     }
 
-    /// A line containing real math delimiters is handed to the LaTeX
-    /// renderer whole — MathJax renders the surrounding plain text as-is
-    /// and only typesets the delimited math, which is exactly the mixed
-    /// prose+equation rendering a resume/paper line actually needs. A line
-    /// with no math gets `\textbf`/`\textit`/`\emph` turned into real
-    /// bold/italic instead, since MathJax has no reason to understand those
-    /// outside of math mode.
     @ViewBuilder
     private func inlineContent(_ line: String) -> some View {
         if line.contains("$") || line.contains("\\[") || line.contains("\\(") {
@@ -994,19 +771,10 @@ struct LaTeXDocumentPreview: View {
         }
     }
 
-    /// Zero-argument commands (no `{...}` to expand) that stand in for a
-    /// single typeset character/symbol.
     private static let zeroArgSubstitutions: [String: String] = [
         "ldots": "\u{2026}", "dots": "\u{2026}", "cdots": "\u{2026}",
     ]
 
-    /// `~`/`--`/`---` aren't backslash commands, so they're substituted in
-    /// plain text segments directly rather than in the backslash-scanning
-    /// loop below: `~` is LaTeX's non-breaking space, and `--`/`---` are its
-    /// en-/em-dash ligatures — all three otherwise show as their literal
-    /// source characters instead of what LaTeX actually typesets. Order
-    /// matters: replacing `---` first means a real `---` can't be seen as
-    /// `--` plus a leftover `-` by the second replacement.
     private func substituteTypography(_ s: some StringProtocol) -> String {
         String(s)
             .replacingOccurrences(of: "~", with: " ")
@@ -1014,35 +782,15 @@ struct LaTeXDocumentPreview: View {
             .replacingOccurrences(of: "--", with: "\u{2013}")
     }
 
-    /// Citations/cross-references (`\cite`, `\ref`, `\pageref`, …) can't be
-    /// resolved here — that needs an actual bibliography/label pass this
-    /// preview doesn't have — so their raw internal key (meaningless to a
-    /// reader, e.g. `smith2020` or `fig:diagram1`) is replaced with a
-    /// neutral placeholder instead of being shown as if it were content.
     private static let citationCommands: Set<String> = ["cite", "citep", "citet", "citeauthor", "citeyear", "nocite"]
     private static let referenceCommands: Set<String> = ["ref", "eqref", "pageref", "autoref"]
 
-    /// `\textbf{}`/`\textit{}`/`\emph{}`/`\texttt{}`/`\underline{}`/`\sout{}`
-    /// become real bold/italic/monospace/underline/strikethrough runs;
-    /// `\href{url}{label}`/`\url{...}` become real tappable links; `\\`
-    /// becomes an actual line break; `\cite{}`/`\ref{}` and friends become a
-    /// neutral `[cite]`/`[ref]` placeholder (see above); an unrecognized
-    /// `\command{...}{...}…` with several brace groups (a custom macro like
-    /// a resume template's `\resumeSubheading{a}{b}{c}{d}`) shows all of its
-    /// groups joined, not just the first; common escaped characters are
-    /// unescaped so `\%`/`\&`/`\_` read naturally.
     private func formattedText(_ line: String) -> AttributedString {
         var result = AttributedString()
         var rest = Substring(line)
 
         while let backslash = rest.firstIndex(of: "\\") {
-            // `{\declword ...}` — an old-style TeX font-switching group
-            // (e.g. `{\bfseries Name}`), where the command takes NO brace
-            // argument of its own and instead just changes state for the
-            // rest of its enclosing group. Distinct from `\textbf{...}`
-            // (name immediately followed by `{`) and handled before the
-            // backslash is treated normally, so this group's own `{` never
-            // gets appended as a stray literal character the way it used to.
+
             if backslash > rest.startIndex, rest[rest.index(before: backslash)] == "{" {
                 let braceOpen = rest.index(before: backslash)
                 let afterSlash = rest[rest.index(after: backslash)...]
@@ -1091,9 +839,7 @@ struct LaTeXDocumentPreview: View {
 
             guard !name.isEmpty, afterName.first == "{",
                   let braceEnd = matchingBrace(in: afterName, openAt: 0) else {
-                // Not a recognized `\name{...}` shape — drop just the
-                // backslash so the rest of the token still reads naturally
-                // instead of showing a stray `\`.
+
                 rest = afterSlash
                 continue
             }
@@ -1111,8 +857,7 @@ struct LaTeXDocumentPreview: View {
                     linkRun.foregroundColor = .accentColor
                     result += linkRun
                 } else {
-                    // Malformed `\href` (no label group) — show the URL
-                    // itself as the link text rather than dropping it.
+
                     var linkRun = AttributedString(inner)
                     linkRun.link = URL(string: inner)
                     linkRun.foregroundColor = .accentColor
@@ -1148,12 +893,7 @@ struct LaTeXDocumentPreview: View {
             case "underline": run.underlineStyle = .single
             case "sout", "strikethrough": run.strikethroughStyle = .single
             default:
-                // Unrecognized macro — if more brace groups immediately
-                // follow, this is likely a multi-argument macro (e.g. a
-                // resume template's own `\resumeSubheading{a}{b}{c}{d}`);
-                // fold them all into one readable run instead of leaving
-                // the later groups as literal `{b}{c}{d}`. Capped so
-                // malformed/unbalanced input can't loop indefinitely.
+
                 var extraGroups = 0
                 while extraGroups < 5, rest.first == "{",
                       let nextEnd = matchingBrace(in: rest, openAt: 0) {
@@ -1222,12 +962,7 @@ final class CodeHighlighter {
     private var highlightr: Highlightr?
     private var didInit = false
     private var currentTheme: String?
-    // Revisiting a clip (or switching away and back) used to redo the full
-    // highlight.js pass from scratch every time — nothing here remembered a
-    // result across calls, only the CALLER's `.task(id:)` avoided repeating
-    // the work within a single still-alive view instance. Same fingerprint-
-    // keyed NSCache approach TextInsightService/TableCellExtractor already
-    // use elsewhere in this file.
+
     private let cache = NSCache<NSString, NSAttributedString>()
 
     private init() { cache.countLimit = 200 }
@@ -1238,8 +973,7 @@ final class CodeHighlighter {
 
     func highlight(_ code: String, languageDisplayName: String?, dark: Bool) async -> NSAttributedString? {
         let key = Self.cacheKey(code, languageDisplayName: languageDisplayName, dark: dark)
-        // Fast path: a cache hit never has to hop onto the highlighter's
-        // serial queue at all.
+
         if let hit = cache.object(forKey: key) { return hit }
         return await withCheckedContinuation { continuation in
             queue.async { [weak self] in
@@ -1254,11 +988,6 @@ final class CodeHighlighter {
         }
     }
 
-    /// Highlightr runs highlight.js through JavaScriptCore — tokenizing multiple
-    /// MB of code/JSON through a JS engine takes seconds. Above this cap we skip
-    /// highlighting entirely (returns nil) so the preview shows the plain-text
-    /// fallback instantly instead of hanging. Highlighting a 5 MB file adds no
-    /// real value anyway.
     static let maxHighlightLength = 100_000
 
     func highlightSync(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
@@ -1304,10 +1033,7 @@ struct HighlightedCodeTextView: NSViewRepresentable {
             tv.textContainerInset = NSSize(width: 6, height: 6)
             tv.isHorizontallyResizable = true
             tv.isVerticallyResizable = true
-            // maxSize is what actually lets the text view grow wider than its
-            // visible frame — without it, long code lines were clipped and the
-            // horizontal scroller had nothing to scroll to. Combined with a
-            // non-wrapping container, lines now extend and scroll sideways.
+
             tv.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                 height: CGFloat.greatestFiniteMagnitude)
             tv.textContainer?.widthTracksTextView = false
@@ -1322,16 +1048,8 @@ struct HighlightedCodeTextView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let tv = scroll.documentView as? NSTextView else { return }
         tv.textStorage?.setAttributedString(attributed)
-        // Re-layout so the text view's frame expands to the widest line, which
-        // is what makes the horizontal scroller appear when needed.
+
         tv.layoutManager?.ensureLayout(for: tv.textContainer!)
         tv.sizeToFit()
     }
 }
-
-/// CSV/TSV FILES specifically — previously these fell into `isTextFile` and
-/// rendered as flat monospaced text like any other text file, with no grid
-/// at all, even though the exact same delimited content pasted as plain text
-/// (not file-backed) already got a table view via `RichTextContentPreview`'s
-/// `.table` case. This closes that gap so a copied .csv/.tsv FILE gets the
-/// same treatment.

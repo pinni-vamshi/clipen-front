@@ -75,9 +75,6 @@ enum ImageService {
         return CGImageSourceGetCount(src) > 1
     }
 
-    /// True for a multi-page TIFF. Our encode pipeline draws a single CGImage,
-    /// so re-encoding one would silently drop every page but the first — the
-    /// same fidelity loss `isAnimatedGIF` guards against for GIFs.
     static func isMultiPageTIFF(_ data: Data) -> Bool {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil),
               let type = CGImageSourceGetType(src),
@@ -170,10 +167,6 @@ enum ImageService {
                     best = ImageCandidate(data: data, image: image, dataType: targetType, label: label)
                 }
 
-                // Each encode attempt allocates a full-resolution RGBA buffer
-                // (rgbaCGImage) plus an autoreleased NSBitmapImageRep. Draining
-                // per iteration keeps a big image from stacking several of them
-                // before the surrounding queue block's pool would.
                 switch kind {
                 case .jpeg:
                     for (q, label) in [(CGFloat(0.82), "JPEG 82%"), (CGFloat(0.70), "JPEG 70%"), (CGFloat(0.58), "JPEG 58%")] {
@@ -558,12 +551,7 @@ enum ImageService {
 
     private static func scaledCopy(of image: NSImage, factor: CGFloat) -> NSImage? {
         guard factor > 0, factor < 1 else { return nil }
-        // Was NSImage.lockFocus, which is not safe off the main thread — and
-        // reducedCopy calls this from a background queue. rgbaCGImage draws
-        // the source into an explicit CGContext at the target pixel size
-        // (high interpolation), the same thread-agnostic path stitch and the
-        // encoders already use, so scaling no longer touches AppKit's
-        // main-thread graphics state.
+
         let (pw, ph) = pixelDimensions(of: image)
         let tw = max(1, Int((CGFloat(pw) * factor).rounded()))
         let th = max(1, Int((CGFloat(ph) * factor).rounded()))

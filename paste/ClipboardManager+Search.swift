@@ -8,11 +8,7 @@ import Vision
 extension ClipboardManager {
 
     func recomputeEmbeddingsInBackground() {
-        // Snapshot on main (cheap), then hand EVERYTHING — including the
-        // singleton first-touch — to a background queue. Previously the
-        // `ClipenEmbedder.shared.isAvailable` guard ran on main, which
-        // triggered NLContextualEmbedding.load() (5-20 s on cold launch)
-        // synchronously and froze the whole app before the window could open.
+
         let snapshot = items.filter { $0.embedding == nil }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard ClipenEmbedder.shared.isAvailable else { return }
@@ -54,10 +50,7 @@ extension ClipboardManager {
         clearPopupHintHighlights()
         cancelPendingFirstOpen()
         guard !displayItems.isEmpty else { return }
-        // Trial spent: this path never opens the popup, so with the paste
-        // blocked a quick ⌘V tap would do nothing visible whatsoever and read
-        // as the app being broken. Show the popup — and therefore the subscribe
-        // prompt — instead of failing silently.
+
         guard ProGate.shared.isUnlocked else {
             openPopupNow()
             return
@@ -96,10 +89,7 @@ extension ClipboardManager {
         markBlobPurgeNeeded()
         if displayItems.isEmpty { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
-        // Deleting shifts the selection onto a DIFFERENT item, so the transform
-        // and share panels must re-target too. Syncing only the item preview
-        // here left transformDisplaysCache describing the deleted item, and
-        // commitPaste() reads its tool id while operating on the new one.
+
         selectionDidChange()
     }
 
@@ -161,14 +151,6 @@ extension ClipboardManager {
         selectedIndex = min(max(0, selectedIndex), display.count - 1)
     }
 
-    /// Records the single mutually-exclusive outcome for the current popup
-    /// session — pasted / deleted / escaped / blank — exactly once. Called
-    /// from BOTH the paste-completion paths (which hide the window directly
-    /// and never route through dismissPreview) and dismissPreview itself, so
-    /// the `pasted` case is captured; the guard makes it idempotent. "escaped"
-    /// covers the Escape key AND click-away; "blank" is the silent
-    /// auto-dismiss timeout (zero user input); pasted beats deleted beats
-    /// how it was closed.
     func finalizePopupOutcome() {
         guard popupSessionActive, !popupSessionOutcomeRecorded else { return }
         popupSessionOutcomeRecorded = true
@@ -187,8 +169,7 @@ extension ClipboardManager {
     }
 
     func dismissPreview() {
-        // Popup going away means the inline editor loses its host — treat
-        // that as a cancel, silently.
+
         if isInlineEditing { inlineEditItemID = nil; itemPreviewPanel.hide() }
         if previewWindow.isVisible {
             if let openedAt = popupOpenedAt {
@@ -306,9 +287,6 @@ extension ClipboardManager {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, q.count >= 2 else { return [] }
 
-        // Key the cache on itemsRevision, not items.count: content can change
-        // while the count stays the same (an item edited/moved/re-captured),
-        // which the old count-based key would miss and serve stale results.
         if q == lastSearchQuery
             && itemsRevision == lastSearchItemsRev
             && embeddedItemCount == lastSearchEmbedRev {
@@ -548,21 +526,11 @@ enum ImageSimilarityService {
     }
 }
 
-/// Text embedder that prefers the on-device transformer
-/// `NLContextualEmbedding` (macOS 14+) — it runs on the **Neural Engine** and
-/// is **multilingual** — and transparently falls back to the classic CPU-only,
-/// English-only sentence embedding when the contextual model's assets aren't
-/// present. The backend is chosen ONCE at startup so every vector produced in a
-/// session shares the same dimensionality (mixing would break cosine compares;
-/// `cosineSimilarity` already guards mismatches, but we avoid them entirely).
-///
-/// Safety: if anything about the contextual path is unavailable it behaves
-/// exactly like the previous `NLEmbedding` code — it can never regress search.
 final class ClipenEmbedder {
     static let shared = ClipenEmbedder()
 
     private let fallback: NLEmbedding?
-    private let contextual: Any?   // NLContextualEmbedding, boxed behind availability
+    private let contextual: Any?
     let usingContextual: Bool
 
     var isAvailable: Bool { usingContextual || fallback != nil }
@@ -573,15 +541,13 @@ final class ClipenEmbedder {
         var box: Any? = nil
         var usingCtx = false
         if #available(macOS 14.0, *) {
-            // Latin-script model covers most Western languages in one model.
+
             if let model = NLContextualEmbedding(script: .latin),
                (try? model.load()) != nil {
                 box = model
                 usingCtx = true
             } else if #available(macOS 14.0, *) {
-                // Assets not present yet — request them in the background so a
-                // later launch can use the Neural Engine path. This session
-                // still runs on the safe fallback below.
+
                 NLContextualEmbedding(script: .latin)?.requestAssets { _, _ in }
             }
         }
@@ -589,7 +555,6 @@ final class ClipenEmbedder {
         usingContextual = usingCtx
     }
 
-    /// A single mean-pooled vector for `text`, or nil if it can't be embedded.
     func vector(for text: String) -> [Float]? {
         if #available(macOS 14.0, *), let model = contextual as? NLContextualEmbedding {
             guard let result = try? model.embeddingResult(for: text, language: nil) else { return nil }

@@ -6,8 +6,7 @@ class SharePanel: NSObject, NSPopoverDelegate {
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
     private let popover = NSPopover()
     private var cachedPanelHeight: CGFloat = 320
-    // See TransformPanel's identical comment: keyed on content shape so a
-    // fresh S press doesn't re-measure a throwaway view just to discard it.
+
     private var cachedHeightSignature: Int? = nil
     private var wantsVisible = false
     private var shownStrip: NSRect? = nil
@@ -104,8 +103,7 @@ class SharePanel: NSObject, NSPopoverDelegate {
     func hide() {
         wantsVisible = false
         if popover.isShown {
-            // Snap-close to avoid the animated fade visually overlapping
-            // whatever panel replaces it (transform, item preview).
+
             popover.animates = false
             popover.performClose(nil)
             popover.animates = true
@@ -119,9 +117,7 @@ struct ShareView: View {
     let services: [NSSharingService]
     let selectedIndex: Int
     let itemCount: Int
-    /// Shared across every row — lets the ONE selection box travel and
-    /// resize between rows via `matchedGeometryEffect`, same pattern as the
-    /// main popup's `PopoverRow`.
+
     @Namespace private var selectionNamespace
 
     var body: some View {
@@ -173,9 +169,7 @@ struct ShareView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    // Spacing here (not 0) reserves the vertical room the
-                    // selected row's height-growth needs — see ShareRow's
-                    // scaleEffect comment.
+
                     VStack(spacing: 10) {
                         ForEach(Array(services.enumerated()), id: \.offset) { idx, service in
                             ShareRow(service: service, isSelected: idx == selectedIndex, selectionNamespace: selectionNamespace)
@@ -199,8 +193,7 @@ struct ShareView: View {
                     .padding(.horizontal, 8)
                 }
                 .onChange(of: selectedIndex) { _, newIdx in
-                    // Same spring as SelectionHighlightStyle — see
-                    // PreviewOverlayWindow's identical comment.
+
                     withAnimation(SelectionHighlightStyle.spring) {
                         proxy.scrollTo(newIdx, anchor: .center)
                     }
@@ -216,21 +209,15 @@ struct ShareView: View {
 private struct ShareRow: View, Equatable {
     let service: NSSharingService
     let isSelected: Bool
-    /// A `Namespace.ID` never changes after creation, so it's safe to leave
-    /// out of `==` below.
+
     let selectionNamespace: Namespace.ID
 
-    // Same pattern as TransformRow: `@State private var isHovered` is
-    // intentionally left out of the equality contract.
     static func == (lhs: ShareRow, rhs: ShareRow) -> Bool {
         lhs.service === rhs.service && lhs.isSelected == rhs.isSelected
     }
 
     @State private var isHovered = false
 
-    /// Constant for every row — see `SelectionHighlight.inset`. Sized so
-    /// the scaled selected row fits this panel's fixed 260pt width:
-    ///   row = 260 − 2·14 = 232  →  232 · 1.12 = 259.8 ≤ 260
     private static let horizontalInset: CGFloat = 14
 
     var body: some View {
@@ -257,9 +244,7 @@ private struct ShareRow: View, Equatable {
                     .foregroundColor(.accentColor.opacity(0.7))
             }
         }
-        // Same reasoning as the main popup's `rowContent`: hard-block any
-        // inherited animation so this row's own text/icon changes never
-        // pick up the selection box's spring or its position travel.
+
         .transaction { $0.animation = nil }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(

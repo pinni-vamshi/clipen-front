@@ -8,14 +8,10 @@ extension ClipboardManager {
         markedItemIDs.compactMap { id in items.first(where: { $0.id == id }) }
     }
 
-    /// ⌘+G — fold the marked items into a single group entry, placed where the
-    /// first-marked item was, in marking order. Nested groups are flattened one
-    /// level so a group never contains another group. Capped at maxGroupItems.
     func groupMarkedItems() {
         let marked = orderedMarkedItems
         guard marked.count >= 2 else { return }
 
-        // Flatten any already-grouped members one level, preserve order, cap.
         var children: [ClipboardItem] = []
         for m in marked {
             if case .group(let inner) = m.content { children.append(contentsOf: inner) }
@@ -26,14 +22,13 @@ extension ClipboardManager {
         guard children.count >= 2 else { return }
 
         let markedSet = Set(markedItemIDs)
-        // Position of the first-marked item within the full ring.
+
         let insertAt = items.firstIndex(where: { $0.id == markedItemIDs.first }) ?? 0
         let anchorPinned = items.first(where: { $0.id == markedItemIDs.first })?.isPinned ?? false
 
         var groupItem = ClipboardItem(content: .group(children))
         groupItem.isPinned = anchorPinned
 
-        // Remove the originals, then insert the group at the anchor slot.
         let removedBefore = items.prefix(insertAt).filter { markedSet.contains($0.id) }.count
         items.removeAll { markedSet.contains($0.id) }
         let clampedIndex = min(max(0, insertAt - removedBefore), items.count)
@@ -47,7 +42,6 @@ extension ClipboardManager {
         markNudgeUsedNaturally(.groups)
     }
 
-    /// Split a group back into its individual members at the group's position.
     func ungroup(_ item: ClipboardItem) {
         guard case .group(let children) = item.content,
               let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
@@ -67,8 +61,7 @@ extension ClipboardManager {
 
     func enterTransformStage() {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
-        // One call handles leaving share (if active) and giving up the item
-        // preview, in the correct order — see setSidePanelStage.
+
         setSidePanelStage(.transform)
         markNudgeUsedNaturally(.transformPanel)
 
@@ -133,7 +126,7 @@ extension ClipboardManager {
         case .svg(let src):
             return Self.shareTempFile(Data(src.utf8), ext: "svg", id: item.id).map { [$0] } ?? []
         case .group(let items):
-            // Share every member of the group.
+
             return items.flatMap { shareRepresentations(for: $0) }
         default:
             guard let text = item.content.plainText, !text.isEmpty else { return [] }
@@ -148,8 +141,7 @@ extension ClipboardManager {
     }
 
     private static func shareTempFile(_ data: Data, ext: String, id: UUID) -> URL? {
-        // Ephemeral temp dir, recreated every launch — safe to rename outright,
-        // unlike the Application Support history/blob paths.
+
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("ClipenShare", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -184,7 +176,7 @@ extension ClipboardManager {
             flashStatus("No share destinations available for this item.")
             return
         }
-        // Leaves transform (if active) and drops the item preview, in order.
+
         setSidePanelStage(.share)
         shareTargetItems = targets
         shareServices = Self.rankedShareServices(services)
@@ -286,12 +278,7 @@ extension ClipboardManager {
             guard let url = rep as? URL else { return true }
             return seenURLs.insert(url.absoluteString).inserted
         }
-        // NSSharingService reliably treats multiple file/URL items as separate
-        // attachments, but many destinations only pick up one item when handed
-        // several bare NSString entries in the same array — with several
-        // marked text items this looked like "only the first or last" made it
-        // into the share. Combine plain-text representations into one string
-        // so the whole marked set is actually included.
+
         let items: [Any]
         if rawItems.count > 1, rawItems.allSatisfy({ $0 is NSString }) {
             let combined = rawItems.compactMap { ($0 as? NSString) as String? }.joined(separator: "\n\n")
@@ -336,10 +323,7 @@ extension ClipboardManager {
         guard !transformingMarkedSet else { return }
         guard inTransformStage, previewWindow.isVisible,
               !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
-        // Same itemID guard as refreshTransformDisplaysCache — without it,
-        // every V/B navigation step while the transform panel is open
-        // rebuilds the tool list from scratch even when landing back on an
-        // item already in cache, thrashing ToolRegistry's single-slot cache.
+
         let currentItem = displayItems[selectedIndex]
         if currentItem.id != lastTransformCacheItemID || transformDisplaysCache.isEmpty {
             lastTransformCacheItemID = currentItem.id
@@ -433,12 +417,6 @@ extension ClipboardManager {
         return previewWindow.selectedRowAnchorPoint(selectedIndex: selectedIndex, totalItems: displayItems.count)
     }
 
-    /// Called from PopoverPreviewView the moment the real selected-row
-    /// frame becomes known/changes — re-anchors whichever side panel is
-    /// currently open using that fresh measurement. Each call below is
-    /// already safe to call redundantly (both self-guard on their own
-    /// visibility/stage and reposition-only when nothing else changed), so
-    /// no extra guarding is needed here beyond what they already do.
     func repositionAnchoredSidePanelForMeasuredRow() {
         guard previewWindow.isVisible else { return }
         if itemPreviewPanel.isVisible {
@@ -452,17 +430,10 @@ extension ClipboardManager {
         }
     }
 
-    // MARK: - Inline edit (E on the popup)
-
-    // MARK: - L/U instant case transforms
-
     func applyCaseTransformForSelection(_ kind: CaseTransformKind) {
         guard previewWindow.isVisible, !isInlineEditing else { return }
         guard displayItems.indices.contains(selectedIndex) else { return }
-        // L/U aren't blocked while the share panel is up either (same gap as
-        // E above) — without this, the panel would keep showing share targets
-        // built from the item's pre-transform content after it silently changes
-        // underneath it.
+
         setSidePanelStage(.none)
         let item = displayItems[selectedIndex]
         guard let currentText = Self.editablePlainText(for: item) else {
@@ -471,7 +442,7 @@ extension ClipboardManager {
         }
 
         if let saved = caseTransformOriginals[item.id], saved.kind == kind {
-            // Toggle: same key pressed again — revert to pre-transform text
+
             if case .file = item.content {
                 updateFileItemText(id: item.id, newText: saved.text)
             } else {
@@ -479,7 +450,7 @@ extension ClipboardManager {
             }
             caseTransformOriginals.removeValue(forKey: item.id)
         } else {
-            // Apply transform — save current text for toggle
+
             let transformed: String
             switch kind {
             case .lowercase: transformed = currentText.lowercased()
@@ -496,29 +467,20 @@ extension ClipboardManager {
         invalidateCachesAfterContentEdit()
         playInteractionSoundIfEnabled(.moveFront)
         userOpenedItemPreview = true
-        // Not syncItemPreviewWithSelection() — when userOpenedItemPreview is
-        // already true, that function only REFRESHES an already-visible
-        // preview (see its own body); it never opens a closed one. L/U should
-        // always surface the result, whether or not the preview happened to
-        // be open already.
+
         showSelectedItemPreview()
         let toolID = kind == .uppercase ? "text.uppercase" : "text.lowercase"
         AuthManager.shared.registerToolUsage(toolID: toolID)
     }
 
-    /// E — start inline editing on the currently-selected item, if it carries
-    /// editable text. Called from the event tap.
     func beginInlineEditForSelection() {
         guard previewWindow.isVisible, !isInlineEditing else { return }
         guard displayItems.indices.contains(selectedIndex) else { return }
         beginInlineEdit(for: displayItems[selectedIndex])
     }
 
-    /// Also called by the E entry in the Transform panel — one canonical path.
     func beginInlineEdit(for item: ClipboardItem) {
-        // Markdown-tagged rich content (html/richText/rtfd) can't round-trip
-        // through the mixed/rich editor without losing headers, lists, etc.
-        // Plain .text and .file markdown items still edit fine as raw text.
+
         if item.tags.contains(.markdown) {
             switch item.content {
             case .html, .richText, .rtfd:
@@ -527,36 +489,25 @@ extension ClipboardManager {
             default: break
             }
         }
-        // E isn't blocked while the share panel is up (only inTransformStage
-        // and isInlineEditing are guarded at the event-tap level — see
-        // ClipboardManager+EventTap.swift), so without this, editing here
-        // could open the inline editor over a still-visible share panel. Exit
-        // it here, once, ahead of every editor variant below.
+
         setSidePanelStage(.none)
-        // Mixed content (text interleaved with tables) gets a combined editor
-        // so nothing is silently dropped. segments(for:) only returns non-nil
-        // when both text AND table segments are present.
+
         if let segs = TableCellExtractor.segments(for: item) {
             beginInlineMixedEdit(for: item, segments: segs)
             return
         }
-        // Real table structure (richText/RTFD/HTML table, e.g. pasted from
-        // Excel/Numbers/a web page) edits cell-by-cell — routing it through
-        // the flat text editor instead would flatten the whole table into one
-        // plain-text blob and permanently destroy its structure on save.
+
         if let rows = TableCellExtractor.cells(for: item) {
             beginInlineTableEdit(for: item, rows: rows)
             return
         }
-        // Rich content (richText/rtfd/html without tables) gets a formatted
-        // editor so users see bold, colors, links etc. while editing.
+
         if let attr = Self.editableAttributedString(for: item) {
             beginInlineRichEdit(for: item, attributedString: attr)
             return
         }
         guard let plain = Self.editablePlainText(for: item) else {
-            // No separate "can't be edited" popup — shake the row and play the
-            // denied tone, like the standard macOS "nope" gesture.
+
             signalEditDenied(for: item.id)
             return
         }
@@ -580,18 +531,8 @@ extension ClipboardManager {
         AuthManager.shared.registerToolUsage(toolID: "text.edit")
     }
 
-    /// Shared prologue for every inline-editor variant (plain / table / mixed
-    /// / rich). These six lines were copy-pasted into all four `beginInline*`
-    /// functions; the only thing that legitimately differs between them is
-    /// which editor gets presented afterwards.
-    ///
-    /// The popup MUST stay open through an edit, so: pin it, give up any
-    /// transform/share stage, suspend the idle timer, and claim the side slot.
     private func beginInlineEditPresentation(for item: ClipboardItem) {
-        // Claim the edit BEFORE leaving the stage: setSidePanelStage(.none)
-        // re-runs the auto-preview policy, and `isInlineEditing` (which is just
-        // `inlineEditItemID != nil`) is what makes that a no-op. Setting the id
-        // afterwards would briefly open an auto-preview underneath the editor.
+
         inlineEditItemID = item.id
         setSidePanelStage(.none)
         popupPinnedOpen = true
@@ -687,8 +628,6 @@ extension ClipboardManager {
         finishInlineEditCommit()
     }
 
-    /// Double-Enter in the inline editor: save, then immediately paste the
-    /// just-edited item — one keystroke pattern instead of Enter-then-V.
     func commitInlineEditAndPaste(with newText: String) {
         commitInlineEditThenPaste { [self] in commitInlineEdit(with: newText) }
     }
@@ -713,10 +652,6 @@ extension ClipboardManager {
         commitInlineEditThenPaste { [self] in commitInlineTableEdit(with: rows) }
     }
 
-    /// An item's CONTENT was just rewritten in place (inline edit, or an L/U
-    /// case transform). Everything derived from the old content is now stale:
-    /// the cached display list, the cached tool list, and ToolRegistry's own
-    /// single-slot cache.
     private func invalidateCachesAfterContentEdit() {
         _displayItems = nil
         lastTransformCacheItemID = nil
@@ -724,17 +659,11 @@ extension ClipboardManager {
         ToolRegistry.invalidateCache()
     }
 
-    /// Shared epilogue for every inline-edit commit. The item's content just
-    /// changed, so the cached display list and the cached tool list built from
-    /// the OLD content are both stale and must be dropped.
     private func finishInlineEditCommit() {
         invalidateCachesAfterContentEdit()
         endInlineEditPresentation()
     }
 
-    /// Double-Enter in any inline editor: save via `commit`, then paste the
-    /// item that was just edited. The id has to be captured BEFORE committing,
-    /// because committing clears `inlineEditItemID`.
     private func commitInlineEditThenPaste(_ commit: () -> Void) {
         guard let id = inlineEditItemID else { return }
         commit()
@@ -766,8 +695,7 @@ extension ClipboardManager {
 
     private func endInlineEditPresentation() {
         itemPreviewPanel.hide()
-        // Give focus back to Clipen's popup window so keys resume flowing
-        // through the event tap normally.
+
         userOpenedItemPreview = false
         if previewWindow.isVisible {
             startAutoDismissTimer()
@@ -783,39 +711,39 @@ extension ClipboardManager {
         syncItemPreviewWithSelection()
     }
 
-    /// THE single "the selection changed" entry point. Every place that moves
-    /// `selectedIndex`, reorders `displayItems` (pin/group/delete), or changes
-    /// the filter must call this — not the three sync functions by hand.
-    ///
-    /// Each of the three self-guards on its own stage/visibility (see their
-    /// bodies), so calling all three unconditionally is a no-op for whichever
-    /// panels aren't open. Hand-rolling the combination is what let call sites
-    /// drift: before this existed, of the 15 selection-change sites only 8
-    /// called all three — `deleteSelected()` and `togglePin()` called just the
-    /// item preview, leaving the transform panel pointed at a stale (or
-    /// deleted) item while `commitPaste()` still read its tool list.
     func selectionDidChange() {
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
         syncShareStageWithSelection()
     }
 
+    private static let itemPreviewSyncDelay: TimeInterval = 0.07
+
     func syncItemPreviewWithSelection() {
+
         guard previewWindow.isVisible else { return }
-        // Inline editor owns the side slot until commit/cancel — never let a
-        // stray selection change (mark, front, cycle) overwrite it.
         if isInlineEditing { return }
-        // Transform (X) and share (S) own the side slot while active, so
-        // auto-preview must not pop the item preview open on top of them when
-        // a navigation lands on a matching content type.
-        //
-        // `sidePanelStage` is the single source of truth here: setSidePanelStage
-        // is the only thing that assigns it, and it hides the outgoing panel in
-        // the same call — so the stage and what's actually on screen cannot
-        // disagree. (This used to read the panels' own `isVisible` instead,
-        // because the previous independent `inTransformStage` / `inShareStage`
-        // booleans could be left `true` with no panel showing, which wedged
-        // auto-preview off for the rest of the session.)
+        if sidePanelStage != .none { return }
+
+        itemPreviewSyncWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.applyItemPreviewSync()
+        }
+        itemPreviewSyncWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.itemPreviewSyncDelay, execute: work)
+    }
+
+    func cancelPendingItemPreviewSync() {
+        itemPreviewSyncWork?.cancel()
+        itemPreviewSyncWork = nil
+    }
+
+    private func applyItemPreviewSync() {
+        itemPreviewSyncWork = nil
+        guard previewWindow.isVisible else { return }
+
+        if isInlineEditing { return }
+
         if sidePanelStage != .none { return }
         if userOpenedItemPreview {
             if itemPreviewPanel.isVisible {
@@ -840,22 +768,6 @@ extension ClipboardManager {
         }
     }
 
-    /// Warms the (up to) 3 items before and 3 after the current selection
-    /// in the background — see PreviewPrefetch.swift for what "warms"
-    /// actually does per content type. Only ever runs alongside an actual
-    /// preview update, so it's purely a "the next few V-taps won't feel
-    /// like they're loading" optimization while you're already browsing
-    /// with preview open — never anything else.
-    ///
-    /// Called on every navigation step, so the window recomputes from
-    /// scratch each time — but `prefetchedNeighborIDs` means only the ONE
-    /// genuinely new item at the leading edge actually gets
-    /// `PreviewPrefetcher.prefetch()` called on it. Without this, every
-    /// step re-called prefetch on all 6 neighbors and relied on each of
-    /// their own caches (TableCellExtractor, TextInsightService,
-    /// FilePreviewCache, …) to bail out cheaply — correct, but real
-    /// redundant calls (and, for file items, a redundant background Task
-    /// spawn) on every step regardless.
     private func prefetchNeighborPreviews() {
         guard itemPreviewPanel.isVisible, !displayItems.isEmpty else { return }
         let lower = max(0, selectedIndex - 3)
@@ -863,10 +775,7 @@ extension ClipboardManager {
         guard lower <= upper else { return }
 
         let windowIDs = Set((lower...upper).filter { $0 != selectedIndex }.map { displayItems[$0].id })
-        // Drop anything that's fallen out of the window — if the user
-        // comes back to it later, re-prefetching is both safe (every
-        // underlying cache checks itself first) and correct (it may have
-        // been genuinely evicted from those caches by then).
+
         prefetchedNeighborIDs.formIntersection(windowIDs)
 
         for idx in lower...upper where idx != selectedIndex {
@@ -1063,9 +972,7 @@ extension ClipboardManager {
         ClipenSignpost.event("selection.target")
 
         cycleCount += 1
-        // Only a tap that MOVED the selection counts as navigation — the tap
-        // that merely opened the popup used to be counted too, which inflated
-        // nav to roughly (pastes + real navigation) in the daily stats.
+
         if wasVisible {
             AuthManager.shared.registerActionUsage(actionID: "popup.nav")
         }
@@ -1130,8 +1037,6 @@ extension ClipboardManager {
         selectionDidChange()
     }
 
-    /// Walk to the next category one at a time (Recents → each tag → wrap),
-    /// driven by repeated taps of the ` (grave) key while the popup is open.
     func cycleCategoryForward() {
         let total = 1 + availableTags.count
         guard total > 1 else { return }
@@ -1145,15 +1050,12 @@ extension ClipboardManager {
         selectCategoryByIndex((current + 1) % total)
         AuthManager.shared.registerActionUsage(actionID: "action.next-category")
 
-        // Briefly light the ` hint in the popup strip.
         popupHintCategory = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
             self?.popupHintCategory = false
         }
     }
 
-    /// Walk to the previous category one at a time — the reverse of
-    /// `cycleCategoryForward()`, driven by ⇧` while the popup is open.
     func cycleCategoryBackward() {
         let total = 1 + availableTags.count
         guard total > 1 else { return }
@@ -1167,7 +1069,6 @@ extension ClipboardManager {
         selectCategoryByIndex((current - 1 + total) % total)
         AuthManager.shared.registerActionUsage(actionID: "action.prev-category")
 
-        // Briefly light the ` hint in the popup strip.
         popupHintCategory = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
             self?.popupHintCategory = false
@@ -1221,14 +1122,7 @@ extension ClipboardManager {
             }
         }
         capturedPasteTarget = NSWorkspace.shared.frontmostApplication
-        // Re-check the trial before painting — the count may have crossed the
-        // threshold since the last open, and the popup itself is what shows
-        // the subscribe prompt. evaluate() is instant (cached policy + local
-        // paste count); refresh() re-asks the server so a policy change (e.g.
-        // a purchase, or a plan change) reaches this machine on the very next
-        // popup open instead of waiting for the 30-minute background timer.
-        // Only this one trigger point — not every keystroke, not navigation
-        // elsewhere in the app, just the popup opening.
+
         ProGate.shared.evaluate()
         ProGate.shared.refresh()
         ClipenSignpost.event("popup.show")
@@ -1668,8 +1562,6 @@ extension ClipboardManager {
         commitPaste()
     }
 
-    /// Returns true when the item became MARKED (false = unmarked), so call
-    /// sites can count only actual marking in the usage stats.
     @discardableResult
     func toggleMark(id: UUID) -> Bool {
         let nowMarked: Bool
@@ -1718,11 +1610,6 @@ extension ClipboardManager {
         return ClipboardItem.makeCombinedItemProvider(for: markedItems)
     }
 
-    // MARK: - Collections
-
-    /// Jumps straight to the view in that 1-based slot. Slot 1 is always "All"
-    /// (the whole ring, unfiltered); slots 2…6 are the collections in creation
-    /// order. Instant switch, no toggle — a number always lands on its view.
     func selectCollection(slot: Int) {
         if slot == 1 {
             if activeCollection != nil {
@@ -1739,8 +1626,6 @@ extension ClipboardManager {
         activeCollection = collections[index]
     }
 
-    /// Highest number key that currently does something: All plus whatever
-    /// collections exist.
     var highestCollectionSlot: Int { collections.count + 1 }
 
     @discardableResult
@@ -1760,7 +1645,6 @@ extension ClipboardManager {
         return true
     }
 
-    /// Renaming carries every item that carried the old name along with it.
     func renameCollection(_ old: String, to rawNew: String) {
         let new = rawNew.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !new.isEmpty, new != old,
@@ -1780,8 +1664,6 @@ extension ClipboardManager {
         saveHistory()
     }
 
-    /// Deleting a collection deletes the clips inside it — except clips that
-    /// also live in another collection, which simply lose this one membership.
     func deleteCollection(_ name: String) {
         guard let slot = collections.firstIndex(of: name) else { return }
         collections.remove(at: slot)
@@ -1796,7 +1678,6 @@ extension ClipboardManager {
         saveHistory()
     }
 
-    /// Move = leave the current collection, join `target`.
     func moveItem(_ id: UUID, toCollection target: String) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         if let activeCollection { items[idx].collections.remove(activeCollection) }
@@ -1806,7 +1687,6 @@ extension ClipboardManager {
         AuthManager.shared.registerActionUsage(actionID: "action.collection-move")
     }
 
-    /// Share = join `target` while staying wherever it already is.
     func shareItem(_ id: UUID, toCollection target: String) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].collections.insert(target)

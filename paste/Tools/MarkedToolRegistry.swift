@@ -52,15 +52,13 @@ enum MarkedToolRegistry {
         return base + collectionTools(for: items)
     }
 
-    /// File the whole marked set into another collection, mirroring the
-    /// single-item collection transforms.
     private static func collectionTools(for items: [ClipboardItem]) -> [MarkedTool] {
         let manager = ClipboardManager.shared
         let active  = manager.activeCollection
         var tools: [MarkedTool] = []
 
         for name in manager.collections {
-            // Skip a destination every marked item already belongs to.
+
             guard !items.allSatisfy({ $0.collections.contains(name) }) else { continue }
             let ids = items.map(\.id)
 

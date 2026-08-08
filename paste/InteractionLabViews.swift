@@ -3,7 +3,6 @@ import AppKit
 import Combine
 import UniformTypeIdentifiers
 
-
 struct LabKeyCapView: View {
     let key: LabKey
     let pressed: Bool
@@ -148,10 +147,7 @@ private struct LabSidePanel: View {
 
 struct InteractionLabStage: View {
     @ObservedObject var lab: InteractionLabController
-    /// Hides just the small animated keycap row at the bottom (⌘ V X …) —
-    /// everything above it (mock panel, instruction, caption, result) always
-    /// plays. Used by the Settings keyboard panel, which shows that same
-    /// press animation on the real keyboard tiles instead when this is off.
+
     var showKeyRow: Bool = true
 
     var body: some View {
@@ -198,10 +194,6 @@ struct InteractionLabStage: View {
                     }
                     .frame(height: 58)
 
-                    // Paste-demo tap counter: V ● ● ● ×N. The row is ALWAYS present
-                    // at a fixed height and only its contents fade in/out — otherwise
-                    // inserting/removing it as the demo restarts (on every paste)
-                    // changed the stage height and shook the whole sheet up and down.
                     ZStack {
                         if lab.pasteTapTarget > 0 {
                             HStack(spacing: 7) {
@@ -227,9 +219,7 @@ struct InteractionLabStage: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .task {
-            // `play()` itself now waits for real run-loop turns before its
-            // first animation fires (see InteractionLabController.play()),
-            // so this fallback no longer needs its own guessed delay.
+
             guard !lab.isPlaying else { return }
             lab.play()
         }
@@ -249,4 +239,3 @@ extension View {
         })
     }
 }
-

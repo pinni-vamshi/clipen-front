@@ -10,7 +10,6 @@ import SwiftUI
 import WebKit
 @preconcurrency import PDFKit
 
-
 struct AsyncDelimitedFilePreview: View {
     let url: URL
     @State private var rows: [[String]]?
@@ -131,16 +130,9 @@ struct FilePreviewContent: View {
                 AsyncPDFFilePreview(url: url)
             } else if url.pathExtension.lowercased() == "gif" {
                 AsyncGIFFilePreview(url: url)
-            // Known-not-an-image extensions MUST short-circuit before the
-            // greedy `NSImage(contentsOf:)` probe below — that call reads the
-            // WHOLE file on main to try image detection, which for a 50 MB
-            // GLB / video / etc. is a 2-10 s beach-ball freeze before we ever
-            // reach the correct branch.
+
             } else if FileKindDetector.isGLTFModelFile(url) {
-                // glTF/GLB rendering (via GLTFKit2's shared concurrent loader
-                // queue) was causing hangs and crashes in practice — removed
-                // rather than left half-working. The file itself still
-                // copies/pastes normally; it just doesn't render a preview.
+
                 NoPreviewAvailableView(url: url)
             } else if FileKindDetector.is3DModelFile(url) {
                 Model3DPreview(url: url)
@@ -155,9 +147,7 @@ struct FilePreviewContent: View {
             } else if FileKindDetector.isTextFile(url) {
                 AsyncTextFilePreview(url: url)
             } else if FileKindDetector.isImageFile(url) {
-                // Loads via NSImage on a background queue rather than the
-                // main-thread NSImage(contentsOf:) below — a 20 MB HEIC used
-                // to hitch main for 100-500 ms before the preview appeared.
+
                 AsyncImageFilePreview(url: url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
@@ -193,9 +183,6 @@ struct FilePreviewContent: View {
     }
 }
 
-/// Default empty state for a file whose type is recognized but has no
-/// working preview renderer. The file itself is unaffected — this only
-/// affects what shows in the preview panel.
 struct NoPreviewAvailableView: View {
     let url: URL
 
@@ -308,7 +295,7 @@ struct FolderTreePreview: View {
 
     private static func scan(_ root: URL) async -> (entries: [Entry], truncated: Bool) {
         await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
+            PreviewWorkQueue.run {
                 var out: [Entry] = []
                 var truncated = false
                 let fm = FileManager.default
@@ -354,7 +341,7 @@ struct Model3DPreview: NSViewRepresentable {
         view.autoenablesDefaultLighting = true
         view.backgroundColor = .clear
         view.antialiasingMode = .multisampling4X
-        view.scene = SCNScene() // placeholder until async load lands
+        view.scene = SCNScene()
         Self.loadSceneAsync(url, into: view, coordinator: context.coordinator)
         return view
     }
@@ -364,14 +351,11 @@ struct Model3DPreview: NSViewRepresentable {
         Self.loadSceneAsync(url, into: view, coordinator: context.coordinator)
     }
 
-    /// Loads on a background queue and swaps in on the main thread. A UUID
-    /// token guards against a stale load winning after the view was reused
-    /// for a different URL.
     private static func loadSceneAsync(_ url: URL, into view: SCNView, coordinator: Coordinator) {
         let token = UUID()
         coordinator.loadToken = token
         coordinator.loadedURL = url
-        DispatchQueue.global(qos: .userInitiated).async {
+        PreviewWorkQueue.run {
             let scene = loadScene(url)
             DispatchQueue.main.async { [weak view] in
                 guard let view, coordinator.loadToken == token else { return }
@@ -416,8 +400,6 @@ struct Model3DPreview: NSViewRepresentable {
         pivot.runAction(spin)
     }
 
-    // Native SceneKit/ModelIO formats only — glTF/GLB never reach here
-    // (routed to NoPreviewAvailableView instead; see FileKindDetector.isGLTFModelFile).
     private static func loadScene(_ url: URL) -> SCNScene {
         if let scene = try? SCNScene(url: url, options: [.checkConsistency: true]) {
             return scene
@@ -626,7 +608,7 @@ struct ZoomableImagePreview: NSViewRepresentable {
 
     private static func decodeFullRes(_ data: Data, into imageView: NSImageView,
                                       scrollView: FitOnLayoutScrollView) {
-        DispatchQueue.global(qos: .userInitiated).async {
+        PreviewWorkQueue.run {
             let full = NSImage(data: data)
             DispatchQueue.main.async {
                 guard let full, scrollView.lastImageDataCount == data.count else { return }
@@ -647,10 +629,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
 
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-        // Explicitly handle trackpad pinch. The preview lives in a
-        // non-activating panel, so NSScrollView's built-in magnification can't
-        // be relied on to receive the gesture — overriding magnify(with:)
-        // guarantees pinch-to-zoom works even while ⌘ is held for the popup.
         override func magnify(with event: NSEvent) {
             let target = min(maxMagnification, max(minMagnification, magnification * (1 + event.magnification)))
             let point = documentView?.convert(event.locationInWindow, from: nil) ?? .zero
@@ -692,11 +670,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
     }
 }
 
-/// One shared WKWebView reused across every HTMLStringPreview mount. Building
-/// a WebKit view is 100-200 ms (WebKit process, JS context, layout engine);
-/// cycling through HTML items used to pay that cost per item. Because only
-/// one HTML preview is visible at any time (the popover shows one item and
-/// swaps rootView on change), reuse is safe.
 private enum HTMLWebViewPool {
     static let shared: WKWebView = {
         let view = WKWebView()
@@ -717,8 +690,7 @@ struct HTMLStringPreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let view = HTMLWebViewPool.shared
-        // Reparent if AppKit tore off from a previous host — cheap when it's
-        // already the child of nothing (fresh) or the same superview.
+
         view.removeFromSuperview()
         if context.coordinator.lastHTML != html {
             loadHTML(view)
@@ -777,16 +749,6 @@ struct HTMLStringPreview: NSViewRepresentable {
     }
 }
 
-
-// ============================================================================
-// Blob preview — the ".blob(typeMap)" content case used to just list the
-// pasteboard type names. Freeform, Notes canvas fragments, WebKit-custom
-// clipboards, private-app copies etc. all land here. When any of the blob's
-// types map to a renderer we already have, use it — the shape/data on the
-// clipboard is the same bytes the destination app would receive on paste, so
-// this preview matches what pasting produces.
-// ============================================================================
-
 struct BlobContentPreview: View {
     let typeMap: [String: Data]
 
@@ -822,8 +784,6 @@ struct BlobContentPreview: View {
             }
         }
     }
-
-    // MARK: - Type resolvers
 
     private static let imageTypes: [String] = [
         "public.png", "public.tiff", "public.jpeg", "public.heic",
@@ -885,8 +845,7 @@ struct BlobContentPreview: View {
                let s = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
                !s.isEmpty { return s }
         }
-        // Some private types are actually plain UTF-8 payloads; opportunistic
-        // decode as a last resort before giving up on the whole clipping.
+
         for (_, data) in typeMap where data.count < 128_000 {
             if let s = String(data: data, encoding: .utf8),
                !s.isEmpty, s.allSatisfy({ $0.isASCII || $0.isLetter || $0.isNumber || $0.isPunctuation || $0.isWhitespace }) {
@@ -899,8 +858,6 @@ struct BlobContentPreview: View {
     private func shouldMonospace(_ s: String) -> Bool {
         s.contains("{") || s.contains("[") || s.contains("\t") || s.contains("<?xml")
     }
-
-    // MARK: - Fallback
 
     private var fallbackTypeList: some View {
         textPreview(typeMap.keys.sorted().map { "· \($0)" }.joined(separator: "\n"),
@@ -916,10 +873,6 @@ struct BlobContentPreview: View {
         }
     }
 }
-
-/// Loads a file-URL image with NSImage on a background queue, shows a spinner
-/// until the image lands. Cycling to a big HEIC/PNG file in the preview no
-/// longer freezes main while NSImage reads and decodes the whole file.
 
 struct AsyncImageFilePreview: View {
     let url: URL
@@ -947,9 +900,6 @@ struct AsyncImageFilePreview: View {
     }
 }
 
-/// `PDFDocument(url:)` reads and parses the whole file — for a large PDF
-/// that's a real main-thread stall. Same async-decode pattern as
-/// AsyncImageFilePreview above.
 struct AsyncPDFFilePreview: View {
     let url: URL
     @State private var document: PDFDocument?
@@ -980,8 +930,6 @@ struct AsyncPDFFilePreview: View {
     }
 }
 
-/// `Data(contentsOf:)` + `NSImage(data:)` for a large animated GIF is real
-/// main-thread I/O + decode work. Same async pattern as the image/PDF cases.
 struct AsyncGIFFilePreview: View {
     let url: URL
     @State private var loaded: (image: NSImage, data: Data)?

@@ -46,9 +46,6 @@ struct ClipboardTool: Identifiable {
     }
 }
 
-/// Transforms available on a ⌘+G group: split it back apart, or paste only a
-/// single data type out of it. A group's normal ⌘-release paste already drops
-/// every member in order; these give finer control.
 enum GroupTools {
     static var all: [ClipboardTool] { [ungroup, pasteText, pasteFiles, pasteImages] }
 
@@ -62,8 +59,7 @@ enum GroupTools {
         label: "Ungroup", group: "Group",
         preview: { children($0) != nil ? "Split into individual items" : nil },
         runSync: { item in
-            // Ring operation, not a paste — perform it on the main actor and
-            // report status so the transform panel just closes cleanly.
+
             DispatchQueue.main.async { ClipboardManager.shared.ungroup(item) }
             return .status("Ungrouped")
         },
@@ -121,12 +117,6 @@ enum GroupTools {
     )
 }
 
-/// Transforms that file a clip into another collection. Built fresh from the
-/// user's collection list on every lookup, so renaming or adding a collection
-/// is reflected immediately. Two flavours per destination:
-///   • Move  — leave the collection it's showing under, join the destination.
-///   • Also in — join the destination while staying where it already is
-///     (collections are multi-membership, so a clip can live in several).
 enum CollectionTools {
     static func all(for item: ClipboardItem) -> [ClipboardTool] {
         let manager = ClipboardManager.shared
@@ -134,7 +124,7 @@ enum CollectionTools {
         var tools: [ClipboardTool] = []
 
         for name in manager.collections {
-            // No point offering a destination the clip already sits in.
+
             guard !item.collections.contains(name) else { continue }
 
             if let active, active != name {

@@ -6,10 +6,7 @@ class TransformPanel: NSObject, NSPopoverDelegate {
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
     private let popover = NSPopover()
     private var cachedPanelHeight: CGFloat = 460
-    // Keyed on the tool-list shape (its count) rather than only "while
-    // shown" — re-measuring a throwaway NSHostingView on every single X
-    // press was doing a full SwiftUI layout pass just to discard it,
-    // even when the panel's height couldn't have changed.
+
     private var cachedHeightSignature: Int? = nil
     private var wantsVisible = false
 
@@ -142,9 +139,7 @@ class TransformPanel: NSObject, NSPopoverDelegate {
     func hide() {
         wantsVisible = false
         if popover.isShown {
-            // Snap-close, not animated. Otherwise the ~150ms fade-out visually
-            // overlaps whatever panel we're switching to (share, item preview),
-            // making it look like Clipen shows two panels at once.
+
             popover.animates = false
             popover.performClose(nil)
             popover.animates = true
@@ -162,9 +157,7 @@ struct TransformView: View {
     let isProcessing:           Bool
     let onDismiss:              () -> Void
     @ObservedObject private var manager = ClipboardManager.shared
-    /// Shared across every row — lets the ONE selection box travel and
-    /// resize between rows via `matchedGeometryEffect`, same pattern as the
-    /// main popup's `PopoverRow`.
+
     @Namespace private var selectionNamespace
 
     private var activePagePickerToolID: String {
@@ -263,9 +256,7 @@ struct TransformView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    // Spacing here (not 0) reserves the vertical room the
-                    // selected row's height-growth needs — see TransformRow's
-                    // scaleEffect comment.
+
                     VStack(spacing: 10) {
                         ForEach(Array(displays.enumerated()), id: \.element.id) { idx, display in
                             TransformRow(
@@ -334,21 +325,16 @@ struct TransformView: View {
                 }
                 .onChange(of: selectedTransformIndex) { _, newIdx in
                     guard displays.indices.contains(newIdx) else { return }
-                    // Row 0 with .center anchor scrolls its top edge above the
-                    // ScrollView's origin (under the header). Pin it to .top
-                    // for the first row so it stays fully visible.
+
                     let anchor: UnitPoint = newIdx == 0 ? .top : .center
-                    // Same spring as SelectionHighlightStyle — see
-                    // PreviewOverlayWindow's identical comment.
+
                     withAnimation(SelectionHighlightStyle.spring) {
                         proxy.scrollTo(newIdx, anchor: anchor)
                     }
                 }
                 .onAppear {
                     guard displays.indices.contains(selectedTransformIndex) else { return }
-                    // On fresh open we always start at row 0. The ScrollView's
-                    // natural position is already there, so scrolling further
-                    // would only tuck the row under the header — skip it.
+
                     if selectedTransformIndex > 0 {
                         proxy.scrollTo(selectedTransformIndex, anchor: .center)
                     }
@@ -362,13 +348,9 @@ struct TransformRow: View, Equatable {
     let display:      TransformDisplay
     let isSelected:   Bool
     let isProcessing: Bool
-    /// A `Namespace.ID` never changes after creation, so it's safe to leave
-    /// out of `==` below.
+
     let selectionNamespace: Namespace.ID
 
-    // `@State private var isHovered` isn't part of the equality contract —
-    // SwiftUI preserves it across renders based on view identity, and hover
-    // changes trigger a re-render on their own regardless of `.equatable()`.
     static func == (lhs: TransformRow, rhs: TransformRow) -> Bool {
         lhs.display == rhs.display
             && lhs.isSelected == rhs.isSelected
@@ -377,9 +359,6 @@ struct TransformRow: View, Equatable {
 
     @State private var isHovered = false
 
-    /// Constant for every row — see `SelectionHighlight.inset`. Sized so
-    /// the scaled selected row fits this panel's fixed 290pt width:
-    ///   row = 290 − 2·16 = 258  →  258 · 1.12 = 289.0 ≤ 290
     private static let horizontalInset: CGFloat = 16
 
     var body: some View {
@@ -431,9 +410,7 @@ struct TransformRow: View, Equatable {
                 }
             }
         }
-        // Same reasoning as the main popup's `rowContent`: hard-block any
-        // inherited animation so this row's own text/icon changes never
-        // pick up the selection box's spring or its position travel.
+
         .transaction { $0.animation = nil }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

@@ -3,7 +3,6 @@ import AppKit
 import Combine
 import UniformTypeIdentifiers
 
-
 struct CollectionsWidthKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -31,15 +30,7 @@ struct ClipenSettingsView: View {
 
     @State private var newCollectionName = ""
     @State private var renameCollectionText = ""
-    /// One shared trigger for all three collection alerts. Chaining three
-    /// separate `.alert(isPresented:)` modifiers on the same view is the
-    /// cause of a real bug: SwiftUI only reliably tracks one alert's
-    /// presentation state per view identity, so after a handful of
-    /// presentations across the three, EVERY alert on this view — new,
-    /// rename, and delete alike — silently stops presenting at all,
-    /// with no error and no visible feedback on click. Routing all
-    /// three through a single `.alert(_:isPresented:presenting:)` call
-    /// keyed on this one enum removes the conflict entirely.
+
     @State private var collectionAlertKind: CollectionAlertKind? = nil
     @State private var showingCollectionAlert = false
     @State private var scrollViewportWidth: CGFloat = 0
@@ -58,10 +49,6 @@ struct ClipenSettingsView: View {
     @State private var pendingLanguage: AppLanguage?
     @State private var showLanguagePicker = false
 
-    /// SwiftUI-owned source of truth for the beta channel, persisted to the
-    /// same UserDefaults key `AppDelegate.allowedChannels(for:)` reads. Using
-    /// @AppStorage (instead of a computed binding through weak AppDelegate.shared)
-    /// makes turning it OFF actually persist and stops it snapping back on.
     @AppStorage("SUBetaUpdatesEnabled") private var betaUpdatesEnabled = false
 
     private struct Row1HeightKey: PreferenceKey {
@@ -112,17 +99,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    // MARK: - Tips
-    //
-    // Cards for the app's real, tracked lesson windows — not a second,
-    // separately-worded copy of the same gestures. Heading/description come
-    // straight from InteractionDemo (the same source the keyboard-demo
-    // popup above and the automatic nudges already use), and clicking a
-    // card opens that exact lesson window via `presentTipManually`. The
-    // first 5 are the ones that can ALSO appear automatically once their
-    // usage threshold is crossed; Collections and Search only ever open
-    // from here (see NudgeFeature.thresholdMet).
-
     private static let tipFeatures: [NudgeFeature] =
         [.multiPaste, .groups, .preview, .pinPreview, .transformPanel, .collections, .search]
 
@@ -154,10 +130,7 @@ struct ClipenSettingsView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(learned ? .green : .textDim.opacity(0.5))
             }
-            // No line cap — the caption fills however much of the card it
-            // needs and only truncates if it genuinely doesn't fit, instead
-            // of always cutting off at a fixed line count regardless of how
-            // much room was actually left.
+
             Text(LocalizedStringKey(feature.demo.caption))
                 .font(.system(size: 11))
                 .foregroundColor(.textSec)
@@ -682,13 +655,6 @@ struct ClipenSettingsView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Pro upsell
-
-    /// Sits above Collections. Disappears entirely once the user is Pro — at
-    /// that point the toolbar badge alone carries the status, and a permanent
-    /// "subscribe" strip in a paid app would just be noise. Gated on
-    /// paywallApplies for the same reason as the toolbar badge: the paywall is
-    /// inert for real users today, so there is nothing to upsell them on yet.
     @ViewBuilder
     private var proUpsellBanner: some View {
         if proGate.paywallApplies && !proGate.isPro {
@@ -728,12 +694,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    // MARK: - Collections
-
-    /// Opening any of the picker popovers below routes through
-    /// NSPopover.show(...) — see WakeGuard for why that's gated. Closing
-    /// stays instant; only the "turning on" transition is ever delayed,
-    /// and only in the rare post-wake window.
     private func togglePopover(_ flag: Binding<Bool>) {
         if flag.wrappedValue {
             flag.wrappedValue = false
@@ -763,7 +723,7 @@ struct ClipenSettingsView: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    // Slot 1 is always All; collections take 2 onward.
+
                     collectionPill(name: nil, slot: 1)
 
                     ForEach(Array(manager.collections.enumerated()), id: \.element) { index, name in
@@ -790,15 +750,13 @@ struct ClipenSettingsView: View {
                     }
                 }
                 .padding(.vertical, 2)
-                // Centre the pills while they fit, and only start scrolling
-                // once they genuinely overflow.
+
                 .frame(minWidth: scrollViewportWidth, alignment: .center)
             }
             .measuredWidth(CollectionsWidthKey.self)
         }
         .frame(maxWidth: .infinity, alignment: .center)
-        // Same card treatment as the Interaction Preview panel, stretched the
-        // full width of the settings column with its own interior padding.
+
         .padding(.horizontal, 24)
         .padding(.vertical, 20)
         .background(Color.surfaceHi.opacity(0.3),
@@ -831,16 +789,6 @@ struct ClipenSettingsView: View {
             }
         }
     }
-
-    // MARK: - Excluded Apps
-    //
-    // Deliberately NOT a Collections-style pill row — this lives as a single
-    // "Excluded apps / Manage" row inside App Settings instead (in the exact
-    // slot the redundant "Check for Updates" row used to occupy, since that
-    // duplicated the toolbar's own Check-for-Updates button). The management
-    // surface is a compact vertical list in a popover, not a card of its own
-    // on the main settings page — a "set once, rarely revisit" feature earns
-    // a lower profile than Collections, which people switch between often.
 
     private var excludedAppsManagerPopover: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -902,16 +850,9 @@ struct ClipenSettingsView: View {
         .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
-    /// Native "choose an app" panel, scoped to /Applications — the standard
-    /// macOS pattern for this (Automator, "Open With → Other…", login-item
-    /// pickers all work this way). Deliberately NOT a list of currently
-    /// running processes: the whole point of an exclusion list is apps like
-    /// a password manager that you set up once and that may well not be
-    /// open at the moment you're configuring this.
     private func browseForApplicationToExclude() {
         let panel = NSOpenPanel()
-        // NSOpenPanel.title is a plain String — never goes through SwiftUI's
-        // catalog lookup on its own, so this needs the explicit wrap.
+
         panel.title = String(localized: "Choose an App to Exclude")
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowedContentTypes = [.application]
@@ -940,7 +881,7 @@ struct ClipenSettingsView: View {
         let isActive = manager.activeCollection == name
 
         HStack(spacing: 8) {
-            // Leading shortcut badge — the literal keystroke that selects it.
+
             Text("⌘\(slot)")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(isActive ? .white.opacity(0.9) : .textDim)
@@ -952,8 +893,6 @@ struct ClipenSettingsView: View {
                 .font(.system(size: 12, weight: isActive ? .semibold : .medium))
                 .foregroundColor(isActive ? .white : .textPri)
 
-            // Trailing delete — only real collections can be removed; All is
-            // the unfiltered view, not something that can be deleted.
             if let name {
                 Button {
                     collectionAlertKind = .delete(name)
@@ -1232,35 +1171,19 @@ struct ClipenSettingsView: View {
         }
     }
 
-    // MARK: - Keyboard-based interaction picker
-    //
-    // Replaces the old flat list of demo rows. Renders an actual keyboard;
-    // the keys that trigger a real gesture (V, C, X, G, P, F, `, Space,
-    // Delete, Shift) get a pulsing blue border, ⌘ is gold. Click a key to
-    // toggle a popup beside it (not over it) showing that gesture's demo —
-    // and, for gestures with a configurable speed, the Slow/Medium/Fast
-    // picker right there in the same popup. Click the same key again to
-    // close it.
-
     struct KBKey: Identifiable, Equatable {
         let id: String
         let label: String
         var width: CGFloat = 1
         var demos: [InteractionDemo] = []
         var isCommand: Bool = false
-        /// Consecutive keys sharing the same groupID render as ONE bordered
-        /// cluster (e.g. the whole 1–9 row for Collections) instead of each
-        /// key getting its own separate blue box — any of them opens the
-        /// same demo, since the real gesture is "hold ⌘ and press 1–9",
-        /// not tied to any single number.
+
         var groupID: String? = nil
         static func == (l: KBKey, r: KBKey) -> Bool { l.id == r.id }
     }
 
     private enum KBLayout {
-        // 1 is "All", 2 through maxCollections+1 are your collections — the
-        // whole row is one gesture (hold ⌘, press 1–9), so all nine keys
-        // share the Collections demo and render as a single grouped cluster.
+
         private static let collectionNumberKeys: [KBKey] = (1...9).map { n in
             KBKey(id: "\(n)", label: "\(n)", demos: [.collections], groupID: "collections")
         }
@@ -1289,11 +1212,9 @@ struct ClipenSettingsView: View {
              KBKey(id: "Z", label: "Z"),
              KBKey(id: "X", label: "X", demos: [.transform]),
              KBKey(id: "C", label: "C", demos: [.moveToFront]),
-             // Reverse (previously its own thing on Shift) is now a category
-             // of V itself — Shift+V IS a V gesture, not a separate key.
+
              KBKey(id: "V", label: "V", demos: [.cycle, .multiPaste, .pinnedOpen, .reverseCycle]),
-             // B doubles as the alternate reverse-cycle trigger when that
-             // setting is toggled on (see the toggle inside the reverse demo).
+
              KBKey(id: "B", label: "B", demos: [.reverseCycle]),
              KBKey(id: "N", label: "N"), KBKey(id: "M", label: "M"),
              KBKey(id: "COMMA", label: ","), KBKey(id: "PERIOD", label: "."), KBKey(id: "SLASH", label: "/"),
@@ -1318,16 +1239,9 @@ struct ClipenSettingsView: View {
 
         let key: KBKey
         let isActive: Bool
-        /// True while the demo currently playing in this key's (or a sibling
-        /// key's) popover is "pressing" this real key — drives the actual
-        /// keyboard tile to visibly depress in sync with the popup's own
-        /// animated keycap, instead of only the popup animating on its own.
+
         let isPressed: Bool
-        /// True while some OTHER demo is playing and this key isn't part of
-        /// it. Its blue/gold interactive styling disappears completely (not
-        /// just dims) for the duration — only the keys actually involved in
-        /// the current gesture stay highlighted, so the keyboard doesn't
-        /// look like a dozen things are happening at once.
+
         let dimmed: Bool
         let unitWidth: CGFloat
         let keyHeight: CGFloat
@@ -1376,18 +1290,11 @@ struct ClipenSettingsView: View {
 
     struct KeyDemoPopup: View {
         let key: KBKey
-        // Shared with KeyboardInteractionPanel (not owned here) so the real
-        // keyboard tiles can light up in sync with this demo's own animated
-        // keycap row instead of only the popup animating.
+
         @ObservedObject var lab: InteractionLabController
 
         @State private var selected: InteractionDemo
-        // ON (default): the mock panel etc. always play, with the press
-        // animation on the popup's OWN small keycap row — self-contained,
-        // nothing behind the popup needs to be visible for the demo to make
-        // sense. OFF: the same key presses sync onto the REAL keyboard tiles
-        // behind this popup instead, and the popup's own row goes quiet.
-        // The two never animate at once — this just picks which one shows it.
+
         @State private var showInnerButtons = true
         @ObservedObject private var manager = ClipboardManager.shared
 
@@ -1420,10 +1327,6 @@ struct ClipenSettingsView: View {
                         .font(.system(size: 11, weight: .semibold)).foregroundColor(.textPri)
                 }
 
-                // No separate caption Text here — InteractionLabStage already
-                // renders the caption itself (lab.currentCaption). The mock
-                // panel always plays; only its own keycap row is toggled off
-                // when the real keyboard is doing that job instead.
                 InteractionLabStage(lab: lab, showKeyRow: showInnerButtons)
 
                 Button {
@@ -1464,9 +1367,6 @@ struct ClipenSettingsView: View {
                     }
                 }
 
-                // Reverse-cycle's actual trigger (Shift+V vs B) is a global
-                // setting, not a per-key thing — surface the toggle right
-                // here since this demo is reachable from both V and B.
                 if selected == .reverseCycle {
                     HStack(spacing: 8) {
                         Text("Reverse key").font(.system(size: 9)).foregroundColor(.textDim)
@@ -1482,25 +1382,14 @@ struct ClipenSettingsView: View {
                 }
             }
             .padding(14)
-            // Wide enough for demos that slide the mock popup aside and show
-            // a side panel (Transform, Space-preview) — those two panels
-            // together span ~320pt once their offsets are accounted for; a
-            // narrower popup clipped the side panel's right edge.
+
             .frame(width: 380)
             .task {
                 lab.syncRealKeyboard = !showInnerButtons
-                // The cold-start race (first playthrough has no visible
-                // animation) is now handled inside
-                // InteractionLabController.play() itself, which every
-                // `select`/`play` call funnels through — no need to
-                // duplicate a settle-wait here.
+
                 lab.select(selected)
             }
-            // Not a plain `lab.stop()`: if a different key's popover has
-            // already opened and taken `lab` over by the time this fires
-            // (see InteractionLabController.stopIfStillPlaying), stopping
-            // unconditionally here would cancel that new popup's just-
-            // started animation instead of this one's.
+
             .onDisappear { lab.stopIfStillPlaying(selected) }
         }
 
@@ -1566,9 +1455,7 @@ struct ClipenSettingsView: View {
 
     private struct KeyboardInteractionPanel: View {
         @State private var activeKeyID: String? = nil
-        // Owned here (not inside KeyDemoPopup) so the real keyboard tiles
-        // below can read its pressedKeys and depress in sync with whichever
-        // demo is currently playing in the open popover.
+
         @StateObject private var lab = InteractionLabController()
 
         private let keySpacing: CGFloat = 7
@@ -1579,10 +1466,7 @@ struct ClipenSettingsView: View {
             GeometryReader { geo in
                 let totalWidth = geo.size.width
                 let pressedRealIDs = lab.syncRealKeyboard ? Set(lab.pressedKeys.flatMap { $0.kbKeyIDs }) : []
-                // While a demo plays, only the real keys it actually uses
-                // (plus the key whose popover is open) stay lit — every
-                // other interactive key's blue border disappears entirely
-                // for the duration instead of just quieting its pulse.
+
                 let involvedRealIDs: Set<String> = lab.isPlaying
                     ? Set(lab.selectedDemo.heroKeys.flatMap { $0.kbKeyIDs }).union(activeKeyID.map { [$0] } ?? [])
                     : []
@@ -1590,13 +1474,7 @@ struct ClipenSettingsView: View {
                 VStack(spacing: keySpacing) {
                     ForEach(Array(KBLayout.rows.enumerated()), id: \.offset) { _, row in
                         let segments = Self.segments(for: row)
-                        // Must match what's actually RENDERED (one gap per
-                        // segment boundary), not the ungrouped key count —
-                        // grouping several keys (e.g. the whole 1–9 row) into
-                        // one cluster removes their internal gaps, so
-                        // counting 13 gaps for a row that only draws 5 made
-                        // every row's units come out too small and rows
-                        // stopped lining up with the ones above/below them.
+
                         let rowUnits = row.reduce(CGFloat(0)) { $0 + $1.width }
                         let rowGaps = CGFloat(segments.count - 1)
                         let rowAvail = totalWidth - horizontalPadding * 2 - rowGaps * keySpacing
@@ -1612,14 +1490,7 @@ struct ClipenSettingsView: View {
                                                isPressed: pressedRealIDs.contains(key.id),
                                                dimmed: lab.isPlaying && !involvedRealIDs.contains(key.id),
                                                unitWidth: unitW, keyHeight: keyHeight)
-                                        // `lab` republishes many times a second
-                                        // while any demo plays, re-running this
-                                        // whole panel's body — without this,
-                                        // every key's `.popover()` bridge (all
-                                        // of them, across the whole keyboard,
-                                        // not just the open one) would get
-                                        // re-evaluated on every single publish
-                                        // for as long as any demo is playing.
+
                                         .equatable()
                                         .onTapGesture {
                                             guard !key.demos.isEmpty else { return }
@@ -1665,9 +1536,6 @@ struct ClipenSettingsView: View {
             .frame(minHeight: 320)
         }
 
-        /// Splits a row into render segments: consecutive keys sharing the
-        /// same non-nil groupID collapse into one segment (rendered as a
-        /// single bordered cluster); everything else stays its own segment.
         private static func segments(for row: [KBKey]) -> [[KBKey]] {
             var result: [[KBKey]] = []
             var current: [KBKey] = []
@@ -1684,10 +1552,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    /// Renders a run of keys (e.g. the whole 1–9 Collections row) as ONE
-    /// bordered box instead of N separate ones — any key in it opens the
-    /// same demo, so visually they read as a single unified control rather
-    /// than nine individually-interactive buttons.
     private struct GroupedKeyCluster: View, Equatable {
         static func == (lhs: Self, rhs: Self) -> Bool {
             lhs.keys == rhs.keys && lhs.isActive == rhs.isActive && lhs.pressedRealIDs == rhs.pressedRealIDs

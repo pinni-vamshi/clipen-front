@@ -10,7 +10,6 @@ import SwiftUI
 import WebKit
 @preconcurrency import PDFKit
 
-
 struct ExtractedLink: Identifiable {
     let id = UUID()
     let label: String
@@ -18,12 +17,7 @@ struct ExtractedLink: Identifiable {
 }
 
 enum LinkExtractor {
-    /// Built once, reused forever. Constructing an NSDataDetector loads the
-    /// system's data-detection resources and an NSRegularExpression compiles
-    /// its pattern — both used to happen on EVERY SwiftUI body evaluation of
-    /// the preview (i.e. every selection), on the main thread. Both classes
-    /// are documented as thread-safe for concurrent matching, so a single
-    /// shared instance is safe to share across the main and worker queues.
+
     private nonisolated static let linkDetector: NSDataDetector? =
         try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
@@ -68,7 +62,6 @@ enum LinkExtractor {
         return out
     }
 
-    /// URLs that appear as bare text (not markup) inside plain-text copies.
     nonisolated static func links(fromPlainText text: String, cap: Int = 12) -> [ExtractedLink] {
         guard text.count <= 300_000, let detector = linkDetector else { return [] }
         let ns = text as NSString
@@ -83,12 +76,6 @@ enum LinkExtractor {
     }
 }
 
-/// Parses a plain-text representation of any copied content for things worth
-/// surfacing at a glance without opening the full preview: person names,
-/// email addresses, code-shaped lines, and lines that repeat verbatim
-/// (useful for spotting duplicated rows in pasted lists/logs).
-/// The result of one text-insight scan. A reference type so `NSCache` can hold
-/// it; every stored property is immutable.
 nonisolated final class TextInsights {
     struct RepeatedLine {
         let line: String
@@ -112,20 +99,12 @@ nonisolated final class TextInsights {
     }
 }
 
-/// Runs the insight scan off the main thread and memoizes it per clip.
-///
-/// This scan (an NLTagger named-entity pass plus several regex/line scans) used
-/// to run synchronously inside `RichLinkedPreview.body` — so it re-ran on every
-/// SwiftUI body evaluation, on the main thread, for every text-ish clip, and
-/// the cost was paid even when the result was empty. That was the bulk of the
-/// delay between clicking an item and seeing its preview.
 final class TextInsightService {
     static let shared = TextInsightService()
 
     private let queue = DispatchQueue(label: "com.clipen.textinsights", qos: .userInitiated)
     private let cache = NSCache<NSString, TextInsights>()
-    // [ExtractedLink] is a value type, so it's boxed as NSArray for NSCache —
-    // same pattern TableCellExtractor already uses for [[String]] above.
+
     private let linkCache = NSCache<NSString, NSArray>()
 
     private init() {
@@ -133,10 +112,6 @@ final class TextInsightService {
         linkCache.countLimit = 400
     }
 
-    /// Keyed on the clip id AND a content fingerprint, so editing a clip in
-    /// place (same id, new text) recomputes instead of serving stale insights.
-    /// Shared by both the insights cache and the link cache below — the same
-    /// fingerprint invalidates both correctly on edit.
     static func cacheKey(id: UUID?, text: String?) -> String {
         let t = text ?? ""
         return "\(id?.uuidString ?? "-")|\(t.count)|\(t.prefix(48))|\(t.suffix(48))"
@@ -172,10 +147,6 @@ final class TextInsightService {
         linkCache.object(forKey: key as NSString) as? [ExtractedLink]
     }
 
-    /// `compute` is whichever `LinkExtractor` variant matches the clip's
-    /// content type (plain text / attributed string / HTML) — this service
-    /// doesn't need to know which; it only owns the off-thread + cache
-    /// mechanics, exactly like `insights(forKey:text:)` above.
     func links(forKey key: String, compute: @escaping () -> [ExtractedLink]) async -> [ExtractedLink] {
         await withCheckedContinuation { continuation in
             queue.async { [weak self] in
@@ -198,8 +169,6 @@ enum TextInsightExtractor {
         try? NSRegularExpression(pattern: #"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"#,
                                  options: .caseInsensitive)
 
-    /// The whole scan, in one call — always invoked from a background queue
-    /// (see TextInsightService), never from a view body.
     nonisolated static func computeInsights(in text: String) -> TextInsights {
         TextInsights(emails: emails(in: text),
                      names: personNames(in: text),
@@ -227,11 +196,6 @@ enum TextInsightExtractor {
         return out
     }
 
-    /// Named-entity recognition is by far the heaviest thing in this file's
-    /// analysis path — NLTagger loads an ML model and runs inference. The cap
-    /// used to be 50 k characters, which is a lot of inference to sit behind a
-    /// chip strip; a few thousand characters is more than enough to surface
-    /// the names worth showing.
     nonisolated static func personNames(in text: String, cap: Int = 6) -> [String] {
         guard !text.isEmpty, text.count <= 5_000 else { return [] }
         let tagger = NLTagger(tagSchemes: [.nameType])
@@ -297,10 +261,7 @@ enum TextInsightExtractor {
 
 struct PreviewInsightChip: Identifiable {
     enum Kind { case link(URL), email, name, code, repeated(Int), added, removed }
-    /// Assigned by `uniqued(_:)` from the chip's own content. It used to be a
-    /// fresh `UUID()` per chip per build, which meant every rebuild produced
-    /// entirely new identities and `ForEach` in InsightsStrip could never diff
-    /// — it tore down and relaid out the whole strip each time.
+
     var id: String = ""
     let kind: Kind
     let icon: String
@@ -308,7 +269,6 @@ struct PreviewInsightChip: Identifiable {
     let color: Color
     var helpText: String? = nil
 
-    /// Content-derived identity. Stable across rebuilds for the same chip.
     private var stableKey: String {
         switch kind {
         case .link(let url):   return "link|\(url.absoluteString)"
@@ -321,9 +281,6 @@ struct PreviewInsightChip: Identifiable {
         }
     }
 
-    /// Stamps stable ids, disambiguating the rare genuine duplicate (e.g. the
-    /// same code-shaped line appearing twice) so SwiftUI never sees a repeated
-    /// ForEach id.
     static func uniqued(_ chips: [PreviewInsightChip]) -> [PreviewInsightChip] {
         var seen = Set<String>()
         return chips.map { chip in
@@ -340,8 +297,6 @@ struct PreviewInsightChip: Identifiable {
         }
     }
 
-    /// The concrete added (green) / removed (red) lines from a small edit,
-    /// shown first in the strip so "what exactly changed" is obvious.
     static func diffChips(_ detail: DiffDetail?) -> [PreviewInsightChip] {
         guard let detail else { return [] }
         var chips: [PreviewInsightChip] = []
@@ -358,7 +313,6 @@ struct PreviewInsightChip: Identifiable {
         return chips
     }
 
-    /// Cheap — link extraction already happened at the call site.
     static func linkChips(_ links: [ExtractedLink]) -> [PreviewInsightChip] {
         links.map {
             PreviewInsightChip(kind: .link($0.url), icon: "link",
@@ -367,8 +321,6 @@ struct PreviewInsightChip: Identifiable {
         }
     }
 
-    /// Pure formatting of an already-computed (off-main, cached) scan — no
-    /// analysis happens here, so this is safe to call from a view body.
     static func textChips(_ insights: TextInsights?) -> [PreviewInsightChip] {
         guard let insights else { return [] }
         var chips: [PreviewInsightChip] = []
@@ -395,11 +347,6 @@ struct PreviewInsightChip: Identifiable {
 struct InsightsStrip: View {
     let chips: [PreviewInsightChip]
 
-    /// Alternates chips into two independent rows (1st→row A, 2nd→row B,
-    /// 3rd→row A, …) rather than a shared-column grid — a grid would match
-    /// each row's column width to its widest paired item, leaving gaps
-    /// around shorter chips. Two plain, independently-packed `HStack`s keep
-    /// every chip flush against its neighbor.
     private var rowA: [PreviewInsightChip] { chips.enumerated().filter { $0.offset % 2 == 0 }.map(\.element) }
     private var rowB: [PreviewInsightChip] { chips.enumerated().filter { $0.offset % 2 == 1 }.map(\.element) }
 
@@ -431,8 +378,7 @@ struct InsightsStrip: View {
     }
 
     private func chipLabel(_ chip: PreviewInsightChip) -> some View {
-        // Diff chips are tinted with their add/remove color; everything else
-        // keeps the neutral gray look.
+
         let isDiff: Bool = { if case .added = chip.kind { return true }
                              if case .removed = chip.kind { return true }
                              return false }()
@@ -448,18 +394,10 @@ struct InsightsStrip: View {
 }
 
 struct RichLinkedPreview<Content: View>: View {
-    /// How to find this clip's links — deferred, not run yet. Every call site
-    /// used to compute its `LinkExtractor.links(...)` eagerly as a plain
-    /// argument expression, meaning the NSDataDetector/regex scan ran
-    /// synchronously on the main thread on EVERY body evaluation (every
-    /// selection, every re-render), uncached — the same class of stutter the
-    /// insights scan below used to cause before it was moved off-thread.
-    /// Wrapping it in a closure lets this view run it exactly like insights:
-    /// off the main thread, once per clip, cached after that.
+
     let computeLinks: () -> [ExtractedLink]
     var plainText: String? = nil
-    /// Identity of the clip these insights describe — the cache key, so the
-    /// scan runs once per clip rather than on every body evaluation.
+
     var insightID: UUID? = nil
     var diff: DiffDetail? = nil
     @ViewBuilder let content: Content
@@ -482,15 +420,10 @@ struct RichLinkedPreview<Content: View>: View {
                 InsightsStrip(chips: chips)
             }
         }
-        // The content renders immediately; the insight/link chips appear a
-        // beat later on a cache miss. Previously the insights scan ran
-        // inline in `body` (same for link extraction until now), so the
-        // preview couldn't paint at all until it finished.
+
         .task(id: taskKey) {
             let key = taskKey
 
-            // Links: cache hit is synchronous, same reasoning as insights
-            // below — revisiting a clip shows its link chips immediately.
             if let hit = TextInsightService.shared.cachedLinks(forKey: key) {
                 links = hit
             } else {
@@ -504,14 +437,12 @@ struct RichLinkedPreview<Content: View>: View {
                 insights = nil
                 return
             }
-            // Cache hit is synchronous — revisiting a clip shows its chips
-            // immediately, with no flash of the strip appearing late.
+
             if let hit = TextInsightService.shared.cached(forKey: key) {
                 insights = hit
                 return
             }
-            // Drop the previous clip's chips while the new scan runs, so they
-            // can't linger next to unrelated content.
+
             insights = nil
             let computed = await TextInsightService.shared.insights(forKey: key, text: plainText)
             guard !Task.isCancelled else { return }
