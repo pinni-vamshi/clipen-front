@@ -659,16 +659,27 @@ struct PopoverRow: View, Equatable {
         }
         .padding(.horizontal, isSelected ? Self.horizontalInset : Self.restingInset)
         // The pop is on the WHOLE row here — icon, divider, content, and the
-        // box all scale up together as one unit, not just the text. This is
+        // box all widen together as one unit, not just the text. This is
         // also what fixes the overlap bug from scaling content alone: since
         // everything grows in the same proportion together, nothing can
         // bleed past a neighbor that stayed a different size — there's no
-        // "static" part left for a "growing" part to run into.
+        // "static" part left for a "growing" part to run into. (Height is
+        // pinned separately below — see the scaleEffect comment.)
         //   Popup width is a fixed 420 (see showAnchored's contentSize).
         //   box = 420 − 2·28 = 364  →  364 · 1.10 = 400.4 ≤ 420
         // → stays inside with ~10pt of gap on each edge at the popped size,
         //   on top of the ~28pt resting gap from horizontalInset itself.
-        .scaleEffect(isSelected ? Self.selectedScale : 1.0)
+        // Anisotropic on purpose: X grows with the spring (the visible
+        // "elevation" pop), Y is pinned to 1.0 always. `scaleEffect` scales
+        // both axes around the row's own center, so a spring on the Y axis
+        // makes the row's top/bottom edges — and the box riding along with
+        // them — transiently overshoot past the resting height and spring
+        // back, which reads as the selection box bobbing up and down. Since
+        // the row's height never needs to change (only its width grows to
+        // make room for the wider selected look), pinning Y removes that
+        // vertical wobble at the source instead of damping it away — which
+        // also means the X spring can stay fully lively.
+        .scaleEffect(x: isSelected ? Self.selectedScale : 1.0, y: 1.0)
         // Asymmetric on purpose: becoming selected keeps the springy pop
         // (unchanged, that direction was already right) — but a row
         // FALLING BACK to resting size doesn't need that same bounce/
@@ -677,7 +688,7 @@ struct PopoverRow: View, Equatable {
         // less than the spring's own response), so the previous row settles
         // back down cleanly instead of wobbling on the way down.
         .animation(isSelected
-                   ? .spring(response: 0.32, dampingFraction: 0.82)
+                   ? .spring(response: 0.32, dampingFraction: 0.5)
                    : .easeOut(duration: 0.24),
                    value: isSelected)
         .offset(x: shakeOffsetX)

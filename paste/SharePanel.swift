@@ -119,6 +119,10 @@ struct ShareView: View {
     let services: [NSSharingService]
     let selectedIndex: Int
     let itemCount: Int
+    /// Shared across every row — lets the ONE selection box travel and
+    /// resize between rows via `matchedGeometryEffect`, same pattern as the
+    /// main popup's `PopoverRow`.
+    @Namespace private var selectionNamespace
 
     var body: some View {
         VStack(spacing: 0) {
@@ -171,7 +175,7 @@ struct ShareView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(Array(services.enumerated()), id: \.offset) { idx, service in
-                            ShareRow(service: service, isSelected: idx == selectedIndex)
+                            ShareRow(service: service, isSelected: idx == selectedIndex, selectionNamespace: selectionNamespace)
                                 .equatable()
                                 .id(idx)
                                 .contentShape(Rectangle())
@@ -207,6 +211,9 @@ struct ShareView: View {
 private struct ShareRow: View, Equatable {
     let service: NSSharingService
     let isSelected: Bool
+    /// A `Namespace.ID` never changes after creation, so it's safe to leave
+    /// out of `==` below.
+    let selectionNamespace: Namespace.ID
 
     // Same pattern as TransformRow: `@State private var isHovered` is
     // intentionally left out of the equality contract.
@@ -215,6 +222,10 @@ private struct ShareRow: View, Equatable {
     }
 
     @State private var isHovered = false
+
+    private static let horizontalInset: CGFloat = 18
+    private static let restingInset:    CGFloat = 6
+    private static let selectedScale:   CGFloat = 1.10
 
     var body: some View {
         HStack(spacing: 10) {
@@ -240,14 +251,37 @@ private struct ShareRow: View, Equatable {
                     .foregroundColor(.accentColor.opacity(0.7))
             }
         }
+        // Same reasoning as the main popup's `rowContent`: hard-block any
+        // inherited animation so this row's own text/icon changes never
+        // pick up the selection box's spring or its position travel.
+        .transaction { $0.animation = nil }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(
-            isSelected ? Color.accentColor : (isHovered ? Color.accentColor.opacity(0.1) : Color.clear),
+            (!isSelected && isHovered) ? Color.accentColor.opacity(0.1) : Color.clear,
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
-        .padding(.horizontal, 6)
+        // Only the SELECTED row hosts the box, tagged with the shared
+        // namespace — SwiftUI interpolates its frame between whichever two
+        // rows hold that tag across a selection change, so one box visibly
+        // travels to the new row instead of one disappearing while another
+        // pops in elsewhere.
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.accentColor)
+                    .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace)
+            }
+        }
+        .padding(.horizontal, isSelected ? Self.horizontalInset : Self.restingInset)
+        // Anisotropic on purpose — same as the main popup: X grows with the
+        // spring (the visible "elevation" pop), Y is pinned to 1.0 so the
+        // row's height never overshoots and the box can't bob up and down.
+        .scaleEffect(x: isSelected ? Self.selectedScale : 1.0, y: 1.0)
+        .animation(isSelected
+                   ? .spring(response: 0.32, dampingFraction: 0.5)
+                   : .easeOut(duration: 0.24),
+                   value: isSelected)
         .onHover { isHovered = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovered)
-        .animation(.easeInOut(duration: 0.12), value: isSelected)
     }
 }
