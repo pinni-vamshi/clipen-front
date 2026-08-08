@@ -677,7 +677,7 @@ struct PopoverRow: View, Equatable {
         // less than the spring's own response), so the previous row settles
         // back down cleanly instead of wobbling on the way down.
         .animation(isSelected
-                   ? .spring(response: 0.32, dampingFraction: 0.5)
+                   ? .spring(response: 0.32, dampingFraction: 0.82)
                    : .easeOut(duration: 0.24),
                    value: isSelected)
         .offset(x: shakeOffsetX)
