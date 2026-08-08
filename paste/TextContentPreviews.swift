@@ -349,6 +349,72 @@ struct LaTeXRenderedPreview: View {
     }
 }
 
+/// Serializes math rendering across every `LaTeX()` view in the app.
+/// MathJax renders through ONE shared JavaScriptCore context
+/// (`MathJax.svgRenderer`, in the LaTeXSwiftUI/MathJaxSwift dependency) —
+/// letting many equations fire their render at the exact same moment means
+/// many calls contending for that single engine simultaneously, which is
+/// the leading suspect for math-heavy documents rendering some equations
+/// and silently leaving others as raw source (see `GatedMath` below).
+/// There's no completion callback in LaTeXSwiftUI's public API to know
+/// exactly when a given render finishes, so this uses a fixed grace period
+/// per turn as a practical stand-in — long enough for a typical equation to
+/// convert, short enough that a math-heavy document still reveals its
+/// equations at a reasonable pace while scrolling.
+actor MathRenderGate {
+    static let shared = MathRenderGate()
+    private var isBusy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !isBusy {
+            isBusy = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            isBusy = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
+/// Wraps a `LaTeX()`-rendered equation so it only starts rendering once
+/// `MathRenderGate` grants it a turn, instead of every currently-visible
+/// equation requesting a render from the shared MathJax engine at once.
+/// Shows the raw source (dimmed) while waiting, matching the same
+/// error-mode fallback `LaTeX()` itself uses for a genuine parse failure —
+/// so waiting-for-a-turn and actually-failed-to-render look the same
+/// instead of introducing a third, distracting visual state.
+private struct GatedMath<Content: View>: View {
+    let source: String
+    @ViewBuilder let content: () -> Content
+    @State private var isMyTurn = false
+
+    var body: some View {
+        Group {
+            if isMyTurn {
+                content()
+            } else {
+                Text(source)
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .task(id: source) {
+            await MathRenderGate.shared.acquire()
+            isMyTurn = true
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            await MathRenderGate.shared.release()
+        }
+    }
+}
+
 /// Renders a whole `.tex` file (a real document — `\documentclass`,
 /// `\usepackage`, etc. — see `LaTeXRenderedPreview`'s doc comment for why
 /// that's routed here instead) as readable formatted text, the same idea as
@@ -510,15 +576,19 @@ struct LaTeXDocumentPreview: View {
     /// `inlineContent`'s per-line mixed prose+math handling) — `.blockViews`
     /// gives it the same centered block treatment `LaTeXRenderedPreview`
     /// uses for a bare equation, appropriate here since the whole block IS
-    /// the equation, not prose with math embedded in it.
+    /// the equation, not prose with math embedded in it. Gated through
+    /// `MathRenderGate` (see its doc comment) so a math-heavy document
+    /// doesn't fire every visible equation's render at once.
     private func mathBlock(_ source: String) -> some View {
-        LaTeX(source)
-            .font(NSFont.systemFont(ofSize: 13))
-            .parsingMode(.onlyEquations)
-            .blockMode(.blockViews)
-            .errorMode(.original)
-            .foregroundColor(.primary)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        GatedMath(source: source) {
+            LaTeX(source)
+                .font(NSFont.systemFont(ofSize: 13))
+                .parsingMode(.onlyEquations)
+                .blockMode(.blockViews)
+                .errorMode(.original)
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     /// amsthm-style environments (`\newtheorem{theorem}{Theorem}` and
@@ -907,13 +977,15 @@ struct LaTeXDocumentPreview: View {
     @ViewBuilder
     private func inlineContent(_ line: String) -> some View {
         if line.contains("$") || line.contains("\\[") || line.contains("\\(") {
-            LaTeX(line)
-                .font(NSFont.systemFont(ofSize: 13))
-                .parsingMode(.onlyEquations)
-                .blockMode(.blockText)
-                .errorMode(.original)
-                .foregroundColor(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            GatedMath(source: line) {
+                LaTeX(line)
+                    .font(NSFont.systemFont(ofSize: 13))
+                    .parsingMode(.onlyEquations)
+                    .blockMode(.blockText)
+                    .errorMode(.original)
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         } else {
             Text(formattedText(line))
                 .font(.system(size: 13))

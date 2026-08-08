@@ -217,11 +217,27 @@ struct MultiItemPreviewView: View {
         currentItemID == nil ? items.count : items.count - 1
     }
 
+    /// Called without `currentItemID` for a saved `.group` item (see
+    /// `ContentPreviewView`'s `.group` case); called WITH it for an active
+    /// multi-mark selection (see `showSelectedItemPreview()`), where the
+    /// currently-viewed item sits in `items` alongside the marked ones but
+    /// isn't itself counted as "marked".
+    private var isGroupPreview: Bool { currentItemID == nil }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("\(markedCount) marked")
-                    .font(.system(size: 12, weight: .semibold))
+                HStack(spacing: 4) {
+                    Image(systemName: isGroupPreview ? "square.stack.3d.up.fill" : "checkmark.circle.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("\(isGroupPreview ? "Group" : "Marked") · \(markedCount)")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundColor(.indigo)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color.indigo.opacity(0.14), in: Capsule())
+                .overlay(Capsule().stroke(Color.indigo.opacity(0.35), lineWidth: 0.5))
+
                 Spacer()
                 Text("Space to close")
                     .font(.system(size: 10))
