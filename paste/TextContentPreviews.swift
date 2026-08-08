@@ -452,7 +452,16 @@ struct LaTeXDocumentPreview: View {
     /// `openAt` is the index of the `{` itself; returns the index of its
     /// matching `}`, accounting for nested braces (e.g. a `\textbf{}` inside
     /// a section title).
-    private func matchingBrace(in s: String, openAt: Int) -> String.Index? {
+    ///
+    /// Generic over `StringProtocol` so it can run directly on a `Substring`
+    /// (as `formattedText` needs to, below) without first copying it into a
+    /// `String` — a `String.Index` is only valid against the exact string
+    /// value it was produced from, so returning an index computed against a
+    /// COPY and then using it to subscript the original `Substring` is
+    /// undefined behavior. That mismatch is exactly what crashed here: the
+    /// copy and the original happen to share enough representation to often
+    /// work, until they don't.
+    private func matchingBrace<S: StringProtocol>(in s: S, openAt: Int) -> S.Index? {
         var depth = 0
         var idx = s.index(s.startIndex, offsetBy: openAt)
         while idx < s.endIndex {
@@ -518,7 +527,7 @@ struct LaTeXDocumentPreview: View {
             let name = String(afterSlash.prefix(while: { $0.isLetter }))
             let afterName = afterSlash.dropFirst(name.count)
             guard !name.isEmpty, afterName.first == "{",
-                  let braceEnd = matchingBrace(in: String(afterName), openAt: 0) else {
+                  let braceEnd = matchingBrace(in: afterName, openAt: 0) else {
                 // Not a recognized `\name{...}` shape — drop just the
                 // backslash so the rest of the token still reads naturally
                 // instead of showing a stray `\`.
