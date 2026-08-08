@@ -447,6 +447,9 @@ extension ClipboardManager {
         if inTransformStage {
             updateTransformPanel()
         }
+        if inShareStage {
+            updateSharePanel()
+        }
     }
 
     // MARK: - Inline edit (E on the popup)

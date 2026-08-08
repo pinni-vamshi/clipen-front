@@ -223,7 +223,7 @@ private struct ShareRow: View, Equatable {
 
     @State private var isHovered = false
 
-    private static let horizontalInset: CGFloat = 18
+    private static let horizontalInset: CGFloat = 12
     private static let restingInset:    CGFloat = 6
     private static let selectedScale:   CGFloat = 1.06
 
