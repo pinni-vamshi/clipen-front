@@ -101,7 +101,18 @@ struct MarkdownTextPreview: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
+            // `LazyVStack`, not `VStack`: MathJax renders through ONE
+            // shared JavaScriptCore context (`MathJax.svgRenderer`) common
+            // to every `LaTeX()` view. A plain `VStack` instantiates every
+            // block up front and fires every math render simultaneously the
+            // instant the preview appears — on a document with dozens of
+            // equations, that's dozens of renders racing the same shared
+            // context at once, which is a far better explanation for
+            // "identical equations, inconsistent results" than anything in
+            // the parsing above. Lazy loading means only the blocks
+            // actually scrolled into view (plus a small buffer) exist and
+            // start rendering at any one time.
+            LazyVStack(alignment: .leading, spacing: 6) {
                 ForEach(blocks) { $0.view }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -375,7 +386,18 @@ struct LaTeXDocumentPreview: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
+            // `LazyVStack`, not `VStack`: MathJax renders through ONE
+            // shared JavaScriptCore context (`MathJax.svgRenderer`) common
+            // to every `LaTeX()` view. A plain `VStack` instantiates every
+            // block up front and fires every math render simultaneously the
+            // instant the preview appears — on a document with dozens of
+            // equations, that's dozens of renders racing the same shared
+            // context at once, which is a far better explanation for
+            // "identical equations, inconsistent results" than anything in
+            // the parsing above. Lazy loading means only the blocks
+            // actually scrolled into view (plus a small buffer) exist and
+            // start rendering at any one time.
+            LazyVStack(alignment: .leading, spacing: 6) {
                 ForEach(blocks) { $0.view }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
