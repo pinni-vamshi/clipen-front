@@ -62,6 +62,13 @@ struct RichTextContentPreview: View {
                 case .table:
                     DelimitedTablePreview(text: text)
                         .padding(10)
+                case .code(let language) where language == "LaTeX":
+                    // A whole .tex file — CodeLanguageDetector tags these
+                    // "LaTeX" the same as it would any other source file,
+                    // but raw syntax-highlighted source isn't a useful
+                    // preview for a document meant to be read. Render it as
+                    // formatted text instead (see LaTeXDocumentPreview).
+                    LaTeXDocumentPreview(text: text)
                 case .code(let language):
                     CodeSyntaxPreview(text: text, language: language)
                 case .json:
@@ -317,6 +324,222 @@ struct LaTeXRenderedPreview: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// Renders a whole `.tex` file (a real document — `\documentclass`,
+/// `\usepackage`, etc. — see `LaTeXRenderedPreview`'s doc comment for why
+/// that's routed here instead) as readable formatted text, the same idea as
+/// `MarkdownTextPreview` but for a first pass of the most common LaTeX
+/// constructs rather than the full language: sections, bold/italic, simple
+/// itemize/enumerate lists, and inline/display math. Preamble and layout
+/// commands (`\documentclass`, `\usepackage`, `\newcommand`, `\vspace`, …)
+/// carry no readable content, so they're dropped rather than shown as raw
+/// backslash-noise. Custom macros this doesn't specifically recognize (e.g.
+/// a resume template's own `\resumeItem{...}`) fall back to showing
+/// whatever text sits in the LAST brace group — not a real macro expansion,
+/// just a heuristic that happens to work for the common single-purpose-
+/// wrapper shape those tend to have.
+struct LaTeXDocumentPreview: View {
+    let text: String
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(parsedBlocks) { $0.view }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        }
+    }
+
+    private struct Block: Identifiable {
+        let id = UUID()
+        let view: AnyView
+    }
+
+    /// The readable content lives between `\begin{document}` and
+    /// `\end{document}` — everything before that is preamble. Falls back to
+    /// the whole text for a bare fragment with no preamble/document wrapper.
+    private var documentBody: String {
+        guard let start = text.range(of: "\\begin{document}") else { return text }
+        let afterStart = String(text[start.upperBound...])
+        guard let end = afterStart.range(of: "\\end{document}") else { return afterStart }
+        return String(afterStart[..<end.lowerBound])
+    }
+
+    private static let noiseCommands: Set<String> = [
+        "documentclass", "usepackage", "newcommand", "renewcommand", "providecommand",
+        "newenvironment", "renewenvironment", "def", "let", "RequirePackage",
+        "pagestyle", "thispagestyle", "fancyhf", "headrulewidth", "footrulewidth",
+        "addtolength", "setlength", "tabcolsep", "setcounter",
+        "urlstyle", "raggedbottom", "raggedright", "raggedleft",
+        "hypersetup", "DeclareMathOperator", "definecolor", "geometry",
+        "allsectionsfont", "selectfont", "fontsize", "familydefault", "sfdefault",
+        "vspace", "hspace", "newline", "noindent", "indent",
+        "clearpage", "newpage", "vfill", "hfill", "medskip", "smallskip", "bigskip",
+        "label", "maketitle",
+    ]
+
+    private var parsedBlocks: [Block] {
+        var blocks: [Block] = []
+        let lines = documentBody.components(separatedBy: "\n")
+        var i = 0
+        while i < lines.count {
+            let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+            i += 1
+
+            if trimmed.isEmpty {
+                blocks.append(Block(view: AnyView(Spacer().frame(height: 4))))
+                continue
+            }
+            if trimmed.hasPrefix("%") { continue }
+
+            if let (level, title) = sectionHeader(trimmed) {
+                blocks.append(Block(view: AnyView(
+                    inlineContent(title)
+                        .font(.system(size: level == 1 ? 17 : 15, weight: .bold))
+                )))
+                continue
+            }
+
+            if trimmed.hasPrefix("\\begin{itemize}") || trimmed.hasPrefix("\\begin{enumerate}") {
+                let numbered = trimmed.hasPrefix("\\begin{enumerate}")
+                var n = 1
+                while i < lines.count {
+                    let itemLine = lines[i].trimmingCharacters(in: .whitespaces)
+                    i += 1
+                    if itemLine.hasPrefix("\\end{itemize}") || itemLine.hasPrefix("\\end{enumerate}") { break }
+                    guard itemLine.hasPrefix("\\item") else { continue }
+                    let content = String(itemLine.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                    guard !content.isEmpty else { continue }
+                    let marker = numbered ? "\(n)." : "\u{2022}"
+                    n += 1
+                    blocks.append(Block(view: AnyView(
+                        HStack(alignment: .top, spacing: 6) {
+                            Text(marker).font(.system(size: 13)).frame(minWidth: 14, alignment: .leading)
+                            inlineContent(content)
+                        }
+                        .padding(.leading, 8)
+                    )))
+                }
+                continue
+            }
+
+            if isNoiseLine(trimmed) { continue }
+
+            // A bare `\begin{X}`/`\end{X}` for anything else (center,
+            // tabular*, document's own leftover markers, …) has no content
+            // of its own — drop just the marker and keep processing what's
+            // inside as ordinary lines.
+            if trimmed.hasPrefix("\\begin{") || trimmed.hasPrefix("\\end{") { continue }
+
+            blocks.append(Block(view: AnyView(inlineContent(trimmed))))
+        }
+        return blocks
+    }
+
+    private func sectionHeader(_ line: String) -> (level: Int, title: String)? {
+        for (level, tag) in [(1, "section"), (2, "subsection"), (3, "subsubsection")] {
+            for form in ["\\\(tag)*{", "\\\(tag){"] {
+                guard line.hasPrefix(form), let close = matchingBrace(in: line, openAt: form.count - 1) else { continue }
+                return (level, String(line[line.index(line.startIndex, offsetBy: form.count)..<close]))
+            }
+        }
+        return nil
+    }
+
+    /// `openAt` is the index of the `{` itself; returns the index of its
+    /// matching `}`, accounting for nested braces (e.g. a `\textbf{}` inside
+    /// a section title).
+    private func matchingBrace(in s: String, openAt: Int) -> String.Index? {
+        var depth = 0
+        var idx = s.index(s.startIndex, offsetBy: openAt)
+        while idx < s.endIndex {
+            if s[idx] == "{" { depth += 1 }
+            else if s[idx] == "}" {
+                depth -= 1
+                if depth == 0 { return idx }
+            }
+            idx = s.index(after: idx)
+        }
+        return nil
+    }
+
+    private func isNoiseLine(_ line: String) -> Bool {
+        guard line.hasPrefix("\\") else { return false }
+        let name = line.dropFirst().prefix(while: { $0.isLetter })
+        return Self.noiseCommands.contains(String(name))
+    }
+
+    /// A line containing real math delimiters is handed to the LaTeX
+    /// renderer whole — MathJax renders the surrounding plain text as-is
+    /// and only typesets the delimited math, which is exactly the mixed
+    /// prose+equation rendering a resume/paper line actually needs. A line
+    /// with no math gets `\textbf`/`\textit`/`\emph` turned into real
+    /// bold/italic instead, since MathJax has no reason to understand those
+    /// outside of math mode.
+    @ViewBuilder
+    private func inlineContent(_ line: String) -> some View {
+        if line.contains("$") || line.contains("\\[") || line.contains("\\(") {
+            LaTeX(line)
+                .font(NSFont.systemFont(ofSize: 13))
+                .parsingMode(.onlyEquations)
+                .blockMode(.blockText)
+                .errorMode(.original)
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(formattedText(line))
+                .font(.system(size: 13))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// `\textbf{}`/`\textit{}`/`\emph{}` become real bold/italic runs;
+    /// anything left as an unrecognized `\command{...}` falls back to just
+    /// its last brace group's text (see the type's doc comment); common
+    /// escaped characters are unescaped so `\%`/`\&`/`\_` read naturally.
+    private func formattedText(_ line: String) -> AttributedString {
+        var result = AttributedString()
+        var rest = Substring(line)
+
+        while let backslash = rest.firstIndex(of: "\\") {
+            result += AttributedString(rest[rest.startIndex..<backslash])
+            let afterSlash = rest[rest.index(after: backslash)...]
+
+            if let escaped = afterSlash.first, "%&_#{}$".contains(escaped) {
+                result += AttributedString(String(escaped))
+                rest = afterSlash.dropFirst()
+                continue
+            }
+
+            let name = String(afterSlash.prefix(while: { $0.isLetter }))
+            let afterName = afterSlash.dropFirst(name.count)
+            guard !name.isEmpty, afterName.first == "{",
+                  let braceEnd = matchingBrace(in: String(afterName), openAt: 0) else {
+                // Not a recognized `\name{...}` shape — drop just the
+                // backslash so the rest of the token still reads naturally
+                // instead of showing a stray `\`.
+                rest = afterSlash
+                continue
+            }
+            let innerRange = afterName.index(after: afterName.startIndex)..<braceEnd
+            let inner = String(afterName[innerRange])
+            let consumed = afterName.distance(from: afterName.startIndex, to: braceEnd) + 1
+            rest = afterName.dropFirst(consumed)
+
+            var run = formattedText(inner)
+            switch name {
+            case "textbf": run.inlinePresentationIntent = .stronglyEmphasized
+            case "textit", "emph": run.inlinePresentationIntent = .emphasized
+            default: break
+            }
+            result += run
+        }
+        result += AttributedString(rest)
+        return result
     }
 }
 
