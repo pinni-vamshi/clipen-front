@@ -263,7 +263,10 @@ struct TransformView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(spacing: 0) {
+                    // Spacing here (not 0) reserves the vertical room the
+                    // selected row's height-growth needs — see TransformRow's
+                    // scaleEffect comment.
+                    VStack(spacing: 10) {
                         ForEach(Array(displays.enumerated()), id: \.element.id) { idx, display in
                             TransformRow(
                                 display:    display,
@@ -335,7 +338,9 @@ struct TransformView: View {
                     // ScrollView's origin (under the header). Pin it to .top
                     // for the first row so it stays fully visible.
                     let anchor: UnitPoint = newIdx == 0 ? .top : .center
-                    withAnimation(.easeOut(duration: 0.15)) {
+                    // Same spring as SelectionHighlightStyle — see
+                    // PreviewOverlayWindow's identical comment.
+                    withAnimation(SelectionHighlightStyle.spring) {
                         proxy.scrollTo(newIdx, anchor: anchor)
                     }
                 }
@@ -372,9 +377,8 @@ struct TransformRow: View, Equatable {
 
     @State private var isHovered = false
 
-    private static let horizontalInset: CGFloat = 14
+    private static let horizontalInset: CGFloat = 18
     private static let restingInset:    CGFloat = 6
-    private static let selectedScale:   CGFloat = 1.06
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -435,30 +439,8 @@ struct TransformRow: View, Equatable {
             (!isSelected && isHovered) ? Color.accentColor.opacity(0.1) : Color.clear,
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
-        // The box view is always present (never conditionally inserted) so
-        // exactly one row's copy has `isSource: true` at any instant — the
-        // others are `false` placeholders SwiftUI uses to interpolate the
-        // travel between. Conditionally inserting/removing the view with
-        // `if isSelected { ... }` used to trigger SwiftUI's "Multiple
-        // inserted views ... have `isSource: true`" fault: on a selection
-        // change, the old row's insertion-removal and the new row's
-        // removal-insertion land in the same transaction, and two
-        // default-`isSource: true` views briefly coexist.
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.accentColor)
-                .opacity(isSelected ? 1 : 0)
-                .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace, isSource: isSelected)
-        }
-        .padding(.horizontal, isSelected ? Self.horizontalInset : Self.restingInset)
-        // Anisotropic on purpose — same as the main popup: X grows with the
-        // spring (the visible "elevation" pop), Y is pinned to 1.0 so the
-        // row's height never overshoots and the box can't bob up and down.
-        .scaleEffect(x: isSelected ? Self.selectedScale : 1.0, y: 1.0)
-        .animation(isSelected
-                   ? .spring(response: 0.32, dampingFraction: 0.5)
-                   : .easeOut(duration: 0.24),
-                   value: isSelected)
+        .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
+                             selectedInset: Self.horizontalInset, restingInset: Self.restingInset)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovered)

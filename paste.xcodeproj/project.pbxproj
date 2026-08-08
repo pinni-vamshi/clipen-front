@@ -53,6 +53,7 @@
 		B10000000000000000000034 /* InteractionToneGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000034 /* InteractionToneGenerator.swift */; };
 		B10000000000000000000035 /* ClipboardManager+Nudges.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* ClipboardManager+Nudges.swift */; };
 		B10000000000000000000036 /* ProGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000036 /* ProGate.swift */; };
+		B10000000000000000000037 /* SelectionHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000037 /* SelectionHighlight.swift */; };
 		B10000000000000000000099 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000099 /* Localizable.xcstrings */; };
 		B10000000000000000000100 /* ContentPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000100 /* ContentPreviewView.swift */; };
 		B10000000000000000000101 /* TextContentPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000101 /* TextContentPreviews.swift */; };
@@ -123,6 +124,7 @@
 		A10000000000000000000034 /* InteractionToneGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionToneGenerator.swift; sourceTree = "<group>"; };
 		A10000000000000000000035 /* ClipboardManager+Nudges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Nudges.swift"; sourceTree = "<group>"; };
 		A10000000000000000000036 /* ProGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProGate.swift; sourceTree = "<group>"; };
+		A10000000000000000000037 /* SelectionHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionHighlight.swift; sourceTree = "<group>"; };
 		A10000000000000000000099 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		A10000000000000000000100 /* ContentPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentPreviewView.swift; sourceTree = "<group>"; };
 		A10000000000000000000101 /* TextContentPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextContentPreviews.swift; sourceTree = "<group>"; };
@@ -236,6 +238,7 @@
 				A10000000000000000000003 /* Color+Hex.swift */,
 				A10000000000000000000032 /* QuickLookPreview.swift */,
 				A10000000000000000000033 /* SharePanel.swift */,
+				A10000000000000000000037 /* SelectionHighlight.swift */,
 				A10000000000000000000005 /* FileSnapshotStore.swift */,
 				A10000000000000000000006 /* ItemPreviewPanel.swift */,
 				A10000000000000000000100 /* ContentPreviewView.swift */,
@@ -383,6 +386,7 @@
 				B10000000000000000000003 /* Color+Hex.swift in Sources */,
 				B10000000000000000000032 /* QuickLookPreview.swift in Sources */,
 				B10000000000000000000033 /* SharePanel.swift in Sources */,
+				B10000000000000000000037 /* SelectionHighlight.swift in Sources */,
 				B10000000000000000000005 /* FileSnapshotStore.swift in Sources */,
 				B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */,
 				B10000000000000000000100 /* ContentPreviewView.swift in Sources */,
@@ -565,7 +569,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 408;
+				CURRENT_PROJECT_VERSION = 409;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -584,7 +588,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.52;
+				MARKETING_VERSION = 1.4.53;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -605,7 +609,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 408;
+				CURRENT_PROJECT_VERSION = 409;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -624,7 +628,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.52;
+				MARKETING_VERSION = 1.4.53;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

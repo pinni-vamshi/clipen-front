@@ -389,7 +389,11 @@ struct PopoverPreviewView: View {
                         // consistent curve to interpolate under. Same spring
                         // as each row's own scale bounce, so the box's
                         // travel and the landing row's pop stay in sync.
-                        LazyVStack(spacing: 0) {
+                        // Spacing here (not 0) reserves the vertical room
+                        // the selected row's height-growth needs — see
+                        // PopoverRow's scaleEffect comment — so the popped
+                        // row doesn't overlap its neighbors above/below.
+                        LazyVStack(spacing: 10) {
                             ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                                 PopoverRow(item: item, index: idx,
                                            isSelected: idx == selectedIndex,
@@ -437,25 +441,21 @@ struct PopoverPreviewView: View {
                                 }
                             }
                         }
-                        // Non-bouncy on purpose: a spring's whole defining
-                        // trait is that it overshoots the target and wobbles
-                        // back before settling — that oscillation is exactly
-                        // what read as the box "moving up and down" instead
-                        // of traveling in one clean motion. easeInOut still
-                        // gives the box's matchedGeometryEffect travel a
-                        // smooth accelerate-then-decelerate feel (the "3D
-                        // lift" quality), just with no overshoot/wobble.
-                        .animation(.easeInOut(duration: 0.16), value: selectedIndex)
+                        // Same spring as SelectionHighlightStyle — driving
+                        // the box's matchedGeometryEffect travel with the
+                        // identical curve used for its own scale/shadow
+                        // (see PopoverRow's `.selectionHighlight`) is what
+                        // makes fast, repeated selection changes glide
+                        // continuously instead of each one restarting its
+                        // own animation from rest.
+                        .animation(SelectionHighlightStyle.spring, value: selectedIndex)
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
-                        // Same curve and duration as the box's travel above
-                        // (LazyVStack's `.animation(value: selectedIndex)`)
-                        // — so the box gliding to the new row and the list
-                        // scrolling to reveal it move as one continuous
-                        // motion, neither one bouncing independently of
-                        // the other.
-                        withAnimation(.easeInOut(duration: 0.16)) {
+                        // Same curve as the box's travel above so the box
+                        // gliding to the new row and the list scrolling to
+                        // reveal it move as one continuous motion.
+                        withAnimation(SelectionHighlightStyle.spring) {
                             proxy.scrollTo(items[newIdx].id, anchor: .center)
                         }
                     }
@@ -622,15 +622,18 @@ struct PopoverRow: View, Equatable {
     private static let maxRowHeight: CGFloat = 104
 
     /// Horizontal inset on each side of the selection box, applied ONLY to
-    /// the selected row — chosen together with `selectedScale` so the
-    /// popped WHOLE row (box, rail, divider, content together) still stays
-    /// inside the fixed 420pt popup, see the body's containment-math
-    /// comment for the exact numbers. Every OTHER row uses `restingInset`
-    /// instead: it doesn't need clearance for a scale-up it never does, so
-    /// it can sit much closer to the popup's edges and use the space.
-    private static let horizontalInset: CGFloat = 22
+    /// the selected row — chosen together with `SelectionHighlightStyle.scale`
+    /// so the popped WHOLE row (box, rail, divider, content together) still
+    /// stays inside the fixed 420pt popup:
+    ///   box = 420 − 2·25 = 370  →  370 · 1.12 = 414.4 ≤ 420
+    /// → stays inside with ~2.8pt of gap on each edge at the popped size.
+    /// Vertically, the LazyVStack's 10pt row spacing gives the tallest row
+    /// (104pt · 1.12 = 116.5pt, +12.5pt) enough clearance on each side
+    /// (6.25pt) not to overlap its neighbors. Every OTHER row uses
+    /// `restingInset` instead: it doesn't need clearance for a scale-up it
+    /// never does, so it can sit much closer to the popup's edges.
+    private static let horizontalInset: CGFloat = 25
     private static let restingInset:    CGFloat = 8
-    private static let selectedScale:   CGFloat = 1.06
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -655,56 +658,8 @@ struct PopoverRow: View, Equatable {
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
         .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
-        // The box view is always present (never conditionally inserted) so
-        // exactly one row's copy has `isSource: true` at any instant — the
-        // others are `false` placeholders SwiftUI uses to interpolate the
-        // travel between. Conditionally inserting/removing the view with
-        // `if isSelected { ... }` used to trigger SwiftUI's "Multiple
-        // inserted views ... have `isSource: true`" fault: on a selection
-        // change, the old row's insertion-removal and the new row's
-        // removal-insertion land in the same transaction, and two
-        // default-`isSource: true` views briefly coexist.
-        .background {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.accentColor)
-                .opacity(isSelected ? 1 : 0)
-                .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace, isSource: isSelected)
-        }
-        .padding(.horizontal, isSelected ? Self.horizontalInset : Self.restingInset)
-        // The pop is on the WHOLE row here — icon, divider, content, and the
-        // box all widen together as one unit, not just the text. This is
-        // also what fixes the overlap bug from scaling content alone: since
-        // everything grows in the same proportion together, nothing can
-        // bleed past a neighbor that stayed a different size — there's no
-        // "static" part left for a "growing" part to run into. (Height is
-        // pinned separately below — see the scaleEffect comment.)
-        //   Popup width is a fixed 420 (see showAnchored's contentSize).
-        //   box = 420 − 2·22 = 376  →  376 · 1.06 = 398.6 ≤ 420
-        // → stays inside with ~10.7pt of gap on each edge at the popped
-        //   size, on top of the ~22pt resting gap from horizontalInset
-        //   itself.
-        // Anisotropic on purpose: X grows with the spring (the visible
-        // "elevation" pop), Y is pinned to 1.0 always. `scaleEffect` scales
-        // both axes around the row's own center, so a spring on the Y axis
-        // makes the row's top/bottom edges — and the box riding along with
-        // them — transiently overshoot past the resting height and spring
-        // back, which reads as the selection box bobbing up and down. Since
-        // the row's height never needs to change (only its width grows to
-        // make room for the wider selected look), pinning Y removes that
-        // vertical wobble at the source instead of damping it away — which
-        // also means the X spring can stay fully lively.
-        .scaleEffect(x: isSelected ? Self.selectedScale : 1.0, y: 1.0)
-        // Asymmetric on purpose: becoming selected keeps the springy pop
-        // (unchanged, that direction was already right) — but a row
-        // FALLING BACK to resting size doesn't need that same bounce/
-        // overshoot; it read as loose/uncontrolled rather than lively.
-        // easeOut here has zero overshoot and a shorter duration (~25%
-        // less than the spring's own response), so the previous row settles
-        // back down cleanly instead of wobbling on the way down.
-        .animation(isSelected
-                   ? .spring(response: 0.32, dampingFraction: 0.5)
-                   : .easeOut(duration: 0.24),
-                   value: isSelected)
+        .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
+                             selectedInset: Self.horizontalInset, restingInset: Self.restingInset)
         .offset(x: shakeOffsetX)
         .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
