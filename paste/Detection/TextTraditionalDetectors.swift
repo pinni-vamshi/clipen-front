@@ -178,9 +178,22 @@ enum TextTraditionalDetectors {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard t.count >= 3 else { return false }
         if t.hasPrefix("# ") || t.hasPrefix("## ") || t.contains("\n# ") { return true }
-        if t.contains("```") || DetectionRegex.matches(#"\[[^\]]+\]\([^)]+\)"#, in: t) { return true }
-        if DetectionRegex.matches(#"(?m)^\s*[-*]\s+\S+"#, in: t) ||
-           DetectionRegex.matches(#"(?m)^\s*\d+\.\s+\S+"#, in: t) { return true }
+        // `\s`/`[^\]]`/`[^)]` all match newlines, not just same-line
+        // whitespace — with those, a link/list pattern can span across
+        // completely unrelated lines. That's exactly what happened with a
+        // one-term-per-line LaTeX document: a lone `-` (a minus sign,
+        // split onto its own line between two `\frac{}`s) followed by
+        // `\frac{...}` on the NEXT line matched the dash-list pattern, and
+        // a lone `0.` (end of an equation like `= 0.`) followed by
+        // `\end{align}` on the next line matched the numbered-list one —
+        // both false positives strong enough to outrank the real `.code`
+        // classification and mislabel the whole document as Markdown.
+        // Restricting the marker-to-content gap (and the link brackets'
+        // contents) to same-line whitespace only closes that off while
+        // still matching genuine single-line Markdown.
+        if t.contains("```") || DetectionRegex.matches(#"\[[^\]\n]+\]\([^)\n]+\)"#, in: t) { return true }
+        if DetectionRegex.matches(#"(?m)^[ \t]*[-*][ \t]+\S+"#, in: t) ||
+           DetectionRegex.matches(#"(?m)^[ \t]*\d+\.[ \t]+\S+"#, in: t) { return true }
         return t.contains("**") || t.contains("__")
     }
 
