@@ -563,11 +563,17 @@ extension ClipboardManager {
         }
 
         // ` (grave) — step to the next category one tap at a time.
+        // ⇧` steps to the previous category instead.
         if key == 50 && previewWindow.isVisible && !isSearchActive {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            let shiftGrave = event.flags.contains(.maskShift)
             DispatchQueue.main.async { [weak self] in
                 self?.playInteractionSoundIfEnabled(.category)
-                self?.cycleCategoryForward()
+                if shiftGrave {
+                    self?.cycleCategoryBackward()
+                } else {
+                    self?.cycleCategoryForward()
+                }
             }
             return nil
         }

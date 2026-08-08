@@ -228,8 +228,10 @@ private struct ShareRow: View, Equatable {
 
     @State private var isHovered = false
 
-    private static let horizontalInset: CGFloat = 16
-    private static let restingInset:    CGFloat = 6
+    /// Constant for every row — see `SelectionHighlight.inset`. Sized so
+    /// the scaled selected row fits this panel's fixed 260pt width:
+    ///   row = 260 − 2·14 = 232  →  232 · 1.12 = 259.8 ≤ 260
+    private static let horizontalInset: CGFloat = 14
 
     var body: some View {
         HStack(spacing: 10) {
@@ -265,7 +267,7 @@ private struct ShareRow: View, Equatable {
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
         .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
-                             selectedInset: Self.horizontalInset, restingInset: Self.restingInset)
+                             inset: Self.horizontalInset)
         .onHover { isHovered = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovered)
     }

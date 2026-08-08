@@ -81,8 +81,19 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
     }
 
     func hide() {
-        let wasVisible = isVisible
-        NSLog("[ClipenPreviewDebug] previewWindow.hide() called (wasVisible=\(wasVisible))")
+        // Gate on our OWN intent flag, not on `isVisible` — `isVisible` is
+        // `wantsVisible && popover.isShown`, and `popover.isShown` lags
+        // NSPopover's real state (see showAnchored's comment on the same
+        // flag reading stale-true mid-close; it can equally read false
+        // while a show is still settling). When it read false here, this
+        // whole teardown hook — the ONE path several close sites rely on to
+        // dismiss the side panels — was silently skipped, stranding the
+        // item preview panel on screen after the popup was gone. Keying off
+        // `wantsVisible` means onHide fires exactly once per open→close
+        // cycle regardless of what AppKit's flag happens to say, and the
+        // cleanup it runs is idempotent.
+        let wasVisible = wantsVisible
+        NSLog("[ClipenPreviewDebug] previewWindow.hide() called (wasVisible=\(wasVisible), popover.isShown=\(popover.isShown))")
         wantsVisible = false
         if popover.isShown { popover.performClose(nil) }
         anchorPanel.orderOut(nil)
@@ -213,6 +224,9 @@ struct PopoverPreviewView: View {
     /// Shared with every PopoverRow so the selection box can travel between
     /// them via matchedGeometryEffect — see PopoverRow's background.
     @Namespace private var selectionNamespace
+    /// Same idea as `selectionNamespace`, for the category strip's chips —
+    /// see TagFilterChip's background.
+    @Namespace private var categoryNamespace
 
     private var items: [ClipboardItem] { manager.displayItems }
     private var selectedIndex: Int     { manager.selectedIndex }
@@ -320,14 +334,16 @@ struct PopoverPreviewView: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    TagFilterChip(tag: nil, selected: manager.popupTagFilter == nil) {
+                    TagFilterChip(tag: nil, selected: manager.popupTagFilter == nil,
+                                  namespace: categoryNamespace) {
                         manager.popupTagFilter = nil
                     }
                     .id(CategoryChipID.all)
                     ForEach(manager.availableTags, id: \.self) { tag in
                         TagFilterChip(
                             tag: tag,
-                            selected: manager.popupTagFilter == tag
+                            selected: manager.popupTagFilter == tag,
+                            namespace: categoryNamespace
                         ) {
                             manager.popupTagFilter = tag
                         }
@@ -338,7 +354,11 @@ struct PopoverPreviewView: View {
             }
             .onChange(of: manager.popupTagFilter) { _, newValue in
                 let target: CategoryChipID = newValue.map(CategoryChipID.tag) ?? .all
-                withAnimation(.easeOut(duration: 0.2)) {
+                // Same spring as SelectionHighlightStyle — see
+                // PopoverRow's identical comment — so the category strip's
+                // sliding highlight and its own scroll-to-reveal move as
+                // one continuous motion, matching the row list.
+                withAnimation(SelectionHighlightStyle.spring) {
                     proxy.scrollTo(target, anchor: .center)
                 }
             }
@@ -441,6 +461,12 @@ struct PopoverPreviewView: View {
                                 }
                             }
                         }
+                        // Keeps row 0's selected/elevated pop from touching
+                        // the category strip above it — without this it
+                        // sits flush against that strip's background/
+                        // divider at rest, so its pop has no room to grow
+                        // into on that side.
+                        .padding(.top, 6)
                         // Same spring as SelectionHighlightStyle — driving
                         // the box's matchedGeometryEffect travel with the
                         // identical curve used for its own scale/shadow
@@ -621,19 +647,13 @@ struct PopoverRow: View, Equatable {
     private static let minRowHeight: CGFloat = 56
     private static let maxRowHeight: CGFloat = 104
 
-    /// Horizontal inset on each side of the selection box, applied ONLY to
-    /// the selected row — chosen together with `SelectionHighlightStyle.scale`
-    /// so the popped WHOLE row (box, rail, divider, content together) still
-    /// stays inside the fixed 420pt popup:
-    ///   box = 420 − 2·25 = 370  →  370 · 1.12 = 414.4 ≤ 420
-    /// → stays inside with ~2.8pt of gap on each edge at the popped size.
-    /// Vertically, the LazyVStack's 10pt row spacing gives the tallest row
-    /// (104pt · 1.12 = 116.5pt, +12.5pt) enough clearance on each side
-    /// (6.25pt) not to overlap its neighbors. Every OTHER row uses
-    /// `restingInset` instead: it doesn't need clearance for a scale-up it
-    /// never does, so it can sit much closer to the popup's edges.
-    private static let horizontalInset: CGFloat = 25
-    private static let restingInset:    CGFloat = 8
+    /// Horizontal inset every row sits at, selected or not — constant on
+    /// purpose, see `SelectionHighlight.inset`. Sized so the SCALED
+    /// selected row still fits the fixed 420pt popup:
+    ///   row = 420 − 2·23 = 374  →  374 · 1.12 = 418.9 ≤ 420
+    /// Vertically, the LazyVStack's 10pt row spacing covers the tallest
+    /// row's growth (104 · 1.12 = 116.5, +12.5 → 6.25 each side).
+    private static let horizontalInset: CGFloat = 23
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -659,7 +679,7 @@ struct PopoverRow: View, Equatable {
         .padding(.horizontal, 9).padding(.vertical, 10)
         .frame(minHeight: Self.minRowHeight, maxHeight: Self.maxRowHeight)
         .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
-                             selectedInset: Self.horizontalInset, restingInset: Self.restingInset)
+                             inset: Self.horizontalInset)
         .offset(x: shakeOffsetX)
         .overlay(alignment: .topTrailing) { trailingIndicators }
         .overlay {
@@ -756,7 +776,7 @@ struct PopoverRow: View, Equatable {
     private var rowContent: some View {
         switch item.content {
         case .text(let rawStr):
-            let str = rawStr.displayTrimmedLeading
+            let str = rawStr.rowPreviewPrefix()
             if item.tags.contains(.table) {
                 PopoverMiniTable(text: str)
             } else if let title = item.urlTitle {
@@ -776,9 +796,12 @@ struct PopoverRow: View, Equatable {
                 }
             }
         case .richText(_, plain: let rawPlain), .rtfd(_, plain: let rawPlain):
+            // Prefix FIRST, then strip the object-replacement chars — doing
+            // it the other way round would scan and rewrite the whole
+            // string before the cap could help.
             let plain = rawPlain
+                .rowPreviewPrefix()
                 .replacingOccurrences(of: "\u{FFFC}", with: "")
-                .displayTrimmedLeading
             HStack(alignment: .top, spacing: 8) {
                 if let embedded = EmbeddedImageExtractor.firstImage(for: item) {
                     Image(nsImage: embedded)
@@ -800,7 +823,7 @@ struct PopoverRow: View, Equatable {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .html(_, let rawPlain):
-            let plain = rawPlain.displayTrimmedLeading
+            let plain = rawPlain.rowPreviewPrefix()
             VStack(alignment: .leading, spacing: 2) {
                 Text(plain).font(.system(size: 12)).lineLimit(3).foregroundColor(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -943,6 +966,11 @@ struct CollectionChip: View {
 struct TagFilterChip: View {
     let tag:     ClipboardTag?
     let selected: Bool
+    /// Shared across every chip in the strip — same mechanism as
+    /// PopoverRow's selection box, just horizontal: one highlight capsule
+    /// slides and resizes between chips via `matchedGeometryEffect` instead
+    /// of each chip independently swapping its own fill color.
+    let namespace: Namespace.ID
     var customIcon:  String? = nil
     var customLabel: String? = nil
     let action: () -> Void
@@ -958,11 +986,29 @@ struct TagFilterChip: View {
             }
             .foregroundColor(selected ? .white : .secondary)
             .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(Capsule(style: .continuous)
-                .fill(selected ? AnyShapeStyle(Color(hex: "#4E8DF7"))
-                               : AnyShapeStyle(Color.primary.opacity(0.08))))
+            // The sliding highlight — always present (never conditionally
+            // inserted, same reasoning as PopoverRow's box) so exactly one
+            // chip's copy has `isSource: true` at any instant. Drawn BEHIND
+            // the content but IN FRONT of the resting capsule below, so it
+            // visibly covers that capsule once its opacity reaches 1.
+            .background {
+                Capsule(style: .continuous)
+                    .fill(Color(hex: "#4E8DF7"))
+                    .opacity(selected ? 1 : 0)
+                    .matchedGeometryEffect(id: "categoryHighlight", in: namespace, isSource: selected)
+                    .shadow(color: Color(hex: "#4E8DF7").opacity(selected ? 0.22 : 0),
+                            radius: selected ? 4 : 0, x: 0, y: selected ? 1.5 : 0)
+            }
+            // Resting capsule every chip shows at rest — sits behind the
+            // sliding highlight above, so it only shows through on
+            // unselected chips.
+            .background(Capsule(style: .continuous).fill(Color.primary.opacity(0.08)))
             .overlay(Capsule(style: .continuous)
                 .stroke(selected ? Color.clear : Color.primary.opacity(0.06), lineWidth: 1))
+            // Same spring as the row list's SelectionHighlightStyle, same
+            // subtle pop — "same kind of sliding effect", just horizontal.
+            .scaleEffect(selected ? SelectionHighlightStyle.scale : 1.0)
+            .animation(SelectionHighlightStyle.spring, value: selected)
         }
         .buttonStyle(.plain)
     }

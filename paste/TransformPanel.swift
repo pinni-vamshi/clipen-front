@@ -377,8 +377,10 @@ struct TransformRow: View, Equatable {
 
     @State private var isHovered = false
 
-    private static let horizontalInset: CGFloat = 18
-    private static let restingInset:    CGFloat = 6
+    /// Constant for every row — see `SelectionHighlight.inset`. Sized so
+    /// the scaled selected row fits this panel's fixed 290pt width:
+    ///   row = 290 − 2·16 = 258  →  258 · 1.12 = 289.0 ≤ 290
+    private static let horizontalInset: CGFloat = 16
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -440,7 +442,7 @@ struct TransformRow: View, Equatable {
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
         .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
-                             selectedInset: Self.horizontalInset, restingInset: Self.restingInset)
+                             inset: Self.horizontalInset)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovered)

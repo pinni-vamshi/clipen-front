@@ -197,6 +197,12 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         NSLog("[ClipenPreviewDebug] itemPreviewPanel.present() scheduling popover.show via WakeGuard")
         WakeGuard.afterWakeSettle { [popover, anchorView, weak self] in
             NSLog("[ClipenPreviewDebug] itemPreviewPanel deferred popover.show closure firing (wantsVisible=\(self?.wantsVisible.description ?? "self is nil"))")
+            // A hide() can land between scheduling this and it running (the
+            // post-wake path really does defer across runloop turns), and
+            // showing here anyway would put the panel back on screen with
+            // nothing left to close it — another way to strand it. Bail if
+            // the intent was revoked in the meantime.
+            guard let self, self.wantsVisible else { return }
             popover.animates = false
             popover.show(relativeTo: rowRect, of: anchorView, preferredEdge: edge)
             popover.animates = true

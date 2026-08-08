@@ -26,8 +26,25 @@ enum SelectionHighlightStyle {
 struct SelectionHighlight: ViewModifier {
     let isSelected: Bool
     let namespace: Namespace.ID
-    let selectedInset: CGFloat
-    let restingInset: CGFloat
+    /// Constant for every row, selected or not — deliberately NOT a
+    /// selected/resting pair that animates between two values.
+    ///
+    /// Animating the horizontal inset changes the row's available width on
+    /// every frame of the spring, which re-lays-out its content: the text
+    /// re-wraps and visibly slides relative to the fixed rail/divider on
+    /// its left, so the body appears to detach and drift away from the
+    /// divider as the selection arrives. (The content's own
+    /// `.transaction { $0.animation = nil }` suppresses its animation but
+    /// not the relayout, which is what made it read as a jerky snap rather
+    /// than a glide.) It also costs a full text layout pass per frame,
+    /// compounding any slowness from a large item.
+    ///
+    /// With the inset fixed, `scaleEffect` below is the ONLY thing that
+    /// changes — and scale is a pure transform, applied to the already
+    /// laid-out row. Nothing reflows, so the content stays locked to the
+    /// divider and the whole row grows as one rigid unit, which is exactly
+    /// how tvOS's focus lift behaves.
+    let inset: CGFloat
 
     func body(content: Content) -> some View {
         content
@@ -46,12 +63,13 @@ struct SelectionHighlight: ViewModifier {
                     // only appears while selected, riding the same spring
                     // as the scale below so the lift and the size change
                     // read as one motion.
-                    .shadow(color: Color.accentColor.opacity(isSelected ? 0.45 : 0),
-                            radius: isSelected ? 8 : 0, x: 0, y: isSelected ? 3 : 0)
+                    .shadow(color: Color.accentColor.opacity(isSelected ? 0.22 : 0),
+                            radius: isSelected ? 4 : 0, x: 0, y: isSelected ? 1.5 : 0)
             }
-            .padding(.horizontal, isSelected ? selectedInset : restingInset)
+            .padding(.horizontal, inset)
             // Uniform scale — grows both width and height together so the
-            // pop reads as a lift, not a one-directional stretch.
+            // pop reads as a lift, not a one-directional stretch. The only
+            // animating property here, by design (see `inset` above).
             .scaleEffect(isSelected ? SelectionHighlightStyle.scale : 1.0)
             .animation(SelectionHighlightStyle.spring, value: isSelected)
     }
@@ -59,12 +77,13 @@ struct SelectionHighlight: ViewModifier {
 
 extension View {
     /// Applies the shared selection "lift" — see `SelectionHighlight`.
-    /// `selectedInset`/`restingInset` are the only per-panel knobs: how far
-    /// each row insets from its container at rest vs. selected, sized so
-    /// the popped box still fits inside that panel's own fixed width.
+    ///
+    /// `inset` is the only per-panel knob: how far every row sits in from
+    /// its container's edges. Size it so the SCALED row still fits that
+    /// panel's fixed width — i.e. `(width - 2*inset) * scale <= width`.
     func selectionHighlight(isSelected: Bool, namespace: Namespace.ID,
-                             selectedInset: CGFloat, restingInset: CGFloat) -> some View {
+                             inset: CGFloat) -> some View {
         modifier(SelectionHighlight(isSelected: isSelected, namespace: namespace,
-                                     selectedInset: selectedInset, restingInset: restingInset))
+                                     inset: inset))
     }
 }

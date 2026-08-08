@@ -877,6 +877,28 @@ class ClipboardManager: ObservableObject {
             // setSidePanelStage is itself gated on previewWindow.isVisible,
             // which is already false by the time onHide fires.
             self?.setSidePanelStage(.none)
+            // Unconditional, and NOT redundant with the call above: this is
+            // what fixes the orphaned item-preview-panel bug.
+            //
+            // setSidePanelStage opens with `guard new != sidePanelStage else
+            // { return }`, so asking it for .none when the stage is ALREADY
+            // .none returns before ever reaching its own
+            // `itemPreviewPanel.hide()`. And .none is exactly the state the
+            // common case sits in: while simply browsing, the item preview
+            // is opened by syncItemPreviewWithSelection(), which only runs
+            // when `sidePanelStage == .none` — it never moves the stage. So
+            // for every close path that funnels through here rather than
+            // hiding the panel itself, the popup went away and the preview
+            // panel was left behind on screen with nothing to close it.
+            //
+            // That also explains the two things that made this bug look
+            // mysterious: it is not image-format-specific (HEIC and PNG
+            // both, because the codec is irrelevant — auto-preview just
+            // happens to trigger on images), and it is intermittent
+            // (the close paths that spell out `itemPreviewPanel.hide()`
+            // alongside `previewWindow.hide()` were always fine; only the
+            // ones relying on this hook were broken).
+            self?.itemPreviewPanel.hide()
         }
         itemPreviewPanel.onVisibilityChange = { [weak self] visible in
             self?.isItemPreviewVisible = visible
@@ -1612,6 +1634,27 @@ extension String {
     func displayCapped(_ maxLength: Int = 300_000) -> (text: String, isTruncated: Bool) {
         guard count > maxLength else { return (self, false) }
         return (String(prefix(maxLength)), true)
+    }
+
+    /// Leading-whitespace-trimmed prefix for the popup's list rows, which
+    /// never render more than ~3 lines.
+    ///
+    /// Deliberately NOT `displayTrimmedLeading` — that one materializes a
+    /// full `String` copy of everything after the whitespace, i.e. the whole
+    /// item. On a multi-megabyte clipboard entry that is a huge main-thread
+    /// allocation, and it re-runs on every body evaluation of the row;
+    /// handing the resulting monster to `Text` then makes TextKit lay out
+    /// the entire string just to resolve a 2-line limit. One such item was
+    /// enough to make the whole list's selection animation stutter, since
+    /// that work lands on the main thread mid-animation — and deleting it
+    /// made everything smooth again.
+    ///
+    /// `drop(while:)` and `prefix(_:)` both return `Substring` slices, so
+    /// nothing is copied until the final `String(...)`, which copies at most
+    /// `maxLength` characters. Visually lossless: the cap is far more text
+    /// than three truncated lines can ever show.
+    func rowPreviewPrefix(_ maxLength: Int = 1024) -> String {
+        String(drop(while: \.isWhitespace).prefix(maxLength))
     }
 }
 

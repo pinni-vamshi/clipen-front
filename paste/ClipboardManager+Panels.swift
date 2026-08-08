@@ -1152,6 +1152,28 @@ extension ClipboardManager {
         }
     }
 
+    /// Walk to the previous category one at a time — the reverse of
+    /// `cycleCategoryForward()`, driven by ⇧` while the popup is open.
+    func cycleCategoryBackward() {
+        let total = 1 + availableTags.count
+        guard total > 1 else { return }
+        let current: Int
+        if let filter = popupTagFilter,
+           let pos = availableTags.firstIndex(where: { $0 == filter }) {
+            current = pos + 1
+        } else {
+            current = 0
+        }
+        selectCategoryByIndex((current - 1 + total) % total)
+        AuthManager.shared.registerActionUsage(actionID: "action.prev-category")
+
+        // Briefly light the ` hint in the popup strip.
+        popupHintCategory = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+            self?.popupHintCategory = false
+        }
+    }
+
     func jumpForward(by step: Int = 5) {
         let display = displayItems
         guard !display.isEmpty else { return }
