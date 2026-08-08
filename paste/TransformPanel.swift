@@ -162,6 +162,10 @@ struct TransformView: View {
     let isProcessing:           Bool
     let onDismiss:              () -> Void
     @ObservedObject private var manager = ClipboardManager.shared
+    /// Shared across every row — lets the ONE selection box travel and
+    /// resize between rows via `matchedGeometryEffect`, same pattern as the
+    /// main popup's `PopoverRow`.
+    @Namespace private var selectionNamespace
 
     private var activePagePickerToolID: String {
         switch manager.pageRangeOutputMode {
@@ -259,15 +263,13 @@ struct TransformView: View {
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    // Spacing here (not 0) reserves the vertical room each
-                    // row's own selection pop needs — see TransformRow's
-                    // scaleEffect comment.
-                    VStack(spacing: 14) {
+                    VStack(spacing: 0) {
                         ForEach(Array(displays.enumerated()), id: \.element.id) { idx, display in
                             TransformRow(
                                 display:    display,
                                 isSelected: idx == selectedTransformIndex,
-                                isProcessing: idx == selectedTransformIndex && isProcessing
+                                isProcessing: idx == selectedTransformIndex && isProcessing,
+                                selectionNamespace: selectionNamespace
                             )
                             .equatable()
                             .id(idx)
@@ -355,6 +357,9 @@ struct TransformRow: View, Equatable {
     let display:      TransformDisplay
     let isSelected:   Bool
     let isProcessing: Bool
+    /// A `Namespace.ID` never changes after creation, so it's safe to leave
+    /// out of `==` below.
+    let selectionNamespace: Namespace.ID
 
     // `@State private var isHovered` isn't part of the equality contract —
     // SwiftUI preserves it across renders based on view identity, and hover
@@ -367,8 +372,9 @@ struct TransformRow: View, Equatable {
 
     @State private var isHovered = false
 
+    private static let horizontalInset: CGFloat = 14
     private static let restingInset:    CGFloat = 6
-    private static let selectedScale:   CGFloat = 1.4
+    private static let selectedScale:   CGFloat = 1.06
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -429,20 +435,26 @@ struct TransformRow: View, Equatable {
             (!isSelected && isHovered) ? Color.accentColor.opacity(0.1) : Color.clear,
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
-        // Each row draws its own independent highlight — no shared
-        // namespace, no cross-row travel. Selection changes are a pop in
-        // place, not a moving box.
+        // The box view is always present (never conditionally inserted) so
+        // exactly one row's copy has `isSource: true` at any instant — the
+        // others are `false` placeholders SwiftUI uses to interpolate the
+        // travel between. Conditionally inserting/removing the view with
+        // `if isSelected { ... }` used to trigger SwiftUI's "Multiple
+        // inserted views ... have `isSource: true`" fault: on a selection
+        // change, the old row's insertion-removal and the new row's
+        // removal-insertion land in the same transaction, and two
+        // default-`isSource: true` views briefly coexist.
         .background {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.accentColor)
                 .opacity(isSelected ? 1 : 0)
+                .matchedGeometryEffect(id: "selectionBox", in: selectionNamespace, isSource: isSelected)
         }
-        .padding(.horizontal, Self.restingInset)
-        // Anisotropic on purpose — same as the main popup: Y grows with the
-        // spring (the visible "elevation" pop), X is pinned to 1.0. The
-        // VStack's spacing (14pt) reserves the vertical clearance the pop
-        // needs so it doesn't overlap neighboring rows.
-        .scaleEffect(x: 1.0, y: isSelected ? Self.selectedScale : 1.0)
+        .padding(.horizontal, isSelected ? Self.horizontalInset : Self.restingInset)
+        // Anisotropic on purpose — same as the main popup: X grows with the
+        // spring (the visible "elevation" pop), Y is pinned to 1.0 so the
+        // row's height never overshoots and the box can't bob up and down.
+        .scaleEffect(x: isSelected ? Self.selectedScale : 1.0, y: 1.0)
         .animation(isSelected
                    ? .spring(response: 0.32, dampingFraction: 0.5)
                    : .easeOut(duration: 0.24),
