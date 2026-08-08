@@ -44,9 +44,21 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         let mainPopupVisible = ClipboardManager.shared.previewWindow.isVisible
         let quickClipVisible = ClipboardManager.shared.hasVisibleQuickClipPanel
         if !mainPopupVisible && !quickClipVisible {
+            NSLog("[ClipenPreviewDebug] itemPreviewPanel.popoverDidShow self-closing (mainPopupVisible=false, quickClipVisible=false)")
             popover.performClose(nil)
             anchorPanel.orderOut(nil)
         }
+    }
+
+    // TEMPORARY diagnostic logging — see PreviewOverlayWindow's matching
+    // comment. Remove once the orphaned-panel bug is found. Search
+    // Console.app for "ClipenPreviewDebug".
+    func popoverWillClose(_ notification: Notification) {
+        NSLog("[ClipenPreviewDebug] itemPreviewPanel.popoverWillClose fired (wantsVisible=\(wantsVisible))")
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        NSLog("[ClipenPreviewDebug] itemPreviewPanel.popoverDidClose fired (wantsVisible=\(wantsVisible))")
     }
 
     override init() {
@@ -182,7 +194,9 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
         shownStrip = desiredStrip
         let edge: NSRectEdge = placeRight ? .maxX : .minX
-        WakeGuard.afterWakeSettle { [popover, anchorView] in
+        NSLog("[ClipenPreviewDebug] itemPreviewPanel.present() scheduling popover.show via WakeGuard")
+        WakeGuard.afterWakeSettle { [popover, anchorView, weak self] in
+            NSLog("[ClipenPreviewDebug] itemPreviewPanel deferred popover.show closure firing (wantsVisible=\(self?.wantsVisible.description ?? "self is nil"))")
             popover.animates = false
             popover.show(relativeTo: rowRect, of: anchorView, preferredEdge: edge)
             popover.animates = true
@@ -192,6 +206,7 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
 
     func hide() {
         let wasVisible = wantsVisible
+        NSLog("[ClipenPreviewDebug] itemPreviewPanel.hide() called (wasVisible=\(wasVisible), popover.isShown=\(popover.isShown))")
         wantsVisible = false
         if wasVisible { onVisibilityChange?(false) }
         if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
@@ -212,6 +227,18 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
 struct MultiItemPreviewView: View {
     let items: [ClipboardItem]
     var currentItemID: UUID? = nil
+    /// A saved `.group` item is shown through TWO nested views: the outer
+    /// `ItemPreviewView` (full, non-compact) already draws its own header
+    /// from `item.tags` — which includes a "Group" tag chip — before this
+    /// view's `content` even starts. Drawing a SECOND header here for that
+    /// case produced two stacked bars, one right under the other, both
+    /// saying "Group" in slightly different ways. `ContentPreviewView`'s
+    /// `.group` case passes `showsHeader: false` to suppress this one; the
+    /// item count instead shows next to the outer tag via
+    /// `ClipboardItem.metadataSummary`'s `.group` case. The ad-hoc "Marked"
+    /// case (`showSelectedItemPreview()`) has no such outer wrapper — this
+    /// view IS the top-level content there — so it keeps its own header.
+    var showsHeader: Bool = true
 
     private var markedCount: Int {
         currentItemID == nil ? items.count : items.count - 1
@@ -226,27 +253,29 @@ struct MultiItemPreviewView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                HStack(spacing: 4) {
-                    Image(systemName: isGroupPreview ? "square.stack.3d.up.fill" : "checkmark.circle.fill")
-                        .font(.system(size: 9, weight: .semibold))
-                    Text("\(isGroupPreview ? "Group" : "Marked") · \(markedCount)")
-                        .font(.system(size: 10, weight: .semibold))
+            if showsHeader {
+                HStack(spacing: 8) {
+                    HStack(spacing: 4) {
+                        Image(systemName: isGroupPreview ? "square.stack.3d.up.fill" : "checkmark.circle.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("\(isGroupPreview ? "Group" : "Marked") · \(markedCount)")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.indigo)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.indigo.opacity(0.14), in: Capsule())
+                    .overlay(Capsule().stroke(Color.indigo.opacity(0.35), lineWidth: 0.5))
+
+                    Spacer()
+                    Text("Space to close")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
                 }
-                .foregroundColor(.indigo)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.indigo.opacity(0.14), in: Capsule())
-                .overlay(Capsule().stroke(Color.indigo.opacity(0.35), lineWidth: 0.5))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
 
-                Spacer()
-                Text("Space to close")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                Divider()
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            Divider()
 
             ScrollView {
                 VStack(spacing: 0) {

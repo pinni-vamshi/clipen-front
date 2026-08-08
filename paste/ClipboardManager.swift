@@ -760,6 +760,10 @@ class ClipboardManager: ObservableObject {
     ///    single-occupancy. Callers no longer hide it by hand, so they can no
     ///    longer do it in the wrong order relative to the stage switch.
     func setSidePanelStage(_ new: SidePanelStage) {
+        // TEMPORARY diagnostic logging — tracking down the orphaned item
+        // preview panel bug. Remove once found. Search Console.app for
+        // "ClipenPreviewDebug".
+        NSLog("[ClipenPreviewDebug] setSidePanelStage(\(new)) called, current=\(sidePanelStage), guardWillSkip=\(new == sidePanelStage)")
         guard new != sidePanelStage else { return }
 
         switch sidePanelStage {
@@ -1217,6 +1221,11 @@ struct ClipboardItem: Identifiable {
             let total = urls.compactMap { fileSize($0) }.reduce(0, +)
             let size = total > 0 ? " · " + ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file) : ""
             return "\(urls.count) files\(size)"
+        case .group(let items):
+            // Shows next to the item's own "Group" tag chip in
+            // ItemPreviewView's header — the same slot every other type's
+            // metadata (image dimensions, file size, …) already uses.
+            return "\(items.count) items"
         default:
             return nil
         }

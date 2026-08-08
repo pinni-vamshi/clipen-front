@@ -20,6 +20,18 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         }
     }
 
+    // TEMPORARY diagnostic logging — tracking down a bug where the main
+    // popup sometimes disappears with no corresponding `hide()` call from
+    // our own code (see if AppKit itself is closing the popover). Remove
+    // once found. Search Console.app for "ClipenPreviewDebug".
+    func popoverWillClose(_ notification: Notification) {
+        NSLog("[ClipenPreviewDebug] previewWindow.popoverWillClose fired (wantsVisible=\(wantsVisible))")
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        NSLog("[ClipenPreviewDebug] previewWindow.popoverDidClose fired (wantsVisible=\(wantsVisible))")
+    }
+
     private var visibleRowCount: Int = 5
 
     private let anchorPanel: NSPanel
@@ -70,6 +82,7 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
 
     func hide() {
         let wasVisible = isVisible
+        NSLog("[ClipenPreviewDebug] previewWindow.hide() called (wasVisible=\(wasVisible))")
         wantsVisible = false
         if popover.isShown { popover.performClose(nil) }
         anchorPanel.orderOut(nil)

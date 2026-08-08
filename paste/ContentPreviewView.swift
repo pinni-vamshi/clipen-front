@@ -89,8 +89,12 @@ struct ContentPreviewView: View {
             BlobContentPreview(typeMap: typeMap)
         case .group(let items):
             // A grouped item previews its members individually, same view the
-            // popup uses when previewing a marked set.
-            MultiItemPreviewView(items: items)
+            // popup uses when previewing a marked set. `showsHeader: false`
+            // because the enclosing ItemPreviewView already drew a header
+            // for this item (its "Group" tag chip) — see MultiItemPreviewView's
+            // doc comment for why a second one here was a real bug, not a
+            // stylistic choice.
+            MultiItemPreviewView(items: items, showsHeader: false)
         }
     }
 
