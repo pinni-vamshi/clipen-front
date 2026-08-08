@@ -368,6 +368,64 @@ struct LaTeXDocumentPreview: View {
         return String(afterStart[..<end.lowerBound])
     }
 
+    /// Multi-line display-math openers this preview specifically buffers
+    /// across lines (see `parsedBlocks`). `\[` and `\begin{equation}`/
+    /// `equation*` are recognized natively by LaTeXSwiftUI's own equation
+    /// scanner, so their content is passed through as-is. The amsmath
+    /// environments (`align`, `gather`, `eqnarray`, `multline`, `alignat`)
+    /// are NOT recognized as math on their own by that scanner — it only
+    /// looks for `$…$`, `\(…\)`, `\[…\]`, and `equation`/`equation*` — so
+    /// those need `needsDisplayWrap` to get wrapped in `\[ \]` before being
+    /// handed off; MathJax itself understands `align` etc. just fine once
+    /// it's inside a math region the scanner actually finds.
+    private static let mathOpeners: [(open: String, close: String, needsDisplayWrap: Bool)] = [
+        ("\\[", "\\]", false),
+        ("\\begin{equation*}", "\\end{equation*}", false),
+        ("\\begin{equation}",  "\\end{equation}",  false),
+        ("\\begin{align*}",    "\\end{align*}",    true),
+        ("\\begin{align}",     "\\end{align}",     true),
+        ("\\begin{gather*}",   "\\end{gather*}",   true),
+        ("\\begin{gather}",    "\\end{gather}",    true),
+        ("\\begin{eqnarray*}", "\\end{eqnarray*}", true),
+        ("\\begin{eqnarray}",  "\\end{eqnarray}",  true),
+        ("\\begin{multline*}", "\\end{multline*}", true),
+        ("\\begin{multline}",  "\\end{multline}",  true),
+        ("\\begin{alignat*}",  "\\end{alignat*}",  true),
+        ("\\begin{alignat}",   "\\end{alignat}",   true),
+        ("\\begin{flalign*}",  "\\end{flalign*}",  true),
+        ("\\begin{flalign}",   "\\end{flalign}",   true),
+        ("\\begin{subequations}", "\\end{subequations}", true),
+        // Matrix/case environments are normally nested inside one of the
+        // delimiters above (`$\begin{pmatrix}...\end{pmatrix}$`), which
+        // already works without any of these entries. These specifically
+        // cover the same environments pasted BARE at the top level, with no
+        // outer math delimiter of their own.
+        ("\\begin{pmatrix}",   "\\end{pmatrix}",   true),
+        ("\\begin{bmatrix}",   "\\end{bmatrix}",   true),
+        ("\\begin{vmatrix}",   "\\end{vmatrix}",   true),
+        ("\\begin{Vmatrix}",   "\\end{Vmatrix}",   true),
+        ("\\begin{smallmatrix}", "\\end{smallmatrix}", true),
+        ("\\begin{matrix}",    "\\end{matrix}",    true),
+        ("\\begin{cases}",     "\\end{cases}",     true),
+        ("\\begin{array}",     "\\end{array}",     true),
+        ("$$", "$$", true),
+    ]
+
+    /// A standalone display-math block, rendered on its own (as opposed to
+    /// `inlineContent`'s per-line mixed prose+math handling) — `.blockViews`
+    /// gives it the same centered block treatment `LaTeXRenderedPreview`
+    /// uses for a bare equation, appropriate here since the whole block IS
+    /// the equation, not prose with math embedded in it.
+    private func mathBlock(_ source: String) -> some View {
+        LaTeX(source)
+            .font(NSFont.systemFont(ofSize: 13))
+            .parsingMode(.onlyEquations)
+            .blockMode(.blockViews)
+            .errorMode(.original)
+            .foregroundColor(.primary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private static let noiseCommands: Set<String> = [
         "documentclass", "usepackage", "newcommand", "renewcommand", "providecommand",
         "newenvironment", "renewenvironment", "def", "let", "RequirePackage",
@@ -400,6 +458,27 @@ struct LaTeXDocumentPreview: View {
                     inlineContent(title)
                         .font(.system(size: level == 1 ? 17 : 15, weight: .bold))
                 )))
+                continue
+            }
+
+            // A display-math block often spans several lines — `\[ ... \]`,
+            // `$$ ... $$`, or an amsmath environment like `align`/`gather`.
+            // The per-line handling below (`inlineContent`) only sees ONE
+            // line at a time, so a block whose closing delimiter is several
+            // lines down would never get past its opening line unrendered.
+            // Buffer every line from the opener through its matching closer
+            // and hand the whole thing to the renderer as one block.
+            if let opener = Self.mathOpeners.first(where: { trimmed.hasPrefix($0.open) }) {
+                var blockLines = [lines[i - 1]]
+                var closed = trimmed.dropFirst(opener.open.count).contains(opener.close)
+                while !closed, i < lines.count {
+                    blockLines.append(lines[i])
+                    closed = lines[i].contains(opener.close)
+                    i += 1
+                }
+                let raw = blockLines.joined(separator: "\n")
+                let source = opener.needsDisplayWrap ? "\\[\n\(raw)\n\\]" : raw
+                blocks.append(Block(view: AnyView(mathBlock(source))))
                 continue
             }
 
@@ -506,17 +585,85 @@ struct LaTeXDocumentPreview: View {
         }
     }
 
-    /// `\textbf{}`/`\textit{}`/`\emph{}` become real bold/italic runs;
-    /// anything left as an unrecognized `\command{...}` falls back to just
-    /// its last brace group's text (see the type's doc comment); common
-    /// escaped characters are unescaped so `\%`/`\&`/`\_` read naturally.
+    /// Zero-argument commands (no `{...}` to expand) that stand in for a
+    /// single typeset character/symbol.
+    private static let zeroArgSubstitutions: [String: String] = [
+        "ldots": "\u{2026}", "dots": "\u{2026}", "cdots": "\u{2026}",
+    ]
+
+    /// `~`/`--`/`---` aren't backslash commands, so they're substituted in
+    /// plain text segments directly rather than in the backslash-scanning
+    /// loop below: `~` is LaTeX's non-breaking space, and `--`/`---` are its
+    /// en-/em-dash ligatures — all three otherwise show as their literal
+    /// source characters instead of what LaTeX actually typesets. Order
+    /// matters: replacing `---` first means a real `---` can't be seen as
+    /// `--` plus a leftover `-` by the second replacement.
+    private func substituteTypography(_ s: some StringProtocol) -> String {
+        String(s)
+            .replacingOccurrences(of: "~", with: " ")
+            .replacingOccurrences(of: "---", with: "\u{2014}")
+            .replacingOccurrences(of: "--", with: "\u{2013}")
+    }
+
+    /// Citations/cross-references (`\cite`, `\ref`, `\pageref`, …) can't be
+    /// resolved here — that needs an actual bibliography/label pass this
+    /// preview doesn't have — so their raw internal key (meaningless to a
+    /// reader, e.g. `smith2020` or `fig:diagram1`) is replaced with a
+    /// neutral placeholder instead of being shown as if it were content.
+    private static let citationCommands: Set<String> = ["cite", "citep", "citet", "citeauthor", "citeyear", "nocite"]
+    private static let referenceCommands: Set<String> = ["ref", "eqref", "pageref", "autoref"]
+
+    /// `\textbf{}`/`\textit{}`/`\emph{}`/`\texttt{}`/`\underline{}`/`\sout{}`
+    /// become real bold/italic/monospace/underline/strikethrough runs;
+    /// `\href{url}{label}`/`\url{...}` become real tappable links; `\\`
+    /// becomes an actual line break; `\cite{}`/`\ref{}` and friends become a
+    /// neutral `[cite]`/`[ref]` placeholder (see above); an unrecognized
+    /// `\command{...}{...}…` with several brace groups (a custom macro like
+    /// a resume template's `\resumeSubheading{a}{b}{c}{d}`) shows all of its
+    /// groups joined, not just the first; common escaped characters are
+    /// unescaped so `\%`/`\&`/`\_` read naturally.
     private func formattedText(_ line: String) -> AttributedString {
         var result = AttributedString()
         var rest = Substring(line)
 
         while let backslash = rest.firstIndex(of: "\\") {
-            result += AttributedString(rest[rest.startIndex..<backslash])
+            // `{\declword ...}` — an old-style TeX font-switching group
+            // (e.g. `{\bfseries Name}`), where the command takes NO brace
+            // argument of its own and instead just changes state for the
+            // rest of its enclosing group. Distinct from `\textbf{...}`
+            // (name immediately followed by `{`) and handled before the
+            // backslash is treated normally, so this group's own `{` never
+            // gets appended as a stray literal character the way it used to.
+            if backslash > rest.startIndex, rest[rest.index(before: backslash)] == "{" {
+                let braceOpen = rest.index(before: backslash)
+                let afterSlash = rest[rest.index(after: backslash)...]
+                let declName = String(afterSlash.prefix(while: { $0.isLetter }))
+                let afterDecl = afterSlash.dropFirst(declName.count)
+                if !declName.isEmpty, afterDecl.first != "{",
+                   let braceEnd = matchingBrace(in: rest, openAt: rest.distance(from: rest.startIndex, to: braceOpen)) {
+                    result += AttributedString(substituteTypography(rest[rest.startIndex..<braceOpen]))
+                    let groupInner = String(afterDecl[afterDecl.startIndex..<braceEnd])
+                    var run = formattedText(groupInner)
+                    switch declName {
+                    case "bf", "bfseries": run.inlinePresentationIntent = .stronglyEmphasized
+                    case "it", "itshape", "sl", "slshape", "em": run.inlinePresentationIntent = .emphasized
+                    case "tt", "ttfamily": run.font = .system(size: 13, design: .monospaced)
+                    default: break
+                    }
+                    result += run
+                    rest = rest[rest.index(after: braceEnd)...]
+                    continue
+                }
+            }
+
+            result += AttributedString(substituteTypography(rest[rest.startIndex..<backslash]))
             let afterSlash = rest[rest.index(after: backslash)...]
+
+            if afterSlash.hasPrefix("\\") {
+                result += AttributedString("\n")
+                rest = afterSlash.dropFirst()
+                continue
+            }
 
             if let escaped = afterSlash.first, "%&_#{}$".contains(escaped) {
                 result += AttributedString(String(escaped))
@@ -526,6 +673,13 @@ struct LaTeXDocumentPreview: View {
 
             let name = String(afterSlash.prefix(while: { $0.isLetter }))
             let afterName = afterSlash.dropFirst(name.count)
+
+            if let substitution = Self.zeroArgSubstitutions[name] {
+                result += AttributedString(substitution)
+                rest = afterName
+                continue
+            }
+
             guard !name.isEmpty, afterName.first == "{",
                   let braceEnd = matchingBrace(in: afterName, openAt: 0) else {
                 // Not a recognized `\name{...}` shape — drop just the
@@ -539,15 +693,71 @@ struct LaTeXDocumentPreview: View {
             let consumed = afterName.distance(from: afterName.startIndex, to: braceEnd) + 1
             rest = afterName.dropFirst(consumed)
 
+            if name == "href" {
+                if rest.first == "{", let labelEnd = matchingBrace(in: rest, openAt: 0) {
+                    let label = String(rest[rest.index(after: rest.startIndex)..<labelEnd])
+                    rest = rest[rest.index(after: labelEnd)...]
+                    var linkRun = formattedText(label)
+                    linkRun.link = URL(string: inner)
+                    linkRun.foregroundColor = .accentColor
+                    result += linkRun
+                } else {
+                    // Malformed `\href` (no label group) — show the URL
+                    // itself as the link text rather than dropping it.
+                    var linkRun = AttributedString(inner)
+                    linkRun.link = URL(string: inner)
+                    linkRun.foregroundColor = .accentColor
+                    result += linkRun
+                }
+                continue
+            }
+            if name == "url" {
+                var linkRun = AttributedString(inner)
+                linkRun.link = URL(string: inner)
+                linkRun.foregroundColor = .accentColor
+                result += linkRun
+                continue
+            }
+            if Self.citationCommands.contains(name) {
+                var marker = AttributedString("[cite]")
+                marker.foregroundColor = .secondary
+                result += marker
+                continue
+            }
+            if Self.referenceCommands.contains(name) {
+                var marker = AttributedString("[ref]")
+                marker.foregroundColor = .secondary
+                result += marker
+                continue
+            }
+
             var run = formattedText(inner)
             switch name {
             case "textbf": run.inlinePresentationIntent = .stronglyEmphasized
             case "textit", "emph": run.inlinePresentationIntent = .emphasized
-            default: break
+            case "texttt": run.font = .system(size: 13, design: .monospaced)
+            case "underline": run.underlineStyle = .single
+            case "sout", "strikethrough": run.strikethroughStyle = .single
+            default:
+                // Unrecognized macro — if more brace groups immediately
+                // follow, this is likely a multi-argument macro (e.g. a
+                // resume template's own `\resumeSubheading{a}{b}{c}{d}`);
+                // fold them all into one readable run instead of leaving
+                // the later groups as literal `{b}{c}{d}`. Capped so
+                // malformed/unbalanced input can't loop indefinitely.
+                var extraGroups = 0
+                while extraGroups < 5, rest.first == "{",
+                      let nextEnd = matchingBrace(in: rest, openAt: 0) {
+                    let nextInner = String(rest[rest.index(after: rest.startIndex)..<nextEnd])
+                    run += AttributedString("  ")
+                    run += formattedText(nextInner)
+                    rest = rest[rest.index(after: nextEnd)...]
+                    extraGroups += 1
+                }
             }
             result += run
         }
-        result += AttributedString(rest)
+        result += AttributedString(substituteTypography(rest))
         return result
     }
 }
