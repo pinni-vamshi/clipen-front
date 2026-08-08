@@ -150,6 +150,21 @@ enum TextTraditionalDetectors {
     }
 
     private static func isLatex(_ text: String) -> Bool {
+        // A full document (has its own preamble/`\documentclass`, or an
+        // explicit `\begin{document}`) isn't a math expression — it's source
+        // code the LaTeX renderer (MathJax via LaTeXSwiftUI, see
+        // LaTeXRenderedPreview) can't compile. Left unchecked, the `\begin{`
+        // keyword below matches ANY environment — `\begin{itemize}`,
+        // `\begin{tabular*}`, `\begin{center}` are exactly as common in a
+        // full document as `\begin{equation}` is in an actual math snippet —
+        // so a whole resume/paper would get tagged `.latex` and handed to a
+        // renderer that finds no real equation regions in it, silently
+        // falling back to mostly-unrendered source. Bailing out here instead
+        // lets it fall through to the existing `.code("LaTeX")` classification,
+        // which is the correct treatment for a real `.tex` file.
+        guard !text.contains("\\documentclass"), !text.contains("\\begin{document}") else {
+            return false
+        }
         let keywords = ["\\begin{", "\\end{", "\\frac{", "\\sum", "\\int",
                         "\\alpha", "\\beta", "\\gamma", "\\delta", "\\theta",
                         "\\lambda", "\\pi", "\\sigma", "\\sqrt{", "\\infty",

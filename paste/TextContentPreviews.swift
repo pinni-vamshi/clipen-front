@@ -282,10 +282,10 @@ struct DelimitedTablePreview: View {
 /// Renders `.latex`-tagged captures as actual typeset math (via
 /// LaTeXSwiftUI/MathJax) instead of the syntax-highlighted-source treatment
 /// every other code-like type gets. The detector that assigns `.latex`
-/// (`isLatex` in TextTraditionalDetectors.swift) only checks for math-mode
-/// keywords/delimiters, not a full `\documentclass` — so this is always a
-/// math expression, never a whole document, which is exactly what this
-/// package renders (it doesn't compile full LaTeX documents).
+/// (`isLatex` in TextTraditionalDetectors.swift) explicitly excludes
+/// anything with its own `\documentclass`/`\begin{document}` — so this is
+/// always a math expression, never a whole document, which is exactly what
+/// this package renders (it doesn't compile full LaTeX documents).
 struct LaTeXRenderedPreview: View {
     let text: String
 
