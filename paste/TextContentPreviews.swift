@@ -91,13 +91,24 @@ struct RichTextContentPreview: View {
 struct MarkdownTextPreview: View {
     let text: String
 
+    // Same identity-stability fix as `LaTeXDocumentPreview` below: `Block`
+    // gets a fresh random UUID every time `parsedBlocks` is accessed, so
+    // reading it directly from `body` would hand `ForEach` a brand-new set
+    // of view identities on every redraw. Harmless here (Text renders
+    // synchronously, so there's nothing async to interrupt) but still
+    // wasteful churn — cached the same way for consistency.
+    @State private var blocks: [Block] = []
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(parsedBlocks) { $0.view }
+                ForEach(blocks) { $0.view }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
+        }
+        .task(id: text) {
+            blocks = parsedBlocks
         }
     }
 
@@ -343,13 +354,35 @@ struct LaTeXRenderedPreview: View {
 struct LaTeXDocumentPreview: View {
     let text: String
 
+    // `parsedBlocks` below builds a fresh `[Block]` — each with its own
+    // brand-new random UUID — every time it's accessed. Iterating it
+    // directly from `body` would mean SwiftUI sees a completely different
+    // set of view identities on every redraw (any scroll/layout pass in the
+    // ScrollView triggers one), so it tears down and recreates every child
+    // view each time, including every `LaTeX()` math renderer. That's
+    // merely wasteful for plain text, but `LaTeX()`'s render is
+    // asynchronous (real MathJax work via JavaScriptCore) — a torn-down
+    // view aborts its render and the fresh replacement starts over from
+    // scratch, so on a page with many equations some finish by pure timing
+    // luck before the next redraw kills them, and others never do,
+    // producing exactly the "identical-looking equations, some render and
+    // some silently don't" symptom this fixes. Computing the blocks ONCE
+    // per `text` value into `@State`, and having `body` read that stable
+    // array instead of the computed property directly, keeps every child
+    // view's identity — and therefore its in-flight render — intact across
+    // redraws.
+    @State private var blocks: [Block] = []
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                ForEach(parsedBlocks) { $0.view }
+                ForEach(blocks) { $0.view }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(4)
+        }
+        .task(id: text) {
+            blocks = parsedBlocks
         }
     }
 
@@ -367,6 +400,46 @@ struct LaTeXDocumentPreview: View {
         guard let end = afterStart.range(of: "\\end{document}") else { return afterStart }
         return String(afterStart[..<end.lowerBound])
     }
+
+    /// Everything the preamble strip in `documentBody` throws away — needed
+    /// for exactly one thing: `\title{}`/`\author{}`/`\date{}` are declared
+    /// here, not in the body, so a document that calls `\maketitle` (which
+    /// otherwise renders as nothing, since it's just a noise command with no
+    /// content of its own) needs this to recover what it's supposed to
+    /// typeset.
+    private var preambleText: String {
+        guard let start = text.range(of: "\\begin{document}") else { return "" }
+        return String(text[text.startIndex..<start.lowerBound])
+    }
+
+    /// Looks up `\command{...}` in the preamble and returns its brace
+    /// content — used for `title`/`author`/`date`. Operates on ONE captured
+    /// `String` value throughout (never a fresh copy mid-lookup) so every
+    /// index stays valid for what it's used against — see `matchingBrace`'s
+    /// doc comment for why that specifically matters here.
+    private func extractPreambleField(_ command: String) -> String? {
+        let preamble = preambleText
+        let marker = "\\\(command){"
+        guard let markerRange = preamble.range(of: marker) else { return nil }
+        let braceIndex = preamble.index(before: markerRange.upperBound)
+        guard let closeIndex = matchingBrace(
+            in: preamble, openAt: preamble.distance(from: preamble.startIndex, to: braceIndex)
+        ) else { return nil }
+        return String(preamble[preamble.index(after: braceIndex)..<closeIndex])
+    }
+
+    /// Environments whose content is literal, un-interpreted text — no
+    /// LaTeX commands inside them mean anything, so they're shown as raw
+    /// monospace source (via `CodeSyntaxPreview`) rather than run through
+    /// any of the command/math parsing the rest of this preview does.
+    /// `lstlisting` can carry a trailing `[options]` (e.g.
+    /// `\begin{lstlisting}[language=Python]`), so its open marker is
+    /// deliberately a prefix rather than the exact full tag.
+    private static let verbatimEnvironments: [(open: String, close: String)] = [
+        ("\\begin{verbatim}", "\\end{verbatim}"),
+        ("\\begin{lstlisting", "\\end{lstlisting}"),
+        ("\\begin{minted}", "\\end{minted}"),
+    ]
 
     /// Multi-line display-math openers this preview specifically buffers
     /// across lines (see `parsedBlocks`). `\[` and `\begin{equation}`/
@@ -426,18 +499,126 @@ struct LaTeXDocumentPreview: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// amsthm-style environments (`\newtheorem{theorem}{Theorem}` and
+    /// friends) — always `\begin{name}[Optional Title] ... \end{name}`, with
+    /// a matching display label the real document would generate via
+    /// numbering this preview doesn't attempt to reproduce.
+    private static let theoremEnvironments: [String: String] = [
+        "theorem": "Theorem", "lemma": "Lemma", "proposition": "Proposition",
+        "corollary": "Corollary", "definition": "Definition", "remark": "Remark",
+        "example": "Example", "proof": "Proof", "claim": "Claim",
+        "conjecture": "Conjecture", "notation": "Notation", "observation": "Observation",
+    ]
+
     private static let noiseCommands: Set<String> = [
         "documentclass", "usepackage", "newcommand", "renewcommand", "providecommand",
         "newenvironment", "renewenvironment", "def", "let", "RequirePackage",
         "pagestyle", "thispagestyle", "fancyhf", "headrulewidth", "footrulewidth",
         "addtolength", "setlength", "tabcolsep", "setcounter",
-        "urlstyle", "raggedbottom", "raggedright", "raggedleft",
+        "urlstyle", "raggedbottom", "raggedright", "raggedleft", "centering",
         "hypersetup", "DeclareMathOperator", "definecolor", "geometry",
         "allsectionsfont", "selectfont", "fontsize", "familydefault", "sfdefault",
         "vspace", "hspace", "newline", "noindent", "indent",
         "clearpage", "newpage", "vfill", "hfill", "medskip", "smallskip", "bigskip",
         "label", "maketitle",
     ]
+
+    /// A row-terminator/separator line with no cell content of its own —
+    /// booktabs' `\toprule`/`\midrule`/`\bottomrule`, plain `\hline`, and
+    /// `\cline{...}` are formatting-only, so showing them as literal
+    /// "toprule"/"midrule" text (what happened before this existed) is
+    /// exactly the kind of raw-command noise this whole preview exists to
+    /// avoid.
+    private static func isTableRuleLine(_ line: String) -> Bool {
+        line == "\\toprule" || line == "\\midrule" || line == "\\bottomrule" ||
+        line == "\\hline" || line.hasPrefix("\\cline{")
+    }
+
+    /// Splits one tabular row's source on top-level `&` column separators.
+    /// `\&` (an escaped, literal ampersand) is kept intact rather than
+    /// treated as a split point.
+    private static func splitTableRow(_ raw: String) -> [String] {
+        var cells: [String] = []
+        var current = ""
+        let chars = Array(raw)
+        var idx = 0
+        while idx < chars.count {
+            if chars[idx] == "\\", idx + 1 < chars.count, chars[idx + 1] == "&" {
+                current.append("\\&")
+                idx += 2
+                continue
+            }
+            if chars[idx] == "&" {
+                cells.append(current)
+                current = ""
+                idx += 1
+                continue
+            }
+            current.append(chars[idx])
+            idx += 1
+        }
+        cells.append(current)
+        return cells
+    }
+
+    /// Parses the raw lines between `\begin{tabular}...}` and
+    /// `\end{tabular}` into rows of cell text. A row's LaTeX source ends at
+    /// `\\` (optionally followed by a spacing arg like `\\[2pt]`, which is
+    /// dropped along with the terminator since it doesn't affect the
+    /// cells) — not at a source line break, since a row is free to wrap
+    /// across several source lines.
+    private static func parseTabularRows(_ lines: [String]) -> [[String]] {
+        var rows: [[String]] = []
+        var buffer = ""
+        for line in lines {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || isTableRuleLine(t) { continue }
+            buffer += (buffer.isEmpty ? "" : " ") + t
+
+            while let range = buffer.range(of: "\\\\") {
+                let rowSource = String(buffer[buffer.startIndex..<range.lowerBound])
+                let cells = splitTableRow(rowSource).map { $0.trimmingCharacters(in: .whitespaces) }
+                if cells.contains(where: { !$0.isEmpty }) { rows.append(cells) }
+                var remainder = buffer[range.upperBound...]
+                if remainder.first == "[", let close = remainder.firstIndex(of: "]") {
+                    remainder = remainder[remainder.index(after: close)...]
+                }
+                buffer = String(remainder).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        // A tabular's LAST row often has no trailing `\\` at all (it's
+        // optional immediately before `\end{tabular}`) — anything still
+        // sitting in `buffer` once every line has been consumed is that
+        // final, unterminated row.
+        let cells = splitTableRow(buffer).map { $0.trimmingCharacters(in: .whitespaces) }
+        if cells.contains(where: { !$0.isEmpty }) { rows.append(cells) }
+        return rows
+    }
+
+    /// Each cell goes through `inlineContent` (not a plain `Text`) so a
+    /// numeric/math-heavy table — the most common kind — still gets real
+    /// typeset math per cell, and the first row is bolded on the (common)
+    /// assumption that it's the header.
+    private func tabularGrid(_ rows: [[String]]) -> some View {
+        let colCount = rows.map(\.count).max() ?? 1
+        return VStack(spacing: 1) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { r, row in
+                HStack(spacing: 1) {
+                    ForEach(0..<colCount, id: \.self) { c in
+                        (c < row.count ? inlineContent(row[c]) : inlineContent(""))
+                            .font(.system(size: 13, weight: r == 0 ? .semibold : .regular))
+                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .frame(minWidth: 60, alignment: .leading)
+                            .background(Color.primary.opacity(r == 0 ? 0.06 : 0.02))
+                            .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+                    }
+                }
+            }
+        }
+        .padding(4)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.15), lineWidth: 1))
+    }
 
     private var parsedBlocks: [Block] {
         var blocks: [Block] = []
@@ -456,7 +637,52 @@ struct LaTeXDocumentPreview: View {
             if let (level, title) = sectionHeader(trimmed) {
                 blocks.append(Block(view: AnyView(
                     inlineContent(title)
-                        .font(.system(size: level == 1 ? 17 : 15, weight: .bold))
+                        .font(.system(size: Self.headerFontSize(for: level), weight: .bold))
+                )))
+                continue
+            }
+
+            if trimmed == "\\maketitle" {
+                let title  = extractPreambleField("title")
+                let author = extractPreambleField("author")
+                // `\date{\today}` is extremely common and can't be resolved
+                // to an actual date without running the LaTeX macro — show
+                // it only when it's a literal date the author typed in,
+                // not the `\today` placeholder itself.
+                let date = extractPreambleField("date").flatMap { $0 == "\\today" ? nil : $0 }
+                if title != nil || author != nil || date != nil {
+                    blocks.append(Block(view: AnyView(
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let title { inlineContent(title).font(.system(size: 19, weight: .bold)) }
+                            if let author { inlineContent(author).font(.system(size: 14)) }
+                            if let date {
+                                inlineContent(date).font(.system(size: 12)).foregroundColor(.secondary)
+                            }
+                        }
+                    )))
+                }
+                continue
+            }
+
+            // Verbatim/code-listing environments don't contain LaTeX
+            // commands to interpret — showing their content through the
+            // normal command-parsing path would mangle any backslash or
+            // brace that happens to appear in the code. Checked before
+            // anything else here so nothing inside ever gets touched by the
+            // math/list/command handling below.
+            if let vb = Self.verbatimEnvironments.first(where: { trimmed.hasPrefix($0.open) }) {
+                var codeLines: [String] = []
+                while i < lines.count {
+                    let raw = lines[i]
+                    i += 1
+                    if raw.trimmingCharacters(in: .whitespaces).hasPrefix(vb.close) { break }
+                    codeLines.append(raw)
+                }
+                blocks.append(Block(view: AnyView(
+                    CodeSyntaxPreview(text: codeLines.joined(separator: "\n"), language: nil)
+                        .frame(minHeight: 20)
+                        .padding(8)
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
                 )))
                 continue
             }
@@ -482,25 +708,100 @@ struct LaTeXDocumentPreview: View {
                 continue
             }
 
-            if trimmed.hasPrefix("\\begin{itemize}") || trimmed.hasPrefix("\\begin{enumerate}") {
-                let numbered = trimmed.hasPrefix("\\begin{enumerate}")
+            if trimmed.hasPrefix("\\begin{"),
+               let nameEnd = trimmed[trimmed.index(trimmed.startIndex, offsetBy: 7)...].firstIndex(of: "}"),
+               let displayLabel = Self.theoremEnvironments[String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: 7)..<nameEnd])] {
+                let envName = String(trimmed[trimmed.index(trimmed.startIndex, offsetBy: 7)..<nameEnd])
+                let afterEnv = trimmed[trimmed.index(after: nameEnd)...]
+                var label = displayLabel
+                if afterEnv.first == "[", let closeBracket = afterEnv.firstIndex(of: "]") {
+                    label += " (\(afterEnv[afterEnv.index(after: afterEnv.startIndex)..<closeBracket]))"
+                }
+                label += "."
+
+                let endMarker = "\\end{\(envName)}"
+                var bodyLines: [String] = []
+                while i < lines.count {
+                    let bodyLine = lines[i].trimmingCharacters(in: .whitespaces)
+                    i += 1
+                    if bodyLine.hasPrefix(endMarker) { break }
+                    bodyLines.append(bodyLine)
+                }
+                blocks.append(Block(view: AnyView(
+                    VStack(alignment: .leading, spacing: 4) {
+                        inlineContent(label).font(.system(size: 13, weight: .bold))
+                        ForEach(Array(bodyLines.enumerated()), id: \.offset) { _, bodyLine in
+                            if !bodyLine.isEmpty { inlineContent(bodyLine) }
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                )))
+                continue
+            }
+
+            if trimmed.hasPrefix("\\begin{itemize}") || trimmed.hasPrefix("\\begin{enumerate}")
+                || trimmed.hasPrefix("\\begin{description}") {
+                let numbered  = trimmed.hasPrefix("\\begin{enumerate}")
+                let described = trimmed.hasPrefix("\\begin{description}")
                 var n = 1
                 while i < lines.count {
                     let itemLine = lines[i].trimmingCharacters(in: .whitespaces)
                     i += 1
-                    if itemLine.hasPrefix("\\end{itemize}") || itemLine.hasPrefix("\\end{enumerate}") { break }
+                    if itemLine.hasPrefix("\\end{itemize}") || itemLine.hasPrefix("\\end{enumerate}")
+                        || itemLine.hasPrefix("\\end{description}") { break }
                     guard itemLine.hasPrefix("\\item") else { continue }
-                    let content = String(itemLine.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                    guard !content.isEmpty else { continue }
-                    let marker = numbered ? "\(n)." : "\u{2022}"
-                    n += 1
-                    blocks.append(Block(view: AnyView(
-                        HStack(alignment: .top, spacing: 6) {
-                            Text(marker).font(.system(size: 13)).frame(minWidth: 14, alignment: .leading)
-                            inlineContent(content)
-                        }
-                        .padding(.leading, 8)
-                    )))
+                    var rest = itemLine.dropFirst(5)
+
+                    // `description`'s `\item[Term] definition` carries its
+                    // own bold label in brackets — distinct from the plain
+                    // bullet/number every other list item gets.
+                    var label: String? = nil
+                    if described, rest.first == "[", let closeBracket = rest.firstIndex(of: "]") {
+                        label = String(rest[rest.index(after: rest.startIndex)..<closeBracket])
+                        rest = rest[rest.index(after: closeBracket)...]
+                    }
+                    let content = String(rest).trimmingCharacters(in: .whitespaces)
+                    guard !content.isEmpty || label != nil else { continue }
+
+                    if let label {
+                        blocks.append(Block(view: AnyView(
+                            HStack(alignment: .top, spacing: 6) {
+                                inlineContent(label).font(.system(size: 13, weight: .semibold))
+                                inlineContent(content)
+                            }
+                            .padding(.leading, 8)
+                        )))
+                    } else {
+                        let marker = numbered ? "\(n)." : "\u{2022}"
+                        n += 1
+                        blocks.append(Block(view: AnyView(
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(marker).font(.system(size: 13)).frame(minWidth: 14, alignment: .leading)
+                                inlineContent(content)
+                            }
+                            .padding(.leading, 8)
+                        )))
+                    }
+                }
+                continue
+            }
+
+            // `tabular*`/`tabularx` share the same row syntax as plain
+            // `tabular` — `&`-separated cells, `\\`-terminated rows — so one
+            // prefix check covers all three instead of needing a separate
+            // entry per variant.
+            if trimmed.hasPrefix("\\begin{tabular") {
+                var rowLines: [String] = []
+                while i < lines.count {
+                    let rowLine = lines[i].trimmingCharacters(in: .whitespaces)
+                    i += 1
+                    if rowLine.hasPrefix("\\end{tabular") { break }
+                    rowLines.append(rowLine)
+                }
+                let rows = Self.parseTabularRows(rowLines)
+                if !rows.isEmpty {
+                    blocks.append(Block(view: AnyView(tabularGrid(rows))))
                 }
                 continue
             }
@@ -519,13 +820,27 @@ struct LaTeXDocumentPreview: View {
     }
 
     private func sectionHeader(_ line: String) -> (level: Int, title: String)? {
-        for (level, tag) in [(1, "section"), (2, "subsection"), (3, "subsubsection")] {
+        for (level, tag) in [
+            (0, "part"), (0, "chapter"),
+            (1, "section"), (2, "subsection"), (3, "subsubsection"),
+            (4, "paragraph"), (4, "subparagraph"),
+        ] {
             for form in ["\\\(tag)*{", "\\\(tag){"] {
                 guard line.hasPrefix(form), let close = matchingBrace(in: line, openAt: form.count - 1) else { continue }
                 return (level, String(line[line.index(line.startIndex, offsetBy: form.count)..<close]))
             }
         }
         return nil
+    }
+
+    private static func headerFontSize(for level: Int) -> CGFloat {
+        switch level {
+        case 0:  return 19
+        case 1:  return 17
+        case 2:  return 15
+        case 3:  return 14
+        default: return 13
+        }
     }
 
     /// `openAt` is the index of the `{` itself; returns the index of its
