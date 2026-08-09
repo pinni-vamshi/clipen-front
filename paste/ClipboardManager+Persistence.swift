@@ -253,6 +253,7 @@ extension ClipboardManager {
                                     sourceAppName: old.sourceAppName)
         updated.isPinned          = old.isPinned
         updated.diffBadge         = old.diffBadge
+        updated.diffDetail        = old.diffDetail
         updated.sourceBundleID    = old.sourceBundleID
         updated.userNote          = old.userNote
         updated.pastedToAppName   = old.pastedToAppName
@@ -262,6 +263,10 @@ extension ClipboardManager {
         updated.pasteCountByApp   = old.pasteCountByApp
         updated.pastedToAppNames  = old.pastedToAppNames
         updated.originalFileURL   = old.originalFileURL
+        updated.sidecarTypes      = old.sidecarTypes
+        updated.ocrText           = old.ocrText
+        updated.collections       = old.collections
+        updated.embedding         = old.embedding
         items[idx] = updated
         invalidateBlobCaches(for: id)
         lastSearchQuery = nil
@@ -611,9 +616,19 @@ extension ClipboardManager {
             guard let kids = p.groupChildren else { return nil }
             let items = kids.prefix(Self.maxGroupItems).compactMap { child -> ClipboardItem? in
                 guard let c = decodeContent(child) else { return nil }
-                return ClipboardItem(content: c, id: child.id, timestamp: child.timestamp,
+                var item = ClipboardItem(content: c, id: child.id, timestamp: child.timestamp,
                                      urlTitle: child.urlTitle, sourceAppName: child.sourceAppName,
                                      userNote: child.userNote, ocrText: child.ocrText)
+                item.isPinned = child.isPinned
+                item.collections = Set(child.collections ?? [])
+                if let orig = child.originalFilePath { item.originalFileURL = URL(fileURLWithPath: orig) }
+                item.sourceBundleID = child.sourceBundleID
+                if let rel = child.sidecarBlob, let raw = readBlob(rel),
+                   let sidecar = try? JSONDecoder().decode([String: Data].self, from: raw),
+                   !sidecar.isEmpty {
+                    item.sidecarTypes = sidecar
+                }
+                return item
             }
             return items.isEmpty ? nil : .group(Array(items))
         default:
@@ -881,9 +896,11 @@ extension ClipboardManager {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
 
+        let loadedEmbeddings = readEmbeddingsFile()
+
         var shownHeadIDs = Set<UUID>()
         if let headPersisted = readManifest(at: historyHeadURL, dec: dec), !headPersisted.isEmpty {
-            let headBatch = decodeHistoryBatch(headPersisted, loadedEmbeddings: [:])
+            let headBatch = decodeHistoryBatch(headPersisted, loadedEmbeddings: loadedEmbeddings)
             if !headBatch.items.isEmpty {
                 mergeHistoryBlobCaches(headBatch)
                 shownHeadIDs = Set(headBatch.items.map(\.id))
@@ -952,8 +969,6 @@ extension ClipboardManager {
         if !persisted.isEmpty, let goodBytes = try? Data(contentsOf: historyFileURL) {
             try? goodBytes.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
         }
-        let loadedEmbeddings = readEmbeddingsFile()
-
         let unpinnedPersisted  = persisted.filter { !$0.isPinned }
         let priorityPersisted  = Self.historyPrioritySlice(persisted)
         let deferredPersisted  = Array(unpinnedPersisted.dropFirst(Self.historyPriorityUnpinnedCount))
@@ -1034,13 +1049,17 @@ extension ClipboardManager {
 
     private static let embeddingSchemaVersion = 3
     private static let embeddingSchemaKey = "clipen.embeddingSchemaVersion"
+    private static let embeddingDimKey = "clipen.embeddingDimension"
 
     static var persistedEmbeddingSchemaIsCurrent: Bool {
-        UserDefaults.standard.integer(forKey: embeddingSchemaKey) >= embeddingSchemaVersion
+        guard UserDefaults.standard.integer(forKey: embeddingSchemaKey) >= embeddingSchemaVersion else { return false }
+        let storedDim = UserDefaults.standard.integer(forKey: embeddingDimKey)
+        return storedDim == 0 || storedDim == ClipenEmbedder.shared.dimension
     }
 
     static func markEmbeddingSchemaCurrent() {
         UserDefaults.standard.set(embeddingSchemaVersion, forKey: embeddingSchemaKey)
+        UserDefaults.standard.set(ClipenEmbedder.shared.dimension, forKey: embeddingDimKey)
     }
 
 }

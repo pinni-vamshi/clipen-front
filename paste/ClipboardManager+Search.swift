@@ -24,7 +24,7 @@ extension ClipboardManager {
             guard !computed.isEmpty else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                var byID: [UUID: [Float]] = Dictionary(uniqueKeysWithValues: computed.map { ($0.id, $0.vector) })
+                var byID: [UUID: [Float]] = Dictionary(computed.map { ($0.id, $0.vector) }, uniquingKeysWith: { _, last in last })
                 var updated = self.items
                 var applied = 0
                 for idx in updated.indices where updated[idx].embedding == nil {
@@ -534,6 +534,13 @@ final class ClipenEmbedder {
     let usingContextual: Bool
 
     var isAvailable: Bool { usingContextual || fallback != nil }
+
+    var dimension: Int {
+        if #available(macOS 14.0, *), let model = contextual as? NLContextualEmbedding {
+            return model.dimension
+        }
+        return fallback?.dimension ?? 0
+    }
 
     private init() {
         fallback = NLEmbedding.sentenceEmbedding(for: .english)

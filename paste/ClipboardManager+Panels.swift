@@ -41,6 +41,7 @@ extension ClipboardManager {
 
         markedItemIDs = []
         multiSelectAnchorIndex = nil
+        markBlobPurgeNeeded()
         selectedIndex = displayItems.firstIndex(where: { $0.id == groupItem.id }) ?? 0
         selectionDidChange()
         AuthManager.shared.registerActionUsage(actionID: "action.group")

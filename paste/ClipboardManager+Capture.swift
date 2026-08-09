@@ -670,6 +670,14 @@ extension ClipboardManager {
 
         _ = EmbeddedImageExtractor.firstImage(for: item)
 
+        // Warm the row thumbnail here, off-main, so materialising an image
+        // row mid-scroll is a cache hit instead of a synchronous decode.
+        if case .image(_, let data, _) = content,
+           ItemThumbnailCache.shared.cachedDataThumbnail(key: item.id.uuidString) == nil,
+           let thumb = ItemThumbnailCache.decodeDataThumbnail(data: data) {
+            ItemThumbnailCache.shared.storeDataThumbnail(thumb, key: item.id.uuidString)
+        }
+
         guard let plainText = content.plainText, !plainText.isEmpty else { return }
 
         let cacheKey = TextInsightService.cacheKey(id: item.id, text: plainText)

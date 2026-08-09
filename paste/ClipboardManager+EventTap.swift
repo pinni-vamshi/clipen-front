@@ -487,6 +487,20 @@ extension ClipboardManager {
             return nil
         }
 
+        if key == 50 && previewWindow.isVisible && !isSearchActive {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+            let shiftGrave = shift
+            DispatchQueue.main.async { [weak self] in
+                self?.playInteractionSoundIfEnabled(.category)
+                if shiftGrave {
+                    self?.cycleCategoryBackward()
+                } else {
+                    self?.cycleCategoryForward()
+                }
+            }
+            return nil
+        }
+
         guard !shift && !opt else { return Unmanaged.passUnretained(event) }
 
         if key == 8 && previewWindow.isVisible {
@@ -521,20 +535,6 @@ extension ClipboardManager {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
             DispatchQueue.main.async { [weak self] in
                 self?.applyCaseTransformForSelection(.uppercase)
-            }
-            return nil
-        }
-
-        if key == 50 && previewWindow.isVisible && !isSearchActive {
-            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
-            let shiftGrave = event.flags.contains(.maskShift)
-            DispatchQueue.main.async { [weak self] in
-                self?.playInteractionSoundIfEnabled(.category)
-                if shiftGrave {
-                    self?.cycleCategoryBackward()
-                } else {
-                    self?.cycleCategoryForward()
-                }
             }
             return nil
         }

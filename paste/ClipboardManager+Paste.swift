@@ -124,10 +124,15 @@ extension ClipboardManager {
         pb.clearContents()
         pb.writeObjects([makeFilePasteboardItem(for: url)])
         markPasteboardWriteAsOwn()
-        _ = resolvedPasteTarget()
+        let target = resolvedPasteTarget()
+        let token = beginPasteSimulation()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.simulateCommandV()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.endPasteSimulation(token: token)
+            }
         }
+        AuthManager.shared.registerCommandVAction()
     }
 
     func commitPaste() {

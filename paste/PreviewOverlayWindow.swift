@@ -427,7 +427,8 @@ struct PopoverPreviewView: View {
                                         }
                                 case .imageRun(let run):
                                     ImageRunRow(run: run, selectedIndex: selectedIndex,
-                                                selectionNamespace: selectionNamespace)
+                                                selectionNamespace: selectionNamespace,
+                                                markedItemIDs: manager.markedItemIDs)
                                         .equatable()
                                         // Without this, scrollTo(item.id) has no
                                         // anchor to estimate against for an
@@ -446,36 +447,23 @@ struct PopoverPreviewView: View {
                         }
 
                         .padding(.top, 6)
-
-                        .animation(SelectionHighlightStyle.spring, value: selectedIndex)
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
                         let targetID = items[newIdx].id
                         let coarseID = coarseScrollTarget(for: newIdx)
 
-                        // Jump to the row-level anchor first — for an
-                        // .imageRun this is the ONLY anchor that exists
-                        // before the row has ever been rendered (see
-                        // `coarseScrollTarget`); scrolling straight to a
-                        // nested, never-rendered item id is a silent no-op,
-                        // which is exactly why "back" into an image run
-                        // used to do nothing. Also handles the pre-existing
-                        // long-jump case (wrapping from the first item back
-                        // to the last) since LazyVStack's position estimate
-                        // for an unmeasured row degrades on tall, uneven
-                        // rows.
-                        withAnimation(SelectionHighlightStyle.spring) {
-                            proxy.scrollTo(coarseID, anchor: .center)
-                        }
-                        // One runloop turn later the row has actually been
-                        // measured (its GeometryReader/id anchors have
-                        // fired), so a second, unanimated scrollTo can
-                        // target the real item id for precise centering —
-                        // this is also what the Transform/Share side panel
-                        // anchors off of via `selectedRowMeasuredFrame`.
-                        // Guarded on selection not having moved on again in
-                        // the meantime.
+                        // Jump to the row-level anchor — for an .imageRun
+                        // this is the ONLY anchor that exists before the row
+                        // has ever been rendered (see `coarseScrollTarget`);
+                        // scrolling straight to a nested, never-rendered
+                        // item id is a silent no-op, which is why "back"
+                        // into an image run used to do nothing. For every
+                        // other row it IS the item's own id, so this single
+                        // animated scroll is already exact.
+                        proxy.scrollTo(coarseID, anchor: .center)
+
+                        guard coarseID != AnyHashable(targetID) else { return }
                         DispatchQueue.main.async {
                             guard manager.selectedIndex == newIdx else { return }
                             proxy.scrollTo(targetID, anchor: .center)
@@ -533,13 +521,8 @@ struct ImageRunRow: View, Equatable {
     let run: [(item: ClipboardItem, index: Int)]
     let selectedIndex: Int
     let selectionNamespace: Namespace.ID
+    let markedItemIDs: [UUID]
 
-    /// Without this, every selection change anywhere in the popup forces
-    /// SwiftUI to re-diff every ImageRunRow's full subtree (multiple image
-    /// cells each), not just the one row whose own selection state actually
-    /// changed — the same skip-when-unchanged pattern PopoverRow already
-    /// uses. That extra unnecessary diffing is what made the selection
-    /// animation feel jerky specifically around image rows.
     static func == (l: ImageRunRow, r: ImageRunRow) -> Bool {
         guard l.run.count == r.run.count else { return false }
         for (a, b) in zip(l.run, r.run) {
@@ -551,6 +534,9 @@ struct ImageRunRow: View, Equatable {
         let rSelected = r.run.contains(where: { $0.index == r.selectedIndex })
         if lSelected != rSelected { return false }
         if lSelected && l.selectedIndex != r.selectedIndex { return false }
+        let lMarked = Set(l.run.map(\.item.id)).intersection(l.markedItemIDs)
+        let rMarked = Set(r.run.map(\.item.id)).intersection(r.markedItemIDs)
+        if lMarked != rMarked { return false }
         return true
     }
 
@@ -606,7 +592,8 @@ struct ImageRunRow: View, Equatable {
                             }
                             ImageRunCell(item: entry.item, index: entry.index,
                                          isSelected: entry.index == selectedIndex,
-                                         selectionNamespace: selectionNamespace)
+                                         selectionNamespace: selectionNamespace,
+                                         markOrder: markedItemIDs.firstIndex(of: entry.item.id).map { $0 + 1 })
                         }
                     }
                 }
@@ -615,6 +602,14 @@ struct ImageRunRow: View, Equatable {
             // this VStack can ever be wider than the popup itself,
             // regardless of how many images ended up on the widest line.
             .frame(width: Self.lineWidth, alignment: .leading)
+            // Same guard PopoverRow puts on its own rowContent. The
+            // LazyVStack carries an .animation(spring, value: selectedIndex),
+            // so without this every selection change anywhere in the popup
+            // implicitly animates this run's layout — image cells sliding and
+            // resizing under a scroll that is already animating. The
+            // selection highlight keeps its own animation; only the content
+            // underneath opts out.
+            .transaction { $0.animation = nil }
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
     }
@@ -652,6 +647,44 @@ struct ImageRunRow: View, Equatable {
     }
 }
 
+/// Draws an item's image without ever decoding on the main thread while a
+/// scroll is running. `ItemThumbnailCache.thumbnail(forData:key:)` decodes
+/// synchronously on a cache miss, and a `LazyVStack` materialises rows *during*
+/// the scroll animation — so a run of four images meant up to four full
+/// CGImageSource decodes inside a single frame, every time you scrolled onto
+/// it for the first time. That is the hitch felt specifically when moving into
+/// image rows. Here a miss draws the already-in-memory original for a frame or
+/// two while the real thumbnail is decoded off-main.
+struct CachedThumbnail: View {
+    let original: NSImage
+    let data: Data
+    let key: String
+    let size: CGFloat
+    let cornerRadius: CGFloat
+
+    @State private var decoded: NSImage?
+
+    var body: some View {
+        Image(nsImage: decoded ?? ItemThumbnailCache.shared.cachedDataThumbnail(key: key) ?? original)
+            .resizable().aspectRatio(contentMode: .fill)
+            .frame(width: size, height: size)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .task(id: key) {
+                guard decoded == nil,
+                      ItemThumbnailCache.shared.cachedDataThumbnail(key: key) == nil else { return }
+                let rawData = data
+                let thumbKey = key
+                let img = await Task.detached(priority: .userInitiated) {
+                    ItemThumbnailCache.decodeDataThumbnail(data: rawData)
+                }.value
+                guard let img, !Task.isCancelled else { return }
+                ItemThumbnailCache.shared.storeDataThumbnail(img, key: thumbKey)
+                decoded = img
+            }
+    }
+}
+
 /// One image inside an `ImageRunRow` — still a full `ClipboardItem`, so
 /// marking/pinning/delete/paste all key off its own id exactly as they do
 /// for a normal row; only how it's DRAWN differs.
@@ -660,19 +693,16 @@ private struct ImageRunCell: View {
     let index: Int
     let isSelected: Bool
     let selectionNamespace: Namespace.ID
+    let markOrder: Int?
 
-    @ObservedObject private var manager = ClipboardManager.shared
     private static let cellSize: CGFloat = ImageRunRow.cellSize
-
-    private var markOrder: Int? { manager.markOrder(for: item.id) }
 
     var body: some View {
         Group {
             if case .image(let img, let data, _) = item.content {
-                Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
-                    .resizable().aspectRatio(contentMode: .fill)
-                    .frame(width: Self.cellSize, height: Self.cellSize)
-                    .clipped()
+                CachedThumbnail(original: img, data: data, key: item.id.uuidString,
+                                size: Self.cellSize,
+                                cornerRadius: SelectionHighlightStyle.cellCornerRadius)
             }
         }
         .frame(width: Self.cellSize, height: Self.cellSize)
@@ -703,21 +733,21 @@ private struct ImageRunCell: View {
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            manager.uiSelectItem(at: index)
-            manager.pasteItemKeepingPopupOpen(id: item.id)
+            ClipboardManager.shared.uiSelectItem(at: index)
+            ClipboardManager.shared.pasteItemKeepingPopupOpen(id: item.id)
         }
         .onTapGesture(count: 1) {
             let mods = NSEvent.modifierFlags
             if mods.contains(.shift) {
-                manager.uiRangeSelectItem(to: index)
+                ClipboardManager.shared.uiRangeSelectItem(to: index)
                 return
             }
             if mods.contains(.command) {
-                manager.uiToggleSelectItem(at: index)
+                ClipboardManager.shared.uiToggleSelectItem(at: index)
                 return
             }
-            manager.uiSelectItem(at: index)
-            manager.uiPreviewSelectedItem()
+            ClipboardManager.shared.uiSelectItem(at: index)
+            ClipboardManager.shared.uiPreviewSelectedItem()
         }
         .onDrag {
             item.makeItemProvider()
@@ -1037,11 +1067,8 @@ struct PopoverRow: View, Equatable {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .image(let img, let data, _):
-            Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
-                .resizable().aspectRatio(contentMode: .fill)
-                .frame(width: 48, height: 48)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            CachedThumbnail(original: img, data: data, key: item.id.uuidString,
+                            size: 48, cornerRadius: 6)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .svg(let src):
             Text(src).font(.system(size: 11, design: .monospaced)).lineLimit(2)
