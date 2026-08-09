@@ -418,18 +418,55 @@ struct PopoverPreviewView: View {
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
+                        let targetID = items[newIdx].id
 
                         withAnimation(SelectionHighlightStyle.spring) {
-                            proxy.scrollTo(items[newIdx].id, anchor: .center)
+                            proxy.scrollTo(targetID, anchor: .center)
+                        }
+                        // The LazyVStack only estimates where an
+                        // off-screen row sits before it's ever been
+                        // measured — accurate for uniform-height rows, but
+                        // this list mixes single-line text rows with
+                        // multi-line image runs, so the estimate can land
+                        // far from the real row on a long jump (worst
+                        // case: wrapping from the first item back to the
+                        // last). That stale position is also what the
+                        // Transform/Share side panel anchors off of via
+                        // `selectedRowMeasuredFrame` — so an inaccurate
+                        // scroll silently produces an inaccurate anchor
+                        // too, since the row's GeometryReader never fires
+                        // to correct it if the row was never actually
+                        // brought into view. One runloop turn later the
+                        // first scroll's target row (even if landed on
+                        // imprecisely) has been measured for real, so a
+                        // second, unanimated scrollTo corrects the
+                        // position from real layout instead of the
+                        // estimate. Guarded on selection not having moved
+                        // on again in the meantime.
+                        DispatchQueue.main.async {
+                            guard manager.selectedIndex == newIdx else { return }
+                            proxy.scrollTo(targetID, anchor: .center)
                         }
                     }
                     .onAppear {
                         guard items.indices.contains(selectedIndex) else { return }
-                        proxy.scrollTo(items[selectedIndex].id, anchor: .center)
+                        let targetID = items[selectedIndex].id
+                        proxy.scrollTo(targetID, anchor: .center)
+                        DispatchQueue.main.async {
+                            guard items.indices.contains(selectedIndex),
+                                  items[selectedIndex].id == targetID else { return }
+                            proxy.scrollTo(targetID, anchor: .center)
+                        }
                     }
                     .onChange(of: manager.popupOpenGeneration) { _, _ in
                         guard items.indices.contains(selectedIndex) else { return }
-                        proxy.scrollTo(items[selectedIndex].id, anchor: .center)
+                        let targetID = items[selectedIndex].id
+                        proxy.scrollTo(targetID, anchor: .center)
+                        DispatchQueue.main.async {
+                            guard items.indices.contains(selectedIndex),
+                                  items[selectedIndex].id == targetID else { return }
+                            proxy.scrollTo(targetID, anchor: .center)
+                        }
                     }
                 }
             }
@@ -464,17 +501,25 @@ struct ImageRunRow: View {
     let selectedIndex: Int
     let selectionNamespace: Namespace.ID
 
-    private static let cellSize:  CGFloat = 48
-    private static let cellGap:   CGFloat = 8
+    static let cellSize:  CGFloat = 60
+    private static let cellGap:   CGFloat = 12
     private static let railWidth: CGFloat = 22
+    /// Fixed at 4 regardless of available width — a straightforward "N
+    /// per line" read, rather than however many the popup's 420pt happens
+    /// to fit.
+    private static let maxPerLine = 4
     /// 420 (popup width) − 18 (row's own .horizontal padding, 9 each side)
-    /// − 22 (rail) − 8 (rail↔divider spacing) − 1 (divider) − 8
-    /// (divider↔first image spacing).
+    /// − 22 (rail) − 12 (rail↔divider spacing) − 1 (divider) − 12
+    /// (divider↔first image spacing). Enforced as a hard `.frame` width
+    /// below, not just used to size things — so a math mistake clips a
+    /// cell instead of letting it push past the popup's own fixed-width
+    /// bounds.
     private static let lineWidth: CGFloat = 420 - 18 - railWidth - cellGap - 1 - cellGap
     private static let perImageWidth = cellSize + cellGap + 1 + cellGap
 
     private var lines: [[(item: ClipboardItem, index: Int)]] {
-        let perLine = max(1, Int((Self.lineWidth - Self.cellSize) / Self.perImageWidth) + 1)
+        let fitsPerLine = max(1, Int((Self.lineWidth - Self.cellSize) / Self.perImageWidth) + 1)
+        let perLine = min(Self.maxPerLine, fitsPerLine)
         var out: [[(item: ClipboardItem, index: Int)]] = []
         var i = 0
         while i < run.count {
@@ -513,10 +558,27 @@ struct ImageRunRow: View {
                     }
                 }
             }
+            // Hard clamp — see the `lineWidth` comment above. Nothing in
+            // this VStack can ever be wider than the popup itself,
+            // regardless of how many images ended up on the widest line.
+            .frame(width: Self.lineWidth, alignment: .leading)
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
     }
 
+    /// Same tag-label formatting as `PopoverRow.tagLabelText`, for whichever
+    /// item this run's rail badge is currently representing.
+    private func tagLabelText(for item: ClipboardItem) -> String {
+        let visible = item.tags.prefix(4)
+        let labels = visible.map { String(localized: String.LocalizationValue($0.label)) }
+        let suffix = item.tags.count > 4 ? ", +\(item.tags.count - 4)" : ""
+        return labels.joined(separator: ", ") + suffix
+    }
+
+    /// Mirrors `PopoverRow.railBadge`'s default/selected split exactly:
+    /// the rotated tag-label TEXT at rest, the tag ICON only once
+    /// something in this run is actually selected — never a generic
+    /// "this is a group of photos" icon.
     @ViewBuilder
     private var railBadge: some View {
         if let selectedEntry = run.first(where: { $0.index == selectedIndex }) {
@@ -526,10 +588,13 @@ struct ImageRunRow: View {
                 .frame(width: 20, height: 20)
                 .background(Color.secondary.opacity(0.45), in: Circle())
         } else {
-            Image(systemName: "photo.on.rectangle")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary.opacity(0.6))
-                .frame(width: 20, height: 20)
+            Text(tagLabelText(for: run[0].item))
+                .font(.system(size: 8, weight: .black))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundColor(.secondary.opacity(0.75))
+                .frame(width: 88, alignment: .center)
+                .rotationEffect(.degrees(-90))
         }
     }
 }
@@ -544,7 +609,7 @@ private struct ImageRunCell: View {
     let selectionNamespace: Namespace.ID
 
     @ObservedObject private var manager = ClipboardManager.shared
-    private static let cellSize: CGFloat = 48
+    private static let cellSize: CGFloat = ImageRunRow.cellSize
 
     private var markOrder: Int? { manager.markOrder(for: item.id) }
 
@@ -1025,7 +1090,7 @@ struct CollectionChip: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .overlay(
-            Capsule().stroke(Color(hex: "#4E8DF7"), lineWidth: 2)
+            Capsule().stroke(Color(hex: "#4E8DF7"), lineWidth: 1)
         )
         .help("Current collection — press 1–9 to switch")
     }
