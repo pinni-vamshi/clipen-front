@@ -931,6 +931,7 @@ extension ClipboardManager {
         let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
         let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
         down?.flags = .maskCommand; up?.flags = .maskCommand
+        Self.tagSynthetic(down); Self.tagSynthetic(up)
         down?.post(tap: .cgAnnotatedSessionEventTap)
         up?.post(tap: .cgAnnotatedSessionEventTap)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -1514,6 +1515,7 @@ extension ClipboardManager {
         let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
         let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
         down?.flags = .maskCommand; up?.flags = .maskCommand
+        Self.tagSynthetic(down); Self.tagSynthetic(up)
         down?.post(tap: .cgAnnotatedSessionEventTap)
         up?.post(tap: .cgAnnotatedSessionEventTap)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in

@@ -120,6 +120,8 @@ extension ClipboardManager {
             return Unmanaged.passUnretained(event)
         }
 
+        if Self.isSynthetic(event) { return Unmanaged.passUnretained(event) }
+
         if type == .flagsChanged { return handleFlagsChanged(event) }
         if type == .keyUp        { return handleKeyUp(event) }
         if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
@@ -188,6 +190,12 @@ extension ClipboardManager {
             pTapHoldTimer?.invalidate();      pTapHoldTimer = nil
             sTapHoldTimer?.invalidate();      sTapHoldTimer = nil
             if key == 49 { spaceKeyIsDown = false }
+            return Unmanaged.passUnretained(event)
+        }
+
+        if key == 9, isSimulatingPaste {
+            vTapHoldTimer?.invalidate();      vTapHoldTimer = nil
+            firstOpenHoldTimer?.invalidate(); firstOpenHoldTimer = nil
             return Unmanaged.passUnretained(event)
         }
 

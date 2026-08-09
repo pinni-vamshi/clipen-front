@@ -579,6 +579,16 @@ class ClipboardManager: ObservableObject {
     var runLoopSource: CFRunLoopSource?
     var isSimulatingPaste = false
 
+    static let syntheticEventMarker: Int64 = 0x434C_5049_4E01
+
+    static func tagSynthetic(_ event: CGEvent?) {
+        event?.setIntegerValueField(.eventSourceUserData, value: syntheticEventMarker)
+    }
+
+    static func isSynthetic(_ event: CGEvent) -> Bool {
+        event.getIntegerValueField(.eventSourceUserData) == syntheticEventMarker
+    }
+
     private var pasteSimulationToken = 0
 
     @discardableResult
@@ -701,6 +711,8 @@ class ClipboardManager: ObservableObject {
             self?.itemPreviewPanel.hide()
 
             self?.cancelPendingItemPreviewSync()
+
+            self?.userOpenedItemPreview = false
         }
         itemPreviewPanel.onVisibilityChange = { [weak self] visible in
             self?.isItemPreviewVisible = visible

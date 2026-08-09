@@ -69,10 +69,12 @@ extension ClipboardManager {
                     guard let base = ptr.baseAddress else { return }
                     if let dn = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
                         dn.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
+                        ClipboardManager.tagSynthetic(dn)
                         dn.post(tap: .cghidEventTap)
                     }
                     if let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
                         up.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
+                        ClipboardManager.tagSynthetic(up)
                         up.post(tap: .cghidEventTap)
                     }
                 }
@@ -349,6 +351,7 @@ extension ClipboardManager {
             let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
             let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
             down?.flags = .maskCommand; up?.flags = .maskCommand
+            Self.tagSynthetic(down); Self.tagSynthetic(up)
             down?.post(tap: .cgAnnotatedSessionEventTap)
             up?.post(tap: .cgAnnotatedSessionEventTap)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -414,6 +417,7 @@ extension ClipboardManager {
             let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
             let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
             down?.flags = .maskCommand; up?.flags = .maskCommand
+            Self.tagSynthetic(down); Self.tagSynthetic(up)
             down?.post(tap: .cgAnnotatedSessionEventTap)
             up?.post(tap: .cgAnnotatedSessionEventTap)
             let delay: TimeInterval = remaining.isEmpty ? 0.2 : 0.28
