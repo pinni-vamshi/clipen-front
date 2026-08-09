@@ -208,6 +208,29 @@ struct PopoverPreviewView: View {
         return result
     }
 
+    /// The id to `scrollTo` first for a given item index. For a `.single`
+    /// row this is just the item's own id (already a direct, ForEach-level
+    /// anchor). For an item inside an `.imageRun`, the item's id lives three
+    /// views deep inside `ImageRunCell` and has no anchor at all until that
+    /// row has actually been rendered once — so off-screen it must be
+    /// found from scratch, and scrolling straight to it silently does
+    /// nothing. The row's own id (now tagged via `.id(segment.id)`) is a
+    /// direct ForEach-level anchor same as a `.single` row, so it always has
+    /// something to jump to, even sight unseen.
+    private func coarseScrollTarget(for idx: Int) -> AnyHashable {
+        guard items.indices.contains(idx) else {
+            return items.first.map { AnyHashable($0.id) } ?? AnyHashable("")
+        }
+        if case .image = items[idx].content {
+            for segment in rowSegments {
+                if case .imageRun(let run) = segment, run.contains(where: { $0.index == idx }) {
+                    return AnyHashable(segment.id)
+                }
+            }
+        }
+        return AnyHashable(items[idx].id)
+    }
+
     private static let rowH: CGFloat = 72
 
     var body: some View {
@@ -405,6 +428,16 @@ struct PopoverPreviewView: View {
                                 case .imageRun(let run):
                                     ImageRunRow(run: run, selectedIndex: selectedIndex,
                                                 selectionNamespace: selectionNamespace)
+                                        .equatable()
+                                        // Without this, scrollTo(item.id) has no
+                                        // anchor to estimate against for an
+                                        // off-screen run — the id is buried
+                                        // inside ImageRunCell, three levels
+                                        // below anything ForEach or LazyVStack
+                                        // can position ahead of render. Tagging
+                                        // the row itself gives scrollTo a real
+                                        // target to jump to first.
+                                        .id(segment.id)
                                 }
                                 if segIdx < segments.count - 1 {
                                     Divider().padding(.leading, 38).opacity(0.25)
@@ -419,30 +452,30 @@ struct PopoverPreviewView: View {
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
                         let targetID = items[newIdx].id
+                        let coarseID = coarseScrollTarget(for: newIdx)
 
+                        // Jump to the row-level anchor first — for an
+                        // .imageRun this is the ONLY anchor that exists
+                        // before the row has ever been rendered (see
+                        // `coarseScrollTarget`); scrolling straight to a
+                        // nested, never-rendered item id is a silent no-op,
+                        // which is exactly why "back" into an image run
+                        // used to do nothing. Also handles the pre-existing
+                        // long-jump case (wrapping from the first item back
+                        // to the last) since LazyVStack's position estimate
+                        // for an unmeasured row degrades on tall, uneven
+                        // rows.
                         withAnimation(SelectionHighlightStyle.spring) {
-                            proxy.scrollTo(targetID, anchor: .center)
+                            proxy.scrollTo(coarseID, anchor: .center)
                         }
-                        // The LazyVStack only estimates where an
-                        // off-screen row sits before it's ever been
-                        // measured — accurate for uniform-height rows, but
-                        // this list mixes single-line text rows with
-                        // multi-line image runs, so the estimate can land
-                        // far from the real row on a long jump (worst
-                        // case: wrapping from the first item back to the
-                        // last). That stale position is also what the
-                        // Transform/Share side panel anchors off of via
-                        // `selectedRowMeasuredFrame` — so an inaccurate
-                        // scroll silently produces an inaccurate anchor
-                        // too, since the row's GeometryReader never fires
-                        // to correct it if the row was never actually
-                        // brought into view. One runloop turn later the
-                        // first scroll's target row (even if landed on
-                        // imprecisely) has been measured for real, so a
-                        // second, unanimated scrollTo corrects the
-                        // position from real layout instead of the
-                        // estimate. Guarded on selection not having moved
-                        // on again in the meantime.
+                        // One runloop turn later the row has actually been
+                        // measured (its GeometryReader/id anchors have
+                        // fired), so a second, unanimated scrollTo can
+                        // target the real item id for precise centering —
+                        // this is also what the Transform/Share side panel
+                        // anchors off of via `selectedRowMeasuredFrame`.
+                        // Guarded on selection not having moved on again in
+                        // the meantime.
                         DispatchQueue.main.async {
                             guard manager.selectedIndex == newIdx else { return }
                             proxy.scrollTo(targetID, anchor: .center)
@@ -451,7 +484,7 @@ struct PopoverPreviewView: View {
                     .onAppear {
                         guard items.indices.contains(selectedIndex) else { return }
                         let targetID = items[selectedIndex].id
-                        proxy.scrollTo(targetID, anchor: .center)
+                        proxy.scrollTo(coarseScrollTarget(for: selectedIndex), anchor: .center)
                         DispatchQueue.main.async {
                             guard items.indices.contains(selectedIndex),
                                   items[selectedIndex].id == targetID else { return }
@@ -461,7 +494,7 @@ struct PopoverPreviewView: View {
                     .onChange(of: manager.popupOpenGeneration) { _, _ in
                         guard items.indices.contains(selectedIndex) else { return }
                         let targetID = items[selectedIndex].id
-                        proxy.scrollTo(targetID, anchor: .center)
+                        proxy.scrollTo(coarseScrollTarget(for: selectedIndex), anchor: .center)
                         DispatchQueue.main.async {
                             guard items.indices.contains(selectedIndex),
                                   items[selectedIndex].id == targetID else { return }
@@ -496,10 +529,30 @@ struct PopoverPreviewView: View {
 /// rather than shrink-wrap it. Popup width is fixed at 420pt (see
 /// `showAnchored`), so how many images fit per line is computed from that
 /// same fixed width instead, exactly as `PopoverRow.horizontalInset` is.
-struct ImageRunRow: View {
+struct ImageRunRow: View, Equatable {
     let run: [(item: ClipboardItem, index: Int)]
     let selectedIndex: Int
     let selectionNamespace: Namespace.ID
+
+    /// Without this, every selection change anywhere in the popup forces
+    /// SwiftUI to re-diff every ImageRunRow's full subtree (multiple image
+    /// cells each), not just the one row whose own selection state actually
+    /// changed — the same skip-when-unchanged pattern PopoverRow already
+    /// uses. That extra unnecessary diffing is what made the selection
+    /// animation feel jerky specifically around image rows.
+    static func == (l: ImageRunRow, r: ImageRunRow) -> Bool {
+        guard l.run.count == r.run.count else { return false }
+        for (a, b) in zip(l.run, r.run) {
+            if a.item.id != b.item.id || a.index != b.index || a.item.isPinned != b.item.isPinned {
+                return false
+            }
+        }
+        let lSelected = l.run.contains(where: { $0.index == l.selectedIndex })
+        let rSelected = r.run.contains(where: { $0.index == r.selectedIndex })
+        if lSelected != rSelected { return false }
+        if lSelected && l.selectedIndex != r.selectedIndex { return false }
+        return true
+    }
 
     static let cellSize:  CGFloat = 60
     private static let cellGap:   CGFloat = 12
