@@ -159,32 +159,6 @@ class ClipboardManager: ObservableObject {
         UserDefaults.standard.set(clamped, forKey: "preferredRingSize")
     }
 
-    func reloadSettingsFromDefaults() {
-        let ud = UserDefaults.standard
-        let newRing = min(max(ud.integer(forKey: "preferredRingSize"), 1), AuthManager.shared.ringLimit)
-        if newRing != maxItems { maxItems = newRing }
-        captureRichText              = ud.object(forKey: "captureRichText") as? Bool ?? true
-        pastePlainTextByDefault      = ud.object(forKey: "pastePlainTextByDefault") as? Bool ?? false
-        captureFiles                 = ud.object(forKey: "captureFiles") as? Bool ?? true
-        fetchURLTitles               = ud.object(forKey: "fetchURLTitles") as? Bool ?? true
-        showColorSwatches            = ud.object(forKey: "showColorSwatches") as? Bool ?? true
-        showPopupInteractionHints    = ud.object(forKey: "showPopupInteractionHints") as? Bool ?? true
-        interactionSoundsEnabled     = ud.object(forKey: "interactionSoundsEnabled") as? Bool ?? true
-        reverseCycleUsesB            = ud.bool(forKey: "reverseCycleUsesB")
-        firstOpenDelay               = min(max(ud.object(forKey: "firstOpenDelay") as? Double ?? 0.0, 0.0), 1.0)
-        autoDismissEnabled           = ud.object(forKey: "autoDismissEnabled") as? Bool ?? true
-        autoDismissSeconds           = min(max(ud.object(forKey: "autoDismissSeconds") as? Double ?? 180, 10), 1800)
-        referenceAppAffinityEnabled  = ud.object(forKey: "referenceAppAffinityEnabled") as? Bool ?? true
-        advanceAfterMark             = ud.object(forKey: "advanceAfterMark") as? Bool ?? false
-        openOnSecondTap              = ud.object(forKey: "openOnSecondTap") as? Bool ?? false
-        pinStartPosition             = min(max(1, ud.object(forKey: "pinStartPosition") as? Int ?? 1), Self.maxPinnedItems)
-        rememberLastSelection        = ud.object(forKey: "rememberLastSelection") as? Bool ?? false
-        rememberLastPositionTimeoutMinutes = ud.object(forKey: "rememberLastPositionTimeoutMinutes") as? Int ?? 0
-        collections                  = ud.stringArray(forKey: "clipenCollections") ?? []
-        autoPreviewTypes             = AutoPreviewContentType.loadSaved()
-        appLanguageCode              = ud.string(forKey: "appLanguageCode") ?? ""
-    }
-
     @Published var captureRichText: Bool = UserDefaults.standard.object(forKey: "captureRichText") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(captureRichText, forKey: "captureRichText")

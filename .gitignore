@@ -8,3 +8,6 @@ dist/*.dmg
 dist/export-*/
 dist/*.log
 dist/old_updates/
+
+# graphify generated knowledge graph
+graphify-out/

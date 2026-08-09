@@ -322,22 +322,6 @@ enum ImageService {
             .appendingPathComponent("Clipen/Converted/\(fileName)", isDirectory: false)
     }
 
-    static func pasteboardTypes(for item: ClipboardItem) -> [NSPasteboard.PasteboardType] {
-        guard case .image(_, let rawData, let dataType) = item.content else { return [] }
-        var types = [dataType]
-        if let compat = compatibilityPasteboardPayload(
-            image: NSImage(data: rawData) ?? NSImage(),
-            rawData: rawData,
-            dataType: dataType
-        ), !types.contains(compat.type) {
-            types.append(compat.type)
-        }
-        if shouldAttachTiffFallback(for: dataType) {
-            types.append(.tiff)
-        }
-        return types
-    }
-
     private static func pathExtension(for dataType: NSPasteboard.PasteboardType) -> String {
         let raw = dataType.rawValue.lowercased()
         if raw.contains("png") { return "png" }

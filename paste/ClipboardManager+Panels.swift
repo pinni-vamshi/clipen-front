@@ -4,8 +4,13 @@ import SwiftUI
 
 extension ClipboardManager {
 
+    func items(forIDs ids: some Sequence<UUID>) -> [ClipboardItem] {
+        let index = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return ids.compactMap { index[$0] }
+    }
+
     var orderedMarkedItems: [ClipboardItem] {
-        markedItemIDs.compactMap { id in items.first(where: { $0.id == id }) }
+        items(forIDs: markedItemIDs)
     }
 
     func groupMarkedItems() {
@@ -394,7 +399,7 @@ extension ClipboardManager {
         let anchor = selectedRowAnchor()
         let current: ClipboardItem? = (!displayItems.isEmpty && selectedIndex < displayItems.count)
             ? displayItems[selectedIndex] : nil
-        let marked = markedItemIDs.compactMap { id in items.first(where: { $0.id == id }) }
+        let marked = orderedMarkedItems
         if marked.count > 1 {
             var stack = marked
             if let current {
@@ -1602,12 +1607,6 @@ extension ClipboardManager {
     func markOrder(for id: UUID) -> Int? {
         guard let idx = markedItemIDs.firstIndex(of: id) else { return nil }
         return idx + 1
-    }
-
-    func markedItemsDragProvider(fallback: ClipboardItem) -> NSItemProvider {
-        let markedItems = markedItemIDs.compactMap { id in items.first(where: { $0.id == id }) }
-        guard !markedItems.isEmpty else { return fallback.makeItemProvider() }
-        return ClipboardItem.makeCombinedItemProvider(for: markedItems)
     }
 
     func selectCollection(slot: Int) {

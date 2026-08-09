@@ -274,7 +274,7 @@ extension ClipboardManager {
             let ids = Set(markedItemIDs)
             markedItemIDs = []
             let displayOrder = Dictionary(uniqueKeysWithValues: displayItems.enumerated().map { ($1.id, $0) })
-            let orderedItems = ids.compactMap { id in items.first(where: { $0.id == id }) }
+            let orderedItems = items(forIDs: ids)
                 .sorted { (displayOrder[$0.id] ?? Int.max) < (displayOrder[$1.id] ?? Int.max) }
             guard !orderedItems.isEmpty else {
                 previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()

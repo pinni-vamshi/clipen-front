@@ -2,6 +2,10 @@ import Foundation
 import AppKit
 import CryptoKit
 
+private func clipenHTMLTableRow(_ row: [String]) -> String {
+    "<tr>" + row.map { "<td>\($0.htmlEscaped)</td>" }.joined() + "</tr>"
+}
+
 private enum HistoryCrypto {
     static let keychainKey = "historyEncryptionKey"
 
@@ -184,10 +188,7 @@ extension ClipboardManager {
     func updateItemTable(id: UUID, rows: [[String]]) {
         guard items.contains(where: { $0.id == id }) else { return }
         let cleanRows = rows.map { row in row.map { $0.replacingOccurrences(of: "\n", with: " ") } }
-        func htmlRow(_ row: [String]) -> String {
-            "<tr>" + row.map { "<td>\($0.htmlEscaped)</td>" }.joined() + "</tr>"
-        }
-        let html = "<table>" + cleanRows.map(htmlRow).joined() + "</table>"
+        let html = "<table>" + cleanRows.map(clipenHTMLTableRow).joined() + "</table>"
         let plain = cleanRows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
         replaceItemContent(id: id, newContent: .html(html, plain: plain))
 
@@ -233,10 +234,7 @@ extension ClipboardManager {
                 plainParts.append(text)
             case .table(let rows):
                 let clean = rows.map { $0.map { $0.replacingOccurrences(of: "\n", with: " ") } }
-                func htmlRow(_ row: [String]) -> String {
-                    "<tr>" + row.map { "<td>\($0.htmlEscaped)</td>" }.joined() + "</tr>"
-                }
-                htmlParts.append("<table>" + clean.map(htmlRow).joined() + "</table>")
+                htmlParts.append("<table>" + clean.map(clipenHTMLTableRow).joined() + "</table>")
                 plainParts.append(clean.map { $0.joined(separator: "\t") }.joined(separator: "\n"))
             }
         }

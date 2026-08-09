@@ -131,7 +131,7 @@ extension ClipboardManager {
     }
 
     func moveMarkedToFront() {
-        let orderedItems = markedItemIDs.compactMap { id in items.first(where: { $0.id == id }) }
+        let orderedItems = orderedMarkedItems
         guard !orderedItems.isEmpty else { return }
         let movedIDs = Set(orderedItems.map(\.id))
         let remaining = items.filter { !movedIDs.contains($0.id) }
@@ -233,7 +233,7 @@ extension ClipboardManager {
         markNudgeUsedNaturally(.pinPreview)
 
         if !markedItemIDs.isEmpty {
-            let orderedItems = markedItemIDs.compactMap { id in items.first(where: { $0.id == id }) }
+            let orderedItems = orderedMarkedItems
             guard !orderedItems.isEmpty else { return }
             for item in orderedItems {
                 openQuickClipPanel(for: item)
