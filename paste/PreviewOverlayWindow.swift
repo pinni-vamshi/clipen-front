@@ -163,6 +163,51 @@ struct PopoverPreviewView: View {
     private var items: [ClipboardItem] { manager.displayItems }
     private var selectedIndex: Int     { manager.selectedIndex }
 
+    /// `displayItems` folded into display segments: runs of 2+ consecutive
+    /// `.image` items become one `ImageRunRow`; everything else stays its
+    /// own `PopoverRow`, unchanged. Recomputed on every render — there is
+    /// no stored grouping to go stale — so a run splits or reforms for
+    /// free whenever pinning, search, or a tag filter reorders
+    /// `displayItems` out from under it. `selectedIndex` still means
+    /// exactly what it always has: an index into `displayItems`. Nothing
+    /// about marking, pinning, delete, or paste changes — they all key off
+    /// item identity, which this never touches.
+    private enum RowSegment: Identifiable {
+        case single(item: ClipboardItem, index: Int)
+        case imageRun([(item: ClipboardItem, index: Int)])
+
+        var id: String {
+            switch self {
+            case .single(let item, _): return item.id.uuidString
+            case .imageRun(let run):   return "run-" + (run.first?.item.id.uuidString ?? "")
+            }
+        }
+    }
+
+    private var rowSegments: [RowSegment] {
+        var result: [RowSegment] = []
+        var run: [(item: ClipboardItem, index: Int)] = []
+        func flushRun() {
+            guard !run.isEmpty else { return }
+            if run.count >= 2 {
+                result.append(.imageRun(run))
+            } else {
+                result.append(.single(item: run[0].item, index: run[0].index))
+            }
+            run = []
+        }
+        for (idx, item) in items.enumerated() {
+            if case .image = item.content {
+                run.append((item, idx))
+            } else {
+                flushRun()
+                result.append(.single(item: item, index: idx))
+            }
+        }
+        flushRun()
+        return result
+    }
+
     private static let rowH: CGFloat = 72
 
     var body: some View {
@@ -253,7 +298,7 @@ struct PopoverPreviewView: View {
     private var categoryStrip: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
+                HStack(spacing: 12) {
                     TagFilterChip(tag: nil, selected: manager.popupTagFilter == nil,
                                   namespace: categoryNamespace) {
                         manager.popupTagFilter = nil
@@ -318,43 +363,50 @@ struct PopoverPreviewView: View {
                     ScrollView(.vertical, showsIndicators: true) {
 
                         LazyVStack(spacing: 10) {
-                            ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                                PopoverRow(item: item, index: idx,
-                                           isSelected: idx == selectedIndex,
-                                           markOrder: manager.markOrder(for: item.id),
-                                           showColorSwatches: manager.showColorSwatches,
-                                           selectionNamespace: selectionNamespace,
-                                           shakeGeneration: manager.editDeniedShake?.itemID == item.id
-                                               ? manager.editDeniedShake?.generation ?? 0 : 0)
-                                    .equatable()
-                                    .id(item.id)
+                            let segments = rowSegments
+                            ForEach(Array(segments.enumerated()), id: \.element.id) { segIdx, segment in
+                                switch segment {
+                                case .single(let item, let idx):
+                                    PopoverRow(item: item, index: idx,
+                                               isSelected: idx == selectedIndex,
+                                               markOrder: manager.markOrder(for: item.id),
+                                               showColorSwatches: manager.showColorSwatches,
+                                               selectionNamespace: selectionNamespace,
+                                               shakeGeneration: manager.editDeniedShake?.itemID == item.id
+                                                   ? manager.editDeniedShake?.generation ?? 0 : 0)
+                                        .equatable()
+                                        .id(item.id)
 
-                                    .background(
-                                        GeometryReader { geo in
-                                            Color.clear.preference(
-                                                key: SelectedRowFramePreferenceKey.self,
-                                                value: idx == selectedIndex ? geo.frame(in: .global) : nil)
+                                        .background(
+                                            GeometryReader { geo in
+                                                Color.clear.preference(
+                                                    key: SelectedRowFramePreferenceKey.self,
+                                                    value: idx == selectedIndex ? geo.frame(in: .global) : nil)
+                                            }
+                                        )
+                                        .contentShape(Rectangle())
+                                        .onTapGesture(count: 2) {
+                                            manager.uiSelectItem(at: idx)
+                                            manager.pasteItemKeepingPopupOpen(id: item.id)
                                         }
-                                    )
-                                    .contentShape(Rectangle())
-                                    .onTapGesture(count: 2) {
-                                        manager.uiSelectItem(at: idx)
-                                        manager.pasteItemKeepingPopupOpen(id: item.id)
-                                    }
-                                    .onTapGesture(count: 1) {
-                                        let mods = NSEvent.modifierFlags
-                                        if mods.contains(.shift) {
-                                            manager.uiRangeSelectItem(to: idx)
-                                            return
+                                        .onTapGesture(count: 1) {
+                                            let mods = NSEvent.modifierFlags
+                                            if mods.contains(.shift) {
+                                                manager.uiRangeSelectItem(to: idx)
+                                                return
+                                            }
+                                            if mods.contains(.command) {
+                                                manager.uiToggleSelectItem(at: idx)
+                                                return
+                                            }
+                                            manager.uiSelectItem(at: idx)
+                                            manager.uiPreviewSelectedItem()
                                         }
-                                        if mods.contains(.command) {
-                                            manager.uiToggleSelectItem(at: idx)
-                                            return
-                                        }
-                                        manager.uiSelectItem(at: idx)
-                                        manager.uiPreviewSelectedItem()
-                                    }
-                                if idx < items.count - 1 {
+                                case .imageRun(let run):
+                                    ImageRunRow(run: run, selectedIndex: selectedIndex,
+                                                selectionNamespace: selectionNamespace)
+                                }
+                                if segIdx < segments.count - 1 {
                                     Divider().padding(.leading, 38).opacity(0.25)
                                 }
                             }
@@ -392,6 +444,166 @@ struct PopoverPreviewView: View {
             .foregroundColor(.secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
+    }
+}
+
+/// A run of 2+ consecutive `.image` items rendered as ONE shared row: the
+/// same leading rail/divider a normal row has, once — then the images
+/// themselves, each still its own full `ClipboardItem` with its own id,
+/// laid left-to-right with a thin divider between each, wrapping onto a
+/// new line inside this same row once the current line is full.
+///
+/// Deliberately NOT measured via a body-level `GeometryReader` — that
+/// expands to fill all available height inside a `VStack`/`LazyVStack`
+/// (a standing SwiftUI quirk), which would blow up this row's height
+/// rather than shrink-wrap it. Popup width is fixed at 420pt (see
+/// `showAnchored`), so how many images fit per line is computed from that
+/// same fixed width instead, exactly as `PopoverRow.horizontalInset` is.
+struct ImageRunRow: View {
+    let run: [(item: ClipboardItem, index: Int)]
+    let selectedIndex: Int
+    let selectionNamespace: Namespace.ID
+
+    private static let cellSize:  CGFloat = 48
+    private static let cellGap:   CGFloat = 8
+    private static let railWidth: CGFloat = 22
+    /// 420 (popup width) − 18 (row's own .horizontal padding, 9 each side)
+    /// − 22 (rail) − 8 (rail↔divider spacing) − 1 (divider) − 8
+    /// (divider↔first image spacing).
+    private static let lineWidth: CGFloat = 420 - 18 - railWidth - cellGap - 1 - cellGap
+    private static let perImageWidth = cellSize + cellGap + 1 + cellGap
+
+    private var lines: [[(item: ClipboardItem, index: Int)]] {
+        let perLine = max(1, Int((Self.lineWidth - Self.cellSize) / Self.perImageWidth) + 1)
+        var out: [[(item: ClipboardItem, index: Int)]] = []
+        var i = 0
+        while i < run.count {
+            let end = min(i + perLine, run.count)
+            out.append(Array(run[i..<end]))
+            i = end
+        }
+        return out
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Self.cellGap) {
+            railBadge
+                .frame(width: Self.railWidth)
+                .frame(maxHeight: .infinity, alignment: .center)
+                .padding(.vertical, 2)
+                .clipped()
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.secondary.opacity(0.25))
+                .frame(width: 1)
+                .frame(maxHeight: .infinity)
+            VStack(alignment: .leading, spacing: Self.cellGap) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    HStack(spacing: 0) {
+                        ForEach(Array(line.enumerated()), id: \.element.item.id) { cellIdx, entry in
+                            if cellIdx > 0 {
+                                Rectangle()
+                                    .fill(Color.secondary.opacity(0.2))
+                                    .frame(width: 1, height: Self.cellSize * 0.7)
+                                    .padding(.horizontal, Self.cellGap)
+                            }
+                            ImageRunCell(item: entry.item, index: entry.index,
+                                         isSelected: entry.index == selectedIndex,
+                                         selectionNamespace: selectionNamespace)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var railBadge: some View {
+        if let selectedEntry = run.first(where: { $0.index == selectedIndex }) {
+            Image(systemName: selectedEntry.item.primaryTag.icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 20, height: 20)
+                .background(Color.secondary.opacity(0.45), in: Circle())
+        } else {
+            Image(systemName: "photo.on.rectangle")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary.opacity(0.6))
+                .frame(width: 20, height: 20)
+        }
+    }
+}
+
+/// One image inside an `ImageRunRow` — still a full `ClipboardItem`, so
+/// marking/pinning/delete/paste all key off its own id exactly as they do
+/// for a normal row; only how it's DRAWN differs.
+private struct ImageRunCell: View {
+    let item: ClipboardItem
+    let index: Int
+    let isSelected: Bool
+    let selectionNamespace: Namespace.ID
+
+    @ObservedObject private var manager = ClipboardManager.shared
+    private static let cellSize: CGFloat = 48
+
+    private var markOrder: Int? { manager.markOrder(for: item.id) }
+
+    var body: some View {
+        Group {
+            if case .image(let img, let data, _) = item.content {
+                Image(nsImage: ItemThumbnailCache.shared.thumbnail(forData: data, key: item.id.uuidString) ?? img)
+                    .resizable().aspectRatio(contentMode: .fill)
+                    .frame(width: Self.cellSize, height: Self.cellSize)
+                    .clipped()
+            }
+        }
+        .frame(width: Self.cellSize, height: Self.cellSize)
+        .clipShape(RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous))
+        .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
+                             inset: 0, appearance: .cell)
+        // The mark number lives on THIS image's own corner — marks are
+        // per-item, same as everywhere else in the popup, just drawn
+        // small here instead of on a shared rail.
+        .overlay(alignment: .topTrailing) {
+            if let order = markOrder {
+                Text("\(order)")
+                    .font(.system(size: 8, weight: .black))
+                    .foregroundColor(.white)
+                    .frame(width: 14, height: 14)
+                    .background(Color(red: 0.20, green: 0.78, blue: 0.35), in: Circle())
+                    .offset(x: 4, y: -4)
+                    .help("Marked #\(order) for multi-paste — hold V to toggle")
+            }
+        }
+        .id(item.id)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: SelectedRowFramePreferenceKey.self,
+                    value: isSelected ? geo.frame(in: .global) : nil)
+            }
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            manager.uiSelectItem(at: index)
+            manager.pasteItemKeepingPopupOpen(id: item.id)
+        }
+        .onTapGesture(count: 1) {
+            let mods = NSEvent.modifierFlags
+            if mods.contains(.shift) {
+                manager.uiRangeSelectItem(to: index)
+                return
+            }
+            if mods.contains(.command) {
+                manager.uiToggleSelectItem(at: index)
+                return
+            }
+            manager.uiSelectItem(at: index)
+            manager.uiPreviewSelectedItem()
+        }
+        .onDrag {
+            item.makeItemProvider()
+        }
     }
 }
 
@@ -812,8 +1024,8 @@ struct CollectionChip: View {
         .foregroundColor(.secondary.opacity(0.85))
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(
-            Capsule().fill(Color.primary.opacity(0.07))
+        .overlay(
+            Capsule().stroke(Color(hex: "#4E8DF7"), lineWidth: 2)
         )
         .help("Current collection — press 1–9 to switch")
     }

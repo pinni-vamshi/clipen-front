@@ -193,12 +193,6 @@ extension ClipboardManager {
             return Unmanaged.passUnretained(event)
         }
 
-        if key == 9, isSimulatingPaste {
-            vTapHoldTimer?.invalidate();      vTapHoldTimer = nil
-            firstOpenHoldTimer?.invalidate(); firstOpenHoldTimer = nil
-            return Unmanaged.passUnretained(event)
-        }
-
         if key == 9, let timer = vTapHoldTimer {
             timer.invalidate()
             vTapHoldTimer = nil
@@ -382,8 +376,6 @@ extension ClipboardManager {
         guard cmd && !ctrl else { return Unmanaged.passUnretained(event) }
 
         if key == 9 {
-            if isSimulatingPaste { return Unmanaged.passUnretained(event) }
-
             if opt && !previewWindow.isVisible {
                 return Unmanaged.passUnretained(event)
             }
