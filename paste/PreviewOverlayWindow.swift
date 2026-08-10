@@ -1192,14 +1192,15 @@ struct PopoverRow: View, Equatable {
             // No separate summary icon here — the rail badge (before the
             // divider) already shows this row's category icon, so a second
             // one in the body would just repeat it. Individual per-file
-            // type icons carry more information anyway. Sized and capped
-            // to match ImageRunRow's cells exactly, so multi-file and
-            // multi-image rows read as the same visual language — and the
+            // type icons carry more information anyway. Capped to match
+            // ImageRunRow's per-line count, but sized 20% smaller than its
+            // cells — full cellSize read as too big for a row that's just
+            // showing file-type icons, not actual image content. The
             // count is pushed to the row's trailing edge via Spacer
             // instead of trailing whichever icon happens to be last.
             HStack(spacing: 4) {
                 ForEach(Array(urls.prefix(ImageRunRow.maxPerLine).enumerated()), id: \.offset) { _, url in
-                    fileThumbnail(url, size: ImageRunRow.cellSize)
+                    fileThumbnail(url, size: ImageRunRow.cellSize * 0.8)
                 }
                 Spacer(minLength: 8)
                 Text("\(urls.count)")
