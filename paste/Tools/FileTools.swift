@@ -128,14 +128,14 @@ enum FileTools {
             label: "Paste Individual Files",
             group: "FILE",
             preview: { item in
-                let folders = fileURLs(for: item).filter(isDirectory)
+                let folders = fileURLs(for: item).filter(FileKindDetector.isDirectory)
                 guard !folders.isEmpty else { return nil }
                 let count = flattenedFiles(in: folders).count
                 guard count > 0 else { return nil }
                 return "Extract \(count) individual file\(count == 1 ? "" : "s"), subfolders included"
             },
             runAsync: { item in
-                let folders = fileURLs(for: item).filter(isDirectory)
+                let folders = fileURLs(for: item).filter(FileKindDetector.isDirectory)
                 guard !folders.isEmpty else { return nil }
                 return await withCheckedContinuation { continuation in
                     DispatchQueue.global(qos: .userInitiated).async {
@@ -198,10 +198,6 @@ enum FileTools {
         }
     }
 
-    private static func isDirectory(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-    }
-
     private static func flattenedFiles(in folders: [URL], cap: Int = 2000) -> [URL] {
         var out: [URL] = []
         let fm = FileManager.default
@@ -212,7 +208,7 @@ enum FileTools {
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else { continue }
             for case let url as URL in enumerator {
-                guard !isDirectory(url) else { continue }
+                guard !FileKindDetector.isDirectory(url) else { continue }
                 out.append(url)
                 if out.count >= cap { return out }
             }

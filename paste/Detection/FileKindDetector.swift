@@ -2,6 +2,10 @@ import Foundation
 import PDFKit
 
 enum FileKindDetector {
+    nonisolated static func isDirectory(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+    }
+
     nonisolated static func isImageFile(_ url: URL) -> Bool {
         switch fileExtension(url) {
         case "png", "jpg", "jpeg", "heic", "gif", "tif", "tiff", "webp", "bmp",

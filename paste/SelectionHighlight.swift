@@ -7,6 +7,13 @@ enum SelectionHighlightStyle {
     static let cellCornerRadius: CGFloat = 6
     static let cellBorderWidth: CGFloat = 4.0
     static let spring = Animation.spring(response: 0.35, dampingFraction: 0.75)
+    /// Rail → divider → content spacing, shared by every row type
+    /// (PopoverRow, ImageRunRow) so the divider lands at the same x
+    /// position regardless of which kind of row it belongs to. Keep this
+    /// independent from any row type's own internal content spacing
+    /// (e.g. ImageRunRow.cellGap) — that one broke this exact alignment
+    /// once already by being reused for both.
+    static let rowRailSpacing: CGFloat = 8
 }
 
 enum SelectionHighlightAppearance {

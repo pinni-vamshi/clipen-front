@@ -598,8 +598,8 @@ struct ImageRunRow: View, Equatable {
                 return false
             }
         }
-        let lSelected = l.run.contains(where: { $0.index == l.selectedIndex })
-        let rSelected = r.run.contains(where: { $0.index == r.selectedIndex })
+        let lSelected = l.isAnySelected
+        let rSelected = r.isAnySelected
         if lSelected != rSelected { return false }
         if lSelected && l.selectedIndex != r.selectedIndex { return false }
         let lMarked = Set(l.run.map(\.item.id)).intersection(l.markedItemIDs)
@@ -621,12 +621,16 @@ struct ImageRunRow: View, Equatable {
     /// to fit.
     static let maxPerLine = 4
     /// 420 (popup width) − 18 (row's own .horizontal padding, 9 each side)
-    /// − 22 (rail) − 12 (rail↔divider spacing) − 1 (divider) − 12
-    /// (divider↔first image spacing). Enforced as a hard `.frame` width
-    /// below, not just used to size things — so a math mistake clips a
-    /// cell instead of letting it push past the popup's own fixed-width
-    /// bounds.
-    private static let lineWidth: CGFloat = 420 - 18 - railWidth - cellGap - 1 - cellGap
+    /// − 22 (rail) − 8 (rail↔divider spacing) − 1 (divider) − 8
+    /// (divider↔first image spacing). The rail↔divider↔content spacing is
+    /// SelectionHighlightStyle.rowRailSpacing, not cellGap — those two used
+    /// to be the same number by coincidence, until cellGap changed for the
+    /// "more space between images" request and silently pushed the
+    /// divider out of alignment with every other row type. Enforced as a
+    /// hard `.frame` width below, not just used to size things — so a math
+    /// mistake clips a cell instead of letting it push past the popup's
+    /// own fixed-width bounds.
+    private static let lineWidth: CGFloat = 420 - 18 - railWidth - SelectionHighlightStyle.rowRailSpacing - 1 - SelectionHighlightStyle.rowRailSpacing
     private static let perImageWidth = cellSize + cellGap + 1 + cellGap
 
     private var lines: [[(item: ClipboardItem, index: Int)]] {
@@ -642,8 +646,15 @@ struct ImageRunRow: View, Equatable {
         return out
     }
 
+    /// True while any image in this run is the current selection — drives
+    /// a light background tint on the whole row, kept separate from the
+    /// per-cell border/scale/shadow highlight in ImageRunCell (that one
+    /// stays exactly as it is; this just gives the row the same "selected
+    /// row has a background" language every other row type already has).
+    private var isAnySelected: Bool { run.contains(where: { $0.index == selectedIndex }) }
+
     var body: some View {
-        HStack(alignment: .top, spacing: Self.cellGap) {
+        HStack(alignment: .top, spacing: SelectionHighlightStyle.rowRailSpacing) {
             railBadge
                 .frame(width: Self.railWidth)
                 .frame(maxHeight: .infinity, alignment: .center)
@@ -686,6 +697,11 @@ struct ImageRunRow: View, Equatable {
             // underneath opts out.
             .transaction { $0.animation = nil }
         }
+        .background {
+            RoundedRectangle(cornerRadius: SelectionHighlightStyle.cornerRadius, style: .continuous)
+                .fill(Color.accentColor.opacity(isAnySelected ? 0.12 : 0))
+        }
+        .animation(SelectionHighlightStyle.spring, value: isAnySelected)
         .padding(.horizontal, 9).padding(.vertical, 10)
     }
 
@@ -983,7 +999,7 @@ struct PopoverRow: View, Equatable {
     private static let horizontalInset: CGFloat = 23
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: SelectionHighlightStyle.rowRailSpacing) {
             verticalRail
 
             RoundedRectangle(cornerRadius: 1.5)
@@ -1143,6 +1159,18 @@ struct PopoverRow: View, Equatable {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        case .file(let url) where FileKindDetector.isDirectory(url):
+            HStack(alignment: .top, spacing: 10) {
+                VStack(spacing: 3) {
+                    Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
+                        .resizable().frame(width: ImageRunRow.cellSize, height: ImageRunRow.cellSize)
+                    Text(url.lastPathComponent)
+                        .font(.system(size: 10, weight: .medium)).lineLimit(1)
+                        .frame(width: ImageRunRow.cellSize)
+                }
+                FolderContentsPreview(url: url, itemID: item.id)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            }
         case .file(let url):
             HStack(spacing: 6) {
                 fileThumbnail(url, size: 28)
@@ -1153,15 +1181,21 @@ struct PopoverRow: View, Equatable {
             // No separate summary icon here — the rail badge (before the
             // divider) already shows this row's category icon, so a second
             // one in the body would just repeat it. Individual per-file
-            // type icons carry more information anyway.
+            // type icons carry more information anyway. Sized and capped
+            // to match ImageRunRow's cells exactly, so multi-file and
+            // multi-image rows read as the same visual language — and the
+            // count is pushed to the row's trailing edge via Spacer
+            // instead of trailing whichever icon happens to be last.
             HStack(spacing: 4) {
-                ForEach(Array(urls.prefix(6).enumerated()), id: \.offset) { _, url in
-                    fileThumbnail(url, size: 22)
+                ForEach(Array(urls.prefix(ImageRunRow.maxPerLine).enumerated()), id: \.offset) { _, url in
+                    fileThumbnail(url, size: ImageRunRow.cellSize)
                 }
+                Spacer(minLength: 8)
                 Text("\(urls.count)")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.secondary)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .image(let img, let data, _):
             CachedThumbnail(original: img, data: data, key: item.id.uuidString,
                             size: 48, cornerRadius: 6)
@@ -1200,6 +1234,55 @@ struct PopoverRow: View, Equatable {
         } else {
             Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
                 .resizable().frame(width: size, height: size)
+        }
+    }
+}
+
+/// Top-level contents of a folder row, shown as small type icons —
+/// subfolders included, but only ever one level deep (a subfolder's own
+/// children are never read, it just renders as a folder icon like any
+/// other entry). Reads FileManager off-main since folder enumeration can
+/// be slow on network/cloud-synced volumes, and caches the result per
+/// item id so re-scrolling past the same row doesn't re-read the
+/// directory.
+private struct FolderContentsPreview: View {
+    let url: URL
+    let itemID: UUID
+
+    private static let cache = RecentItemCache<[URL]>(capacity: 8)
+    private static let iconSize: CGFloat = 22
+    private static let maxShown = 8
+
+    @State private var children: [URL]?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let children {
+                ForEach(Array(children.prefix(Self.maxShown).enumerated()), id: \.offset) { _, child in
+                    Image(nsImage: ClipenIconCache.shared.fileIcon(for: child))
+                        .resizable().frame(width: Self.iconSize, height: Self.iconSize)
+                }
+                if children.count > Self.maxShown {
+                    Text("+\(children.count - Self.maxShown)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .task(id: itemID) {
+            if let cached = Self.cache.value(for: itemID) {
+                children = cached
+                return
+            }
+            let folderURL = url
+            let result = await Task.detached(priority: .utility) { () -> [URL] in
+                (try? FileManager.default.contentsOfDirectory(
+                    at: folderURL, includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles])) ?? []
+            }.value
+            guard !Task.isCancelled else { return }
+            Self.cache.insert(result, for: itemID)
+            children = result
         }
     }
 }

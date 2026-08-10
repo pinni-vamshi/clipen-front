@@ -118,13 +118,9 @@ struct AsyncTextFilePreview: View {
 struct FilePreviewContent: View {
     let url: URL
 
-    private var isDirectory: Bool {
-        (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-    }
-
     var body: some View {
         Group {
-            if isDirectory {
+            if FileKindDetector.isDirectory(url) {
                 FolderTreePreview(url: url)
             } else if url.pathExtension.lowercased() == "pdf" {
                 AsyncPDFFilePreview(url: url)
@@ -307,14 +303,14 @@ struct FolderTreePreview: View {
                         includingPropertiesForKeys: [.isDirectoryKey],
                         options: [.skipsHiddenFiles]) else { return }
                     let sorted = items.sorted { a, b in
-                        let ad = (try? a.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                        let bd = (try? b.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                        let ad = FileKindDetector.isDirectory(a)
+                        let bd = FileKindDetector.isDirectory(b)
                         if ad != bd { return ad && !bd }
                         return a.lastPathComponent.localizedCaseInsensitiveCompare(b.lastPathComponent) == .orderedAscending
                     }
                     for item in sorted {
                         if out.count >= maxEntries { truncated = true; return }
-                        let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                        let isDir = FileKindDetector.isDirectory(item)
                         out.append(Entry(name: item.lastPathComponent, depth: depth, isDir: isDir))
                         if isDir { walk(item, depth: depth + 1) }
                     }
