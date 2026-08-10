@@ -697,10 +697,21 @@ struct ImageRunRow: View, Equatable {
             // underneath opts out.
             .transaction { $0.animation = nil }
         }
+        // The whole run lifts as one surface when the selection is inside
+        // it — same spring, same moment as the selected cell's own lift,
+        // so the section and the image inside it move together instead of
+        // the image animating against a static background. Deliberately a
+        // transparent material, not an accent tint: this reads as the
+        // section being raised off the popup, which a flat colour wash
+        // cannot convey no matter how low its opacity.
         .background {
             RoundedRectangle(cornerRadius: SelectionHighlightStyle.cornerRadius, style: .continuous)
-                .fill(Color.accentColor.opacity(isAnySelected ? 0.12 : 0))
+                .fill(.ultraThinMaterial)
+                .opacity(isAnySelected ? 1 : 0)
+                .shadow(color: Color.black.opacity(isAnySelected ? 0.20 : 0),
+                        radius: isAnySelected ? 8 : 0, x: 0, y: isAnySelected ? 3 : 0)
         }
+        .scaleEffect(isAnySelected ? SelectionHighlightStyle.scale : 1.0)
         .animation(SelectionHighlightStyle.spring, value: isAnySelected)
         .padding(.horizontal, 9).padding(.vertical, 10)
     }
@@ -1238,52 +1249,129 @@ struct PopoverRow: View, Equatable {
     }
 }
 
-/// Top-level contents of a folder row, shown as small type icons —
-/// subfolders included, but only ever one level deep (a subfolder's own
-/// children are never read, it just renders as a folder icon like any
-/// other entry). Reads FileManager off-main since folder enumeration can
-/// be slow on network/cloud-synced volumes, and caches the result per
-/// item id so re-scrolling past the same row doesn't re-read the
-/// directory.
+/// A folder row's contents, summarised by file *type* rather than listed
+/// file by file — one icon per distinct kind found at a level, with how
+/// many of that kind live there underneath it. Listing every file is
+/// unreadable past a handful; "3 PDFs, 12 images" says more in the same
+/// width.
+///
+/// Subfolders recurse into their own level, drawn progressively smaller
+/// so nesting depth reads visually without needing indentation the row
+/// has no vertical room for. Bounded on depth and on groups-per-level
+/// because the popup row is a fixed 420pt wide — a deep tree renders as
+/// far as it fits and stops, rather than overflowing.
+///
+/// The directory walk runs off-main (slow on network/cloud-synced
+/// volumes) and is cached per item id so re-scrolling past the same row
+/// doesn't re-read the tree. Only URLs cross the thread boundary — the
+/// AppKit icon lookup stays on main, same as every other row type.
 private struct FolderContentsPreview: View {
     let url: URL
     let itemID: UUID
 
-    private static let cache = RecentItemCache<[URL]>(capacity: 8)
-    private static let iconSize: CGFloat = 22
-    private static let maxShown = 8
+    struct Group: Identifiable {
+        let id = UUID()
+        /// Any one file of this kind — used purely to ask the system for
+        /// that kind's icon.
+        let representative: URL
+        let count: Int
+    }
+    struct Level: Identifiable {
+        let id = UUID()
+        let depth: Int
+        let groups: [Group]
+    }
 
-    @State private var children: [URL]?
+    private static let cache = RecentItemCache<[Level]>(capacity: 8)
+    private static let maxDepth = 3
+    private static let maxGroupsPerLevel = 4
+    private static let maxLevels = 4
+
+    /// Shrinks per level so depth is legible at a glance: 26 → 20 → 15 → 12.
+    private static func iconSize(forDepth depth: Int) -> CGFloat {
+        max(12, 26 - CGFloat(depth) * 5.5)
+    }
+
+    @State private var levels: [Level]?
 
     var body: some View {
-        HStack(spacing: 4) {
-            if let children {
-                ForEach(Array(children.prefix(Self.maxShown).enumerated()), id: \.offset) { _, child in
-                    Image(nsImage: ClipenIconCache.shared.fileIcon(for: child))
-                        .resizable().frame(width: Self.iconSize, height: Self.iconSize)
-                }
-                if children.count > Self.maxShown {
-                    Text("+\(children.count - Self.maxShown)")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
+        HStack(alignment: .center, spacing: 10) {
+            ForEach(levels ?? []) { level in
+                HStack(alignment: .center, spacing: 5) {
+                    ForEach(level.groups) { group in
+                        VStack(spacing: 1) {
+                            Image(nsImage: ClipenIconCache.shared.fileIcon(for: group.representative))
+                                .resizable()
+                                .frame(width: Self.iconSize(forDepth: level.depth),
+                                       height: Self.iconSize(forDepth: level.depth))
+                            Text("\(group.count)")
+                                .font(.system(size: max(7, 10 - CGFloat(level.depth)), weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
         }
         .task(id: itemID) {
             if let cached = Self.cache.value(for: itemID) {
-                children = cached
+                levels = cached
                 return
             }
             let folderURL = url
-            let result = await Task.detached(priority: .utility) { () -> [URL] in
-                (try? FileManager.default.contentsOfDirectory(
-                    at: folderURL, includingPropertiesForKeys: nil,
-                    options: [.skipsHiddenFiles])) ?? []
+            let scanned = await Task.detached(priority: .utility) {
+                FolderContentsPreview.scan(folderURL)
             }.value
             guard !Task.isCancelled else { return }
-            Self.cache.insert(result, for: itemID)
-            children = result
+            Self.cache.insert(scanned, for: itemID)
+            levels = scanned
         }
+    }
+
+    /// Breadth-first so the shallowest levels — the ones most likely to
+    /// fit in the row — are always the ones that survive the maxLevels
+    /// cap, rather than one deep branch eating the whole budget.
+    nonisolated private static func scan(_ root: URL) -> [Level] {
+        let fm = FileManager.default
+        var out: [Level] = []
+        var frontier: [URL] = [root]
+        var depth = 0
+
+        while depth < maxDepth, !frontier.isEmpty, out.count < maxLevels {
+            var byKind: [String: (representative: URL, count: Int)] = [:]
+            var nextFrontier: [URL] = []
+
+            for dir in frontier {
+                guard let entries = try? fm.contentsOfDirectory(
+                    at: dir, includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles]) else { continue }
+
+                for entry in entries {
+                    let isDir = FileKindDetector.isDirectory(entry)
+                    if isDir { nextFrontier.append(entry) }
+                    // Folders collapse into one "folder" group; files group
+                    // by extension, so 12 PNGs read as one icon with 12
+                    // under it rather than 12 identical icons.
+                    let kind = isDir ? "\u{1}dir" : entry.pathExtension.lowercased()
+                    if let existing = byKind[kind] {
+                        byKind[kind] = (existing.representative, existing.count + 1)
+                    } else {
+                        byKind[kind] = (entry, 1)
+                    }
+                }
+            }
+
+            if !byKind.isEmpty {
+                let groups = byKind.values
+                    .sorted { $0.count > $1.count }
+                    .prefix(maxGroupsPerLevel)
+                    .map { Group(representative: $0.representative, count: $0.count) }
+                out.append(Level(depth: depth, groups: Array(groups)))
+            }
+
+            frontier = nextFrontier
+            depth += 1
+        }
+        return out
     }
 }
 
