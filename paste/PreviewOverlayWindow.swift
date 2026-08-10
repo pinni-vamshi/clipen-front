@@ -1150,14 +1150,17 @@ struct PopoverRow: View, Equatable {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .files(let urls):
-            HStack(spacing: 6) {
-                if let first = urls.first(where: FileKindDetector.isImageFile) {
-                    fileThumbnail(first, size: 28)
-                } else {
-                    Image(systemName: "doc.on.doc").frame(width: 14, height: 14)
+            // No separate summary icon here — the rail badge (before the
+            // divider) already shows this row's category icon, so a second
+            // one in the body would just repeat it. Individual per-file
+            // type icons carry more information anyway.
+            HStack(spacing: 4) {
+                ForEach(Array(urls.prefix(6).enumerated()), id: \.offset) { _, url in
+                    fileThumbnail(url, size: 22)
                 }
-                Text("\(urls.count) files").font(.system(size: 11, weight: .medium)).lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(urls.count)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
             }
         case .image(let img, let data, _):
             CachedThumbnail(original: img, data: data, key: item.id.uuidString,
