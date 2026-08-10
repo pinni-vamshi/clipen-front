@@ -2,6 +2,7 @@ import SwiftUI
 
 enum SelectionHighlightStyle {
     static let scale: CGFloat = 1.12
+    static let cellScale: CGFloat = 1.22
     static let cornerRadius: CGFloat = 8
     static let cellCornerRadius: CGFloat = 6
     static let cellBorderWidth: CGFloat = 4.0
@@ -44,13 +45,13 @@ struct SelectionHighlight: ViewModifier {
                         .stroke(Color.accentColor, lineWidth: SelectionHighlightStyle.cellBorderWidth)
                         .opacity(isSelected ? 1 : 0)
                         .matchedGeometryEffect(id: "selectionBox", in: namespace, isSource: isSelected)
-                        .shadow(color: Color.accentColor.opacity(isSelected ? 0.22 : 0),
-                                radius: isSelected ? 4 : 0, x: 0, y: isSelected ? 1.5 : 0)
+                        .shadow(color: Color.accentColor.opacity(isSelected ? 0.3 : 0),
+                                radius: isSelected ? 6 : 0, x: 0, y: isSelected ? 2 : 0)
                 }
-                // Same pop as a row's own scale, so an image getting
-                // selected reads as the same "lift" as everything else in
-                // the popup — not a lesser, border-only treatment.
-                .scaleEffect(isSelected ? SelectionHighlightStyle.scale : 1.0)
+                // A stronger pop than a row's own scale — images sit in
+                // tight horizontal runs, so the selected one needs a
+                // bigger lift to read clearly against its neighbors.
+                .scaleEffect(isSelected ? SelectionHighlightStyle.cellScale : 1.0)
                 .animation(SelectionHighlightStyle.spring, value: isSelected)
         }
     }

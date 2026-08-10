@@ -461,6 +461,7 @@ struct PopoverPreviewView: View {
                         }
 
                         .padding(.top, 6)
+                        .padding(.bottom, 10)
                     }
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
@@ -562,7 +563,7 @@ struct ImageRunRow: View, Equatable {
     }
 
     static let cellSize:  CGFloat = 60
-    private static let cellGap:   CGFloat = 12
+    private static let cellGap:   CGFloat = 16
     private static let railWidth: CGFloat = 22
     /// Fixed at 4 regardless of available width — a straightforward "N
     /// per line" read, rather than however many the popup's 420pt happens
