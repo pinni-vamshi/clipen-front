@@ -1618,9 +1618,16 @@ extension ClipboardManager {
                 AuthManager.shared.registerActionUsage(actionID: "action.collection-switch")
             }
             activeCollection = nil
-            selectedIndex = 0
-            cycleCount += 1
-            selectionDidChange()
+            // activeCollection's own didSet already resets selectedIndex to
+            // 0 on every assignment, including a same-value reassignment
+            // (re-pressing the number for the collection already active).
+            // What it can't do is move the *scroll position* back to the
+            // top when selectedIndex's value doesn't actually change (was
+            // already 0) — onChange(of: selectedIndex) only fires on a real
+            // transition. Bumping popupOpenGeneration reuses the same
+            // "snap scroll to selectedIndex regardless of delta" path
+            // popup-open already relies on for this exact problem.
+            popupOpenGeneration += 1
             return
         }
         let index = slot - 2
@@ -1629,13 +1636,7 @@ extension ClipboardManager {
             AuthManager.shared.registerActionUsage(actionID: "action.collection-switch")
         }
         activeCollection = collections[index]
-        // Always jump back to the first item — both when switching into a
-        // different collection and when re-pressing the number for the one
-        // already active (e.g. after scrolling deep into it), matching how
-        // selectCategoryByIndex resets category-tag switches.
-        selectedIndex = 0
-        cycleCount += 1
-        selectionDidChange()
+        popupOpenGeneration += 1
     }
 
     var highestCollectionSlot: Int { collections.count + 1 }
