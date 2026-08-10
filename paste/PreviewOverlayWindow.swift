@@ -512,6 +512,31 @@ struct PopoverPreviewView: View {
                             proxy.scrollTo(targetID, anchor: .center)
                         }
                     }
+                    // Fires on every collection switch, including
+                    // re-selecting the collection already active — unlike
+                    // onChange(of: selectedIndex), which only fires when
+                    // selectedIndex's value actually transitions and would
+                    // stay silent when it was already 0. Animated (unlike
+                    // popupOpenGeneration's snap) since this always follows
+                    // a visible user action, not a popup materializing.
+                    .onChange(of: manager.collectionSwitchGeneration) { _, _ in
+                        guard items.indices.contains(selectedIndex) else { return }
+                        let idx = selectedIndex
+                        let targetID = items[idx].id
+                        let (coarseID, needsRefine) = scrollTarget(for: idx)
+
+                        withAnimation(SelectionHighlightStyle.spring) {
+                            proxy.scrollTo(coarseID, anchor: .center)
+                        }
+
+                        guard needsRefine, coarseID != AnyHashable(targetID) else { return }
+                        DispatchQueue.main.async {
+                            guard manager.selectedIndex == idx else { return }
+                            withAnimation(SelectionHighlightStyle.spring) {
+                                proxy.scrollTo(targetID, anchor: .center)
+                            }
+                        }
+                    }
                 }
             }
         }

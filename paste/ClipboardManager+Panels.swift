@@ -1624,10 +1624,11 @@ extension ClipboardManager {
             // What it can't do is move the *scroll position* back to the
             // top when selectedIndex's value doesn't actually change (was
             // already 0) — onChange(of: selectedIndex) only fires on a real
-            // transition. Bumping popupOpenGeneration reuses the same
-            // "snap scroll to selectedIndex regardless of delta" path
-            // popup-open already relies on for this exact problem.
-            popupOpenGeneration += 1
+            // transition. collectionSwitchGeneration drives a dedicated,
+            // animated scroll-to-top for exactly that case (a separate
+            // counter from popupOpenGeneration, whose own scroll snap stays
+            // instant since it also fires on ordinary popup-open).
+            collectionSwitchGeneration += 1
             return
         }
         let index = slot - 2
@@ -1636,7 +1637,7 @@ extension ClipboardManager {
             AuthManager.shared.registerActionUsage(actionID: "action.collection-switch")
         }
         activeCollection = collections[index]
-        popupOpenGeneration += 1
+        collectionSwitchGeneration += 1
     }
 
     var highestCollectionSlot: Int { collections.count + 1 }

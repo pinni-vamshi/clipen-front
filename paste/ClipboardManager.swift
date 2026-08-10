@@ -57,6 +57,7 @@ class ClipboardManager: ObservableObject {
     }
 
     @Published var popupOpenGeneration: Int = 0
+    @Published var collectionSwitchGeneration: Int = 0
 
     @Published var popupHintV = false
     @Published var popupHintShiftV = false
