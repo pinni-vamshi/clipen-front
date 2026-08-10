@@ -4,8 +4,7 @@ enum SelectionHighlightStyle {
     static let scale: CGFloat = 1.12
     static let cornerRadius: CGFloat = 8
     static let cellCornerRadius: CGFloat = 6
-    /// Matches the collection pill's border thickness.
-    static let cellBorderWidth: CGFloat = 2.0
+    static let cellBorderWidth: CGFloat = 4.0
     static let spring = Animation.spring(response: 0.35, dampingFraction: 0.75)
 }
 

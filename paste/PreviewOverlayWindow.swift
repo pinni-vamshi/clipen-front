@@ -218,17 +218,31 @@ struct PopoverPreviewView: View {
     /// direct ForEach-level anchor same as a `.single` row, so it always has
     /// something to jump to, even sight unseen.
     private func coarseScrollTarget(for idx: Int) -> AnyHashable {
+        scrollTarget(for: idx).coarse
+    }
+
+    /// `needsRefine` is only true for a run that wraps to a second line —
+    /// there the coarse (row-level) anchor centers the run's whole bounding
+    /// box, which isn't the same vertical position as a cell on its second
+    /// line. A single-line run has every cell at the row's own vertical
+    /// center already, so re-centering on the individual cell after the
+    /// coarse scroll is a redundant second animated scroll to (near enough)
+    /// the same offset — that extra correction is what read as the
+    /// selection jiggling up and down while stepping between images in one
+    /// line.
+    private func scrollTarget(for idx: Int) -> (coarse: AnyHashable, needsRefine: Bool) {
         guard items.indices.contains(idx) else {
-            return items.first.map { AnyHashable($0.id) } ?? AnyHashable("")
+            let fallback = items.first.map { AnyHashable($0.id) } ?? AnyHashable("")
+            return (fallback, false)
         }
         if case .image = items[idx].content {
             for segment in rowSegments {
                 if case .imageRun(let run) = segment, run.contains(where: { $0.index == idx }) {
-                    return AnyHashable(segment.id)
+                    return (AnyHashable(segment.id), run.count > ImageRunRow.maxPerLine)
                 }
             }
         }
-        return AnyHashable(items[idx].id)
+        return (AnyHashable(items[idx].id), false)
     }
 
     private static let rowH: CGFloat = 72
@@ -451,7 +465,7 @@ struct PopoverPreviewView: View {
                     .onChange(of: selectedIndex) { _, newIdx in
                         guard items.indices.contains(newIdx) else { return }
                         let targetID = items[newIdx].id
-                        let coarseID = coarseScrollTarget(for: newIdx)
+                        let (coarseID, needsRefine) = scrollTarget(for: newIdx)
 
                         // Jump to the row-level anchor — for an .imageRun
                         // this is the ONLY anchor that exists before the row
@@ -468,7 +482,7 @@ struct PopoverPreviewView: View {
                             proxy.scrollTo(coarseID, anchor: .center)
                         }
 
-                        guard coarseID != AnyHashable(targetID) else { return }
+                        guard needsRefine, coarseID != AnyHashable(targetID) else { return }
                         DispatchQueue.main.async {
                             guard manager.selectedIndex == newIdx else { return }
                             withAnimation(SelectionHighlightStyle.spring) {
@@ -553,7 +567,7 @@ struct ImageRunRow: View, Equatable {
     /// Fixed at 4 regardless of available width — a straightforward "N
     /// per line" read, rather than however many the popup's 420pt happens
     /// to fit.
-    private static let maxPerLine = 4
+    static let maxPerLine = 4
     /// 420 (popup width) − 18 (row's own .horizontal padding, 9 each side)
     /// − 22 (rail) − 12 (rail↔divider spacing) − 1 (divider) − 12
     /// (divider↔first image spacing). Enforced as a hard `.frame` width
