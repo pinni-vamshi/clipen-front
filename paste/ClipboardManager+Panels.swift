@@ -1618,6 +1618,9 @@ extension ClipboardManager {
                 AuthManager.shared.registerActionUsage(actionID: "action.collection-switch")
             }
             activeCollection = nil
+            selectedIndex = 0
+            cycleCount += 1
+            selectionDidChange()
             return
         }
         let index = slot - 2
@@ -1626,6 +1629,13 @@ extension ClipboardManager {
             AuthManager.shared.registerActionUsage(actionID: "action.collection-switch")
         }
         activeCollection = collections[index]
+        // Always jump back to the first item — both when switching into a
+        // different collection and when re-pressing the number for the one
+        // already active (e.g. after scrolling deep into it), matching how
+        // selectCategoryByIndex resets category-tag switches.
+        selectedIndex = 0
+        cycleCount += 1
+        selectionDidChange()
     }
 
     var highestCollectionSlot: Int { collections.count + 1 }
