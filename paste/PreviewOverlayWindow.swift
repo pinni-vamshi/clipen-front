@@ -613,7 +613,7 @@ struct ImageRunRow: View, Equatable {
         return true
     }
 
-    static let cellSize:  CGFloat = 60
+    static let cellSize:  CGFloat = 51
     private static let cellGap:   CGFloat = 16
     private static let railWidth: CGFloat = 22
     /// Fixed at 4 regardless of available width — a straightforward "N
@@ -1007,6 +1007,14 @@ struct PopoverRow: View, Equatable {
 
     private static let horizontalInset: CGFloat = SelectionHighlightStyle.rowInset
 
+    /// Both were originally derived from `ImageRunRow.cellSize`, back when
+    /// they happened to want the same number. Pinned to their own values
+    /// now: image cells are sized for image *content*, these are sized for
+    /// icons, so a change to one shouldn't silently resize the other —
+    /// exactly how cellGap once knocked the row divider out of alignment.
+    private static let fileIconSize: CGFloat = 48
+    private static let folderIconSize: CGFloat = 60
+
     var body: some View {
         HStack(alignment: .top, spacing: SelectionHighlightStyle.rowRailSpacing) {
             verticalRail
@@ -1172,10 +1180,10 @@ struct PopoverRow: View, Equatable {
             HStack(alignment: .top, spacing: 10) {
                 VStack(spacing: 3) {
                     Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
-                        .resizable().frame(width: ImageRunRow.cellSize, height: ImageRunRow.cellSize)
+                        .resizable().frame(width: Self.folderIconSize, height: Self.folderIconSize)
                     Text(url.lastPathComponent)
                         .font(.system(size: 10, weight: .medium)).lineLimit(1)
-                        .frame(width: ImageRunRow.cellSize)
+                        .frame(width: Self.folderIconSize)
                 }
                 FolderContentsPreview(url: url, itemID: item.id)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -1198,7 +1206,7 @@ struct PopoverRow: View, Equatable {
             // instead of trailing whichever icon happens to be last.
             HStack(spacing: 4) {
                 ForEach(Array(urls.prefix(ImageRunRow.maxPerLine).enumerated()), id: \.offset) { _, url in
-                    fileThumbnail(url, size: ImageRunRow.cellSize * 0.8)
+                    fileThumbnail(url, size: Self.fileIconSize)
                 }
                 Spacer(minLength: 8)
                 Text("\(urls.count)")
