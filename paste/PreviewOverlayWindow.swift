@@ -460,13 +460,20 @@ struct PopoverPreviewView: View {
                         // item id is a silent no-op, which is why "back"
                         // into an image run used to do nothing. For every
                         // other row it IS the item's own id, so this single
-                        // animated scroll is already exact.
-                        proxy.scrollTo(coarseID, anchor: .center)
+                        // animated scroll is already exact. It shares the
+                        // highlight's own spring so the content glides in
+                        // step with the selection box instead of snapping
+                        // underneath it.
+                        withAnimation(SelectionHighlightStyle.spring) {
+                            proxy.scrollTo(coarseID, anchor: .center)
+                        }
 
                         guard coarseID != AnyHashable(targetID) else { return }
                         DispatchQueue.main.async {
                             guard manager.selectedIndex == newIdx else { return }
-                            proxy.scrollTo(targetID, anchor: .center)
+                            withAnimation(SelectionHighlightStyle.spring) {
+                                proxy.scrollTo(targetID, anchor: .center)
+                            }
                         }
                     }
                     .onAppear {
