@@ -391,10 +391,29 @@ struct PopoverPreviewView: View {
     private var normalRingArea: some View {
         Group {
             if items.isEmpty {
-                Text("No items with this tag")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if !manager.isHistoryFullyLoaded {
+                    // Right after launch, manager.items only holds the
+                    // priority slice (pinned + the 40 most recent unpinned)
+                    // — the rest loads in background chunks (see
+                    // performHistoryLoadOffMain in
+                    // ClipboardManager+Persistence.swift). A collection or
+                    // tag filter can land entirely inside a chunk that
+                    // hasn't arrived yet, making displayItems empty even
+                    // though the collection genuinely has items — items's
+                    // own didSet invalidates the displayItems cache on
+                    // every chunk append, so this self-corrects the
+                    // instant the data lands. Showing "loading" here
+                    // instead of "no items" avoids lying about a
+                    // collection being empty during that window.
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Text("No items with this tag")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical, showsIndicators: true) {
