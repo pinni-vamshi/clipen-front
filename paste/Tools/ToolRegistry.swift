@@ -7,13 +7,10 @@ enum ToolRegistry {
     }
 
     private struct ResolvedTools {
-        let itemID: UUID
-
         let collectionSignature: String
         let entries: [(tool: ClipboardTool, preview: String?)]
     }
-    private static var resolvedCache: ResolvedTools?
-    private static let resolvedLock = NSLock()
+    private static let resolvedCache = RecentItemCache<ResolvedTools>(capacity: 5)
 
     private static func collectionSignature(for item: ClipboardItem) -> String {
         let manager = ClipboardManager.shared
@@ -27,14 +24,9 @@ enum ToolRegistry {
 
     private static func resolved(for item: ClipboardItem) -> [(tool: ClipboardTool, preview: String?)] {
         let signature = collectionSignature(for: item)
-        resolvedLock.lock()
-        if let cached = resolvedCache, cached.itemID == item.id,
-           cached.collectionSignature == signature {
-            let entries = cached.entries
-            resolvedLock.unlock()
-            return entries
+        if let cached = resolvedCache.value(for: item.id), cached.collectionSignature == signature {
+            return cached.entries
         }
-        resolvedLock.unlock()
 
         let pool = toolPool(for: item)
         var scored: [(tool: ClipboardTool, preview: String?, score: Double, order: Int)] = []
@@ -52,11 +44,7 @@ enum ToolRegistry {
         }
         let entries = scored.map { (tool: $0.tool, preview: $0.preview) }
 
-        resolvedLock.lock()
-        resolvedCache = ResolvedTools(itemID: item.id,
-                                      collectionSignature: signature,
-                                      entries: entries)
-        resolvedLock.unlock()
+        resolvedCache.insert(ResolvedTools(collectionSignature: signature, entries: entries), for: item.id)
         return entries
     }
 
@@ -127,9 +115,7 @@ enum ToolRegistry {
     }
 
     static func invalidateCache() {
-        resolvedLock.lock()
-        resolvedCache = nil
-        resolvedLock.unlock()
+        resolvedCache.removeAll()
     }
 
     private static func tool(for item: ClipboardItem, toolID: String) -> ClipboardTool? {

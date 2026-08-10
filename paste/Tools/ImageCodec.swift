@@ -25,22 +25,12 @@ enum ImageService {
         let label: String
     }
 
-    private static let inputCacheLock = NSLock()
-    private static var cachedInput: (id: UUID, input: ImageInput)?
+    private static let inputCache = RecentItemCache<ImageInput>(capacity: 5)
 
     static func imageInput(for item: ClipboardItem) -> ImageInput? {
-        inputCacheLock.lock()
-        if let cached = cachedInput, cached.id == item.id {
-            let hit = cached.input
-            inputCacheLock.unlock()
-            return hit
-        }
-        inputCacheLock.unlock()
-
+        if let cached = inputCache.value(for: item.id) { return cached }
         guard let input = decodeImageInput(for: item) else { return nil }
-        inputCacheLock.lock()
-        cachedInput = (item.id, input)
-        inputCacheLock.unlock()
+        inputCache.insert(input, for: item.id)
         return input
     }
 

@@ -67,6 +67,7 @@
 		B10000000000000000000109 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000109 /* SettingsView.swift */; };
 		B10000000000000000000110 /* WakeGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000110 /* WakeGuard.swift */; };
 		B10000000000000000000111 /* PreviewPrefetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000111 /* PreviewPrefetch.swift */; };
+		B10000000000000000000112 /* RecentItemCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* RecentItemCache.swift */; };
 		B10000000000000000000200 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000200 /* GoogleService-Info.plist */; };
 		B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */; };
 		B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC7302505C7008E5DD1 /* FirebaseFirestore */; };
@@ -138,6 +139,7 @@
 		A10000000000000000000109 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A10000000000000000000110 /* WakeGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeGuard.swift; sourceTree = "<group>"; };
 		A10000000000000000000111 /* PreviewPrefetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPrefetch.swift; sourceTree = "<group>"; };
+		A10000000000000000000112 /* RecentItemCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentItemCache.swift; sourceTree = "<group>"; };
 		A10000000000000000000200 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		EE8C684D2FB7847A002CA5C3 /* Clipen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipen.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -188,6 +190,7 @@
 				A10000000000000000000016 /* ImageTools.swift */,
 				A10000000000000000000017 /* MediaTools.swift */,
 				A10000000000000000000018 /* PDFTools.swift */,
+				A10000000000000000000112 /* RecentItemCache.swift */,
 				A10000000000000000000034 /* InteractionToneGenerator.swift */,
 				A1000000000000000000002E /* ImageCodec.swift */,
 				A1000000000000000000002F /* MarkedToolRegistry.swift */,
@@ -422,6 +425,7 @@
 				B10000000000000000000016 /* ImageTools.swift in Sources */,
 				B10000000000000000000017 /* MediaTools.swift in Sources */,
 				B10000000000000000000018 /* PDFTools.swift in Sources */,
+				B10000000000000000000112 /* RecentItemCache.swift in Sources */,
 				B10000000000000000000034 /* InteractionToneGenerator.swift in Sources */,
 				B1000000000000000000002E /* ImageCodec.swift in Sources */,
 				B1000000000000000000002F /* MarkedToolRegistry.swift in Sources */,

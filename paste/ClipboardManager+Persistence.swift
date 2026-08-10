@@ -549,6 +549,16 @@ extension ClipboardManager {
     func saveHistory(snapshot: [ClipboardItem]? = nil) {
 
         guard snapshot != nil || isHistoryFullyLoaded else { return }
+        // items's own didSet marks this dirty on every mutation — every
+        // call site here (the debounced $items sink, plus the direct
+        // calls after a collection rename/delete/move/share) is always
+        // preceded by a genuine items change, so this only skips work
+        // when nothing new actually needs persisting, e.g. the debounce
+        // settling twice for a change a direct call already saved.
+        // Without this, the entire history was re-encoded, re-encrypted,
+        // and rewritten to disk on every save regardless of whether
+        // anything changed since the last one.
+        guard historyDirty else { return }
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         var referencedBlobs: Set<String> = []
@@ -572,6 +582,7 @@ extension ClipboardManager {
         }
         guard let plain = try? enc.encode(persisted),
               let cipher = HistoryCrypto.encrypt(plain) else { return }
+        historyDirty = false
         try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
         if historyLoadedCleanly, !itemsToSave.isEmpty {
             try? cipher.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])

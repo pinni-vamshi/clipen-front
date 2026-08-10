@@ -20,6 +20,7 @@ class ClipboardManager: ObservableObject {
     var payloadBlobCache: [UUID: String] = [:]
     var sidecarBlobCache: [UUID: String] = [:]
     var embeddingsDirty = false
+    var historyDirty = false
     var blobPurgeNeeded = true
 
     @Published var hasLoadedHistoryOnce: Bool = false
@@ -42,6 +43,7 @@ class ClipboardManager: ObservableObject {
     @Published var items: [ClipboardItem] = [] {
         didSet {
             itemsRevision &+= 1
+            historyDirty = true
             _displayItems = nil
             _availableTags = nil
             updatePendingPasteID()
