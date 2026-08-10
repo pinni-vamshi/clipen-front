@@ -442,7 +442,8 @@ struct PopoverPreviewView: View {
                                 case .imageRun(let run):
                                     ImageRunRow(run: run, selectedIndex: selectedIndex,
                                                 selectionNamespace: selectionNamespace,
-                                                markedItemIDs: manager.markedItemIDs)
+                                                markedItemIDs: manager.markedItemIDs,
+                                                editDeniedShake: manager.editDeniedShake)
                                         .equatable()
                                         // Without this, scrollTo(item.id) has no
                                         // anchor to estimate against for an
@@ -544,6 +545,7 @@ struct ImageRunRow: View, Equatable {
     let selectedIndex: Int
     let selectionNamespace: Namespace.ID
     let markedItemIDs: [UUID]
+    let editDeniedShake: ClipboardManager.DeniedShakeSignal?
 
     static func == (l: ImageRunRow, r: ImageRunRow) -> Bool {
         guard l.run.count == r.run.count else { return false }
@@ -559,6 +561,11 @@ struct ImageRunRow: View, Equatable {
         let lMarked = Set(l.run.map(\.item.id)).intersection(l.markedItemIDs)
         let rMarked = Set(r.run.map(\.item.id)).intersection(r.markedItemIDs)
         if lMarked != rMarked { return false }
+        func shakeGen(_ row: ImageRunRow) -> Int {
+            row.run.contains(where: { $0.item.id == row.editDeniedShake?.itemID })
+                ? row.editDeniedShake?.generation ?? 0 : 0
+        }
+        if shakeGen(l) != shakeGen(r) { return false }
         return true
     }
 
@@ -615,7 +622,9 @@ struct ImageRunRow: View, Equatable {
                             ImageRunCell(item: entry.item, index: entry.index,
                                          isSelected: entry.index == selectedIndex,
                                          selectionNamespace: selectionNamespace,
-                                         markOrder: markedItemIDs.firstIndex(of: entry.item.id).map { $0 + 1 })
+                                         markOrder: markedItemIDs.firstIndex(of: entry.item.id).map { $0 + 1 },
+                                         shakeGeneration: editDeniedShake?.itemID == entry.item.id
+                                             ? editDeniedShake?.generation ?? 0 : 0)
                         }
                     }
                 }
@@ -716,8 +725,21 @@ private struct ImageRunCell: View {
     let isSelected: Bool
     let selectionNamespace: Namespace.ID
     let markOrder: Int?
+    let shakeGeneration: Int
 
     private static let cellSize: CGFloat = ImageRunRow.cellSize
+
+    @State private var shakeOffsetX: CGFloat = 0
+
+    private func runShake() {
+        let step: TimeInterval = 0.045
+        let amounts: [CGFloat] = [8, -8, 6, -6, 3, -3, 0]
+        for (i, amount) in amounts.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(i)) {
+                withAnimation(.easeInOut(duration: step)) { shakeOffsetX = amount }
+            }
+        }
+    }
 
     var body: some View {
         Group {
@@ -773,6 +795,11 @@ private struct ImageRunCell: View {
         }
         .onDrag {
             item.makeItemProvider()
+        }
+        .offset(x: shakeOffsetX)
+        .onChange(of: shakeGeneration) { _, new in
+            guard new > 0 else { return }
+            runShake()
         }
     }
 }
