@@ -943,39 +943,68 @@ extension ClipboardManager {
         }
     }
 
+    /// Taps of V faster than this land as instant, unanimated selection
+    /// changes instead of retargeting the (0.35s response) spring that
+    /// drives the image-elevation, row-highlight, and scroll-to effects.
+    /// Below this interval the spring never gets close to converging
+    /// before the next tap arrives — it's perpetually redirected mid-flight,
+    /// which reads as stutter. Since an unanimated update fully resolves
+    /// immediately, there's no "unfinished" state left over once a fast
+    /// burst ends — the view is already exactly where it should be.
+    /// Deliberate, slower taps still animate normally.
+    private static let selectionAnimationCooldown: TimeInterval = 0.15
+
+    @discardableResult
+    private func withRateLimitedSelectionAnimation<T>(_ mutate: () -> T) -> T {
+        let now = Date()
+        let shouldAnimate = now.timeIntervalSince(lastAnimatedSelectionChangeAt) > Self.selectionAnimationCooldown
+        lastAnimatedSelectionChangeAt = now
+        guard shouldAnimate else {
+            var t = Transaction(animation: nil)
+            t.disablesAnimations = true
+            return withTransaction(t, mutate)
+        }
+        return mutate()
+    }
+
     func cycleNext() {
         let display = displayItems
         guard !display.isEmpty else { return }
         let wasVisible = previewWindow.isVisible
 
-        if !previewWindow.isVisible {
-            if pendingFirstOpen {
-                cancelPendingFirstOpen()
-                openPopupNow()
-                selectedIndex = min(1, display.count - 1)
-            } else if openOnSecondTap {
-                selectedIndex = 0
-                pendingFirstOpen = true
-                pendingFirstOpenTimer?.invalidate()
-                pendingFirstOpenTimer = nil
-                return
-            } else if firstOpenDelay > 0 {
-                selectedIndex = 0
-                pendingFirstOpen = true
-                pendingFirstOpenTimer?.invalidate()
-                let t = Timer(timeInterval: firstOpenDelay, repeats: false) { [weak self] _ in
-                    DispatchQueue.main.async { self?.openPopoverAfterDelay() }
+        let shouldContinue = withRateLimitedSelectionAnimation { () -> Bool in
+            if !previewWindow.isVisible {
+                if pendingFirstOpen {
+                    cancelPendingFirstOpen()
+                    openPopupNow()
+                    selectedIndex = min(1, display.count - 1)
+                } else if openOnSecondTap {
+                    selectedIndex = 0
+                    pendingFirstOpen = true
+                    pendingFirstOpenTimer?.invalidate()
+                    pendingFirstOpenTimer = nil
+                    return false
+                } else if firstOpenDelay > 0 {
+                    selectedIndex = 0
+                    pendingFirstOpen = true
+                    pendingFirstOpenTimer?.invalidate()
+                    let t = Timer(timeInterval: firstOpenDelay, repeats: false) { [weak self] _ in
+                        DispatchQueue.main.async { self?.openPopoverAfterDelay() }
+                    }
+                    RunLoop.main.add(t, forMode: .common)
+                    pendingFirstOpenTimer = t
+                    return false
+                } else {
+                    selectedIndex = 0
+                    openPopupNow()
                 }
-                RunLoop.main.add(t, forMode: .common)
-                pendingFirstOpenTimer = t
-                return
             } else {
-                selectedIndex = 0
-                openPopupNow()
+                selectedIndex = (selectedIndex + 1) % display.count
             }
-        } else {
-            selectedIndex = (selectedIndex + 1) % display.count
+            return true
         }
+        guard shouldContinue else { return }
+
         ClipenSignpost.event("selection.target")
 
         cycleCount += 1
@@ -993,12 +1022,14 @@ extension ClipboardManager {
         let wasVisible = previewWindow.isVisible
         AuthManager.shared.registerActionUsage(actionID: "action.prev")
 
-        if !previewWindow.isVisible {
-            cancelPendingFirstOpen()
-            selectedIndex = display.count - 1
-            openPopupNow()
-        } else {
-            selectedIndex = (selectedIndex - 1 + display.count) % display.count
+        withRateLimitedSelectionAnimation {
+            if !previewWindow.isVisible {
+                cancelPendingFirstOpen()
+                selectedIndex = display.count - 1
+                openPopupNow()
+            } else {
+                selectedIndex = (selectedIndex - 1 + display.count) % display.count
+            }
         }
 
         cycleCount += 1

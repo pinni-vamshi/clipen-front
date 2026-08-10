@@ -326,6 +326,7 @@ class ClipboardManager: ObservableObject {
     var pendingPasteItemID: UUID? = nil
     var cycleCount: Int = 0
     var transformCycleCount: Int = 0
+    var lastAnimatedSelectionChangeAt: Date = .distantPast
     var capturedPasteTarget: NSRunningApplication?
 
     var lastSpaceKeyTime: Date = .distantPast
