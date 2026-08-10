@@ -788,6 +788,16 @@ struct ClipenSettingsView: View {
                 Text("Items only in “\(name)” are deleted. Items that also live in another collection are kept there.")
             }
         }
+        .onChange(of: newCollectionName) { _, new in
+            if new.count > ClipboardManager.maxCollectionNameLength {
+                newCollectionName = String(new.prefix(ClipboardManager.maxCollectionNameLength))
+            }
+        }
+        .onChange(of: renameCollectionText) { _, new in
+            if new.count > ClipboardManager.maxCollectionNameLength {
+                renameCollectionText = String(new.prefix(ClipboardManager.maxCollectionNameLength))
+            }
+        }
     }
 
     private var excludedAppsManagerPopover: some View {

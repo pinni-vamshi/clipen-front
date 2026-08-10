@@ -1649,6 +1649,10 @@ extension ClipboardManager {
             flashStatus(String(localized: "Only \(Self.maxCollections) collections can exist at once."))
             return false
         }
+        guard name.count <= Self.maxCollectionNameLength else {
+            flashStatus(String(localized: "Collection names can be up to \(Self.maxCollectionNameLength) characters."))
+            return false
+        }
         guard !collections.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else {
             flashStatus(String(localized: "“\(name)” already exists."))
             return false
@@ -1662,6 +1666,10 @@ extension ClipboardManager {
         let new = rawNew.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !new.isEmpty, new != old,
               let slot = collections.firstIndex(of: old) else { return }
+        guard new.count <= Self.maxCollectionNameLength else {
+            flashStatus(String(localized: "Collection names can be up to \(Self.maxCollectionNameLength) characters."))
+            return
+        }
         guard !collections.contains(where: { $0.caseInsensitiveCompare(new) == .orderedSame }) else {
             flashStatus(String(localized: "“\(new)” already exists."))
             return
