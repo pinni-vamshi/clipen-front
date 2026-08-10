@@ -14,10 +14,22 @@ enum SelectionHighlightStyle {
     /// (e.g. ImageRunRow.cellGap) — that one broke this exact alignment
     /// once already by being reused for both.
     static let rowRailSpacing: CGFloat = 8
+    /// Outer horizontal inset every row type sits behind, so each row's
+    /// rail and divider land at the same x. Lives here rather than on one
+    /// row type because ImageRunRow not having it is what pushed image
+    /// rows 23pt left of everything else — and, once they gained a scale
+    /// effect, made them overflow the popup's fixed width when selected.
+    static let rowInset: CGFloat = 23
 }
 
 enum SelectionHighlightAppearance {
     case row
+    /// Same geometry as `.row` — same inset, same scale, same spring — but
+    /// a transparent raised surface instead of the accent fill. For rows
+    /// whose *contents* already carry their own per-item highlight (image
+    /// runs), where an opaque blue wash would bury the images and a second
+    /// accent-coloured box would compete with the cell borders.
+    case rowSurface
     case cell
 }
 
@@ -43,6 +55,23 @@ struct SelectionHighlight: ViewModifier {
                 }
                 .padding(.horizontal, inset)
 
+                .scaleEffect(isSelected ? SelectionHighlightStyle.scale : 1.0)
+                .animation(SelectionHighlightStyle.spring, value: isSelected)
+        case .rowSurface:
+            content
+                .background {
+                    RoundedRectangle(cornerRadius: SelectionHighlightStyle.cornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .opacity(isSelected ? 1 : 0)
+                        // Deliberately no matchedGeometryEffect: the cells
+                        // inside this row already drive "selectionBox", and
+                        // a second source for the same id while one of them
+                        // is selected breaks the shared animation. This
+                        // surface fades and scales in place instead.
+                        .shadow(color: Color.black.opacity(isSelected ? 0.22 : 0),
+                                radius: isSelected ? 4 : 0, x: 0, y: isSelected ? 1.5 : 0)
+                }
+                .padding(.horizontal, inset)
                 .scaleEffect(isSelected ? SelectionHighlightStyle.scale : 1.0)
                 .animation(SelectionHighlightStyle.spring, value: isSelected)
         case .cell:

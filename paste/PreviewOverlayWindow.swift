@@ -620,17 +620,21 @@ struct ImageRunRow: View, Equatable {
     /// per line" read, rather than however many the popup's 420pt happens
     /// to fit.
     static let maxPerLine = 4
-    /// 420 (popup width) − 18 (row's own .horizontal padding, 9 each side)
-    /// − 22 (rail) − 8 (rail↔divider spacing) − 1 (divider) − 8
-    /// (divider↔first image spacing). The rail↔divider↔content spacing is
-    /// SelectionHighlightStyle.rowRailSpacing, not cellGap — those two used
-    /// to be the same number by coincidence, until cellGap changed for the
-    /// "more space between images" request and silently pushed the
-    /// divider out of alignment with every other row type. Enforced as a
-    /// hard `.frame` width below, not just used to size things — so a math
-    /// mistake clips a cell instead of letting it push past the popup's
-    /// own fixed-width bounds.
-    private static let lineWidth: CGFloat = 420 - 18 - railWidth - SelectionHighlightStyle.rowRailSpacing - 1 - SelectionHighlightStyle.rowRailSpacing
+    /// 420 (popup width) − 46 (rowInset, 23 each side) − 18 (row's own
+    /// .horizontal padding, 9 each side) − 22 (rail) − 8 (rail↔divider
+    /// spacing) − 1 (divider) − 8 (divider↔first image spacing).
+    ///
+    /// Two separate insets, both mandatory: rowRailSpacing is the gap
+    /// *inside* the row (rail↔divider↔content), rowInset is what the whole
+    /// row sits behind so it lines up with every other row type. Neither is
+    /// cellGap — reusing that for the inner gap is what knocked the divider
+    /// out of alignment once already. Enforced as a hard `.frame` width
+    /// below, not just used to size things: a math mistake clips a cell
+    /// rather than letting the row push past the popup's fixed width, which
+    /// is exactly what the selected-row scale effect would otherwise do.
+    private static let lineWidth: CGFloat = 420
+        - SelectionHighlightStyle.rowInset * 2
+        - 18 - railWidth - SelectionHighlightStyle.rowRailSpacing - 1 - SelectionHighlightStyle.rowRailSpacing
     private static let perImageWidth = cellSize + cellGap + 1 + cellGap
 
     private var lines: [[(item: ClipboardItem, index: Int)]] {
@@ -697,23 +701,17 @@ struct ImageRunRow: View, Equatable {
             // underneath opts out.
             .transaction { $0.animation = nil }
         }
-        // The whole run lifts as one surface when the selection is inside
-        // it — same spring, same moment as the selected cell's own lift,
-        // so the section and the image inside it move together instead of
-        // the image animating against a static background. Deliberately a
-        // transparent material, not an accent tint: this reads as the
-        // section being raised off the popup, which a flat colour wash
-        // cannot convey no matter how low its opacity.
-        .background {
-            RoundedRectangle(cornerRadius: SelectionHighlightStyle.cornerRadius, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .opacity(isAnySelected ? 1 : 0)
-                .shadow(color: Color.black.opacity(isAnySelected ? 0.20 : 0),
-                        radius: isAnySelected ? 8 : 0, x: 0, y: isAnySelected ? 3 : 0)
-        }
-        .scaleEffect(isAnySelected ? SelectionHighlightStyle.scale : 1.0)
-        .animation(SelectionHighlightStyle.spring, value: isAnySelected)
         .padding(.horizontal, 9).padding(.vertical, 10)
+        // Goes through the same modifier every other row type uses, in the
+        // same position in the chain — so this row gets the identical outer
+        // inset, scale and spring as a text row's blue highlight, just with
+        // a transparent surface. Applied *after* the padding (as PopoverRow
+        // does) so the raised surface extends past the divider rather than
+        // hugging it exactly.
+        .selectionHighlight(isSelected: isAnySelected,
+                            namespace: selectionNamespace,
+                            inset: SelectionHighlightStyle.rowInset,
+                            appearance: .rowSurface)
     }
 
     /// Same tag-label formatting as `PopoverRow.tagLabelText`, for whichever
@@ -1007,7 +1005,7 @@ struct PopoverRow: View, Equatable {
     private static let minRowHeight: CGFloat = 56
     private static let maxRowHeight: CGFloat = 104
 
-    private static let horizontalInset: CGFloat = 23
+    private static let horizontalInset: CGFloat = SelectionHighlightStyle.rowInset
 
     var body: some View {
         HStack(alignment: .top, spacing: SelectionHighlightStyle.rowRailSpacing) {
