@@ -5,7 +5,7 @@
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/pinni-vamshi/clipen-releases/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>iV2kAkE2DdAm05CxPs20Hw3Z6qYEWEyrswJX7ndOb80=</string>
+	<string>1OxuVCxbGaZ4VWRSyCNhlcep+BRMKhSnAyG8/xqGmqU=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUScheduledCheckInterval</key>
