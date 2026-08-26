@@ -144,6 +144,7 @@ struct ShareView: View {
             }
             HStack(spacing: 14) {
                 FlatHint(key: "S", label: "Next")
+                FlatHint(key: "⇧S", label: "Prev")
                 FlatHint(key: "↵", label: "Send")
                 Spacer()
             }

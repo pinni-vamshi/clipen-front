@@ -14,13 +14,55 @@ private enum HistoryCrypto {
             .appendingPathComponent("Clipen/history.key")
     }
 
+    static var historyFileExists: Bool {
+        FileManager.default.fileExists(atPath: ClipboardManager.shared.historyFileURL.path)
+    }
+
+    /// Two independent sources, checked in order, before ever generating a
+    /// replacement key: the file, then Keychain (previously write/delete
+    /// only — `get` never existed, so Keychain provided zero real backup
+    /// despite the field's own name implying one).
+    ///
+    /// The file is written with `.completeFileProtection`, which macOS
+    /// makes unreadable until the Mac has been unlocked once since boot.
+    /// Launch at Login can start Clipen in that exact window right after a
+    /// macOS update forces a restart — so a failed read here does NOT
+    /// reliably mean "no key was ever created"; a few retries with a short
+    /// pause survive that specific race without any user-visible delay in
+    /// the overwhelmingly common case where the file is simply readable
+    /// immediately, and only actually pause on the rare boot-race path.
     static let cachedKey: SymmetricKey = {
-        if let data = try? Data(contentsOf: keyFileURL), data.count == 32 {
+        for attempt in 0..<3 {
+            if let data = try? Data(contentsOf: keyFileURL), data.count == 32 {
+                return SymmetricKey(data: data)
+            }
+            if attempt < 2 { Thread.sleep(forTimeInterval: 0.3) }
+        }
+
+        if let data = Keychain.get(keychainKey), data.count == 32 {
+            // File was unreadable but Keychain still has it — self-heal the
+            // file from Keychain rather than silently generating a new key
+            // (which would permanently orphan any existing encrypted
+            // history, still sitting on disk, that only the OLD key can
+            // open).
+            writeKeyFile(data)
             return SymmetricKey(data: data)
         }
-        Keychain.delete(keychainKey)
+
+        // Neither source has anything usable. Genuinely a first-ever launch
+        // for most installs — but if encrypted history already exists on
+        // disk, generating a fresh key here does not recover it; it makes
+        // that data permanently unreadable, forever, the moment this key
+        // gets written over the one that could have opened it. Logged
+        // loudly specifically for that case, since it is the one situation
+        // this fallback chain cannot actually fix.
+        if historyFileExists {
+            NSLog("[Clipen] HistoryCrypto: no readable key (file or Keychain) but encrypted history exists — generating a new key means that history is now unrecoverable. This should not happen; if it does, the file read is failing for a reason retries did not cover.")
+        }
         let fresh = SymmetricKey(size: .bits256)
-        writeKeyFile(fresh.withUnsafeBytes { Data($0) })
+        let freshData = fresh.withUnsafeBytes { Data($0) }
+        writeKeyFile(freshData)
+        Keychain.set(freshData, for: keychainKey)
         return fresh
     }()
 
@@ -253,7 +295,6 @@ extension ClipboardManager {
                                     sourceAppName: old.sourceAppName)
         updated.isPinned          = old.isPinned
         updated.diffBadge         = old.diffBadge
-        updated.diffDetail        = old.diffDetail
         updated.sourceBundleID    = old.sourceBundleID
         updated.userNote          = old.userNote
         updated.pastedToAppName   = old.pastedToAppName
@@ -353,17 +394,26 @@ extension ClipboardManager {
     func evictCaches(for id: UUID) {
         TableCellExtractor.invalidate(itemID: id)
         EmbeddedImageExtractor.invalidate(itemID: id)
-        ImageSimilarityService.invalidate(itemID: id)
+
         inlineEditOriginals.removeValue(forKey: id)
     }
 
+    /// Assigns `maxItems` synchronously — the sole caller (`AuthManager.init`)
+    /// is already on the main thread, and queuing this through another
+    /// `DispatchQueue.main.async` used to let `maxItems` stay at its
+    /// compile-time default until after that later block ran, so the very
+    /// first analytics flush of the session sent the wrong `ring_length`.
     func applyPlanLimits(ringLimit cap: Int) {
+        // unlimitedRingSize's own trim guard makes this a no-op for
+        // eviction purposes regardless, but without this check maxItems
+        // would still get force-clamped back down to `cap` here on every
+        // launch — harmless to trimming, but wrong for what the Settings
+        // slider displays until the user touches it again.
+        let effectiveCap = unlimitedRingSize ? Int.max : cap
         let preferred = UserDefaults.standard.object(forKey: "preferredRingSize") as? Int
-        let target = max(1, preferred.map { min($0, cap) } ?? 20)
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.maxItems != target else { return }
-            self.maxItems = target
-        }
+        let target = max(1, preferred.map { min($0, effectiveCap) } ?? 20)
+        guard maxItems != target else { return }
+        maxItems = target
     }
 
     private struct PersistedItem: Codable {
@@ -399,6 +449,81 @@ extension ClipboardManager {
         var collections: [String]? = nil
 
         var originalFilePath: String? = nil
+
+        /// Explicit memberwise init — needed because providing a custom
+        /// init(from:) below (for decode-tolerance) suppresses Swift's
+        /// synthesized memberwise initializer, which `make(from:...)` relies on.
+        init(id: UUID, timestamp: Date, isPinned: Bool, urlTitle: String?, type: String,
+             text: String?, imageData: Data?, imageBlob: String?, imageType: String?,
+             rtfData: Data?, plainText: String?, filePath: String?, filePaths: [String]?,
+             html: String?, sourceAppName: String?, sourceBundleID: String?, embedding: [Float]?,
+             pastedToAppName: String?, pastedToBundleID: String?, lastPastedAt: Date?,
+             pasteCount: Int?, pasteCountByApp: [String: Int]?, pastedToAppNames: [String: String]?,
+             userNote: String? = nil, ocrText: String? = nil,
+             groupChildren: [PersistedItem]? = nil, collections: [String]? = nil,
+             originalFilePath: String? = nil) {
+            self.id = id; self.timestamp = timestamp; self.isPinned = isPinned
+            self.urlTitle = urlTitle; self.type = type; self.text = text
+            self.imageData = imageData; self.imageBlob = imageBlob; self.imageType = imageType
+            self.rtfData = rtfData; self.plainText = plainText; self.filePath = filePath
+            self.filePaths = filePaths; self.html = html
+            self.sourceAppName = sourceAppName; self.sourceBundleID = sourceBundleID
+            self.embedding = embedding
+            self.pastedToAppName = pastedToAppName; self.pastedToBundleID = pastedToBundleID
+            self.lastPastedAt = lastPastedAt
+            self.pasteCount = pasteCount; self.pasteCountByApp = pasteCountByApp
+            self.pastedToAppNames = pastedToAppNames
+            self.userNote = userNote; self.ocrText = ocrText
+            self.groupChildren = groupChildren; self.collections = collections
+            self.originalFilePath = originalFilePath
+        }
+
+        /// A single item's extractedFacts/worldKnowledge/relatedContext
+        /// shape has already changed once (and will likely change again as
+        /// these AI sections evolve) — with Swift's synthesized Decodable,
+        /// a shape mismatch on ANY one of those three fields throws and
+        /// takes the ENTIRE history array decode down with it, since
+        /// loadHistory decodes `[PersistedItem]` as one shot. That's what
+        /// happened going into this version: old-shape persisted data
+        /// (facts/links) failed against the new schema (entities), and the
+        /// whole manifest got quarantined as "corrupt" even though every
+        /// other field was completely fine. These three fields are
+        /// therefore decoded leniently — a shape mismatch drops just that
+        /// field (silently falls back to nil, same as if it were never
+        /// computed) instead of failing the whole item, and a failure on
+        /// this item must never fail every other item in the array.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(UUID.self, forKey: .id)
+            timestamp = try c.decode(Date.self, forKey: .timestamp)
+            isPinned = try c.decode(Bool.self, forKey: .isPinned)
+            urlTitle = try c.decodeIfPresent(String.self, forKey: .urlTitle)
+            type = try c.decode(String.self, forKey: .type)
+            text = try c.decodeIfPresent(String.self, forKey: .text)
+            imageData = try c.decodeIfPresent(Data.self, forKey: .imageData)
+            imageBlob = try c.decodeIfPresent(String.self, forKey: .imageBlob)
+            imageType = try c.decodeIfPresent(String.self, forKey: .imageType)
+            rtfData = try c.decodeIfPresent(Data.self, forKey: .rtfData)
+            plainText = try c.decodeIfPresent(String.self, forKey: .plainText)
+            filePath = try c.decodeIfPresent(String.self, forKey: .filePath)
+            filePaths = try c.decodeIfPresent([String].self, forKey: .filePaths)
+            html = try c.decodeIfPresent(String.self, forKey: .html)
+            sourceAppName = try c.decodeIfPresent(String.self, forKey: .sourceAppName)
+            sourceBundleID = try c.decodeIfPresent(String.self, forKey: .sourceBundleID)
+            embedding = try c.decodeIfPresent([Float].self, forKey: .embedding)
+            pastedToAppName = try c.decodeIfPresent(String.self, forKey: .pastedToAppName)
+            pastedToBundleID = try c.decodeIfPresent(String.self, forKey: .pastedToBundleID)
+            lastPastedAt = try c.decodeIfPresent(Date.self, forKey: .lastPastedAt)
+            pasteCount = try c.decodeIfPresent(Int.self, forKey: .pasteCount)
+            pasteCountByApp = try c.decodeIfPresent([String: Int].self, forKey: .pasteCountByApp)
+            pastedToAppNames = try c.decodeIfPresent([String: String].self, forKey: .pastedToAppNames)
+            userNote = try c.decodeIfPresent(String.self, forKey: .userNote)
+            ocrText = try c.decodeIfPresent(String.self, forKey: .ocrText)
+            sidecarBlob = try c.decodeIfPresent(String.self, forKey: .sidecarBlob)
+            groupChildren = try c.decodeIfPresent([PersistedItem].self, forKey: .groupChildren)
+            collections = try c.decodeIfPresent([String].self, forKey: .collections)
+            originalFilePath = try c.decodeIfPresent(String.self, forKey: .originalFilePath)
+        }
 
         static func make(from item: ClipboardItem,
                          type: String,
@@ -563,7 +688,12 @@ extension ClipboardManager {
         enc.dateEncodingStrategy = .iso8601
         var referencedBlobs: Set<String> = []
 
-        let itemsToSave = snapshot ?? items
+        // Uncaptured placeholders are session-only by design. They hold no
+        // content of their own — they are a pointer at the live system
+        // pasteboard — and after a relaunch that pasteboard has almost
+        // certainly moved on, so a restored one could only ever paste the
+        // wrong thing. Drop them here rather than persisting a trap.
+        let itemsToSave = (snapshot ?? items).filter { !$0.isUncaptured }
         let persisted: [PersistedItem] = itemsToSave.compactMap { item in
             var p = persistedBase(for: item, referencedBlobs: &referencedBlobs)
             if p != nil, let sidecar = item.sidecarTypes {

@@ -155,6 +155,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Blocks quit only long enough for any in-flight local-model generation
+    /// to actually finish, then lets it proceed.
+    ///
+    /// Without this, quitting mid-generation is a live SIGSEGV: `terminate:`
+    /// leads straight into `exit()`, whose static-destructor sequence tears
+    /// down MLX's global scheduler and compiler cache on the main thread
+    /// while a background thread can still be reading those same globals
+    /// inside `TokenIterator`. Observed directly — a crash landed exactly
+    /// one second after a `GATE: entered` log line, in
+    /// `mlx::core::detail::CompilerCache::find`, `far: 0x0`.
+    ///
+    /// The common case (nothing running) resolves in under a millisecond;
+    /// 2s is a ceiling in case a generation is stuck, so quitting is never
+    /// blocked indefinitely.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Task {
+            await LocalModelRuntime.waitUntilIdle(timeoutSeconds: 2.0)
+            await MainActor.run { NSApp.reply(toApplicationShouldTerminate: true) }
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         AuthManager.shared.flushPendingDailyUsage()
         pendingUpdateInstall?()
@@ -192,6 +214,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func checkForUpdates() {
         NSApp.activate(ignoringOtherApps: true)
 
+        // SPUUpdater.checkForUpdates() silently no-ops (SULog only, no
+        // UI) if a session is already running — most commonly the
+        // launch-time automatic check this app fires 3s after launch
+        // (see checkForUpdatesInBackgroundIfAllowed below), or Sparkle's
+        // own periodic background check. Without this guard, clicking
+        // the button during that window does nothing visible at all —
+        // exactly the "sometimes it just does nothing" bug — with no
+        // way to tell whether the click even registered.
+        if let updater = updaterController?.updater, updater.sessionInProgress {
+            ClipboardManager.shared.flashStatus("Already checking for updates…")
+            return
+        }
         updaterController?.checkForUpdates(nil)
     }
 
@@ -280,6 +314,16 @@ extension AppDelegate: SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         NSApp.activate(ignoringOtherApps: true)
+        // Surface a stable release in the popup banner. `channel` is nil for
+        // stable items and "beta" for the beta ones, so this deliberately
+        // ignores betas: a beta subscriber already gets Sparkle's own
+        // prompt, and betas ship often enough that a banner per release
+        // would just be noise.
+        guard item.channel == nil else { return }
+        let version = item.displayVersionString
+        DispatchQueue.main.async {
+            ClipboardManager.shared.availableUpdateVersion = version
+        }
     }
 
     func updater(_ updater: SPUUpdater,

@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 enum InteractionDemo: String, CaseIterable, Identifiable {
     case cycle, pinnedOpen, multiPaste, search, nextCategory
-    case spacePreview, pinPreview, transform, moveToFront, delete, reverseCycle
+    case spacePreview, pinPreview, transform, similar, moveToFront, delete, reverseCycle
     case cyclePinned, pinItem, group, collections
 
     case pasteOne, pasteTwo, pasteThree
@@ -22,6 +22,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .spacePreview: return "tap ␣"
         case .pinPreview:   return "tap ␣ ×2"
         case .transform:    return "tap X"
+        case .similar:      return "tap R"
         case .moveToFront:  return "tap C"
         case .delete:       return "tap ⌫"
         case .reverseCycle: return "⇧ + tap V"
@@ -45,6 +46,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .spacePreview: return "Preview"
         case .pinPreview:   return "Refer (Pin Preview)"
         case .transform:    return "Transform"
+        case .similar:      return "Find Similar"
         case .moveToFront:  return "Move to Front"
         case .delete:       return "Delete"
         case .reverseCycle: return "Previous Item"
@@ -68,6 +70,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .spacePreview: return "Tap Space to preview the highlighted item full-size.\nTap Space again to close — nothing is pasted."
         case .pinPreview:   return "Double-tap Space on the highlighted item.\nSends it to the Reference panel — the popup closes, the preview stays."
         case .transform:    return "Tap X to open the tools, tap X again to cycle them.\n⇧X steps back · hold X closes · release ⌘ pastes the result."
+        case .similar:      return "Tap R to open related items for the highlighted one.\nKeep tapping R to step through each match found."
         case .moveToFront:  return "Tap C to move the highlighted item to the front of the ring.\nThe selection stays put — keep tapping C to promote a run of items."
         case .delete:       return "Tap ⌫ to remove the highlighted item from the ring.\nThe next item slides into its place."
         case .reverseCycle: return "Hold ⌘ and tap ⇧V.\nMoves to the previous item instead of the next."
@@ -91,6 +94,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .spacePreview: return [.cmd, .space]
         case .pinPreview:   return [.cmd, .space]
         case .transform:    return [.cmd, .x]
+        case .similar:      return [.cmd, .r]
         case .moveToFront:  return [.cmd, .c]
         case .delete:       return [.cmd, .backspace]
         case .reverseCycle: return [.cmd, .shift, .v]
@@ -104,7 +108,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
 }
 
 enum LabKey: String, Identifiable, Hashable {
-    case cmd, v, x, f, c, b, p, g, shift, space, backspace, one, two, grave
+    case cmd, v, x, f, c, b, p, g, r, shift, space, backspace, one, two, grave
 
     var id: String { rawValue }
 
@@ -118,6 +122,7 @@ enum LabKey: String, Identifiable, Hashable {
         case .b:         return "B"
         case .p:         return "P"
         case .g:         return "G"
+        case .r:         return "R"
         case .shift:     return "⇧"
         case .space:     return "SPACE"
         case .backspace: return "⌫"
@@ -139,6 +144,7 @@ enum LabKey: String, Identifiable, Hashable {
         case .b:         return ["B"]
         case .p:         return ["P"]
         case .g:         return ["G"]
+        case .r:         return ["R"]
         case .shift:     return ["LSHIFT", "RSHIFT"]
         case .space:     return ["SPACE"]
         case .backspace: return ["DELETE"]

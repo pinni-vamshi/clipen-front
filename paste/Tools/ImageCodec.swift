@@ -455,7 +455,7 @@ enum ImageService {
         return data as Data
     }
 
-    private static func decodeWebP(data: Data) -> NSImage? {
+    static func decodeWebP(data: Data) -> NSImage? {
         guard let cg = decodeCGImage(from: data) else { return NSImage(data: data) }
         return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }

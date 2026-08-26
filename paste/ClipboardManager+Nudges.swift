@@ -9,6 +9,7 @@ enum NudgeFeature: Int, CaseIterable {
 
     case collections = 6
     case search = 7
+    case similar = 8
 
     var demo: InteractionDemo {
         switch self {
@@ -19,6 +20,7 @@ enum NudgeFeature: Int, CaseIterable {
         case .transformPanel: return .transform
         case .collections:    return .collections
         case .search:         return .search
+        case .similar:        return .similar
         }
     }
 
@@ -31,6 +33,7 @@ enum NudgeFeature: Int, CaseIterable {
         case .transformPanel: return "transform_panel"
         case .collections:    return "collections"
         case .search:         return "search"
+        case .similar:        return "similar"
         }
     }
 
@@ -43,6 +46,7 @@ enum NudgeFeature: Int, CaseIterable {
         case .transformPanel: return "clipen.nudge.used.transformPanel"
         case .collections:    return "clipen.nudge.used.collections"
         case .search:         return "clipen.nudge.used.search"
+        case .similar:        return "clipen.nudge.used.similar"
         }
     }
 
@@ -55,6 +59,7 @@ enum NudgeFeature: Int, CaseIterable {
         case .transformPanel: return "clipen.nudge.retry.transformPanel"
         case .collections:    return "clipen.nudge.retry.collections"
         case .search:         return "clipen.nudge.retry.search"
+        case .similar:        return "clipen.nudge.retry.similar"
         }
     }
 }
@@ -108,7 +113,7 @@ extension ClipboardManager {
 
     private static let autoTrackedFeatures: [NudgeFeature] =
         [.multiPaste, .groups, .preview, .pinPreview, .transformPanel]
-    private static let manualOnlyFeatures: [NudgeFeature] = [.collections, .search]
+    private static let manualOnlyFeatures: [NudgeFeature] = [.collections, .search, .similar]
 
     var nudgesLearnedCount: Int {
         Self.autoTrackedFeatures.filter(hasUsedNaturally).count
@@ -138,7 +143,7 @@ extension ClipboardManager {
         case .pinPreview:     return nudgePreviewCount >= 3
         case .transformPanel: return nudgePasteCount >= 8
 
-        case .collections, .search: return false
+        case .collections, .search, .similar: return false
         }
     }
 
@@ -166,6 +171,11 @@ extension ClipboardManager {
     }
 
     private func evaluateNudges() {
+        // Off by default — only the explicit onboarding alert or the Tips
+        // heading toggle in Settings turns this on. presentTipManually
+        // (clicking a tip directly in Settings) bypasses this function
+        // entirely and is unaffected either way.
+        guard autoTipsEnabled else { return }
         guard previewWindow.isVisible, !isInlineEditing, !inTransformStage,
               !popupPinnedOpen, !nudgeIsShowing else { return }
         if let last = lastNudgeShownAt,

@@ -88,13 +88,14 @@ struct TutorialSheet: View {
     @State private var baselineIDs: Set<UUID> = []
     @State private var pasteBoxes: [String] = ["", "", ""]
     @FocusState private var focusedPasteBox: Int?
+    @State private var showAutoTipsAlert = false
 
     @State private var introRevealed = false
     @State private var revealedRows = 0
     @State private var promptPulse = false
     @State private var wordsShown = 0
 
-    private static let philosophyLineKeys = ["A new interaction", "behind every paste."]
+    private static let philosophyLineKeys = ["A unique interaction", "behind every paste."]
     private var philosophyWords: [[String]] {
         Self.philosophyLineKeys.map { key in
             String(localized: String.LocalizationValue(key))
@@ -238,8 +239,7 @@ struct TutorialSheet: View {
             default:
 
                 Button {
-                    isPresented = false
-                    onSeeMore()
+                    showAutoTipsAlert = true
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold))
@@ -255,6 +255,26 @@ struct TutorialSheet: View {
             }
         }
         .padding(.horizontal, 22).padding(.vertical, 14)
+        // One-time question, asked exactly here rather than as a separate
+        // onboarding page, since this button is the natural moment the user
+        // is already deciding "I want to go deeper" — either answer still
+        // proceeds to Settings via onSeeMore(); only whether auto-tips
+        // (evaluateNudges in ClipboardManager+Nudges.swift) turns on
+        // depends on the choice made here.
+        .alert("Learn these interactions as you use the app?",
+               isPresented: $showAutoTipsAlert) {
+            Button("Yes, show me tips") {
+                manager.autoTipsEnabled = true
+                isPresented = false
+                onSeeMore()
+            }
+            Button("No thanks", role: .cancel) {
+                isPresented = false
+                onSeeMore()
+            }
+        } message: {
+            Text("Small practice panels can pop up automatically while you use Clipen, to teach you the most useful moves. You can turn this on or off anytime next to Tips in Settings.")
+        }
     }
 
     private var copyGatePage: some View {
@@ -446,8 +466,11 @@ struct TutorialSheet: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            // No fixed width — was 280, narrower than Settings' own copy
+            // of this same stage (380) for no reason tied to this layout;
+            // the leading column already absorbs the rest of the space via
+            // maxWidth: .infinity, so this side just takes what it needs.
             InteractionLabStage(lab: lab)
-                .frame(width: 280)
         }
         .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 14).frame(maxWidth: .infinity)
     }
@@ -540,35 +563,41 @@ private enum PopupDemoGesture: String, CaseIterable, Identifiable {
 }
 
 private struct PopupGestureDemo: View {
-    private static let items: [LocalizedStringKey] = ["Item One", "Item Two", "Item Three", "Item Four"]
-    private static let selectedIndex = 0
-
     @StateObject private var lab = InteractionLabController()
     @State private var activeGesture: PopupDemoGesture? = nil
 
     @State private var pulse = false
 
     var body: some View {
-        HStack(alignment: .center, spacing: 22) {
+        // Previously one HStack with uniform spacing, centered as a whole
+        // Three equal-width columns, each centering its own content — the
+        // key-buttons column's center this way always lands exactly on the
+        // panel's true horizontal center, regardless of how wide the ⌘V
+        // pair or the caption text happens to be. A Spacer-based layout
+        // (the previous approach) can't guarantee that: it centers the ⌘V
+        // pair in whatever leftover space is left AFTER the fixed-width
+        // key column and caption, which drifts the key column away from
+        // true center whenever either sibling's width changes.
+        HStack(alignment: .center, spacing: 0) {
             VStack(spacing: 10) {
-                mockPopup
-                VStack(spacing: 2) {
-                    Text("Open popup").font(.system(size: 10, weight: .semibold)).foregroundColor(.textDim)
-                    Text("⌘V").font(.system(size: 11, weight: .bold, design: .monospaced)).foregroundColor(.textSec)
-                }
+                openPopupKeys
+                Text("Open popup").font(.system(size: 10, weight: .semibold)).foregroundColor(.textDim)
             }
+            .frame(maxWidth: .infinity)
 
             VStack(spacing: 10) {
                 ForEach(PopupDemoGesture.allCases) { gesture in
                     demoKey(gesture)
                 }
             }
+            .frame(maxWidth: .infinity)
 
             Text("Click these buttons to see the interactions.")
                 .font(.system(size: 11))
                 .foregroundColor(.textDim)
                 .multilineTextAlignment(.leading)
                 .frame(width: 150, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .onAppear {
@@ -576,24 +605,32 @@ private struct PopupGestureDemo: View {
         }
     }
 
-    private var mockPopup: some View {
-        VStack(spacing: 4) {
-            ForEach(Array(Self.items.enumerated()), id: \.offset) { idx, label in
-                HStack(spacing: 6) {
-                    Text(label)
-                        .font(.system(size: 11, weight: idx == Self.selectedIndex ? .semibold : .regular))
-                        .foregroundColor(idx == Self.selectedIndex ? .white : .textPri)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(idx == Self.selectedIndex ? Color.accent : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            }
+    // The 4-item mock list this replaced implied you'd see the actual
+    // popup contents here — you don't, this whole page is just clickable
+    // key demos. A single ⌘V key-cap pair, styled like the other demo
+    // keys to its right, reads as "this is the shortcut" instead of "this
+    // is what the popup looks like."
+    private var openPopupKeys: some View {
+        HStack(spacing: 8) {
+            keyCap("⌘")
+            keyCap("V")
         }
-        .padding(8)
-        .frame(width: 150)
-        .background(Color.surfaceHi, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.border, lineWidth: 1))
+        .padding(10)
+        .background(Color.surfaceHi, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(Color.border, lineWidth: 1))
+    }
+
+    // Filled solid blue, same look demoKey uses for its pressed/active
+    // state — this pair isn't interactive, but it's the shortcut you
+    // actually press to get here, so it should read with the same
+    // weight as an engaged button, not a plain idle key.
+    private func keyCap(_ symbol: String) -> some View {
+        Text(symbol)
+            .font(.system(size: 20, weight: .bold, design: .monospaced))
+            .foregroundColor(.white)
+            .frame(width: 46, height: 46)
+            .background(Color.accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.accent, lineWidth: 2))
     }
 
     private func demoKey(_ gesture: PopupDemoGesture) -> some View {
@@ -621,7 +658,7 @@ private struct PopupGestureDemo: View {
                 get: { activeGesture == gesture },
                 set: { isPresented in if !isPresented { activeGesture = nil } }
             ), arrowEdge: .bottom) {
-                ClipenSettingsView.KeyDemoPopup(key: gesture.kbKey, lab: lab)
+                ClipenSettingsView.KeyDemoPopup(key: gesture.kbKey, lab: lab, showRealKeyboardToggle: false)
             }
     }
 }

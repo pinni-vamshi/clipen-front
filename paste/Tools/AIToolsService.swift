@@ -1,8 +1,12 @@
+import AppKit
 import Foundation
 import NaturalLanguage
 import FoundationModels
 import CoreGraphics
 import ImageIO
+import MLXLLM
+import MLXLMCommon
+@preconcurrency import PDFKit
 
 enum AIService {
 
@@ -13,7 +17,15 @@ enum AIService {
         return false
     }
 
+    /// Plain text-in/text-out generation — the one shape both engines can
+    /// do identically (structured extraction and image understanding below
+    /// stay Apple-only since a local Qwen2.5-Instruct tier has no vision
+    /// and no native structured-output API), so this is the single place
+    /// that actually branches on the user's selected engine.
     static func respond(instructions: String, prompt: String) async -> String? {
+        if case .local(let tier) = await LocalLLMManager.shared.effectiveEngine {
+            return await localRespond(instructions: instructions, prompt: prompt, tier: tier, maxTokens: 1024)
+        }
         guard #available(macOS 26, *) else { return nil }
         guard case .available = SystemLanguageModel.default.availability else { return nil }
         let session = LanguageModelSession(instructions: instructions)
@@ -22,6 +34,34 @@ enum AIService {
             let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : text
         } catch {
+            DebugLog.write("AI respond() (Apple) error: \(error)")
+            return nil
+        }
+    }
+
+    /// `maxTokens` is required, not defaulted — MLX's GenerateParameters
+    /// leaves it nil (unbounded) by default, and a base Qwen2.5-Instruct
+    /// model has no structural guarantee it stops after a short answer the
+    /// way Apple's Generable output does. Without a real cap here, a
+    /// prompt asking for "1-3 words" can ramble for hundreds of tokens,
+    /// which — combined with the model container processing one job at a
+    /// time — can hang indefinitely once more than one request is in
+    /// flight.
+    /// Instruction-following generation (translate, summarize, rewrite…),
+    /// routed through the chat template `ChatSession` applies.
+    static func localRespond(instructions: String, prompt: String, tier: LocalModelTier, maxTokens: Int) async -> String? {
+        let started = Date()
+        do {
+            // Must go through LocalModelRuntime so it passes the inference
+            // gate. Calling ChatSession directly here is what let eleven
+            // generations reach Metal simultaneously.
+            let text = try await LocalModelRuntime.shared.respondChat(
+                tier: tier, instructions: instructions, prompt: prompt, maxTokens: maxTokens
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            DebugLog.write("local chat done in \(String(format: "%.2f", Date().timeIntervalSince(started)))s (\(text.count) chars)")
+            return text.isEmpty ? nil : text
+        } catch {
+            DebugLog.write("Local model (\(tier.displayName)) error: \(error)")
             return nil
         }
     }
@@ -69,9 +109,11 @@ enum AIService {
             let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : text
         } catch {
+            DebugLog.write("describeImage error: \(error)")
             return nil
         }
     }
+
 
     static let minSummarizableLength = 200
     static let maxInputLength = 8000

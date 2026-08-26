@@ -35,6 +35,7 @@
 		B1000000000000000000001F /* TagDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001F /* TagDetector.swift */; };
 		B10000000000000000000021 /* PageRangePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* PageRangePanel.swift */; };
 		B10000000000000000000022 /* FastPasteHintPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* FastPasteHintPanel.swift */; };
+		B10000000000000000000201 /* CopyFeedbackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000201 /* CopyFeedbackPanel.swift */; };
 		B10000000000000000000024 /* QuickClipPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* QuickClipPanel.swift */; };
 		B10000000000000000000025 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000025 /* DeviceIdentity.swift */; };
 		B10000000000000000000026 /* AIToolsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000026 /* AIToolsService.swift */; };
@@ -43,6 +44,7 @@
 		B10000000000000000000029 /* ClipboardManager+Panels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* ClipboardManager+Panels.swift */; };
 		B1000000000000000000002A /* ClipboardManager+Paste.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002A /* ClipboardManager+Paste.swift */; };
 		B1000000000000000000002B /* ClipboardManager+Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* ClipboardManager+Search.swift */; };
+		CE0000000000000000000002 /* ClipenExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000001 /* ClipenExceptionCatcher.m */; };
 		B1000000000000000000002C /* ClipboardManager+Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* ClipboardManager+Persistence.swift */; };
 		B1000000000000000000002D /* OnboardingAndTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002D /* OnboardingAndTutorial.swift */; };
 		B1000000000000000000002E /* ImageCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002E /* ImageCodec.swift */; };
@@ -54,6 +56,8 @@
 		B10000000000000000000035 /* ClipboardManager+Nudges.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* ClipboardManager+Nudges.swift */; };
 		B10000000000000000000036 /* ProGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000036 /* ProGate.swift */; };
 		B10000000000000000000037 /* SelectionHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000037 /* SelectionHighlight.swift */; };
+		B10000000000000000000302 /* ClipenDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000302 /* ClipenDiag.swift */; };
+		B10000000000000000000303 /* SimilarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000303 /* SimilarPanel.swift */; };
 		B10000000000000000000099 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000099 /* Localizable.xcstrings */; };
 		B10000000000000000000100 /* ContentPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000100 /* ContentPreviewView.swift */; };
 		B10000000000000000000101 /* TextContentPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000101 /* TextContentPreviews.swift */; };
@@ -75,6 +79,10 @@
 		EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68612FB7847C002CA5C3 /* Sparkle */; };
 		EE8C68652FB7847C002CA5C3 /* webp in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68642FB7847C002CA5C3 /* webp */; };
 		FE00000000000000000003 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = FE00000000000000000002 /* Highlightr */; };
+		CE0000000000000000000013 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000011 /* MLXLLM */; };
+		CE0000000000000000000014 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000012 /* MLXLMCommon */; };
+		CE0000000000000000000017 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000016 /* Hub */; };
+		CE0000000000000000000019 /* LocalLLMManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000018 /* LocalLLMManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -107,14 +115,19 @@
 		A1000000000000000000001F /* TagDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* PageRangePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageRangePanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000022 /* FastPasteHintPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FastPasteHintPanel.swift; sourceTree = "<group>"; };
+		A10000000000000000000201 /* CopyFeedbackPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopyFeedbackPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000024 /* QuickClipPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickClipPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000025 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		A10000000000000000000026 /* AIToolsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolsService.swift; sourceTree = "<group>"; };
+		CE0000000000000000000018 /* LocalLLMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMManager.swift; sourceTree = "<group>"; };
 		A10000000000000000000027 /* ClipboardManager+Capture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Capture.swift"; sourceTree = "<group>"; };
 		A10000000000000000000028 /* ClipboardManager+EventTap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+EventTap.swift"; sourceTree = "<group>"; };
 		A10000000000000000000029 /* ClipboardManager+Panels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Panels.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002A /* ClipboardManager+Paste.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Paste.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002B /* ClipboardManager+Search.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Search.swift"; sourceTree = "<group>"; };
+		CE0000000000000000000001 /* ClipenExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "ClipenExceptionCatcher.m"; sourceTree = "<group>"; };
+		CE0000000000000000000003 /* ClipenExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ClipenExceptionCatcher.h"; sourceTree = "<group>"; };
+		CE0000000000000000000004 /* paste-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "paste-Bridging-Header.h"; sourceTree = "<group>"; };
 		A1000000000000000000002C /* ClipboardManager+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Persistence.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002D /* OnboardingAndTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAndTutorial.swift; sourceTree = "<group>"; };
 		A1000000000000000000002E /* ImageCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCodec.swift; sourceTree = "<group>"; };
@@ -126,6 +139,8 @@
 		A10000000000000000000035 /* ClipboardManager+Nudges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Nudges.swift"; sourceTree = "<group>"; };
 		A10000000000000000000036 /* ProGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProGate.swift; sourceTree = "<group>"; };
 		A10000000000000000000037 /* SelectionHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionHighlight.swift; sourceTree = "<group>"; };
+		A10000000000000000000302 /* ClipenDiag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipenDiag.swift; sourceTree = "<group>"; };
+		A10000000000000000000303 /* SimilarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimilarPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000099 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		A10000000000000000000100 /* ContentPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentPreviewView.swift; sourceTree = "<group>"; };
 		A10000000000000000000101 /* TextContentPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextContentPreviews.swift; sourceTree = "<group>"; };
@@ -154,6 +169,9 @@
 				B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */,
 				B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */,
 				FE00000000000000000003 /* Highlightr in Frameworks */,
+				CE0000000000000000000013 /* MLXLLM in Frameworks */,
+				CE0000000000000000000014 /* MLXLMCommon in Frameworks */,
+				CE0000000000000000000017 /* Hub in Frameworks */,
 				B670AECB302521BD008E5DD1 /* LaTeXSwiftUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -195,6 +213,7 @@
 				A1000000000000000000002E /* ImageCodec.swift */,
 				A1000000000000000000002F /* MarkedToolRegistry.swift */,
 				A10000000000000000000026 /* AIToolsService.swift */,
+				CE0000000000000000000018 /* LocalLLMManager.swift */,
 				A10000000000000000000019 /* TextTools.swift */,
 				A1000000000000000000001A /* Tool.swift */,
 				A1000000000000000000001B /* ToolRegistry.swift */,
@@ -234,6 +253,9 @@
 				A10000000000000000000029 /* ClipboardManager+Panels.swift */,
 				A1000000000000000000002A /* ClipboardManager+Paste.swift */,
 				A1000000000000000000002B /* ClipboardManager+Search.swift */,
+				CE0000000000000000000001 /* ClipenExceptionCatcher.m */,
+				CE0000000000000000000003 /* ClipenExceptionCatcher.h */,
+				CE0000000000000000000004 /* paste-Bridging-Header.h */,
 				A10000000000000000000035 /* ClipboardManager+Nudges.swift */,
 				A10000000000000000000036 /* ProGate.swift */,
 				A1000000000000000000002C /* ClipboardManager+Persistence.swift */,
@@ -242,6 +264,8 @@
 				A10000000000000000000032 /* QuickLookPreview.swift */,
 				A10000000000000000000033 /* SharePanel.swift */,
 				A10000000000000000000037 /* SelectionHighlight.swift */,
+				A10000000000000000000302 /* ClipenDiag.swift */,
+				A10000000000000000000303 /* SimilarPanel.swift */,
 				A10000000000000000000005 /* FileSnapshotStore.swift */,
 				A10000000000000000000006 /* ItemPreviewPanel.swift */,
 				A10000000000000000000100 /* ContentPreviewView.swift */,
@@ -264,6 +288,7 @@
 				A1000000000000000000000B /* PreviewOverlayWindow.swift */,
 				A10000000000000000000021 /* PageRangePanel.swift */,
 				A10000000000000000000022 /* FastPasteHintPanel.swift */,
+				A10000000000000000000201 /* CopyFeedbackPanel.swift */,
 				A1000000000000000000000C /* TransformPanel.swift */,
 				A1000000000000000000001D /* paste.entitlements */,
 				A10000000000000000000200 /* GoogleService-Info.plist */,
@@ -294,6 +319,9 @@
 				B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */,
 				B670AEC7302505C7008E5DD1 /* FirebaseFirestore */,
 				B670AECA302521BD008E5DD1 /* LaTeXSwiftUI */,
+				CE0000000000000000000011 /* MLXLLM */,
+				CE0000000000000000000012 /* MLXLMCommon */,
+				CE0000000000000000000016 /* Hub */,
 			);
 			productName = paste;
 			productReference = EE8C684D2FB7847A002CA5C3 /* Clipen.app */;
@@ -345,6 +373,8 @@
 				FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */,
 				B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				B670AEC9302521BD008E5DD1 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */,
+				CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
+				CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = EE8C684E2FB7847A002CA5C3 /* Products */;
@@ -382,6 +412,8 @@
 				B10000000000000000000029 /* ClipboardManager+Panels.swift in Sources */,
 				B1000000000000000000002A /* ClipboardManager+Paste.swift in Sources */,
 				B1000000000000000000002B /* ClipboardManager+Search.swift in Sources */,
+				CE0000000000000000000002 /* ClipenExceptionCatcher.m in Sources */,
+				CE0000000000000000000019 /* LocalLLMManager.swift in Sources */,
 				B10000000000000000000035 /* ClipboardManager+Nudges.swift in Sources */,
 				B10000000000000000000036 /* ProGate.swift in Sources */,
 				B1000000000000000000002C /* ClipboardManager+Persistence.swift in Sources */,
@@ -390,6 +422,8 @@
 				B10000000000000000000032 /* QuickLookPreview.swift in Sources */,
 				B10000000000000000000033 /* SharePanel.swift in Sources */,
 				B10000000000000000000037 /* SelectionHighlight.swift in Sources */,
+				B10000000000000000000302 /* ClipenDiag.swift in Sources */,
+				B10000000000000000000303 /* SimilarPanel.swift in Sources */,
 				B10000000000000000000005 /* FileSnapshotStore.swift in Sources */,
 				B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */,
 				B10000000000000000000100 /* ContentPreviewView.swift in Sources */,
@@ -412,6 +446,7 @@
 				B1000000000000000000000B /* PreviewOverlayWindow.swift in Sources */,
 				B10000000000000000000021 /* PageRangePanel.swift in Sources */,
 				B10000000000000000000022 /* FastPasteHintPanel.swift in Sources */,
+				B10000000000000000000201 /* CopyFeedbackPanel.swift in Sources */,
 				B1000000000000000000000C /* TransformPanel.swift in Sources */,
 				B1000000000000000000000E /* ClipboardContentType.swift in Sources */,
 				B1000000000000000000000F /* CodeLanguageDetector.swift in Sources */,
@@ -495,6 +530,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				ARCHS = arm64;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -556,6 +592,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				ARCHS = arm64;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -573,7 +610,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 430;
+				CURRENT_PROJECT_VERSION = 556;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -592,7 +629,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.75;
+				MARKETING_VERSION = 1.6.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -601,6 +638,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "paste/paste-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -613,7 +651,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 430;
+				CURRENT_PROJECT_VERSION = 556;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -632,7 +670,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.4.75;
+				MARKETING_VERSION = 1.6.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -641,6 +679,7 @@
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "paste/paste-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -709,6 +748,22 @@
 				minimumVersion = 2.1.0;
 			};
 		};
+		CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.25.0;
+			};
+		};
+		CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -741,6 +796,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */;
 			productName = Highlightr;
+		};
+		CE0000000000000000000011 /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLLM;
+		};
+		CE0000000000000000000012 /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLMCommon;
+		};
+		CE0000000000000000000016 /* Hub */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Hub;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

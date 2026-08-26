@@ -293,6 +293,10 @@ struct TransformView: View {
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 4)
                                     .transition(.opacity.combined(with: .move(edge: .top)))
+                                    // Scoped to just this picker, not the whole
+                                    // row list — see the note below on why that
+                                    // matters.
+                                    .animation(.easeInOut(duration: 0.15), value: manager.inPageRangeMode)
                             }
 
                             if display.id == "ai.translate" && manager.inLanguagePickerMode {
@@ -311,6 +315,7 @@ struct TransformView: View {
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 4)
                                     .transition(.opacity.combined(with: .move(edge: .top)))
+                                    .animation(.easeInOut(duration: 0.15), value: manager.inLanguagePickerMode)
                             }
 
                             if idx < displays.count - 1 {
@@ -320,8 +325,19 @@ struct TransformView: View {
                     }
                     .padding(.vertical, 6)
                     .padding(.horizontal, 8)
-                    .animation(.easeInOut(duration: 0.15), value: manager.inPageRangeMode)
-                    .animation(.easeInOut(duration: 0.15), value: manager.inLanguagePickerMode)
+                    // These two used to sit here, on the VStack holding every
+                    // row — meaning SwiftUI's implicit-animation system would
+                    // apply this 0.15s easeInOut to ANY animatable change
+                    // inside the whole list, not just the inline picker's own
+                    // reveal. That included the selected row's own
+                    // matchedGeometryEffect box gliding into place on
+                    // selection change, which is driven by its own explicit
+                    // withAnimation(SelectionHighlightStyle.spring) in
+                    // onChange below — two different curves fighting over the
+                    // same geometry read as stutter, not a clean spring. Share's
+                    // panel has no such modifier at this level and scrolls
+                    // smoothly; moved these down onto just the pickers that
+                    // actually need them.
                 }
                 .onChange(of: selectedTransformIndex) { _, newIdx in
                     guard displays.indices.contains(newIdx) else { return }

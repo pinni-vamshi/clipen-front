@@ -456,6 +456,15 @@ private struct HTMLFilePreview: NSViewRepresentable {
             view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         }
     }
+
+    // Unlike WebsitePreview's WKWebView, this one is a fresh instance per
+    // preview (not pooled), but nothing was stopping a video/audio embed
+    // inside the loaded file/webarchive from continuing to play once the
+    // preview was dismissed — same bug class, just on local content instead
+    // of a live YouTube link.
+    static func dismantleNSView(_ view: WKWebView, coordinator: ()) {
+        view.pauseAllMediaPlayback(completionHandler: nil)
+    }
 }
 
 private struct AVMediaPreview: NSViewRepresentable {
@@ -666,15 +675,6 @@ struct ZoomableImagePreview: NSViewRepresentable {
     }
 }
 
-private enum HTMLWebViewPool {
-    static let shared: WKWebView = {
-        let view = WKWebView()
-        view.setValue(false, forKey: "drawsBackground")
-        view.allowsMagnification = true
-        return view
-    }()
-}
-
 struct HTMLStringPreview: NSViewRepresentable {
     final class Coordinator {
         var lastHTML: String?
@@ -685,13 +685,17 @@ struct HTMLStringPreview: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = HTMLWebViewPool.shared
-
-        view.removeFromSuperview()
-        if context.coordinator.lastHTML != html {
-            loadHTML(view)
-            context.coordinator.lastHTML = html
-        }
+        // One WKWebView per preview instance, not a single shared/"pooled"
+        // one — a single instance can only ever be attached to one preview
+        // at a time, so any second simultaneously-visible HTML item (a very
+        // normal thing to hit scrolling a history full of web copies) came
+        // up blank, having been silently detached out from under it by the
+        // next preview's makeNSView call.
+        let view = WKWebView()
+        view.setValue(false, forKey: "drawsBackground")
+        view.allowsMagnification = true
+        loadHTML(view)
+        context.coordinator.lastHTML = html
         return view
     }
 
@@ -702,23 +706,14 @@ struct HTMLStringPreview: NSViewRepresentable {
     }
 
     private func loadHTML(_ view: WKWebView) {
-        let styledHTML = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            :root {
-                color-scheme: light dark;
-            }
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                font-size: 13px;
-                margin: 0;
-                padding: 8px;
-                background-color: transparent;
-            }
+        // Borders and width:100% on every cell are right for a data table and
+        // catastrophic for anything else. Every HTML email is built out of
+        // deeply nested layout tables, so applying them unconditionally drew
+        // a box around every structural cell and stretched each nested table
+        // to full width — turning a designed email into a wireframe of empty
+        // boxes that looked nothing like the source. Only style tables that
+        // are actually tabular data.
+        let tableCSS = TableCellExtractor.htmlIsDataTable(html) ? """
             table {
                 border-collapse: collapse;
                 width: 100%;
@@ -734,6 +729,38 @@ struct HTMLStringPreview: NSViewRepresentable {
                 background-color: rgba(128, 128, 128, 0.1);
                 font-weight: 600;
             }
+        """ : ""
+        let styledHTML = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            :root {
+                // Deliberately `only light`, not `light dark`: this preview
+                // renders arbitrary third-party HTML the user copied (emails,
+                // web content), not UI Clipen designed itself. `light dark`
+                // lets WebKit substitute its own default text/background
+                // colors depending on the *app's* current appearance for any
+                // element the source HTML left unstyled — but the source's
+                // OWN explicit colors (e.g. a background the email set) never
+                // change with it. When Clipen is in dark mode those two land
+                // on opposite sides: WebKit's substituted default text turns
+                // white while an explicitly-set white background stays white,
+                // producing invisible white-on-white text. Pinning to light
+                // keeps every fallback color matched to what the content's
+                // own explicit colors were almost certainly authored against.
+                color-scheme: only light;
+            }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                font-size: 13px;
+                margin: 0;
+                padding: 8px;
+                background-color: transparent;
+            }
+            \(tableCSS)
         </style>
         </head>
         <body>
@@ -742,6 +769,14 @@ struct HTMLStringPreview: NSViewRepresentable {
         </html>
         """
         view.loadHTMLString(styledHTML, baseURL: nil)
+    }
+
+    // Same reasoning as HTMLFilePreview/WebsitePreview: HTML clipboard
+    // content (a copied webpage fragment, an email with an embedded
+    // iframe/video) can contain playing media, and nothing was stopping it
+    // when this preview was dismissed.
+    static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
+        view.pauseAllMediaPlayback(completionHandler: nil)
     }
 }
 
@@ -753,6 +788,7 @@ struct BlobContentPreview: View {
             if let (image, data, dataType) = firstImage() {
                 if dataType.contains("pdf"), let pdf = PDFDocument(data: data) {
                     PDFPreview(document: pdf)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if dataType.contains("gif") {
                     ZoomableImagePreview(image: image, animatedData: data)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -764,15 +800,18 @@ struct BlobContentPreview: View {
                 }
             } else if let pdf = firstPDF() {
                 PDFPreview(document: pdf)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let attr = firstRichText() {
                 let adjusted = attr.adjustingColorsForCurrentAppearance()
                 AttributedTextPreview(attributedString: adjusted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let svg = firstSVG() {
                 let plain = String(data: svg, encoding: .utf8) ?? ""
                 if !plain.isEmpty { textPreview(plain, monospaced: true) }
                 else { fallbackTypeList }
             } else if let html = firstHTML() {
                 HTMLStringPreview(html: html)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let text = firstUTF8Text() {
                 textPreview(text, monospaced: shouldMonospace(text))
             } else {

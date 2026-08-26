@@ -10,5 +10,14 @@
 	<true/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
+	<!-- Screenshot to Clipboard watches the folder macOS saves screenshots
+	     to (Desktop unless the user changed it). macOS gates that folder
+	     behind Files-and-Folders TCC even for non-sandboxed apps, and a
+	     denied read fails silently, so without this string the prompt has
+	     no explanation and the feature can look simply broken. -->
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Clipen watches your screenshot folder so new screenshots can be copied to your clipboard automatically. Only used when "Screenshot to Clipboard" is turned on.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Clipen only needs this if you have changed your screenshot save location to a folder inside Documents.</string>
 </dict>
 </plist>

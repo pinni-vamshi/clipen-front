@@ -44,35 +44,24 @@ struct ContentPreviewView: View {
                     .background(.ultraThinMaterial)
                     Divider()
                     WebsitePreview(url: url)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             } else {
-                RichLinkedPreview(computeLinks: { LinkExtractor.links(fromPlainText: text) }, plainText: text,
-                                  insightID: item.id, diff: item.diffDetail) {
-                    RichTextContentPreview(text: text, detectedType: item.detectedType)
-                }
+                RichTextContentPreview(text: text, detectedType: item.detectedType)
             }
         case .richText(let attrStr, _):
             let adjusted = attrStr.adjustingColorsForCurrentAppearance()
-            RichLinkedPreview(computeLinks: { LinkExtractor.links(from: adjusted) }, plainText: adjusted.string,
-                              insightID: item.id) {
-                AttributedTextPreview(attributedString: adjusted)
-            }
+            AttributedTextPreview(attributedString: adjusted)
         case .html(let html, let plain):
             if plain.isEmpty && html.isEmpty {
                 textPreview(plain, monospaced: false)
             } else {
-                RichLinkedPreview(computeLinks: { LinkExtractor.links(fromHTML: html) }, plainText: plain,
-                                  insightID: item.id) {
-                    HTMLStringPreview(html: html)
-                }
+                HTMLStringPreview(html: html)
             }
         case .rtfd(let data, let plain):
             let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             if let adjusted = AdjustedAttrCache.shared.adjustedRTFD(itemID: item.id, data: data, isDark: isDark) {
-                RichLinkedPreview(computeLinks: { LinkExtractor.links(from: adjusted) }, plainText: plain,
-                                  insightID: item.id) {
-                    AttributedTextPreview(attributedString: adjusted)
-                }
+                AttributedTextPreview(attributedString: adjusted)
             } else {
                 textPreview(plain, monospaced: false)
             }
@@ -303,13 +292,86 @@ enum TableCellExtractor {
         return result.isEmpty ? nil : result
     }
 
-    static func plainTableHTML(for item: ClipboardItem) -> (html: String, plain: String)? {
-        guard let rows = cells(for: item) else { return nil }
-        let html = "<table>" + rows.map { row in
-            "<tr>" + row.map { "<td>\($0.htmlEscaped)</td>" }.joined() + "</tr>"
-        }.joined() + "</table>"
-        let plain = rows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
-        return (html, plain)
+    /// The text "paste as plain text" actually puts on the pasteboard.
+    ///
+    /// Two things this deliberately does NOT do, both of which were bugs:
+    ///
+    /// 1. It never emits HTML. The old version wrote a rebuilt `<table>` to
+    ///    `public.html`, so "plain text" pasted a *table* — and since every
+    ///    HTML email is one giant nested layout table, pasting a newsletter
+    ///    plainly produced a grid of empty boxes in Notes instead of text.
+    ///    Plain means plain: one `.string`, nothing else.
+    ///
+    /// 2. It doesn't feed everything through the table-cell grid. That grid
+    ///    only ever contained text found inside `<td>`/`<th>`, so any text
+    ///    outside a cell was silently dropped — which is why most of the
+    ///    content went missing. Real content text comes from the full-document
+    ///    plain text instead, and the grid is used only for genuine data
+    ///    tables, where tab-separated output is what spreadsheets want.
+    /// Whether an HTML string is a real data table rather than the nested
+    /// layout tables every HTML email is built out of. The preview uses this
+    /// to decide whether drawing cell borders would help or would just
+    /// wireframe the entire email.
+    static func htmlIsDataTable(_ html: String) -> Bool {
+        guard let rows = cells(fromHTML: html) else { return false }
+        return isDataTable(rows)
+    }
+
+    static func pureText(for item: ClipboardItem) -> String? {
+        if let rows = cells(for: item), isDataTable(rows) {
+            return rows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
+        }
+        switch item.content {
+        case .html(_, let plain):
+            return cleanedPlainText(plain)
+        case .richText(let attr, let plain):
+            return cleanedPlainText(attr.string.isEmpty ? plain : attr.string)
+        case .rtfd(let data, let plain):
+            if let attr = NSAttributedString(rtfd: data, documentAttributes: nil),
+               !attr.string.isEmpty {
+                return cleanedPlainText(attr.string)
+            }
+            return cleanedPlainText(plain)
+        default:
+            return nil
+        }
+    }
+
+    /// A real grid of data (spreadsheet, comparison table) as opposed to an
+    /// HTML-email layout table. Only the former should keep its tab columns —
+    /// for the latter the tabs are pure noise from empty spacer cells.
+    static func isDataTable(_ rows: [[String]]) -> Bool {
+        guard rows.count >= 2 else { return false }
+        let widths = Set(rows.map(\.count))
+        guard widths.count == 1, let cols = widths.first, cols >= 2 else { return false }
+        let filled = rows.reduce(0) { $0 + $1.filter { !$0.isEmpty }.count }
+        return Double(filled) / Double(rows.count * cols) >= 0.6
+    }
+
+    /// Layout tables leave behind runs of tabs and blank lines where the
+    /// spacer/image cells were. Without this the "plain" text is mostly
+    /// invisible whitespace with a few words scattered through it.
+    static func cleanedPlainText(_ s: String) -> String {
+        let raw = s.replacingOccurrences(of: "\r\n", with: "\n")
+        var out: [String] = []
+        for line in raw.components(separatedBy: "\n") {
+            let collapsed = line
+                .replacingOccurrences(of: "[ \\t]*\\t[ \\t]*", with: "\t",
+                                      options: .regularExpression)
+                // Stripping an inline tag leaves a space behind, so a link at
+                // the end of a sentence came out as "click here ." — close
+                // that gap back up.
+                .replacingOccurrences(of: " +([.,])", with: "$1",
+                                      options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet(charactersIn: " \t"))
+            if collapsed.isEmpty {
+                if out.last?.isEmpty == false { out.append("") }
+            } else {
+                out.append(collapsed)
+            }
+        }
+        while out.last?.isEmpty == true { out.removeLast() }
+        return out.joined(separator: "\n")
     }
 
     private static func extract(for item: ClipboardItem) -> [[String]]? {
@@ -369,7 +431,9 @@ enum TableCellExtractor {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 cells.append(text)
             }
-            if !cells.isEmpty { rows.append(cells) }
+            // Image-only <td>/<th> cells strip down to "" — drop rows where
+            // every cell went empty instead of rendering them as blank bars.
+            if cells.contains(where: { !$0.isEmpty }) { rows.append(cells) }
         }
         return rows.isEmpty ? nil : rows
     }
@@ -680,6 +744,23 @@ struct WebsitePreview: NSViewRepresentable {
             context.coordinator.progressView?.isHidden = false
             context.coordinator.progressView?.startAnimation(nil)
         }
+    }
+
+    /// Unlike AVPlayerView/QLPreviewView below, this web view is POOLED
+    /// (WebsitePreviewPool) and reused across previews, so dismantle must
+    /// NOT tear it down or nil anything out — that would break reuse for
+    /// the next time this same URL is previewed. It only needs to stop
+    /// whatever's currently playing inside it. Previously nothing called
+    /// this at all: switching away (e.g. to Settings) hid the container
+    /// but left an embedded YouTube video (audio included) running in the
+    /// pooled web view underneath, since `stopLoading()` was only ever
+    /// reached via the pool's own LRU eviction, not on dismissal.
+    /// `pauseAllMediaPlayback` is WKWebView's native way to reach into
+    /// video playing inside an iframe (which is exactly how YouTube embeds
+    /// work) without hand-rolling JS that pierces the iframe boundary.
+    static func dismantleNSView(_ container: NSView, coordinator: Coordinator) {
+        guard let webView = container.subviews.first(where: { $0 is WKWebView }) as? WKWebView else { return }
+        webView.pauseAllMediaPlayback(completionHandler: nil)
     }
 }
 

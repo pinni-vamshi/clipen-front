@@ -170,7 +170,7 @@ final class TrackingService {
     func recordMarkedBatch(id: String, size: Int) {
         guard !id.isEmpty, size > 0 else { return }
         mutateToday { $0.markedBatches[id, default: []].append(size) }
-
+        Analytics.logEvent("marked_batch", parameters: ["id": id, "size": size])
         persistSoon()
     }
 
@@ -376,6 +376,10 @@ final class TrackingService {
 
             "lifetime": Self.stateSnapshot(),
             "days": daysJSON,
+            // The client's own clock, right now, at send time — the backend
+            // has nothing else to derive last_seen/updated_at/created_at
+            // from, since it no longer stamps its own time anywhere.
+            "client_today": Self.dateKey(Date()),
         ]
         lock.unlock()
 
@@ -502,10 +506,13 @@ final class TrackingService {
                                  timeoutInterval: 20)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let now = Date()
         let body: [String: Any] = [
             "hardware_uuid": DeviceIdentity.installKey,
             "message": trimmed,
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            "client_today": Self.dateKey(now),
+            "client_time": Self.timeKey(now),
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
@@ -584,6 +591,16 @@ final class TrackingService {
         calendar.timeZone = TimeZone.current
         let c = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// Same local calendar/timezone as `dateKey`, HH:MM:SS instead of the
+    /// date — the backend no longer stamps its own time anywhere; every
+    /// timestamp it stores is one of these two, sent by the client.
+    static func timeKey(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let c = calendar.dateComponents([.hour, .minute, .second], from: date)
+        return String(format: "%02d:%02d:%02d", c.hour ?? 0, c.minute ?? 0, c.second ?? 0)
     }
 
     static func timeBucket(for date: Date) -> String {

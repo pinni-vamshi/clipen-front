@@ -11,4 +11,15 @@ enum DeviceIdentity {
         }
         return (value.takeRetainedValue() as? String) ?? "unknown"
     }
+
+    /// clipen.app has no DNS record yet (tracked separately) — points at
+    /// the Lovable-hosted domain directly until that's fixed. hardware_uuid
+    /// is required: the Paddle checkout forwards it into custom_data, and
+    /// the backend webhook refuses to grant Pro to any purchase that
+    /// arrives without one (see clipen_backend main.py's /paddle/webhook).
+    static var pricingURL: URL {
+        var comps = URLComponents(string: "https://clipen.lovable.app/pricing.html")!
+        comps.queryItems = [URLQueryItem(name: "hardware_uuid", value: installKey)]
+        return comps.url!
+    }
 }

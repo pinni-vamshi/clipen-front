@@ -15,10 +15,66 @@ private final class DragHandleNSView: NSView {
     }
 }
 
+/// Like `WindowDragHandle`, but tracks the drag manually instead of handing
+/// it to `performDrag` — that call blocks until mouseUp with no way to hook
+/// a "drag ended" moment, which is exactly what's needed to snap the
+/// collapsed badge back to its nearest edge on release. Also resolves
+/// click-vs-drag itself (via `onClick`) rather than pairing this NSView with
+/// a sibling SwiftUI `.onTapGesture` — a SwiftUI gesture recognizer on the
+/// same view consumes mouseDown before it ever reaches this view's own
+/// mouseDown/mouseDragged tracking, which silently breaks dragging entirely.
+private struct SnappingDragHandle: NSViewRepresentable {
+    let onDragEnd: () -> Void
+    let onClick: () -> Void
+    func makeNSView(context: Context) -> SnappingDragHandleNSView {
+        let view = SnappingDragHandleNSView()
+        view.onDragEnd = onDragEnd
+        view.onClick = onClick
+        return view
+    }
+    func updateNSView(_ nsView: SnappingDragHandleNSView, context: Context) {
+        nsView.onDragEnd = onDragEnd
+        nsView.onClick = onClick
+    }
+}
+
+private final class SnappingDragHandleNSView: NSView {
+    var onDragEnd: (() -> Void)?
+    var onClick: (() -> Void)?
+    private var mouseDownScreenLocation: NSPoint = .zero
+    private var windowOriginAtMouseDown: NSPoint = .zero
+    private var didDrag = false
+
+    override func mouseDown(with event: NSEvent) {
+        mouseDownScreenLocation = NSEvent.mouseLocation
+        windowOriginAtMouseDown = window?.frame.origin ?? .zero
+        didDrag = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let window else { return }
+        let current = NSEvent.mouseLocation
+        let dx = current.x - mouseDownScreenLocation.x
+        let dy = current.y - mouseDownScreenLocation.y
+        if abs(dx) > 2 || abs(dy) > 2 { didDrag = true }
+        window.setFrameOrigin(NSPoint(x: windowOriginAtMouseDown.x + dx,
+                                       y: windowOriginAtMouseDown.y + dy))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if didDrag {
+            onDragEnd?()
+        } else {
+            onClick?()
+        }
+    }
+}
+
 struct ReferenceTag: Identifiable, Equatable {
     let id = UUID()
     let label: String
     let kind: Kind
+    let bundleID: String?
     enum Kind { case app, context }
 }
 
@@ -27,26 +83,42 @@ final class ReferenceCarousel: ObservableObject {
     @Published var index: Int = 0
     @Published var pendingFocusPageID: UUID? = nil
 
+    @Published var lastActiveAppBundleID: String?
+    var lastActiveAppDisplayName: String? {
+        lastActiveAppBundleID.map { Self.appDisplayName(for: $0) }
+    }
+
     private(set) var pageOwnerBundleIDs: [UUID: Set<String>] = [:]
     private(set) var pageOwnerContext: [UUID: [String: String]] = [:]
     @Published private(set) var pageTags: [UUID: [ReferenceTag]] = [:]
     private var dismissedTags: Set<TagKey> = []
     private struct TagKey: Hashable { let pageID: UUID; let label: String }
 
-    private func addTag(_ label: String, kind: ReferenceTag.Kind, toPage pageID: UUID) {
+    // Apps the user explicitly unlinked via the tag's X button — kept apart
+    // from ownership/ tags so automatic re-matching (app-affinity surface,
+    // async context attach) can never silently relink them. Only the
+    // explicit "link this app" action (the collapsed badge's named button,
+    // via `linkCurrentPage`) is allowed to clear an entry here.
+    private(set) var dismissedOwnerBundleIDs: [UUID: Set<String>] = [:]
+
+    func isDismissed(bundleID: String, pageID: UUID) -> Bool {
+        dismissedOwnerBundleIDs[pageID]?.contains(bundleID) == true
+    }
+
+    private func addTag(_ label: String, kind: ReferenceTag.Kind, bundleID: String? = nil, toPage pageID: UUID) {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let key = TagKey(pageID: pageID, label: trimmed)
         guard !dismissedTags.contains(key) else { return }
         var tags = pageTags[pageID] ?? []
         guard !tags.contains(where: { $0.label == trimmed }) else { return }
-        tags.append(ReferenceTag(label: trimmed, kind: kind))
+        tags.append(ReferenceTag(label: trimmed, kind: kind, bundleID: bundleID))
         pageTags[pageID] = tags
     }
 
     private func autoTag(pageID: UUID, bundleID: String?, context: String?) {
-        guard let bundleID else { return }
-        addTag(Self.appDisplayName(for: bundleID), kind: .app, toPage: pageID)
+        guard let bundleID, !isDismissed(bundleID: bundleID, pageID: pageID) else { return }
+        addTag(Self.appDisplayName(for: bundleID), kind: .app, bundleID: bundleID, toPage: pageID)
         if let context { addTag(context, kind: .context, toPage: pageID) }
     }
 
@@ -67,6 +139,16 @@ final class ReferenceCarousel: ObservableObject {
         tags.removeAll { $0.id == tagID }
         pageTags[pageID] = tags
         dismissedTags.insert(TagKey(pageID: pageID, label: removed.label))
+
+        // Removing an app tag doesn't just hide the chip — it actually
+        // unlinks the app, so this reference stops auto-surfacing for it,
+        // and blocks any automatic path (app-affinity match, async context
+        // attach) from silently relinking it. Only the explicit "link this
+        // app" button click clears the block.
+        if removed.kind == .app, let bundleID = removed.bundleID {
+            pageOwnerBundleIDs[pageID]?.remove(bundleID)
+            dismissedOwnerBundleIDs[pageID, default: []].insert(bundleID)
+        }
     }
 
     @Published var isCollapsed: Bool = false
@@ -130,9 +212,27 @@ final class ReferenceCarousel: ObservableObject {
     }
 
     func linkCurrentPage(toApp bundleID: String, context: String? = nil) {
+        // The one explicit "user manually added it back" path — clears any
+        // block a prior tag removal left behind, so the app can be relinked.
+        dismissedOwnerBundleIDs[current.id]?.remove(bundleID)
+        dismissedTags.remove(TagKey(pageID: current.id, label: Self.appDisplayName(for: bundleID)))
         pageOwnerBundleIDs[current.id, default: []].insert(bundleID)
         if let context { pageOwnerContext[current.id, default: [:]][bundleID] = context }
         autoTag(pageID: current.id, bundleID: bundleID, context: context)
+    }
+
+    /// Attaches a context fetched asynchronously (see
+    /// `ClipboardManager+Search.swift`'s `openQuickClipPanel`, which no
+    /// longer blocks the main thread on the AppleScript/AX round-trip
+    /// before creating the panel) to a specific page by id, rather than
+    /// `linkCurrentPage`'s "whatever is current right now" — the async
+    /// fetch can resolve after the user has already navigated to a
+    /// different page.
+    func attachContext(_ context: String, toPage pageID: UUID, bundleID: String) {
+        guard pages.contains(where: { $0.id == pageID }) else { return }
+        guard !isDismissed(bundleID: bundleID, pageID: pageID) else { return }
+        pageOwnerContext[pageID, default: [:]][bundleID] = context
+        autoTag(pageID: pageID, bundleID: bundleID, context: context)
     }
 
     @discardableResult
@@ -162,8 +262,6 @@ class QuickClipPanel: NSPanel {
     private var similarGrewLeft = false
 
     private var expandedFrame: NSRect?
-    private var pendingLinkAppBundleID: String?
-    private var pendingLinkAppContext: String?
     private static let collapsedSize = NSSize(width: 108, height: 108)
     private static let expandedMinSize = NSSize(width: 320, height: 300)
     private static let collapsedMargin: CGFloat = 16
@@ -196,6 +294,8 @@ class QuickClipPanel: NSPanel {
             rootView: QuickClipPanelContentView(
                 carousel: carousel,
                 onExpand: { [weak self] in self?.expand() },
+                onLinkAndExpand: { [weak self] in self?.linkPendingAppAndExpand() },
+                onSnapToEdge: { [weak self] in self?.snapCollapsedToNearestEdge() },
                 onClosePanel: { [weak self] in self?.close() },
                 onMinimize: { [weak self] in self?.minimize() },
                 onClosePage: { [weak self] in self?.closeCurrentPage() },
@@ -270,49 +370,108 @@ class QuickClipPanel: NSPanel {
         setFrame(NSRect(x: x, y: y, width: w, height: h), display: true, animate: hasFrame)
     }
 
-    func collapseToCorner(activeApp bundleID: String, activeContext: String? = nil) {
+    func collapseToCorner(activeApp bundleID: String) {
         if !carousel.isCollapsed {
             AuthManager.shared.registerActionUsage(actionID: "ref.auto_collapse")
         }
-        pendingLinkAppBundleID = bundleID
-        pendingLinkAppContext = activeContext
+        carousel.lastActiveAppBundleID = bundleID
         shrinkToCornerBadge()
     }
 
+    /// Set when the user explicitly minimizes a panel that's linked to
+    /// whatever app is currently frontmost — without this, the very next
+    /// auto-surface re-check (fired by the click monitor on the click that
+    /// did the minimizing, or the poll timer) sees "app X is active, this
+    /// panel is owned by X" and immediately expands it right back, so a
+    /// manual minimize looked like it did nothing. Cleared the moment a
+    /// DIFFERENT app becomes frontmost — the "user's intent has genuinely
+    /// moved on" signal — so coming back to the same app later resurfaces
+    /// it normally again; see ClipboardManager.applyReferenceSurface.
+    var manualCollapseBundleID: String?
+
     func minimize() {
+        manualCollapseBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         shrinkToCornerBadge()
+    }
+
+    private func animatedSetFrame(_ target: NSRect) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            self.animator().setFrame(target, display: true)
+        }
+    }
+
+    /// Shared by the auto-collapse path and the drag-release snap — both
+    /// need "which corner of this screen is closest to this point right
+    /// now," just starting from a different current frame.
+    private func nearestCornerOrigin(for center: NSPoint, size: NSSize, screen: NSRect) -> NSPoint {
+        let margin = Self.collapsedMargin
+        let nearLeft   = center.x - screen.minX <= screen.maxX - center.x
+        let nearBottom = center.y - screen.minY <= screen.maxY - center.y
+        let x = nearLeft   ? screen.minX + margin : screen.maxX - margin - size.width
+        let y = nearBottom ? screen.minY + margin : screen.maxY - margin - size.height
+        return NSPoint(x: x, y: y)
     }
 
     private func shrinkToCornerBadge() {
         guard !carousel.isCollapsed else { return }
         ClipboardManager.shared.itemPreviewPanel.hide()
         if expandedFrame == nil { expandedFrame = frame }
+        manualExpandBundleID = nil
         carousel.isCollapsed = true
         contentMinSize = Self.collapsedSize
 
         let screen = NSScreen.screens.first(where: { $0.frame.intersects(frame) })?.visibleFrame
             ?? NSScreen.main?.visibleFrame ?? frame
         let size = Self.collapsedSize
-        let margin = Self.collapsedMargin
-        let center = NSPoint(x: frame.midX, y: frame.midY)
-        let nearLeft   = center.x - screen.minX <= screen.maxX - center.x
-        let nearBottom = center.y - screen.minY <= screen.maxY - center.y
-        let x = nearLeft   ? screen.minX + margin : screen.maxX - margin - size.width
-        let y = nearBottom ? screen.minY + margin : screen.maxY - margin - size.height
-        let target = NSRect(x: x, y: y, width: size.width, height: size.height)
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.28
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            self.animator().setFrame(target, display: true)
-        }
+        let origin = nearestCornerOrigin(for: NSPoint(x: frame.midX, y: frame.midY), size: size, screen: screen)
+        animatedSetFrame(NSRect(origin: origin, size: size))
     }
 
+    /// Called on mouseUp after an actual drag of the collapsed badge (see
+    /// SnappingDragHandle) — glides it the rest of the way to whichever
+    /// corner of its current screen it ended up closest to, instead of
+    /// leaving it wherever the user's mouse happened to let go.
+    func snapCollapsedToNearestEdge() {
+        guard carousel.isCollapsed else { return }
+        let screen = NSScreen.screens.first(where: { $0.frame.intersects(frame) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame ?? frame
+        let size = frame.size
+        let origin = nearestCornerOrigin(for: NSPoint(x: frame.midX, y: frame.midY), size: size, screen: screen)
+        animatedSetFrame(NSRect(origin: origin, size: size))
+    }
+
+    /// Set when the user opens a collapsed badge by clicking its body (not
+    /// the named-app button) — an unlinked, "just let me peek" open. The
+    /// click monitor added for app-agnostic auto-surface re-checks fires on
+    /// EVERY click, including this one, and since the panel was never
+    /// linked to whatever app is frontmost, the very next re-check would
+    /// otherwise decide it doesn't belong here and collapse it right back —
+    /// the badge would open and instantly snap shut on its own click. This
+    /// keeps it open through same-app rechecks until the frontmost app
+    /// actually changes to something else; see the read/clear sites in
+    /// ClipboardManager.applyReferenceSurface.
+    var manualExpandBundleID: String?
+
+    /// Opens the collapsed badge WITHOUT linking it to whatever app
+    /// triggered the collapse — clicking the badge's body (as opposed to
+    /// its named-app button) should just reopen the panel, not silently
+    /// attach it to an app the user never asked to link.
     func expand() {
         guard carousel.isCollapsed else { return }
         AuthManager.shared.registerActionUsage(actionID: "ref.badge_click")
-        if let app = pendingLinkAppBundleID {
-            carousel.linkCurrentPage(toApp: app, context: pendingLinkAppContext)
+        manualExpandBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        restoreIfCollapsed()
+    }
+
+    func linkPendingAppAndExpand() {
+        guard carousel.isCollapsed else { return }
+        AuthManager.shared.registerActionUsage(actionID: "ref.badge_click")
+        manualExpandBundleID = nil
+        if let app = carousel.lastActiveAppBundleID {
+            carousel.linkCurrentPage(toApp: app, context: nil)
         }
         restoreIfCollapsed()
     }
@@ -321,14 +480,9 @@ class QuickClipPanel: NSPanel {
         guard carousel.isCollapsed else { return }
         carousel.isCollapsed = false
         contentMinSize = Self.expandedMinSize
-        pendingLinkAppBundleID = nil
-        pendingLinkAppContext = nil
+        carousel.lastActiveAppBundleID = nil
         if let restore = expandedFrame {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.28
-                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                self.animator().setFrame(restore, display: true)
-            }
+            animatedSetFrame(restore)
         } else {
             resizeForCurrentPage(centeredOffset: 0)
         }
@@ -368,6 +522,8 @@ class QuickClipPanel: NSPanel {
 private struct QuickClipPanelContentView: View {
     @ObservedObject var carousel: ReferenceCarousel
     let onExpand: () -> Void
+    let onLinkAndExpand: () -> Void
+    let onSnapToEdge: () -> Void
     let onClosePanel: () -> Void
     let onMinimize: () -> Void
     let onClosePage: () -> Void
@@ -384,7 +540,10 @@ private struct QuickClipPanelContentView: View {
 
     var body: some View {
         if carousel.isCollapsed {
-            CollapsedReferenceBadge(onExpand: onExpand)
+            CollapsedReferenceBadge(pendingAppName: carousel.lastActiveAppDisplayName,
+                                     onExpand: onExpand,
+                                     onLinkAndExpand: onLinkAndExpand,
+                                     onSnapToEdge: onSnapToEdge)
         } else {
             expandedBody
         }
@@ -410,9 +569,7 @@ private struct QuickClipPanelContentView: View {
                         if showSimilar {
                             AuthManager.shared.registerActionUsage(actionID: "action.similar-items")
                             if similarItems.isEmpty {
-                                Task { @MainActor in
-                                    similarItems = await ClipboardManager.shared.similarItems(to: item)
-                                }
+                                similarItems = ClipboardManager.shared.similarItems(to: item)
                             }
                         }
                         onToggleSimilar(showSimilar)
@@ -520,46 +677,64 @@ private struct SlidingPager<Content: View>: View {
 }
 
 private struct CollapsedReferenceBadge: View {
+    let pendingAppName: String?
     let onExpand: () -> Void
+    let onLinkAndExpand: () -> Void
+    let onSnapToEdge: () -> Void
 
     var body: some View {
-        Button(action: onExpand) {
+        VStack(spacing: 6) {
             VStack(spacing: 4) {
                 Image(systemName: "wand.and.rays")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.accentColor)
                 Text("Smart Reference")
                     .font(.system(size: 10, weight: .semibold))
-                Text("(no reference found)")
-                    .font(.system(size: 8))
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(10)
-            .frame(width: 108, height: 108)
+
+            if let pendingAppName {
+                Button(action: onLinkAndExpand) {
+                    Text("Add \(pendingAppName)")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Color.accentColor, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(10)
+        .frame(width: 108, height: 108)
+        .background(SnappingDragHandle(onDragEnd: onSnapToEdge, onClick: onExpand))
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: .black.opacity(0.2), radius: 10, x: 0, y: 5)
-        .help("No pinned reference belongs to the active app. Click to reopen — this will also link the reference to this app.")
     }
 }
 
 private struct SmartReferenceToggle: View {
     @ObservedObject private var manager = ClipboardManager.shared
 
+    private var isOn: Bool { manager.referenceAppAffinityEnabled }
+
     var body: some View {
         Button {
             manager.referenceAppAffinityEnabled.toggle()
         } label: {
-            Text("Smart Reference")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(manager.referenceAppAffinityEnabled ? .accentColor : .secondary)
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(isOn ? Color.accentColor : Color.secondary.opacity(0.4))
+                    .frame(width: 6, height: 6)
+                Text("Smart Reference")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(isOn ? "On" : "Off")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundColor(isOn ? .accentColor : .secondary)
         }
         .buttonStyle(.plain)
-        .help(manager.referenceAppAffinityEnabled
+        .help(isOn
               ? "Smart auto-surface is on — switching to the app a reference was pinned from brings it forward automatically. Click to turn off."
               : "Smart auto-surface is off. Click to turn back on.")
     }
@@ -629,11 +804,34 @@ private struct ReferencePageContentView: View {
         ClipboardManager.shared.updateUserNote(id: item.id, note: value)
     }
 
-    private var isEditableTable: Bool {
-        TableCellExtractor.cells(for: item) != nil
+    /// Rich content renders; it is never poured into an editor.
+    ///
+    /// Both editing surfaces below are lossy: the table grid keeps only cell
+    /// text and the text editor keeps only characters. Formatted content
+    /// routed into either came out looking nothing like it does in the popup
+    /// preview or the main window — an email showed up as a wall of bare
+    /// text with every image, style and link gone — and the panel's copy
+    /// button then pasted that stripped version back out. Anything with real
+    /// formatting therefore falls through to the same renderer the other two
+    /// panels use.
+    private var isRichContent: Bool {
+        switch item.content {
+        case .html, .richText, .rtfd: return true
+        default: return false
+        }
     }
+
+    private var isEditableTable: Bool {
+        // Genuine tabular data only. Every HTML email is built out of nested
+        // layout tables, and treating those as a spreadsheet turned a
+        // designed email into a grid of scattered cell fragments.
+        guard let cells = TableCellExtractor.cells(for: item) else { return false }
+        return TableCellExtractor.isDataTable(cells)
+    }
+
     private var isEditableText: Bool {
-        !isEditableTable && ClipboardManager.editablePlainText(for: item) != nil
+        guard !isEditableTable, !isRichContent else { return false }
+        return ClipboardManager.editablePlainText(for: item) != nil
     }
 
     init(item: ClipboardItem, shouldFocus: Bool, onConsumeFocusRequest: @escaping () -> Void,
@@ -774,10 +972,6 @@ private struct ReferencePageContentView: View {
             .padding(.vertical, 8)
             .background(WindowDragHandle())
 
-            if !tags.isEmpty {
-                ReferenceTagRow(tags: tags, onRemove: onRemoveTag)
-            }
-
             Divider()
 
             Group {
@@ -914,7 +1108,12 @@ private struct ReferencePageContentView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 6)
-            .padding(.bottom, 10)
+            .padding(.bottom, tags.isEmpty ? 10 : 6)
+
+            if !tags.isEmpty {
+                Divider()
+                ReferenceTagRow(tags: tags, onRemove: onRemoveTag)
+            }
         }
         .onAppear {
             if shouldFocus {

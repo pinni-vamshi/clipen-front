@@ -6,6 +6,7 @@ build/
 *.xcarchive
 dist/*.dmg
 dist/export-*/
+dist/*-notarize.zip
 dist/*.log
 dist/old_updates/
 

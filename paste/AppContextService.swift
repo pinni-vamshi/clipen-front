@@ -111,6 +111,81 @@ enum AppContextService {
         raw.components(separatedBy: "\u{1E}").filter { !$0.isEmpty }
     }
 
+    /// Combined form of `currentContext(for:)` + `allTabTexts(for:)` for
+    /// callers that need both — one AppleScript round-trip to the target
+    /// app instead of two. Each Apple Event to Safari/Chrome/Finder costs
+    /// real IPC time that scales with window/tab count, and the front tab
+    /// context is already contained within the full tab list, so issuing
+    /// both scripts back-to-back on every app switch was paying that cost
+    /// twice for data the second call already had.
+    private static let combinedJoinScript = "set AppleScript's text item delimiters to (ASCII character 30)\n"
+        + "set joined to out as text\n"
+        + "return front & (ASCII character 31) & joined"
+
+    static func fetchContext(for bundleID: String) -> (liveContext: String?, tabTexts: [String]) {
+        switch bundleID {
+        case "com.apple.Safari":
+            guard let raw = runAppleScript("""
+                tell application "Safari"
+                    if (count of windows) = 0 then return ""
+                    set front to URL of current tab of front window
+                    set out to {}
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            set end of out to ((name of t) & " || " & (URL of t))
+                        end repeat
+                    end repeat
+                    \(combinedJoinScript)
+                end tell
+                """) else { return (nil, []) }
+            return splitCombined(raw)
+
+        case let id where chromiumBundleIDs.contains(id):
+            guard let appName = NSWorkspace.shared.runningApplications
+                .first(where: { $0.bundleIdentifier == bundleID })?.localizedName
+            else { return (nil, []) }
+            guard let raw = runAppleScript("""
+                tell application "\(appName)"
+                    if (count of windows) = 0 then return ""
+                    set front to URL of active tab of front window
+                    set out to {}
+                    repeat with w in windows
+                        repeat with t in tabs of w
+                            set end of out to ((title of t) & " || " & (URL of t))
+                        end repeat
+                    end repeat
+                    \(combinedJoinScript)
+                end tell
+                """) else { return (nil, []) }
+            return splitCombined(raw)
+
+        case "com.apple.finder":
+            guard let raw = runAppleScript("""
+                tell application "Finder"
+                    if (count of Finder windows) = 0 then return ""
+                    set front to (POSIX path of (target of front window as alias))
+                    set out to {}
+                    repeat with w in Finder windows
+                        set end of out to (name of w)
+                    end repeat
+                    \(combinedJoinScript)
+                end tell
+                """) else { return (nil, []) }
+            return splitCombined(raw)
+
+        default:
+            let title = accessibilityWindowTitle(forBundleID: bundleID)
+            return (title, title.map { [$0] } ?? [])
+        }
+    }
+
+    private static func splitCombined(_ raw: String) -> (liveContext: String?, tabTexts: [String]) {
+        let parts = raw.components(separatedBy: "\u{1F}")
+        let front = parts.first.flatMap { $0.isEmpty ? nil : $0 }
+        let list = parts.count > 1 ? splitList(parts[1]) : []
+        return (front, list)
+    }
+
     private static func accessibilityWindowTitle(forBundleID bundleID: String) -> String? {
         guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID })
         else { return nil }

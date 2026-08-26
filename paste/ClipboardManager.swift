@@ -34,11 +34,32 @@ class ClipboardManager: ObservableObject {
     var lastSearchResult: [ClipboardItem] = []
     var lastSearchItemsRev: Int = -1
     var lastSearchEmbedRev: Int = -1
+    /// Part of the search cache key: affinity changes the ordering, so a
+    /// result cached while the user was in Terminal must not be reused for
+    /// the same query typed in Notes.
+    var lastSearchAffinity: String? = nil
+    var lastSearchPreferValues: Bool = false
     var embeddedItemCount: Int = 0
 
     static var maxDataBytes: Int { AuthManager.shared.maxDataBytes }
 
     var itemsRevision = 0
+
+    /// Bumped once at the very top of addItem(_:) — before the duplicate
+    /// check — every time ANY content type genuinely reaches "this is real,
+    /// capturable content." Unlike itemsRevision, this fires even when the
+    /// item turns out to be a duplicate of the top entry and addItem
+    /// bails without touching `items` at all, which is correct: re-copying
+    /// the same thing again is not a failure, and must not trip the
+    /// "nothing got saved" watchdog in pollClipboard(). It only stays flat
+    /// when addItem is never called at all — the actual failure case.
+    var captureAttemptGeneration = 0
+
+    /// `NSPasteboard.general.changeCount` of the uncaptured placeholder
+    /// currently in the ring, or nil when there isn't one. Kept as a plain
+    /// scalar so the 10Hz poll can decide "is that entry still valid?" with
+    /// one nil check instead of scanning `items` every tick.
+    var uncapturedPlaceholderChangeCount: Int? = nil
 
     @Published var items: [ClipboardItem] = [] {
         didSet {
@@ -100,6 +121,71 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    /// Collections marked to keep every item forever — exempt from ring
+    /// trimming entirely (never deleted, unlike pinning which still yields
+    /// to the algorithm/size limits). Separate concept from pinning: this
+    /// protects a whole collection, not one item, and there's no cap.
+    @Published var rememberForeverCollections: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: "clipenRememberForeverCollections") ?? []) {
+        didSet {
+            UserDefaults.standard.set(Array(rememberForeverCollections),
+                                      forKey: "clipenRememberForeverCollections")
+            _displayItems = nil
+        }
+    }
+
+    /// An item that belongs to at least one remember-forever collection.
+    /// Such items are never deleted by ring trimming — but once they'd
+    /// have fallen outside the ring window, they stop appearing in "All"
+    /// specifically. They stay visible, unaffected, in their own
+    /// collection's filtered view, since displayItems only applies the
+    /// All-window trim when activeCollection is nil.
+    func isRememberProtected(_ item: ClipboardItem) -> Bool {
+        !item.collections.isDisjoint(with: rememberForeverCollections)
+    }
+
+    func toggleRememberForever(_ collection: String) {
+        if rememberForeverCollections.contains(collection) {
+            rememberForeverCollections.remove(collection)
+        } else {
+            rememberForeverCollections.insert(collection)
+        }
+    }
+
+    /// Version string of a STABLE update Sparkle has found, or nil.
+    ///
+    /// Deliberately not persisted: it is re-established by the update check
+    /// on each launch, so a stale value can never outlive the update it
+    /// refers to (or survive the user actually installing it).
+    ///
+    /// Only stable releases set this. Beta channel items are excluded —
+    /// someone opted into betas already sees them through Sparkle's own
+    /// flow, and a banner firing on every beta would be constant noise
+    /// given how often they ship.
+    @Published var availableUpdateVersion: String? = nil
+
+    /// Discovery banner in the popup, prompting to enable Remember Forever
+    /// for the active collection — shown for the next 5 times the popup is
+    /// opened (decremented in openPopupNow), then never again regardless of
+    /// whether the user acted on it.
+    @Published var rememberForeverBannerOpensRemaining: Int =
+        UserDefaults.standard.object(forKey: "clipenRememberForeverBannerOpensRemaining") as? Int ?? 5 {
+        didSet {
+            UserDefaults.standard.set(rememberForeverBannerOpensRemaining,
+                                      forKey: "clipenRememberForeverBannerOpensRemaining")
+        }
+    }
+
+    /// "NEW" badge on the Collections section in Settings — only relevant
+    /// once the user has actually created a collection of their own (the
+    /// built-in "All" doesn't count, and the toggle this banner points at
+    /// has nothing to do with the ring until then). No time expiry: it
+    /// stays visible for as long as this stays true, not just an initial
+    /// few days.
+    var isRememberForeverFeatureNew: Bool {
+        !collections.isEmpty
+    }
+
     @Published var popupTagFilter: ClipboardTag? = nil {
         didSet {
             _displayItems = nil
@@ -132,15 +218,19 @@ class ClipboardManager: ObservableObject {
         }
     }
     @Published var isSearchActive: Bool = false
+    @Published private(set) var searchIntentTag: ClipboardTag? = nil
     @Published var maxItems: Int = 10 {
         didSet {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
 
                 guard self.isHistoryFullyLoaded else { return }
-                let unpinned = self.items.indices.filter { !self.items[$0].isPinned }
-                if unpinned.count > self.maxItems {
-                    let toRemove = unpinned.suffix(from: self.maxItems)
+                guard !self.unlimitedRingSize else { return }
+                let trimmable = self.items.indices.filter {
+                    !self.items[$0].isPinned && !self.isRememberProtected(self.items[$0])
+                }
+                if trimmable.count > self.maxItems {
+                    let toRemove = trimmable.suffix(from: self.maxItems)
                     for idx in toRemove.reversed() {
                         self.evictFileSnapshots(for: self.items[idx])
                         self.evictCaches(for: self.items[idx].id)
@@ -152,7 +242,30 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    /// When on, the ring is never trimmed by item count at all — `maxItems`
+    /// keeps whatever numeric value it last held (so turning this back off
+    /// restores that cap immediately) but is simply not consulted while
+    /// this is true. `setRingSize`/the slider are disabled in Settings
+    /// while this is on; the guard there is a backend safety net, not the
+    /// primary gate.
+    @Published var unlimitedRingSize: Bool = UserDefaults.standard.bool(forKey: "unlimitedRingSize") {
+        didSet {
+            guard oldValue != unlimitedRingSize else { return }
+            UserDefaults.standard.set(unlimitedRingSize, forKey: "unlimitedRingSize")
+            AuthManager.shared.registerActionUsage(
+                actionID: unlimitedRingSize ? "setting.ring_unlimited_on" : "setting.ring_unlimited_off")
+            if !unlimitedRingSize {
+                // Re-trigger maxItems' own didSet to re-apply the trim now
+                // that a real ceiling is back in effect (Swift's property
+                // observers fire on every assignment, even to the same
+                // value, so this isn't a no-op).
+                maxItems = maxItems
+            }
+        }
+    }
+
     func setRingSize(_ size: Int) {
+        guard !unlimitedRingSize else { return }
         let clamped = min(max(size, 1), AuthManager.shared.ringLimit)
         if clamped != maxItems {
             AuthManager.shared.registerActionUsage(actionID: "setting.ring_size")
@@ -160,6 +273,74 @@ class ClipboardManager: ObservableObject {
         }
         maxItems = clamped
         UserDefaults.standard.set(clamped, forKey: "preferredRingSize")
+    }
+
+    /// Off by default. When on, Clipen watches the same folder macOS itself
+    /// saves screenshots to (see screenshotSaveDirectory in
+    /// ClipboardManager+Capture.swift) and pushes any NEW screenshot file
+    /// straight onto the system pasteboard the moment it lands — the
+    /// existing capture poller then picks it up exactly like any other
+    /// copy. Deliberately not tied to a specific keyboard shortcut: the
+    /// default Cmd+Shift+3/4/5 only ever writes a file, never touches the
+    /// clipboard, regardless of whether the user has remapped those keys —
+    /// watching the save location itself is what makes this work
+    /// regardless of how the screenshot was actually triggered.
+    @Published var screenshotCaptureEnabled: Bool = UserDefaults.standard.bool(forKey: "screenshotCaptureEnabled") {
+        didSet {
+            guard oldValue != screenshotCaptureEnabled else { return }
+            UserDefaults.standard.set(screenshotCaptureEnabled, forKey: "screenshotCaptureEnabled")
+            AuthManager.shared.registerActionUsage(
+                actionID: screenshotCaptureEnabled ? "setting.screenshot_capture_on" : "setting.screenshot_capture_off")
+            if screenshotCaptureEnabled {
+                // Permission is requested HERE, at opt-in, and nowhere else —
+                // never bundled in with the permissions Clipen asks for at
+                // launch, which would read as one intimidating pile of
+                // prompts for something the user may not even want.
+                enableScreenshotCaptureWithPermission()
+            } else {
+                disableScreenshotCapture()
+            }
+        }
+    }
+
+    /// Auto-appearing practice panels (evaluateNudges in
+    /// ClipboardManager+Nudges.swift) — off by default, turned on only via
+    /// the explicit Yes/No alert on the onboarding "Personalise & see more
+    /// interactions" button, or the Tips-heading toggle in Settings.
+    /// Manually opening a tip from Settings (presentTipManually) is
+    /// unaffected either way — this only gates the automatic, unprompted
+    /// popping-up.
+    @Published var autoTipsEnabled: Bool =
+        UserDefaults.standard.object(forKey: "autoTipsEnabled") as? Bool ?? false {
+        didSet {
+            guard oldValue != autoTipsEnabled else { return }
+            UserDefaults.standard.set(autoTipsEnabled, forKey: "autoTipsEnabled")
+            AuthManager.shared.registerActionUsage(
+                actionID: autoTipsEnabled ? "setting.auto_tips_on" : "setting.auto_tips_off")
+        }
+    }
+
+
+    var screenshotWatcherSource: DispatchSourceFileSystemObject?
+    var screenshotWatcherFD: Int32 = -1
+    var seenScreenshotPaths: Set<String> = []
+
+    /// Whether an item macOS wouldn't let Clipen capture falls back to a
+    /// flagged, system-default paste instead of being silently dropped.
+    /// Default on: turning it off means those copies go back to producing
+    /// no ring entry at all — the CopyFeedbackPanel "can't copy" badge is
+    /// unaffected either way, since that fires independently of this.
+    @Published var uncapturedFallbackEnabled: Bool = UserDefaults.standard.object(forKey: "uncapturedFallbackEnabled") as? Bool ?? true {
+        didSet {
+            guard oldValue != uncapturedFallbackEnabled else { return }
+            UserDefaults.standard.set(uncapturedFallbackEnabled, forKey: "uncapturedFallbackEnabled")
+            if !uncapturedFallbackEnabled {
+                items.removeAll { $0.isUncaptured }
+                uncapturedPlaceholderChangeCount = nil
+            }
+            AuthManager.shared.registerActionUsage(
+                actionID: uncapturedFallbackEnabled ? "setting.uncaptured_fallback_on" : "setting.uncaptured_fallback_off")
+        }
     }
 
     @Published var captureRichText: Bool = UserDefaults.standard.object(forKey: "captureRichText") as? Bool ?? true {
@@ -210,7 +391,7 @@ class ClipboardManager: ObservableObject {
     }
 
     enum InteractionSound {
-        case cycle, preview, transform, moveFront, share, pin, mark, delete, category, denied
+        case cycle, preview, transform, moveFront, share, pin, mark, delete, category, denied, similar
 
         var frequency: Double {
             switch self {
@@ -224,6 +405,7 @@ class ClipboardManager: ObservableObject {
             case .delete:    return 523
             case .category:  return 587
             case .denied:    return 220
+            case .similar:   return 1175
             }
         }
     }
@@ -272,14 +454,39 @@ class ClipboardManager: ObservableObject {
 
         if let activeCollection {
             result = result.filter { $0.collections.contains(activeCollection) }
+        } else if isHistoryFullyLoaded {
+            // "All" — remember-forever items are never deleted from `items`
+            // (see the trim sites), so left unchecked they'd accumulate in
+            // All forever too, defeating the ring size there. Compute the
+            // window against the raw, unfiltered items array (not `result`,
+            // which may already be narrowed by a tag filter) so a tag
+            // filter being active doesn't shift where this cutoff falls.
+            // Items outside the window still show in their own collection's
+            // filtered view above — this only ever hides them from All.
+            //
+            // Gated on isHistoryFullyLoaded, same as the trim sites already
+            // are: history loads from disk asynchronously, and if the popup
+            // renders before that finishes, `items` is still empty/partial —
+            // windowing against that produced an empty windowIDs set and
+            // hid every real item from All until the next capture forced a
+            // recompute. Skip windowing entirely until loading is done.
+            let unpinnedInOrder = items.filter { !$0.isPinned }
+            let windowIDs = Set(unpinnedInOrder.prefix(maxItems).map(\.id))
+            result = result.filter { $0.isPinned || windowIDs.contains($0.id) }
         }
         if !debouncedPopupSearchQuery.isEmpty {
             let trimmed = debouncedPopupSearchQuery.trimmingCharacters(in: .whitespaces)
-            if trimmed.count >= 2 {
-                let rankedIDs = hybridSearch(query: debouncedPopupSearchQuery)
+            if let intentTag = Self.parseSearchIntent(trimmed),
+               result.contains(where: { $0.tags.contains(intentTag) }) {
+                result = result.filter { $0.tags.contains(intentTag) }
+                searchIntentTag = intentTag
+            } else if trimmed.count >= 2 {
+                searchIntentTag = nil
+                let rankedIDs = hybridSearch(query: debouncedPopupSearchQuery, logRanking: true)
                 let allowed = Set(result.map(\.id))
                 result = rankedIDs.filter { allowed.contains($0.id) }
             } else if !trimmed.isEmpty {
+                searchIntentTag = nil
                 let q = ClipboardItem.normalize(trimmed)
                 result = result.filter { item in
                     item.searchPreviewNorm.contains(q)
@@ -287,7 +494,11 @@ class ClipboardManager: ObservableObject {
                         || item.searchMetaNorm.contains(q)
                         || (item.ocrText.map { ClipboardItem.normalize($0).contains(q) } ?? false)
                 }
+            } else {
+                searchIntentTag = nil
             }
+        } else {
+            searchIntentTag = nil
         }
         result = applyPinOrdering(result)
         _displayItems = result
@@ -320,6 +531,7 @@ class ClipboardManager: ObservableObject {
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
     let sharePanel = SharePanel()
+    let similarPanel = SimilarPanel()
     let nudgeLessonPanel = NudgeLessonPanel()
     let fastPasteHintPanel = FastPasteHintPanel()
     @Published var hasAccessibilityPermission: Bool = AXIsProcessTrusted()
@@ -457,6 +669,33 @@ class ClipboardManager: ObservableObject {
             if oldValue != excludedCaptureBundleIDs { AuthManager.shared.registerActionUsage(actionID: "setting.excluded_apps") }
         }
     }
+
+    /// Separate from excludedCaptureBundleIDs on purpose — that list only
+    /// ever gates capture (ClipboardManager+Capture.swift), never the
+    /// hotkey/paste side. This one gates the opposite: while an app in this
+    /// set is frontmost, Clipen's Cmd+V (and every other popup hotkey)
+    /// passes through completely untouched — capture for that app is
+    /// unaffected either way. Built for apps whose own Cmd+V handling
+    /// Clipen would otherwise steal, e.g. RDP clients forwarding keystrokes
+    /// into a remote session.
+    @Published var pasteBlockedBundleIDs: Set<String> =
+        Set(UserDefaults.standard.stringArray(forKey: "pasteBlockedBundleIDs") ?? []) {
+        didSet {
+            UserDefaults.standard.set(Array(pasteBlockedBundleIDs), forKey: "pasteBlockedBundleIDs")
+            if oldValue != pasteBlockedBundleIDs { AuthManager.shared.registerActionUsage(actionID: "setting.paste_blocked_apps") }
+        }
+    }
+
+    /// Single check both event-tap entry points use — the frontmost app is
+    /// only ever read once per event this way, and the two callers (opening
+    /// the popup, committing a paste on Cmd release) can never drift out of
+    /// sync on what "blocked right now" means.
+    var pasteBlockingActiveForFrontmostApp: Bool {
+        guard !pasteBlockedBundleIDs.isEmpty,
+              let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        else { return false }
+        return pasteBlockedBundleIDs.contains(bundleID)
+    }
     @Published var rememberLastSelection: Bool = UserDefaults.standard.object(forKey: "rememberLastSelection") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(rememberLastSelection, forKey: "rememberLastSelection")
@@ -554,11 +793,16 @@ class ClipboardManager: ObservableObject {
     var historyLoadedCleanly = false
 
     var xTapHoldTimer: Timer?
+    var rTapHoldTimer: Timer?
     static let xHoldThreshold: TimeInterval = 0.35
 
     var escapeWillDismiss = false
 
     var pollTimer: Timer?
+    /// Bumped whenever pollClipboard() processes a real pasteboard change,
+    /// or the popup opens (a strong signal the user is about to copy/paste
+    /// something). Drives startPolling's idle backoff — see its comment.
+    var lastPollActivityAt: Date = Date()
     var permissionRetryTimer: Timer?
     var permissionRetryBackoff: TimeInterval = 1.0
     var lastTransformCacheItemID: UUID? = nil
@@ -613,14 +857,19 @@ class ClipboardManager: ObservableObject {
 
     @Published var isItemPreviewVisible = false
 
-    enum SidePanelStage: Equatable { case none, transform, share }
+    enum SidePanelStage: Equatable { case none, transform, share, similar }
     @Published private(set) var sidePanelStage: SidePanelStage = .none
 
     var inTransformStage: Bool { sidePanelStage == .transform }
     var inShareStage:     Bool { sidePanelStage == .share }
+    var inSimilarStage:   Bool { sidePanelStage == .similar }
 
     var transformIndex   = 0
     var transformDisplaysCache: [TransformDisplay] = []
+
+    var similarPanelItems: [ClipboardItem] = []
+    var similarPanelIndex = 0
+    var similarPanelSourceItemID: UUID? = nil
 
     func setSidePanelStage(_ new: SidePanelStage) {
         guard new != sidePanelStage else { return }
@@ -638,6 +887,11 @@ class ClipboardManager: ObservableObject {
             shareTargetItems   = []
             shareServicesCache = [:]
             shareIndex         = 0
+        case .similar:
+            similarPanel.hide()
+            similarPanelItems        = []
+            similarPanelIndex        = 0
+            similarPanelSourceItemID = nil
         case .none:
             break
         }
@@ -660,6 +914,8 @@ class ClipboardManager: ObservableObject {
     var shareSyncGeneration = 0
 
     var saveCancellable: AnyCancellable?
+
+
 
     @Published var inPageRangeMode: Bool = false
     @Published var pageRangeQuery: String = ""
@@ -733,18 +989,48 @@ class ClipboardManager: ObservableObject {
         attemptEventTap()
         startAppAffinityObserver()
         startScreenChangeObserver()
+        if screenshotCaptureEnabled { startScreenshotWatcher() }
     }
+
 
     var appActivationObserver: NSObjectProtocol?
     private var screenChangeObserver: NSObjectProtocol?
+    private var globalClickMonitor: Any?
+    private var referenceSurfacePollTimer: Timer?
+    private var lastReferenceSurfaceBundleID: String?
+    private var lastReferenceSurfaceCheckAt: Date = .distantPast
+
+    /// Only the properties that actually matter for where the popup should
+    /// sit — excludes maxEDR (and colour space/refresh, which ride along
+    /// with EDR renegotiation) since those churn continuously as ambient
+    /// brightness or HDR content changes, proven in diag.log to fire the
+    /// notification 1,100+ times in under a second while frame/visibleFrame
+    /// never moved once. That's the actual bug: every one of those fires
+    /// was tearing the popup down for a reason with nothing to do with it.
+    private static func structuralFingerprint() -> String {
+        NSScreen.screens.enumerated().map { idx, s in
+            let num = (s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue ?? -1
+            return "[\(idx) id=\(num) frame=\(NSStringFromRect(s.frame)) vis=\(NSStringFromRect(s.visibleFrame)) scale=\(s.backingScaleFactor)]"
+        }.joined(separator: " ")
+    }
+    private var lastStructuralFingerprint: String?
 
     private func startScreenChangeObserver() {
         guard screenChangeObserver == nil else { return }
+        lastStructuralFingerprint = Self.structuralFingerprint()
         screenChangeObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            guard let self, self.previewWindow.isVisible else { return }
+            guard let self else { return }
+            let structFp = Self.structuralFingerprint()
+            let structurallyChanged = (structFp != self.lastStructuralFingerprint)
+            self.lastStructuralFingerprint = structFp
+            guard self.previewWindow.isVisible else { return }
+            // EDR-only churn (brightness/HDR renegotiation) is not a reason
+            // to tear the popup down — only act when something that could
+            // actually strand it (frame, visibleFrame, or scale) changed.
+            guard structurallyChanged else { return }
             self.previewWindow.hide()
             self.setSidePanelStage(.none)
         }
@@ -762,13 +1048,66 @@ class ClipboardManager: ObservableObject {
             guard let self,
                   let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   let bundleID = app.bundleIdentifier else { return }
+            self.lastReferenceSurfaceBundleID = bundleID
+            self.lastReferenceSurfaceCheckAt = Date()
             self.surfaceReferencePanel(forActiveApp: bundleID)
+        }
+
+        // didActivateApplicationNotification only fires on an actual
+        // frontmost-app CHANGE — but Clipen's reference panels are
+        // .nonactivatingPanel, so interacting with them never produces that
+        // transition. If the app you were already in (any app — Claude, a
+        // browser, a native tool) stays frontmost the whole time, that
+        // notification never fires again and a panel can sit stuck with
+        // whatever match it got when it was created. A global click monitor
+        // re-checks on every click anywhere on screen — the generic signal
+        // that the user's attention may have moved — independent of
+        // whether NSWorkspace considers it a "new" frontmost app. This
+        // works uniformly for every app, not just ones with special-cased
+        // AppleScript support.
+        if globalClickMonitor == nil {
+            globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+                self?.recheckReferenceSurfaceIfNeeded()
+            }
+        }
+
+        // Backup for changes with no click involved at all — keyboard-only
+        // tab/window switching inside an app that's already frontmost.
+        if referenceSurfacePollTimer == nil {
+            let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+                guard let self, !self.quickClipPanels.isEmpty else { return }
+                self.recheckReferenceSurfaceIfNeeded(forceIfSameApp: true)
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            referenceSurfacePollTimer = timer
         }
     }
 
+    /// Shared by the click monitor and the poll timer. Same-app rechecks are
+    /// throttled — an actual AppleScript round-trip on every single click
+    /// while the user is just working inside one app would be wasteful and
+    /// laggy — but a real app change always goes through immediately.
+    private func recheckReferenceSurfaceIfNeeded(forceIfSameApp: Bool = false) {
+        guard !quickClipPanels.isEmpty,
+              let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return }
+        let sameApp = bundleID == lastReferenceSurfaceBundleID
+        let now = Date()
+        if sameApp && !forceIfSameApp && now.timeIntervalSince(lastReferenceSurfaceCheckAt) < 1.5 { return }
+        lastReferenceSurfaceBundleID = bundleID
+        lastReferenceSurfaceCheckAt = now
+        surfaceReferencePanel(forActiveApp: bundleID)
+    }
+
+    // No longer excludes Bundle.main (Clipen itself). The popup/QuickClip
+    // panels are .nonactivatingPanel, so ordinary interaction with them
+    // never makes Clipen the frontmost app in NSWorkspace's eyes — this
+    // guard only ever actually fired when the user activated one of
+    // Clipen's real windows (Settings, main history window), and it froze
+    // every reference panel's collapse state indefinitely rather than
+    // correctly collapsing panels that don't belong there.
     func surfaceReferencePanel(forActiveApp bundleID: String) {
         guard referenceAppAffinityEnabled,
-              !quickClipPanels.isEmpty, bundleID != Bundle.main.bundleIdentifier else { return }
+              !quickClipPanels.isEmpty else { return }
 
         let alreadyFetching = pendingReferenceBundleID != nil
         pendingReferenceBundleID = bundleID
@@ -778,8 +1117,7 @@ class ClipboardManager: ObservableObject {
 
     private func fetchReferenceContext(for bundleID: String) {
         referenceContextQueue.async { [weak self] in
-            let liveContext = AppContextService.currentContext(for: bundleID)
-            let tabTexts    = AppContextService.allTabTexts(for: bundleID)
+            let (liveContext, tabTexts) = AppContextService.fetchContext(for: bundleID)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.applyReferenceSurface(bundleID: bundleID, liveContext: liveContext, tabTexts: tabTexts)
@@ -794,7 +1132,7 @@ class ClipboardManager: ObservableObject {
 
     private func applyReferenceSurface(bundleID: String, liveContext: String?, tabTexts: [String]) {
         guard referenceAppAffinityEnabled,
-              !quickClipPanels.isEmpty, bundleID != Bundle.main.bundleIdentifier else { return }
+              !quickClipPanels.isEmpty else { return }
 
         var matched: QuickClipPanel?
         for panel in quickClipPanels where panel.carousel.jumpToPage(ownedBy: bundleID, context: liveContext) {
@@ -802,19 +1140,51 @@ class ClipboardManager: ObservableObject {
             break
         }
 
-        if matched == nil, let (panel, pageID) = semanticBestMatch(forBundleID: bundleID, in: quickClipPanels, tabTexts: tabTexts) {
+        if matched == nil, let (panel, pageID) = semanticBestMatch(forBundleID: bundleID, in: quickClipPanels, tabTexts: tabTexts),
+           !panel.carousel.isDismissed(bundleID: bundleID, pageID: pageID) {
             panel.carousel.jumpToPage(id: pageID)
 
             matched = panel
         }
 
+        // The "did the app actually change" signal both manual-override
+        // flags below rely on — clear any that no longer match the app
+        // that's frontmost right now, so returning to the same app later
+        // (after a genuine switch away) resurfaces/re-collapses normally.
+        for panel in quickClipPanels {
+            if panel.manualExpandBundleID != nil, panel.manualExpandBundleID != bundleID {
+                panel.manualExpandBundleID = nil
+            }
+            if panel.manualCollapseBundleID != nil, panel.manualCollapseBundleID != bundleID {
+                panel.manualCollapseBundleID = nil
+            }
+        }
+
         for panel in quickClipPanels {
             if panel === matched {
+                if panel.manualCollapseBundleID == bundleID {
+                    // User explicitly minimized this while this same app was
+                    // still frontmost — leave it collapsed until they
+                    // actually switch away and come back, instead of this
+                    // very re-check (fired by the click that minimized it)
+                    // immediately deciding it belongs here and popping it
+                    // back open.
+                    continue
+                }
                 AuthManager.shared.registerActionUsage(actionID: "ref.auto_surface")
+                panel.manualExpandBundleID = nil
                 panel.restoreIfCollapsed()
                 panel.orderFrontRegardless()
+            } else if panel.manualExpandBundleID == bundleID {
+                // User clicked the badge's body to peek at it, unlinked,
+                // while this same app was frontmost — leave it open until
+                // the app actually changes, instead of this very re-check
+                // (fired by the click that opened it) immediately deciding
+                // it doesn't belong here and snapping it shut again.
+                continue
             } else {
-                panel.collapseToCorner(activeApp: bundleID, activeContext: liveContext)
+                panel.manualExpandBundleID = nil
+                panel.collapseToCorner(activeApp: bundleID)
             }
         }
     }
@@ -867,12 +1237,6 @@ class ClipboardManager: ObservableObject {
 
 }
 
-struct DiffDetail: Equatable {
-    var added: [String]
-    var removed: [String]
-    var fromRank: Int
-}
-
 struct ClipboardItem: Identifiable {
     let id:        UUID
     let timestamp: Date
@@ -886,14 +1250,29 @@ struct ClipboardItem: Identifiable {
     var urlTitle:  String?  = nil { didSet { rebuildSearchHaystacks() } }
     var diffBadge: String?  = nil
 
-    var diffDetail: DiffDetail? = nil
+    /// A copy macOS refused to hand over (a password manager's concealed
+    /// pasteboard, an excluded app, or content that reached no capture
+    /// branch at all). There is no stored content for these — the real
+    /// bytes only ever existed on the system pasteboard, never here — so
+    /// pasting one deliberately skips Clipen's own pasteboard write and
+    /// lets a plain Cmd+V through instead (see ClipboardManager+Paste's
+    /// simulatePaste). Session-only: never persisted, because after a
+    /// relaunch the system pasteboard has almost certainly moved on and a
+    /// restored placeholder would be a guaranteed wrong paste.
+    var isUncaptured: Bool = false
+    /// `NSPasteboard.general.changeCount` at the moment capture failed.
+    /// If it still matches at paste time, the original content is provably
+    /// the live pasteboard content and a system paste is correct; if it has
+    /// moved, that content is gone for good and pasting would silently
+    /// deliver whatever replaced it, so the paste is refused instead.
+    var uncapturedChangeCount: Int? = nil
 
     var collections: Set<String> = []
     var sourceAppName: String? = nil { didSet { rebuildSearchHaystacks() } }
     var sourceBundleID: String? = nil
     var userNote: String? = nil { didSet { rebuildSearchHaystacks() } }
     var ocrText: String? = nil { didSet { rebuildSearchHaystacks() } }
-    var sidecarTypes: [String: Data]? = nil
+     var sidecarTypes: [String: Data]? = nil
 
     var originalFileURL: URL? = nil
 

@@ -61,14 +61,14 @@ struct SelectionHighlight: ViewModifier {
             content
                 .background {
                     RoundedRectangle(cornerRadius: SelectionHighlightStyle.cornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
+                        .fill(Color.accentColor)
                         .opacity(isSelected ? 1 : 0)
                         // Deliberately no matchedGeometryEffect: the cells
                         // inside this row already drive "selectionBox", and
                         // a second source for the same id while one of them
                         // is selected breaks the shared animation. This
                         // surface fades and scales in place instead.
-                        .shadow(color: Color.black.opacity(isSelected ? 0.22 : 0),
+                        .shadow(color: Color.accentColor.opacity(isSelected ? 0.22 : 0),
                                 radius: isSelected ? 4 : 0, x: 0, y: isSelected ? 1.5 : 0)
                 }
                 .padding(.horizontal, inset)
@@ -78,10 +78,19 @@ struct SelectionHighlight: ViewModifier {
             content
                 .overlay {
                     RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous)
-                        .stroke(Color.accentColor, lineWidth: SelectionHighlightStyle.cellBorderWidth)
+                        .stroke(.ultraThinMaterial, lineWidth: SelectionHighlightStyle.cellBorderWidth)
                         .opacity(isSelected ? 1 : 0)
-                        .matchedGeometryEffect(id: "selectionBox", in: namespace, isSource: isSelected)
-                        .shadow(color: Color.accentColor.opacity(isSelected ? 0.3 : 0),
+                        // Separate id from .row/.rowSurface's "selectionBox"
+                        // on purpose: they used to share one, which made
+                        // SwiftUI try to morph a small outlined thumbnail
+                        // border into a large filled row rectangle (or the
+                        // reverse) whenever selection moved between an image
+                        // run and any other row — two structurally unrelated
+                        // shapes tweening into each other, which read as
+                        // stutter rather than a clean transition. Each family
+                        // now animates independently.
+                        .matchedGeometryEffect(id: "selectionBoxCell", in: namespace, isSource: isSelected)
+                        .shadow(color: Color.black.opacity(isSelected ? 0.3 : 0),
                                 radius: isSelected ? 6 : 0, x: 0, y: isSelected ? 2 : 0)
                 }
                 // A stronger pop than a row's own scale — images sit in

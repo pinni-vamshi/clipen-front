@@ -23,6 +23,7 @@ struct ClipenSettingsView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
     @ObservedObject private var proGate = ProGate.shared
+    @ObservedObject private var llm = LocalLLMManager.shared
 
     @Binding var showResetConfirm: Bool
 
@@ -35,6 +36,7 @@ struct ClipenSettingsView: View {
     @State private var showingCollectionAlert = false
     @State private var scrollViewportWidth: CGFloat = 0
     @State private var showExcludedAppsManager = false
+    @State private var showPasteBlockedAppsManager = false
     @State private var row2Height: CGFloat = 0
     @State private var showAutoPreviewPicker = false
     @State private var showRememberTimeoutPicker = false
@@ -90,6 +92,9 @@ struct ClipenSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .onPreferenceChange(SettingsRow2HeightKey.self) { row2Height = $0 }
 
+                aiSection
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+
                 tipsSection
 
                 feedbackSection
@@ -100,11 +105,28 @@ struct ClipenSettingsView: View {
     }
 
     private static let tipFeatures: [NudgeFeature] =
-        [.multiPaste, .groups, .preview, .pinPreview, .transformPanel, .collections, .search]
+        [.multiPaste, .groups, .preview, .pinPreview, .transformPanel, .collections, .search, .similar]
 
     private var tipsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
-            sectionHeader("05", "TIPS")
+            HStack(spacing: 8) {
+                sectionHeader("06", "TIPS")
+
+                Button {
+                    manager.autoTipsEnabled.toggle()
+                } label: {
+                    Text(manager.autoTipsEnabled ? "Practice: On" : "Practice: Off")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(manager.autoTipsEnabled ? .accent : .textDim)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(manager.autoTipsEnabled ? Color.accentDim : Color.white.opacity(0.06),
+                                    in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help(manager.autoTipsEnabled
+                      ? "Practice panels can pop up automatically as you use Clipen"
+                      : "Practice panels only show when you open one below yourself")
+            }
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -153,62 +175,243 @@ struct ClipenSettingsView: View {
 
     private var feedbackSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("06", "FEEDBACK")
+            sectionHeader("07", "FEEDBACK")
 
+            feedbackCommunityBanner
+
+            // One continuous panel — history and composer used to be two
+            // separate bordered cards with a gap between them; this is a
+            // single rowCard with the history scrolling above and the
+            // composer pinned at its bottom, like an actual chat app
+            // instead of "a card, then a second unrelated card below it."
             rowCard(border: .allSides) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Send a message straight to the developer — suggest a feature, report a bug, or paste a macOS crash report.")
+                VStack(alignment: .leading, spacing: 0) {
+                    // Hint text now leads the whole panel — it used to sit
+                    // right above the text box at the bottom, which read as
+                    // "instructions for the box" rather than "what this
+                    // whole feedback panel is for." Reordered top to bottom:
+                    // hint -> history (if any) -> composer, so the panel
+                    // reads the same direction a real conversation would.
+                    Text("Send a message straight to the developer — suggest a feature, report a bug, share how you'd improve your own workflow, or paste a macOS crash report.")
                         .font(.system(size: 11)).foregroundColor(.textSec)
+                        .padding(14)
 
-                    TextEditor(text: $feedbackText)
-                        .font(.system(size: 12))
-                        .scrollContentBackground(.hidden)
-                        .frame(height: 80)
-                        .padding(6)
-                        .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.border, lineWidth: 1))
+                    rowDivider(leading: 14)
 
-                    HStack {
-                        if feedbackSendState == .failed {
-                            Text("Couldn't send — check your connection and try again.")
-                                .font(.system(size: 10)).foregroundColor(.red.opacity(0.8))
-                        }
-                        Spacer()
-                        feedbackReplyHint
-                        Button {
-                            sendFeedback()
-                        } label: {
-                            Text(feedbackSending ? "Sending…" : "Send")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 14).padding(.vertical, 6)
-                                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(feedbackSending
-                                  || feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if !feedbackThreadRows.isEmpty {
+                        feedbackChatHistory
+                        rowDivider(leading: 14)
                     }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        TextEditor(text: $feedbackText)
+                            .font(.system(size: 12))
+                            .scrollContentBackground(.hidden)
+                            .frame(height: 80)
+                            .padding(6)
+                            .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.border, lineWidth: 1))
+
+                        HStack {
+                            if feedbackSendState == .failed {
+                                Text("Couldn't send — check your connection and try again.")
+                                    .font(.system(size: 10)).foregroundColor(.red.opacity(0.8))
+                            } else if feedbackSendState == .sent {
+                                Text("Sent — expect a reply within a week. Didn't hear back? Send another one.")
+                                    .font(.system(size: 10)).foregroundColor(.textDim)
+                            }
+                            Spacer()
+                            Button {
+                                sendFeedback()
+                            } label: {
+                                Text(feedbackSending ? "Sending…" : "Send")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 14).padding(.vertical, 6)
+                                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(feedbackSending
+                                      || feedbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
+                    .padding(14)
                 }
-                .padding(14)
             }
         }
     }
 
-    private var feedbackReplyHint: some View {
-        HStack(spacing: 4) {
-            Text("You can see replies on the")
-                .font(.system(size: 11)).foregroundColor(.textPri.opacity(0.85))
-            Button {
-                if let url = URL(string: "https://www.instagram.com/clipen.official") {
-                    NSWorkspace.shared.open(url)
-                }
-            } label: {
-                Text("Clipen Instagram page")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.accent)
+    /// Sits above the feedback box, spanning the same full content width as
+    /// proUpsellBanner — this app has no true edge-to-edge banner anywhere
+    /// (everything respects the settings column's side padding), so this
+    /// matches that established pattern rather than introducing a new one.
+    /// Replaces the old inline "you can see replies on Instagram" hint that
+    /// used to sit crammed next to the Send button — replies now render
+    /// directly in-app as feedbackChatThread below, so this is a community
+    /// invite, not the only way to see a reply anymore.
+    private var feedbackCommunityBanner: some View {
+        Button {
+            if let url = URL(string: "https://www.instagram.com/clipen.official") {
+                NSWorkspace.shared.open(url)
             }
-            .buttonStyle(.plain)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "at.badge.plus")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.accent)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Say hi on Instagram")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.textPri)
+                    Text("Join the Clipen community — @clipen.official.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.textSec)
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.textDim)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.accent.opacity(0.35), lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
+    }
+
+    private struct FeedbackThreadRow: Identifiable {
+        let id: String
+        let sortKey: Double
+        let message: String
+        let replyText: String?
+    }
+
+    /// Merges two sources that were never designed to line up automatically:
+    /// proGate.sentFeedback (every message this device has ever sent,
+    /// recorded locally the moment each send succeeds — see SentFeedback's
+    /// doc comment) and proGate.feedbackReplies (server-side, but ONLY ever
+    /// contains messages that already have a developer reply attached).
+    ///
+    /// Every sent message is matched to at most one reply with the same
+    /// (date, text) — "claimed" so a second identical message sent the same
+    /// day (two "hi"s back to back, the exact case that surfaced this) isn't
+    /// paired with the same reply twice. A sent message with no matching
+    /// reply still gets its own row, just with replyText == nil, instead of
+    /// being left out entirely — showing your own message the instant you
+    /// send it, before any reply exists, is the whole point of this. Any
+    /// reply left unclaimed after that (data from before sentFeedback
+    /// existed, or a rare cross-device edge case) still gets shown too,
+    /// using its own bundled `message` field — nothing is ever dropped.
+    private var feedbackThreadRows: [FeedbackThreadRow] {
+        var claimed = Set<String>()
+        var rows: [FeedbackThreadRow] = []
+
+        for sent in proGate.sentFeedback {
+            let match = proGate.feedbackReplies.first {
+                !claimed.contains($0.id) && $0.date == sent.date && $0.message == sent.message
+            }
+            if let match { claimed.insert(match.id) }
+            rows.append(FeedbackThreadRow(
+                id: "sent|\(sent.id)",
+                sortKey: sent.sentAt.timeIntervalSince1970,
+                message: sent.message,
+                replyText: match?.reply_text))
+        }
+
+        let dayFormatter: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            f.timeZone = TimeZone(identifier: "UTC")
+            return f
+        }()
+        let dayTimeFormatter: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            f.timeZone = TimeZone.current  // `time` is the sender's own local clock, not UTC
+            return f
+        }()
+        for reply in proGate.feedbackReplies where !claimed.contains(reply.id) {
+            // The server now includes a real send time (see FeedbackReply.time)
+            // for any entry sent after that started being recorded — use it
+            // for an exact sort position, on the SAME timescale as
+            // sent.sentAt (timeIntervalSince1970, seconds since 1970).
+            // Entries from before `time` existed fall back to an
+            // approximate position (start of that day + index) — still on
+            // the same timescale, just coarser, rather than comparing
+            // against the raw date string's digits, which would silently
+            // sort every one of these before every sent message regardless
+            // of actual order.
+            let sortKey: Double
+            if let time = reply.time,
+               let exact = dayTimeFormatter.date(from: "\(reply.date) \(time)")?.timeIntervalSince1970 {
+                sortKey = exact
+            } else {
+                let dayStart = dayFormatter.date(from: reply.date)?.timeIntervalSince1970 ?? 0
+                sortKey = dayStart + Double(reply.index)
+            }
+            rows.append(FeedbackThreadRow(
+                id: "reply|\(reply.id)",
+                sortKey: sortKey,
+                message: reply.message,
+                replyText: reply.reply_text))
+        }
+
+        return rows.sorted { $0.sortKey < $1.sortKey }
+    }
+
+    /// A real two-sided chat thread — your original message on the left,
+    /// the developer's reply on the right (swapped from the first pass,
+    /// which had them the other way around), oldest exchange first. No
+    /// longer its own card — see feedbackSection, this is now just the
+    /// scrolling top portion of that one panel, with the composer below it
+    /// in the same box.
+    private var feedbackChatHistory: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(feedbackThreadRows) { row in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(row.message)
+                            .font(.system(size: 12))
+                            .foregroundColor(.textPri)
+                            .padding(.horizontal, 11).padding(.vertical, 7)
+                            .background(Color.surfaceHi, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        Spacer(minLength: 40)
+                    }
+                    if let replyText = row.replyText {
+                        HStack {
+                            Spacer(minLength: 40)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Clipen team")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .tracking(0.5)
+                                    .foregroundColor(.accent.opacity(0.85))
+                                Text(replyText)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.textPri)
+                            }
+                            .padding(.horizontal, 11).padding(.vertical, 7)
+                            .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                    } else {
+                        HStack {
+                            Text("Not answered yet")
+                                .font(.system(size: 9))
+                                .foregroundColor(.textDim)
+                            Spacer(minLength: 40)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
     }
 
     private func sendFeedback() {
@@ -216,11 +419,18 @@ struct ClipenSettingsView: View {
         guard !trimmed.isEmpty, !feedbackSending else { return }
         feedbackSending = true
         feedbackSendState = .idle
+        // Same dateKey the request itself files this under server-side
+        // (see TrackingService.sendFeedback's client_today) — captured here
+        // rather than threaded back through the completion, since the
+        // server never echoes it and this is the one place that already
+        // knows it independently.
+        let dateKey = TrackingService.dateKey(Date())
         TrackingService.shared.sendFeedback(trimmed) { success in
             feedbackSending = false
             if success {
                 feedbackText = ""
                 feedbackSendState = .sent
+                proGate.recordSentFeedback(trimmed, date: dateKey)
             } else {
                 feedbackSendState = .failed
             }
@@ -232,13 +442,6 @@ struct ClipenSettingsView: View {
             .font(.system(size: 10, weight: .semibold))
             .tracking(3)
             .foregroundColor(.textSec)
-    }
-
-    private func rowNumber(_ n: Int) -> some View {
-        Text(String(format: "%02d", n))
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-            .foregroundColor(.textDim)
-            .frame(width: 18, alignment: .leading)
     }
 
     private enum RowCardBorder { case leadingLine, allSides }
@@ -265,7 +468,6 @@ struct ClipenSettingsView: View {
     private func behaviourRow(_ n: Int, icon: String, _ label: LocalizedStringKey,
                               isOn: Binding<Bool>) -> some View {
         HStack(spacing: 10) {
-            rowNumber(n)
             Image(systemName: icon).font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text(label).font(.system(size: 13)).foregroundColor(.textPri)
             Spacer()
@@ -277,7 +479,6 @@ struct ClipenSettingsView: View {
 
     private func autoPreviewRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
-            rowNumber(n)
             Image(systemName: "eye").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Always show preview").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
@@ -379,7 +580,6 @@ struct ClipenSettingsView: View {
 
     private func rememberLastPositionRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
-            rowNumber(n)
             Image(systemName: "clock.arrow.circlepath").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Remember last position").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
@@ -416,7 +616,6 @@ struct ClipenSettingsView: View {
 
     private func openDelayRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
-            rowNumber(n)
             Image(systemName: "hourglass").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Open delay").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
@@ -487,7 +686,6 @@ struct ClipenSettingsView: View {
 
     private func pinPositionRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
-            rowNumber(n)
             Image(systemName: "pin.fill").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Pin to top").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
@@ -551,7 +749,6 @@ struct ClipenSettingsView: View {
 
     private func autoDismissRow(_ n: Int) -> some View {
         HStack(spacing: 10) {
-            rowNumber(n)
             Image(systemName: "timer").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
             Text("Auto-dismiss popup").font(.system(size: 13)).foregroundColor(.textPri)
             Spacer(minLength: 8)
@@ -659,7 +856,7 @@ struct ClipenSettingsView: View {
     private var proUpsellBanner: some View {
         if proGate.paywallApplies && !proGate.isPro {
             Button {
-                NSWorkspace.shared.open(URL(string: "https://clipen.app/pro")!)
+                NSWorkspace.shared.open(DeviceIdentity.pricingURL)
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "sparkles")
@@ -713,8 +910,36 @@ struct ClipenSettingsView: View {
 
     private var collectionsSection: some View {
         VStack(alignment: .center, spacing: 14) {
-            sectionHeader("00", "COLLECTIONS")
-                .frame(maxWidth: .infinity, alignment: .center)
+            HStack(spacing: 6) {
+                sectionHeader("00", "COLLECTIONS")
+                if manager.isRememberForeverFeatureNew {
+                    Text("NEW: Remember Forever")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.textSec)
+                        .help("Tap the ∞ toggle on a collection below to keep it forever, exempt from the ring limit")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+
+            // The blue pill lives on the full instruction sentence itself,
+            // not the small "NEW" label above — that's the badge people
+            // actually need to read to know what to do, so it's the one
+            // that should read as a call to action. Same position as
+            // before (this line, right under the header), always visible
+            // for as long as the feature counts as new, not gated behind
+            // a hover-only tooltip.
+            if manager.isRememberForeverFeatureNew {
+                HStack(spacing: 4) {
+                    Text("Tap")
+                    RememberForeverToggle(isOn: false) {}
+                        .allowsHitTesting(false)
+                    Text("on a collection below to keep it forever, exempt from the ring limit.")
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Color.accent, in: Capsule())
+            }
 
             Text("All is your whole clipboard, unfiltered. Create a collection and anything you copy while it's active is filed under it — hold ⌘ and press 1–9 in the popup to switch instantly.")
                 .font(.system(size: 11)).foregroundColor(.textSec)
@@ -886,6 +1111,87 @@ struct ClipenSettingsView: View {
         return bundleID
     }
 
+    // Mirrors excludedAppsManagerPopover/excludedAppRow/
+    // browseForApplicationToExclude exactly, targeting pasteBlockedBundleIDs
+    // instead of excludedCaptureBundleIDs — same picker mechanics, same
+    // NSOpenPanel browse flow, same icon/name lookups (excludedAppDisplayName
+    // is already generic on bundleID, reused as-is rather than duplicated).
+    private var pasteBlockedAppsManagerPopover: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("Block paste in").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
+                Spacer()
+                Button {
+                    browseForApplicationToPasteBlock()
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 14)).foregroundColor(.accent)
+                }
+                .buttonStyle(.plain)
+                .help("Choose any installed app — it doesn't need to be running")
+            }
+            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
+
+            Text("Cmd+V and other Clipen shortcuts pass through untouched while one of these apps is active. Copying still works normally.")
+                .font(.system(size: 10)).foregroundColor(.textDim)
+                .padding(.horizontal, 12).padding(.bottom, 6)
+
+            if manager.pasteBlockedBundleIDs.isEmpty {
+                Text("None yet — tap + to add one.")
+                    .font(.system(size: 11)).foregroundColor(.textDim)
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(manager.pasteBlockedBundleIDs).sorted(), id: \.self) { bundleID in
+                            pasteBlockedAppRow(bundleID: bundleID)
+                        }
+                    }
+                }
+                .frame(maxHeight: 220)
+            }
+            Spacer(minLength: 6)
+        }
+        .frame(width: 240)
+        .padding(.bottom, 4)
+    }
+
+    private func pasteBlockedAppRow(bundleID: String) -> some View {
+        HStack(spacing: 8) {
+            if let icon = ClipenIconCache.shared.appIcon(forBundleID: bundleID) {
+                Image(nsImage: icon).resizable().frame(width: 16, height: 16)
+            } else {
+                Image(systemName: "app.dashed").font(.system(size: 12)).foregroundColor(.textDim)
+            }
+            Text(excludedAppDisplayName(for: bundleID))
+                .font(.system(size: 12)).foregroundColor(.textPri)
+            Spacer()
+            Button {
+                manager.pasteBlockedBundleIDs.remove(bundleID)
+            } label: {
+                Image(systemName: "trash").font(.system(size: 10, weight: .semibold)).foregroundColor(.textDim)
+            }
+            .buttonStyle(.plain)
+            .help("Stop blocking paste for this app")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+    }
+
+    private func browseForApplicationToPasteBlock() {
+        let panel = NSOpenPanel()
+
+        panel.title = String(localized: "Choose an App")
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let bundleID = Bundle(url: url)?.bundleIdentifier
+        else { return }
+        manager.pasteBlockedBundleIDs.insert(bundleID)
+    }
+
     @ViewBuilder
     private func collectionPill(name: String?, slot: Int) -> some View {
         let isActive = manager.activeCollection == name
@@ -902,6 +1208,12 @@ struct ClipenSettingsView: View {
             Text(name ?? String(localized: "All"))
                 .font(.system(size: 12, weight: isActive ? .semibold : .medium))
                 .foregroundColor(isActive ? .white : .textPri)
+
+            if let name {
+                RememberForeverToggle(isOn: manager.rememberForeverCollections.contains(name)) {
+                    manager.toggleRememberForever(name)
+                }
+            }
 
             if let name {
                 Button {
@@ -930,6 +1242,15 @@ struct ClipenSettingsView: View {
                     collectionAlertKind = .rename(name)
                     showingCollectionAlert = true
                 }
+                Button {
+                    manager.toggleRememberForever(name)
+                } label: {
+                    if manager.rememberForeverCollections.contains(name) {
+                        Label("Remembered Forever", systemImage: "checkmark")
+                    } else {
+                        Text("Remember Forever")
+                    }
+                }
                 Button("Delete\u{2026}", role: .destructive) {
                     collectionAlertKind = .delete(name)
                     showingCollectionAlert = true
@@ -942,15 +1263,41 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader("01", "RING SIZE")
 
-            Text("\(manager.maxItems)")
-                .font(.system(size: 64, weight: .black))
-                .foregroundColor(.textPri)
-                .contentTransition(.numericText())
-                .frame(maxWidth: .infinity, alignment: .center)
+            // "items" sits on the number's baseline rather than centered
+            // under it, so the pair reads as one unit ("50 items") and frees
+            // the line below for the infinite toggle.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(manager.unlimitedRingSize ? "∞" : "\(manager.maxItems)")
+                    .font(.system(size: 64, weight: .black))
+                    .foregroundColor(.textPri)
+                    .contentTransition(.numericText())
+                Text("items")
+                    .font(.system(size: 11)).foregroundColor(.textSec)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
 
-            Text("Maximum items in ring")
-                .font(.system(size: 11)).foregroundColor(.textSec)
-                .frame(maxWidth: .infinity, alignment: .center)
+            // Replaces the full-width toggle card this section used to end
+            // with — same pill treatment as the Interactions/Tips headers,
+            // so a secondary switch doesn't visually outweigh the slider
+            // that is the actual subject of this section.
+            Button {
+                withAnimation { manager.unlimitedRingSize.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "infinity").font(.system(size: 9, weight: .bold))
+                    Text(manager.unlimitedRingSize ? "Infinite items: On" : "Infinite items: Off")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundColor(manager.unlimitedRingSize ? .accent : .textDim)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(manager.unlimitedRingSize ? Color.accentDim : Color.white.opacity(0.06),
+                            in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .help(manager.unlimitedRingSize
+                  ? "Cap the ring at the size set below"
+                  : "Keep every item — no limit on how many the ring holds")
 
             HStack(spacing: 10) {
                 ringStepButton("minus") {
@@ -964,12 +1311,15 @@ struct ClipenSettingsView: View {
                     withAnimation { manager.setRingSize(manager.maxItems + 5) }
                 }
             }
+            .disabled(manager.unlimitedRingSize)
+            .opacity(manager.unlimitedRingSize ? 0.35 : 1)
 
             HStack {
                 Text("10").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
                 Spacer()
                 Text("500").font(.system(size: 9, design: .monospaced)).foregroundColor(.textDim)
             }
+            .opacity(manager.unlimitedRingSize ? 0.35 : 1)
         }
     }
 
@@ -1045,7 +1395,7 @@ struct ClipenSettingsView: View {
 
                 HStack(spacing: 10) {
                     Image(systemName: "eye.slash").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
-                    Text("Excluded apps").font(.system(size: 13)).foregroundColor(.textPri)
+                    Text("Stop copying from these apps").font(.system(size: 13)).foregroundColor(.textPri)
                     Spacer()
                     Button {
                         togglePopover($showExcludedAppsManager)
@@ -1059,6 +1409,29 @@ struct ClipenSettingsView: View {
                     .help("Apps whose copies are never captured into history")
                     .popover(isPresented: $showExcludedAppsManager, arrowEdge: .bottom) {
                         excludedAppsManagerPopover
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .frame(maxHeight: .infinity)
+
+                rowDivider(leading: 40)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "keyboard.badge.ellipsis").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                    Text("Disable Clipen in these apps").font(.system(size: 13)).foregroundColor(.textPri)
+                    Spacer()
+                    Button {
+                        togglePopover($showPasteBlockedAppsManager)
+                    } label: {
+                        Text("Manage")
+                            .font(.system(size: 11, weight: .semibold)).foregroundColor(.accent)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("While one of these apps is active, Clipen's Cmd+V and other shortcuts pass straight through untouched — copying still works as normal")
+                    .popover(isPresented: $showPasteBlockedAppsManager, arrowEdge: .bottom) {
+                        pasteBlockedAppsManagerPopover
                     }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
@@ -1101,14 +1474,135 @@ struct ClipenSettingsView: View {
                                            set: { manager.advanceAfterMark = $0 }))
                 rowDivider()
                 purePasteRow(7)
+                rowDivider()
+                behaviourRow(8, icon: "camera.viewfinder", "Screenshot to Clipboard",
+                             isOn: Binding(get: { manager.screenshotCaptureEnabled },
+                                           set: { manager.screenshotCaptureEnabled = $0 }))
+                rowDivider()
+                systemFallbackRow(9)
             }
         }
+    }
+
+    private var aiSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("05", "AI")
+
+            Text("AI facts extraction runs automatically in the background — nothing to turn on.")
+                .font(.system(size: 11))
+                .foregroundColor(.textDim)
+
+            Text("AI MODEL")
+                .font(.system(size: 9, weight: .bold))
+                .tracking(2)
+                .foregroundColor(.textDim)
+                .padding(.top, 6)
+
+            rowCard { aiEngineRow }
+
+            if let error = llm.lastError {
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+            } else {
+                Text("Picking a downloaded model here switches every AI feature above to run on-device instead of Apple Intelligence. Picking one that isn't downloaded yet starts the download automatically.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.textDim)
+            }
+        }
+    }
+
+    /// What's actually running right now, distinct from what's merely
+    /// selected — a selected-but-still-downloading tier keeps everything
+    /// on Apple Intelligence in the meantime (see
+    /// LocalLLMManager.effectiveEngine), and this line is the one place
+    /// that tells the user which of those two is true at this moment.
+    private var currentEngineStatusLine: (title: String, detail: String) {
+        switch llm.selectedEngine {
+        case .apple:
+            return ("Apple Intelligence", AIService.isModelAvailable() ? "Available · running now" : "Unavailable on this Mac")
+        case .local(let tier):
+            if llm.downloadingTiers.contains(tier) {
+                let pct = Int((llm.downloadProgress[tier] ?? 0) * 100)
+                return (tier.displayName, "Downloading \(pct)% · using Apple Intelligence until ready")
+            } else if llm.downloadedTiers.contains(tier) {
+                return (tier.displayName, "Downloaded · running now, on device")
+            } else {
+                return (tier.displayName, "Not downloaded")
+            }
+        }
+    }
+
+    private func menuOptionLabel(_ title: String, _ status: String) -> String {
+        "\(title) — \(status)"
+    }
+
+    private var aiEngineRow: some View {
+        let current = currentEngineStatusLine
+        return HStack(spacing: 10) {
+            Image(systemName: "cpu").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(current.title).font(.system(size: 13)).foregroundColor(.textPri)
+                Text(current.detail).font(.system(size: 10)).foregroundColor(.textDim)
+            }
+
+            Spacer(minLength: 8)
+
+            Picker("", selection: Binding(
+                get: { llm.selectedEngine },
+                set: { llm.selectEngine($0) }
+            )) {
+                Text(menuOptionLabel("Apple Intelligence", AIService.isModelAvailable() ? "Available" : "Unavailable"))
+                    .tag(AIEngineSelection.apple)
+                    .disabled(!AIService.isModelAvailable())
+
+                ForEach(LocalModelTier.allCases) { tier in
+                    Text(menuOptionLabel(tier.displayName, localTierStatusText(tier)))
+                        .tag(AIEngineSelection.local(tier))
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .fixedSize()
+        }
+        .padding(.horizontal, 14).padding(.vertical, 14)
+    }
+
+    private func localTierStatusText(_ tier: LocalModelTier) -> String {
+        if llm.downloadingTiers.contains(tier) {
+            return "Downloading \(Int((llm.downloadProgress[tier] ?? 0) * 100))%"
+        } else if llm.downloadedTiers.contains(tier) {
+            return "Downloaded"
+        } else {
+            return "Not downloaded"
+        }
+    }
+
+    private func systemFallbackRow(_ n: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                Text("Auto fallback to system paste").font(.system(size: 13)).foregroundColor(.textPri)
+                Spacer()
+                Toggle("", isOn: Binding(get: { manager.uncapturedFallbackEnabled },
+                                          set: { manager.uncapturedFallbackEnabled = $0 }))
+                    .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+            }
+            Text("Uses system default paste when the newest item can't be copied. Doesn't apply to older items in history.")
+                .font(.system(size: 10))
+                .foregroundColor(.textDim.opacity(0.6))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 26)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 16)
+        .frame(maxHeight: .infinity)
     }
 
     private func purePasteRow(_ n: Int) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
-                rowNumber(n)
                 Image(systemName: "textformat").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
                 Text("Pure paste").font(.system(size: 13)).foregroundColor(.textPri)
                 Spacer()
@@ -1121,7 +1615,7 @@ struct ClipenSettingsView: View {
                  : "Paste without formatting is available via Transform (X)")
                 .font(.system(size: 10))
                 .foregroundColor(.textDim.opacity(0.6))
-                .padding(.leading, 44)
+                .padding(.leading, 26)
         }
         .padding(.horizontal, 14).padding(.vertical, 16)
         .frame(maxHeight: .infinity)
@@ -1131,7 +1625,7 @@ struct ClipenSettingsView: View {
         [.cycle, .pinnedOpen],
         [.reverseCycle, .multiPaste],
         [.spacePreview, .pinPreview],
-        [.transform, .search, .nextCategory, .moveToFront, .delete],
+        [.transform, .similar, .search, .nextCategory, .moveToFront, .delete],
         [.cyclePinned, .pinItem, .group, .collections],
     ]
 
@@ -1167,8 +1661,8 @@ struct ClipenSettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .help(manager.interactionSoundsEnabled
-                      ? "Turn off sound feedback for popup gestures (V, Space, X, C, S, P, Delete)"
-                      : "Play a sound for every popup gesture (V, Space, X, C, S, P, Delete)")
+                      ? "Turn off sound feedback for popup gestures (V, Space, X, C, S, P, R, Delete)"
+                      : "Play a sound for every popup gesture (V, Space, X, C, S, P, R, Delete)")
             }
 
             KeyboardInteractionPanel()
@@ -1206,7 +1700,7 @@ struct ClipenSettingsView: View {
              KBKey(id: "DELETE", label: "⌫", width: 1.6, demos: [.delete])],
             [KBKey(id: "TAB", label: "tab", width: 1.4),
              KBKey(id: "Q", label: "Q"), KBKey(id: "W", label: "W"), KBKey(id: "E", label: "E"),
-             KBKey(id: "R", label: "R"), KBKey(id: "T", label: "T"), KBKey(id: "Y", label: "Y"),
+             KBKey(id: "R", label: "R", demos: [.similar]), KBKey(id: "T", label: "T"), KBKey(id: "Y", label: "Y"),
              KBKey(id: "U", label: "U"), KBKey(id: "I", label: "I"), KBKey(id: "O", label: "O"),
              KBKey(id: "P", label: "P", demos: [.cyclePinned, .pinItem]),
              KBKey(id: "LBRACKET", label: "["), KBKey(id: "RBRACKET", label: "]"),
@@ -1300,6 +1794,7 @@ struct ClipenSettingsView: View {
 
     struct KeyDemoPopup: View {
         let key: KBKey
+        var showRealKeyboardToggle: Bool = true
 
         @ObservedObject var lab: InteractionLabController
 
@@ -1308,9 +1803,10 @@ struct ClipenSettingsView: View {
         @State private var showInnerButtons = true
         @ObservedObject private var manager = ClipboardManager.shared
 
-        init(key: KBKey, lab: InteractionLabController) {
+        init(key: KBKey, lab: InteractionLabController, showRealKeyboardToggle: Bool = true) {
             self.key = key
             self.lab = lab
+            self.showRealKeyboardToggle = showRealKeyboardToggle
             _selected = State(initialValue: key.demos.first ?? .cycle)
         }
 
@@ -1339,22 +1835,34 @@ struct ClipenSettingsView: View {
 
                 InteractionLabStage(lab: lab, showKeyRow: showInnerButtons)
 
-                Button {
-                    showInnerButtons.toggle()
-                    lab.syncRealKeyboard = !showInnerButtons
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: showInnerButtons ? "keyboard" : "rectangle.on.rectangle")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text(showInnerButtons ? "Animate on keyboard instead" : "Animate keys in popup instead")
-                            .font(.system(size: 10, weight: .semibold))
+                // Only meaningful in the full Settings lab, where a real
+                // system keyboard overlay exists to sync against — the
+                // tutorial's mock popup has nothing to switch to, so this
+                // never shows there (showRealKeyboardToggle: false).
+                if showRealKeyboardToggle {
+                    Button {
+                        showInnerButtons.toggle()
+                        lab.syncRealKeyboard = !showInnerButtons
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: showInnerButtons ? "keyboard" : "rectangle.on.rectangle")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text(showInnerButtons ? "Animate on keyboard instead" : "Animate keys in popup instead")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        // Solid blue + white once real-keyboard sync is
+                        // active, dim outline while still in popup mode —
+                        // previously this looked identical either way, so
+                        // there was no way to tell which mode had actually
+                        // been clicked into without reading the label text.
+                        .foregroundColor(showInnerButtons ? .accent : .white)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(showInnerButtons ? Color.accentDim : Color.accent,
+                                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     }
-                    .foregroundColor(.accent)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(Color.accentDim, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 if let binding = speedBinding(for: selected) {
                     HStack(spacing: 8) {
@@ -1392,8 +1900,11 @@ struct ClipenSettingsView: View {
                 }
             }
             .padding(14)
-
-            .frame(width: 380)
+            // No fixed width — the popup sizes to whatever's actually
+            // inside it. LabMockPanel (190pt) is always present, so that
+            // alone gives this a natural minimum; the row above grows on
+            // its own when the side panel joins it, instead of the popup
+            // being pre-tuned to a width that only fit one specific case.
             .task {
                 lab.syncRealKeyboard = !showInnerButtons
 
@@ -1475,7 +1986,18 @@ struct ClipenSettingsView: View {
         var body: some View {
             GeometryReader { geo in
                 let totalWidth = geo.size.width
-                let pressedRealIDs = lab.syncRealKeyboard ? Set(lab.pressedKeys.flatMap { $0.kbKeyIDs }) : []
+                // specialVPressed drives the HOLD-to-mark beat (multiPaste,
+                // group, reverseCycle) on a key-cap deliberately kept
+                // separate from pressedKeys so it doesn't also light up the
+                // opening ⌘V pair — but that means it was invisible to the
+                // real keyboard here, which only ever watched pressedKeys.
+                // The physical V key never highlighted during a hold.
+                let pressedRealIDs: Set<String> = {
+                    guard lab.syncRealKeyboard else { return [] }
+                    var ids = Set(lab.pressedKeys.flatMap { $0.kbKeyIDs })
+                    if lab.specialVPressed { ids.formUnion(LabKey.v.kbKeyIDs) }
+                    return ids
+                }()
 
                 let involvedRealIDs: Set<String> = lab.isPlaying
                     ? Set(lab.selectedDemo.heroKeys.flatMap { $0.kbKeyIDs }).union(activeKeyID.map { [$0] } ?? [])

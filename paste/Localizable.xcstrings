@@ -1028,6 +1028,112 @@
         }
       }
     },
+    "%lld apps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "%lld apps"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Apps"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld apps"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld apps"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld apl"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld app"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld個のアプリ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "앱 %lld개"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld apps"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld aplikacje"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld apps"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld приложений"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld appar"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld uygulama"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ứng dụng"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 个应用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld 個應用"
+          }
+        }
+      }
+    },
     "%lld files": {
       "localizations": {
         "de": {
@@ -4014,106 +4120,6 @@
         }
       }
     },
-    "A new interaction": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Eine neue Interaktion"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Una nueva interacción"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Une nouvelle interaction"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Interaksi baru"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Una nuova interazione"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新しい操作"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "새로운 상호작용"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Een nieuwe interactie"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nowa interakcja"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Uma nova interação"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Новое взаимодействие"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "En ny interaktion"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Yeni bir etkileşim"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Một tương tác mới"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "全新的交互"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "全新的互動"
-          }
-        }
-      }
-    },
     "APP SETTINGS": {
       "localizations": {
         "de": {
@@ -5538,6 +5544,112 @@
         }
       }
     },
+    "Allow Clipen to access your screenshot folder in System Settings": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Allow Clipen to access your screenshot folder in System Settings"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erlaube Clipen in den Systemeinstellungen den Zugriff auf deinen Screenshot-Ordner"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permite que Clipen acceda a tu carpeta de capturas en Ajustes del Sistema"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Autorisez Clipen à accéder à votre dossier de captures dans Réglages Système"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Izinkan Clipen mengakses folder tangkapan layar di Pengaturan Sistem"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Consenti a Clipen di accedere alla cartella degli screenshot in Impostazioni di Sistema"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システム設定で Clipen にスクリーンショットフォルダへのアクセスを許可してください"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "시스템 설정에서 Clipen이 스크린샷 폴더에 접근하도록 허용하세요"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Geef Clipen toegang tot je schermafbeeldingenmap in Systeeminstellingen"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zezwól Clipen na dostęp do folderu zrzutów ekranu w Ustawieniach systemowych"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permita que o Clipen acesse sua pasta de capturas em Ajustes do Sistema"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Разрешите Clipen доступ к папке со снимками экрана в Системных настройках"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ge Clipen åtkomst till din skärmbildsmapp i Systeminställningar"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sistem Ayarları'nda Clipen'in ekran görüntüsü klasörünüze erişmesine izin verin"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cho phép Clipen truy cập thư mục ảnh chụp màn hình trong Cài đặt Hệ thống"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请在系统设置中允许 Clipen 访问你的截图文件夹"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "請在系統設定中允許 Clipen 存取你的截圖資料夾"
+          }
+        }
+      }
+    },
     "Also in %@": {
       "localizations": {
         "de": {
@@ -6240,6 +6352,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "音訊"
+          }
+        }
+      }
+    },
+    "Auto fallback to system paste": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Auto fallback to system paste"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatischer Rückfall auf Systemeinfügen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recurrir automáticamente al pegado del sistema"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retour automatique au collage système"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otomatis kembali ke tempel sistem"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ripiego automatico sull'incolla di sistema"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システムの貼り付けに自動フォールバック"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "시스템 붙여넣기로 자동 대체"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatisch terugvallen op systeemplakken"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatyczny powrót do wklejania systemowego"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recorrer automaticamente à colagem do sistema"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Автоматический откат к системной вставке"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatisk återgång till systemets inklistring"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sistem yapıştırmasına otomatik geri dönüş"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tự động chuyển sang dán hệ thống"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动回退到系统粘贴"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動回退到系統貼上"
           }
         }
       }
@@ -7150,6 +7368,112 @@
         }
       }
     },
+    "Block paste in": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Block paste in"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einfügen blockieren in"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bloquear pegado en"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bloquer le collage dans"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blokir tempel di"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blocca incolla in"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼り付けをブロック"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "붙여넣기 차단 대상"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plakken blokkeren in"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blokuj wklejanie w"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bloquear colagem em"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Блокировать вставку в"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Blockera inklistring i"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yapıştırmayı engelle"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chặn dán trong"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "阻止粘贴于"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "封鎖貼上於"
+          }
+        }
+      }
+    },
     "Box 1 — tap V once": {
       "localizations": {
         "de": {
@@ -7856,6 +8180,218 @@
         }
       }
     },
+    "Can't copy this": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Can't copy this"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopieren nicht möglich"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se puede copiar esto"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de copier ceci"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tidak bisa menyalin ini"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile copiare questo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これはコピーできません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 항목을 복사할 수 없습니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan dit niet kopiëren"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie można tego skopiować"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não é possível copiar isto"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удаётся скопировать"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan inte kopiera det här"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu kopyalanamıyor"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Không thể sao chép mục này"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法复制"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法複製"
+          }
+        }
+      }
+    },
+    "Can't copy — pastes with system default": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Can't copy — pastes with system default"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopieren nicht möglich — fügt mit Systemstandard ein"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se puede copiar — se pega con el sistema"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copie impossible — collage par le système"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tidak bisa disalin — ditempel oleh sistem"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossibile copiare — incolla con il sistema"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "コピーできません — システム標準で貼り付け"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "복사 불가 — 시스템 기본으로 붙여넣기"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan niet kopiëren — plakt via systeem"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie można skopiować — wkleja systemowo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não é possível copiar — cola pelo sistema"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не удаётся скопировать — вставка системой"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kan inte kopiera — klistras in av systemet"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopyalanamıyor — sistem varsayılanıyla yapıştırılır"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Không thể sao chép — dán bằng hệ thống"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法复制 — 使用系统默认粘贴"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法複製 — 使用系統預設貼上"
+          }
+        }
+      }
+    },
     "Cancel": {
       "localizations": {
         "de": {
@@ -7952,6 +8488,218 @@
           "stringUnit": {
             "state": "translated",
             "value": "取消"
+          }
+        }
+      }
+    },
+    "Cap the ring at the size set below": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Cap the ring at the size set below"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den Ring auf die unten eingestellte Größe begrenzen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limitar el anillo al tamaño definido abajo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limiter l'anneau à la taille définie ci-dessous"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batasi ring ke ukuran yang diatur di bawah"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limita l'anello alla dimensione impostata sotto"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下で設定したサイズにリングを制限します"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "아래에서 설정한 크기로 링을 제한합니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beperk de ring tot de hieronder ingestelde grootte"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ogranicz pierścień do rozmiaru ustawionego poniżej"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limitar o anel ao tamanho definido abaixo"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ограничить кольцо размером, заданным ниже"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Begränsa ringen till storleken som ställs in nedan"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Halkayı aşağıda ayarlanan boyutla sınırla"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giới hạn vòng theo kích thước đặt bên dưới"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将环限制为下方设置的大小"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "將環限制為下方設定的大小"
+          }
+        }
+      }
+    },
+    "Capture": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aufnehmen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Capture"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capturar"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capturer"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tangkap"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cattura"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キャプチャ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "캡처"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vastleggen"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przechwyć"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capturar"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Снимок"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fånga"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yakala"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chụp"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截取"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "擷取"
           }
         }
       }
@@ -8252,6 +9000,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "立即檢查"
+          }
+        }
+      }
+    },
+    "Choose an App": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Choose an App"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App auswählen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elegir una app"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir une app"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pilih Aplikasi"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scegli un'app"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリを選択"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "앱 선택"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kies een app"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wybierz aplikację"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escolher um app"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выбрать приложение"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj en app"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bir Uygulama Seç"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chọn một Ứng dụng"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择应用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇應用程式"
           }
         }
       }
@@ -9892,6 +10746,112 @@
         }
       }
     },
+    "Clipen never received this copy, so it can't be transformed.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen hat diese Kopie nie erhalten und kann sie daher nicht umwandeln."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Clipen never received this copy, so it can't be transformed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen nunca recibió esta copia, así que no se puede transformar."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen n'a jamais reçu cette copie, elle ne peut donc pas être transformée."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen tidak pernah menerima salinan ini, jadi tidak bisa diubah."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen non ha mai ricevuto questa copia, quindi non può trasformarla."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen はこのコピーを受け取っていないため、変換できません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen이 이 복사본을 받지 못해 변환할 수 없습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen heeft deze kopie nooit ontvangen en kan die dus niet omzetten."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen nigdy nie otrzymał tej kopii, więc nie można jej przekształcić."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O Clipen nunca recebeu esta cópia, então não é possível transformá-la."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen не получил эту копию, поэтому её нельзя преобразовать."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen tog aldrig emot den här kopian och kan därför inte omvandla den."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen bu kopyayı hiç almadı, bu yüzden dönüştürülemez."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen chưa từng nhận bản sao này nên không thể biến đổi."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen 从未收到此内容，因此无法转换。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen 從未收到此內容，因此無法轉換。"
+          }
+        }
+      }
+    },
     "Close": {
       "localizations": {
         "de": {
@@ -10488,6 +11448,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "關閉此參照"
+          }
+        }
+      }
+    },
+    "Cmd+V and other Clipen shortcuts pass through untouched while one of these apps is active. Copying still works normally.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Cmd+V and other Clipen shortcuts pass through untouched while one of these apps is active. Copying still works normally."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V und andere Clipen-Tastenkombinationen werden unverändert durchgereicht, solange eine dieser Apps aktiv ist. Kopieren funktioniert weiterhin normal."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V y otros atajos de Clipen pasan sin interceptarse mientras una de estas apps esté activa. Copiar sigue funcionando con normalidad."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V et les autres raccourcis de Clipen passent sans interception tant qu'une de ces apps est active. La copie continue de fonctionner normalement."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V dan pintasan Clipen lainnya diteruskan begitu saja saat salah satu aplikasi ini aktif. Menyalin tetap berfungsi normal."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V e le altre scorciatoie di Clipen passano inalterate mentre una di queste app è attiva. La copia continua a funzionare normalmente."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これらのアプリのいずれかがアクティブな間、⌘V や他の Clipen のショートカットはそのまま素通りします。コピーは通常どおり機能します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 앱 중 하나가 활성 상태인 동안 ⌘V 및 다른 Clipen 단축키는 그대로 통과됩니다. 복사는 평소처럼 작동합니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V en andere Clipen-sneltoetsen gaan ongewijzigd door zolang een van deze apps actief is. Kopiëren blijft gewoon werken."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V i inne skróty Clipen przechodzą bez zmian, gdy jedna z tych aplikacji jest aktywna. Kopiowanie nadal działa normalnie."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O ⌘V e outros atalhos do Clipen passam direto enquanto um desses apps estiver ativo. Copiar continua funcionando normalmente."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V и другие сочетания клавиш Clipen проходят без перехвата, пока активно одно из этих приложений. Копирование по-прежнему работает как обычно."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V och andra Clipen-kortkommandon går rakt igenom opåverkade medan en av dessa appar är aktiv. Kopiering fungerar fortfarande som vanligt."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu uygulamalardan biri etkinken ⌘V ve diğer Clipen kısayolları hiç dokunulmadan geçer. Kopyalama normal şekilde çalışmaya devam eder."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⌘V và các phím tắt khác của Clipen sẽ đi qua nguyên vẹn khi một trong các ứng dụng này đang hoạt động. Sao chép vẫn hoạt động bình thường."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当这些应用中的任意一个处于活动状态时，⌘V 及其他 Clipen 快捷键将原样直接通过。复制功能仍正常工作。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當這些應用程式中的任一個處於使用中狀態時，⌘V 及其他 Clipen 快捷鍵將原樣直接通過。複製功能仍正常運作。"
           }
         }
       }
@@ -14442,6 +15508,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "設計檔案"
+          }
+        }
+      }
+    },
+    "Disable Clipen in these apps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Disable Clipen in these apps"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen in diesen Apps deaktivieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desactivar Clipen en estas apps"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Désactiver Clipen dans ces apps"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nonaktifkan Clipen di aplikasi ini"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disattiva Clipen in queste app"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これらのアプリで Clipen を無効にする"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 앱에서 Clipen 비활성화"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen uitschakelen in deze apps"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wyłącz Clipen w tych aplikacjach"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desativar o Clipen nestes apps"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отключить Clipen в этих приложениях"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inaktivera Clipen i dessa appar"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu uygulamalarda Clipen'i devre dışı bırak"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tắt Clipen trong các ứng dụng này"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在这些应用中禁用 Clipen"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在這些應用程式中停用 Clipen"
           }
         }
       }
@@ -21618,6 +22790,218 @@
         }
       }
     },
+    "Infinite items: Off": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Infinite items: Off"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unbegrenzt: Aus"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ilimitados: No"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Illimité : Désactivé"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tanpa batas: Nonaktif"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Illimitati: Disattivo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無制限: オフ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "무제한: 꺼짐"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onbeperkt: Uit"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bez limitu: Wył."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ilimitados: Desativado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Без лимита: Выкл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obegränsat: Av"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sınırsız: Kapalı"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Không giới hạn: Tắt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无限项：关"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無限項：關"
+          }
+        }
+      }
+    },
+    "Infinite items: On": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Infinite items: On"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unbegrenzt: An"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ilimitados: Sí"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Illimité : Activé"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tanpa batas: Aktif"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Illimitati: Attivo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無制限: オン"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "무제한: 켜짐"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Onbeperkt: Aan"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bez limitu: Wł."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ilimitados: Ativado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Без лимита: Вкл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obegränsat: På"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sınırsız: Açık"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Không giới hạn: Bật"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无限项：开"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無限項：開"
+          }
+        }
+      }
+    },
     "Installer": {
       "localizations": {
         "de": {
@@ -22936,6 +24320,112 @@
         }
       }
     },
+    "Keep every item — no limit on how many the ring holds": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Keep every item — no limit on how many the ring holds"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jedes Element behalten — keine Begrenzung der Ringgröße"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conservar todos los elementos: sin límite de tamaño del anillo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conserver tous les éléments — aucune limite de taille de l'anneau"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Simpan semua item — tanpa batas jumlah dalam ring"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conserva ogni elemento — nessun limite alla dimensione dell'anello"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべての項目を保持 — リングの上限なし"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "모든 항목 유지 — 링 개수 제한 없음"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bewaar elk item — geen limiet op de ringgrootte"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zachowaj każdy element — bez limitu rozmiaru pierścienia"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manter todos os itens — sem limite de tamanho do anel"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Хранить все элементы — без ограничения размера кольца"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Behåll varje objekt — ingen gräns för ringens storlek"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Her öğeyi sakla — halka boyutunda sınır yok"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giữ mọi mục — không giới hạn số lượng trong vòng"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留每一项 — 环的数量不设上限"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保留每一項 — 環的數量不設上限"
+          }
+        }
+      }
+    },
     "Keep here and file under %@ too": {
       "localizations": {
         "de": {
@@ -23738,6 +25228,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "登入時啟動"
+          }
+        }
+      }
+    },
+    "Learn these interactions as you use the app?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Learn these interactions as you use the app?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Interaktionen während der Nutzung der App lernen?"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "¿Aprender estas interacciones mientras usas la app?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Découvrir ces interactions en utilisant l'app ?"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pelajari interaksi ini saat menggunakan aplikasi?"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vuoi imparare queste interazioni mentre usi l'app?"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "アプリを使いながらこれらの操作を学びますか？"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "앱을 사용하면서 이 상호작용을 배우시겠어요?"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deze interacties leren terwijl je de app gebruikt?"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nauczyć się tych interakcji podczas korzystania z aplikacji?"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aprender essas interações enquanto usa o app?"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Изучать эти взаимодействия во время использования приложения?"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vill du lära dig dessa interaktioner medan du använder appen?"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uygulamayı kullanırken bu etkileşimleri öğrenmek ister misiniz?"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Học các thao tác này trong khi sử dụng ứng dụng?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在使用应用时学习这些交互操作吗？"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在使用應用程式時學習這些互動操作嗎？"
           }
         }
       }
@@ -25150,106 +26746,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "已標記為多重貼上 #%lld——按住 V 切換"
-          }
-        }
-      }
-    },
-    "Maximum items in ring": {
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Maximale Elemente im Ring"
-          }
-        },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Máximo de elementos en el anillo"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Éléments maximum dans l'anneau"
-          }
-        },
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Item maksimum dalam ring"
-          }
-        },
-        "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Numero massimo di elementi nell'anello"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "リング内の最大項目数"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "링 내 최대 항목 수"
-          }
-        },
-        "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Maximum aantal items in ring"
-          }
-        },
-        "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Maksymalna liczba elementów w pierścieniu"
-          }
-        },
-        "pt-BR": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Máximo de itens no anel"
-          }
-        },
-        "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Максимум элементов в кольце"
-          }
-        },
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Max antal objekt i ringen"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Halkadaki maksimum öğe"
-          }
-        },
-        "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Số mục tối đa trong vòng"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "环中最大项目数"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "環中最大項目數"
           }
         }
       }
@@ -28290,6 +29786,112 @@
         }
       }
     },
+    "No thanks": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "No thanks"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nein, danke"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No, gracias"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non merci"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tidak, terima kasih"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No, grazie"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "いいえ、結構です"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "아니요, 괜찮습니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nee, bedankt"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie, dziękuję"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não, obrigado"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Нет, спасибо"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nej tack"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hayır, teşekkürler"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Không, cảm ơn"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不用了，谢谢"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不用了，謝謝"
+          }
+        }
+      }
+    },
     "No transforms available": {
       "localizations": {
         "de": {
@@ -28486,6 +30088,218 @@
           "stringUnit": {
             "state": "translated",
             "value": "暫無——點按 + 新增一個。"
+          }
+        }
+      }
+    },
+    "Not answered yet": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Not answered yet"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch nicht beantwortet"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aún sin responder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas encore répondu"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Belum dijawab"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non ancora risposto"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "まだ返信がありません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "아직 답변 없음"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nog niet beantwoord"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jeszcze bez odpowiedzi"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ainda sem resposta"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пока без ответа"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte besvarat än"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Henüz yanıtlanmadı"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chưa có phản hồi"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未回复"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未回覆"
+          }
+        }
+      }
+    },
+    "Not captured — pastes with system default": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nicht erfasst — fügt mit Systemstandard ein"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Not captured — pastes with system default"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No capturado — se pega con el sistema"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non capturé — collage par le système"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tidak tertangkap — ditempel oleh sistem"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non acquisito — incolla con il sistema"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未取得 — システム標準で貼り付け"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "캡처 안 됨 — 시스템 기본으로 붙여넣기"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niet vastgelegd — plakt via systeem"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nieprzechwycone — wkleja systemowo"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não capturado — cola pelo sistema"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не сохранено — вставка системой"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte fångat — klistras in av systemet"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yakalanmadı — sistem varsayılanıyla yapıştırılır"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Không ghi nhận — dán bằng hệ thống"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未捕获 — 使用系统默认粘贴"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未擷取 — 使用系統預設貼上"
           }
         }
       }
@@ -33002,6 +34816,112 @@
         }
       }
     },
+    "Paste cancelled — the target window wasn't ready.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Paste cancelled — the target window wasn't ready."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einfügen abgebrochen — das Zielfenster war nicht bereit."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pegado cancelado: la ventana de destino no estaba lista."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collage annulé — la fenêtre cible n'était pas prête."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tempel dibatalkan — jendela tujuan belum siap."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Incolla annullato — la finestra di destinazione non era pronta."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "貼り付けを中止しました — 対象のウインドウが準備できていません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "붙여넣기 취소됨 — 대상 창이 준비되지 않았습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plakken geannuleerd — het doelvenster was niet gereed."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anulowano wklejanie — okno docelowe nie było gotowe."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Colagem cancelada — a janela de destino não estava pronta."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Вставка отменена — целевое окно не было готово."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inklistring avbröts — målfönstret var inte redo."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yapıştırma iptal edildi — hedef pencere hazır değildi."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Đã hủy dán — cửa sổ đích chưa sẵn sàng."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消粘贴 — 目标窗口尚未就绪。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已取消貼上 — 目標視窗尚未就緒。"
+          }
+        }
+      }
+    },
     "Paste everything marked": {
       "localizations": {
         "de": {
@@ -34810,6 +36730,430 @@
           "stringUnit": {
             "state": "translated",
             "value": "練習"
+          }
+        }
+      }
+    },
+    "Practice panels can pop up automatically as you use Clipen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Practice panels can pop up automatically as you use Clipen"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übungsfenster können automatisch erscheinen, während du Clipen benutzt"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los paneles de práctica pueden aparecer automáticamente mientras usas Clipen"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les panneaux d'entraînement peuvent apparaître automatiquement pendant l'utilisation de Clipen"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Panel latihan bisa muncul otomatis saat kamu memakai Clipen"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I pannelli di pratica possono comparire automaticamente mentre usi Clipen"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen を使用している間、練習パネルが自動的に表示されることがあります"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen을 사용하는 동안 연습 패널이 자동으로 나타날 수 있습니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oefenpanelen kunnen automatisch verschijnen terwijl je Clipen gebruikt"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Panele ćwiczeniowe mogą pojawiać się automatycznie podczas korzystania z Clipen"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os painéis de prática podem aparecer automaticamente enquanto você usa o Clipen"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Панели практики могут появляться автоматически во время использования Clipen"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Övningspaneler kan dyka upp automatiskt medan du använder Clipen"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen'i kullanırken alıştırma panelleri otomatik olarak açılabilir"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Các bảng luyện tập có thể tự động xuất hiện khi bạn sử dụng Clipen"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你使用 Clipen 时，练习面板可能会自动弹出"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你使用 Clipen 時，練習面板可能會自動彈出"
+          }
+        }
+      }
+    },
+    "Practice panels only show when you open one below yourself": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Practice panels only show when you open one below yourself"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übungsfenster werden nur angezeigt, wenn du selbst eines unten öffnest"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los paneles de práctica solo se muestran cuando abres uno tú mismo abajo"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les panneaux d'entraînement ne s'affichent que si vous en ouvrez un vous-même ci-dessous"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Panel latihan hanya muncul saat kamu membukanya sendiri di bawah"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I pannelli di pratica vengono mostrati solo se ne apri uno tu qui sotto"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "練習パネルは、以下から自分で開いたときのみ表示されます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연습 패널은 아래에서 직접 열었을 때만 표시됩니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oefenpanelen worden alleen getoond als je er zelf een hieronder opent"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Panele ćwiczeniowe pojawiają się tylko wtedy, gdy sam otworzysz jeden poniżej"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os painéis de prática só aparecem quando você abre um deles abaixo"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Панели практики показываются только когда вы сами открываете одну из них ниже"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Övningspaneler visas bara när du själv öppnar en nedan"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alıştırma panelleri yalnızca aşağıdan kendiniz birini açtığınızda gösterilir"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bảng luyện tập chỉ hiển thị khi bạn tự mở một bảng bên dưới"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅当你自己在下方打开某个练习面板时才会显示"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "僅當你自己在下方開啟某個練習面板時才會顯示"
+          }
+        }
+      }
+    },
+    "Practice: Off": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Practice: Off"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übung: Aus"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Práctica: No"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entraînement : Désactivé"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Latihan: Nonaktif"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pratica: Disattiva"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "練習: オフ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연습: 꺼짐"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oefenen: Uit"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ćwiczenia: Wył."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prática: Desativada"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Практика: Выкл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Övning: Av"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alıştırma: Kapalı"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Luyện tập: Tắt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "练习：关"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "練習：關"
+          }
+        }
+      }
+    },
+    "Practice: On": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Practice: On"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übung: An"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Práctica: Sí"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entraînement : Activé"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Latihan: Aktif"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pratica: Attiva"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "練習: オン"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연습: 켜짐"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oefenen: Aan"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ćwiczenia: Wł."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prática: Ativada"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Практика: Вкл"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Övning: På"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alıştırma: Açık"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Luyện tập: Bật"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "练习：开"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "練習：開"
           }
         }
       }
@@ -39380,6 +41724,112 @@
         }
       }
     },
+    "Screenshot to Clipboard": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshot in Zwischenablage"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Screenshot to Clipboard"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Captura de pantalla al portapapeles"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture d'écran vers le presse-papiers"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tangkapan layar ke clipboard"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshot negli appunti"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "スクリーンショットをクリップボードへ"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스크린샷을 클립보드로"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schermafbeelding naar klembord"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zrzut ekranu do schowka"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Captura de tela para a área de transferência"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Скриншот в буфер обмена"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skärmbild till urklipp"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekran görüntüsünü panoya al"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chụp màn hình vào clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图到剪贴板"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截圖到剪貼簿"
+          }
+        }
+      }
+    },
     "Search": {
       "localizations": {
         "de": {
@@ -40086,6 +42536,112 @@
         }
       }
     },
+    "Select a region — it copies straight to the clipboard, just like any other copy": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Select a region — it copies straight to the clipboard, just like any other copy"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wähle einen Bereich — er wird direkt in die Zwischenablage kopiert, genau wie jede andere Kopie"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecciona una región — se copia directamente al portapapeles, igual que cualquier otra copia"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sélectionnez une zone — elle est copiée directement dans le presse-papiers, comme n'importe quelle autre copie"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pilih area — hasilnya langsung disalin ke clipboard, seperti salinan lainnya"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Seleziona un'area — viene copiata direttamente negli appunti, come qualsiasi altra copia"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "範囲を選択 — クリップボードに直接コピーされます。他のコピーと同じように扱えます"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "영역을 선택하세요 — 다른 복사와 마찬가지로 클립보드에 바로 복사됩니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecteer een gebied — het wordt direct naar het klembord gekopieerd, net als elke andere kopie"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zaznacz obszar — zostanie skopiowany bezpośrednio do schowka, tak jak każda inna kopia"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selecione uma região — ela é copiada diretamente para a área de transferência, como qualquer outra cópia"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Выберите область — она копируется прямо в буфер обмена, как и любая другая копия"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Markera ett område — det kopieras direkt till urklipp, precis som vilken annan kopia som helst"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bir bölge seçin — diğer her kopya gibi doğrudan panoya kopyalanır"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chọn một vùng — vùng đó được sao chép trực tiếp vào khay nhớ tạm, giống như mọi bản sao khác"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择一个区域 — 会像其他复制内容一样直接复制到剪贴板"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "選擇一個區域 — 會像其他複製內容一樣直接複製到剪貼簿"
+          }
+        }
+      }
+    },
     "Select an item": {
       "localizations": {
         "de": {
@@ -40286,102 +42842,108 @@
         }
       }
     },
-    "Send a message straight to the developer — suggest a feature, report a bug, or paste a macOS crash report.": {
+    "Send a message straight to the developer — suggest a feature, report a bug, share how you'd improve your own workflow, or paste a macOS crash report.": {
       "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Send a message straight to the developer — suggest a feature, report a bug, share how you'd improve your own workflow, or paste a macOS crash report."
+          }
+        },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sende eine Nachricht direkt an den Entwickler — schlage eine Funktion vor, melde einen Fehler oder füge einen macOS-Absturzbericht ein."
+            "value": "Sende eine Nachricht direkt an den Entwickler — schlage eine Funktion vor, melde einen Fehler, teile mit, wie du deinen eigenen Workflow verbessern würdest, oder füge einen macOS-Absturzbericht ein."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Envía un mensaje directamente al desarrollador — sugiere una función, informa un error o pega un informe de fallos de macOS."
+            "value": "Envía un mensaje directamente al desarrollador — sugiere una función, informa un error, cuenta cómo mejorarías tu propio flujo de trabajo o pega un informe de fallos de macOS."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Envoyez un message directement au développeur — suggérez une fonctionnalité, signalez un bug ou collez un rapport de plantage macOS."
+            "value": "Envoyez un message directement au développeur — suggérez une fonctionnalité, signalez un bug, partagez comment vous amélioreriez votre propre flux de travail, ou collez un rapport de plantage macOS."
           }
         },
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kirim pesan langsung ke pengembang — sarankan fitur, laporkan bug, atau tempel laporan crash macOS."
+            "value": "Kirim pesan langsung ke pengembang — sarankan fitur, laporkan bug, bagikan cara meningkatkan alur kerjamu sendiri, atau tempel laporan crash macOS."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Invia un messaggio direttamente allo sviluppatore — suggerisci una funzionalità, segnala un bug o incolla un rapporto di crash di macOS."
+            "value": "Invia un messaggio direttamente allo sviluppatore — suggerisci una funzionalità, segnala un bug, condividi come miglioreresti il tuo flusso di lavoro, oppure incolla un rapporto di crash di macOS."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "開発者に直接メッセージを送信します — 新機能の提案、バグの報告、macOSのクラッシュレポートの貼り付けができます。"
+            "value": "開発者に直接メッセージを送信します — 新機能の提案、バグの報告、自分のワークフローの改善案の共有、macOSのクラッシュレポートの貼り付けができます。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "개발자에게 직접 메시지를 보내세요 — 기능을 제안하거나, 버그를 신고하거나, macOS 충돌 보고서를 붙여넣으세요."
+            "value": "개발자에게 직접 메시지를 보내세요 — 기능을 제안하거나, 버그를 신고하거나, 나만의 워크플로우 개선 아이디어를 공유하거나, macOS 충돌 보고서를 붙여넣으세요."
           }
         },
         "nl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Stuur een bericht rechtstreeks naar de ontwikkelaar — stel een functie voor, meld een bug of plak een macOS-crashrapport."
+            "value": "Stuur een bericht rechtstreeks naar de ontwikkelaar — stel een functie voor, meld een bug, deel hoe jij je eigen workflow zou verbeteren, of plak een macOS-crashrapport."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Wyślij wiadomość bezpośrednio do dewelopera — zaproponuj funkcję, zgłoś błąd lub wklej raport awarii macOS."
+            "value": "Wyślij wiadomość bezpośrednio do dewelopera — zaproponuj funkcję, zgłoś błąd, podziel się pomysłem na usprawnienie własnego workflow lub wklej raport awarii macOS."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Envie uma mensagem diretamente ao desenvolvedor — sugira um recurso, relate um bug ou cole um relatório de falha do macOS."
+            "value": "Envie uma mensagem diretamente ao desenvolvedor — sugira um recurso, relate um bug, compartilhe como você melhoraria seu próprio fluxo de trabalho ou cole um relatório de falha do macOS."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Отправьте сообщение прямо разработчику — предложите функцию, сообщите об ошибке или вставьте отчёт о сбое macOS."
+            "value": "Отправьте сообщение прямо разработчику — предложите функцию, сообщите об ошибке, поделитесь идеей по улучшению своего рабочего процесса или вставьте отчёт о сбое macOS."
           }
         },
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Skicka ett meddelande direkt till utvecklaren — föreslå en funktion, rapportera en bugg eller klistra in en macOS-kraschrapport."
+            "value": "Skicka ett meddelande direkt till utvecklaren — föreslå en funktion, rapportera en bugg, dela hur du skulle förbättra ditt eget arbetsflöde, eller klistra in en macOS-kraschrapport."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Geliştiriciye doğrudan bir mesaj gönder — bir özellik öner, bir hata bildir veya bir macOS çökme raporu yapıştır."
+            "value": "Geliştiriciye doğrudan bir mesaj gönder — bir özellik öner, bir hata bildir, kendi iş akışını nasıl geliştirebileceğini paylaş veya bir macOS çökme raporu yapıştır."
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Gửi tin nhắn trực tiếp cho nhà phát triển — đề xuất tính năng, báo lỗi hoặc dán báo cáo sự cố macOS."
+            "value": "Gửi tin nhắn trực tiếp cho nhà phát triển — đề xuất tính năng, báo lỗi, chia sẻ cách bạn muốn cải thiện quy trình làm việc của mình, hoặc dán báo cáo sự cố macOS."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "直接给开发者发消息——建议新功能、报告错误，或粘贴 macOS 崩溃报告。"
+            "value": "直接给开发者发消息——建议新功能、报告错误、分享你会如何改进自己的工作流程，或粘贴 macOS 崩溃报告。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "直接傳訊息給開發者——建議新功能、回報錯誤，或貼上 macOS 當機報告。"
+            "value": "直接傳訊息給開發者——建議新功能、回報錯誤、分享你會如何改善自己的工作流程，或貼上 macOS 當機報告。"
           }
         }
       }
@@ -40482,6 +43044,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "傳送中…"
+          }
+        }
+      }
+    },
+    "Sent — expect a reply within a week. Didn't hear back? Send another one.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Sent — expect a reply within a week. Didn't hear back? Send another one."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gesendet — erwarte innerhalb einer Woche eine Antwort. Nichts gehört? Sende einfach noch eine."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviado — espera una respuesta en una semana. ¿No has recibido nada? Envía otro mensaje."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Envoyé — attendez-vous à une réponse sous une semaine. Rien reçu ? Renvoyez-en un."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Terkirim — harap tunggu balasan dalam seminggu. Belum dapat kabar? Kirim lagi saja."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inviato — aspettati una risposta entro una settimana. Nessuna notizia? Inviane un altro."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "送信しました — 1週間以内に返信があります。返信がない場合は、もう一度送ってください。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전송됨 — 1주일 이내에 답장을 받아보실 수 있어요. 답장이 없다면 다시 한번 보내주세요."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verzonden — verwacht binnen een week een antwoord. Niets gehoord? Stuur er nog een."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wysłano — spodziewaj się odpowiedzi w ciągu tygodnia. Brak odpowiedzi? Wyślij kolejną wiadomość."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enviado — espere uma resposta em até uma semana. Não recebeu nada? Envie outra mensagem."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отправлено — ответ придёт в течение недели. Не получили ответ? Отправьте ещё одно сообщение."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skickat — förvänta dig ett svar inom en vecka. Inget svar? Skicka ett till."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gönderildi — bir hafta içinde yanıt bekleyebilirsin. Yanıt gelmediyse tekrar gönder."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Đã gửi — hãy chờ phản hồi trong vòng một tuần. Chưa thấy phản hồi? Hãy gửi một tin nhắn khác."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已发送——预计一周内会收到回复。没收到？再发一条试试。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已傳送——預計一週內會收到回覆。沒收到？再傳一次試試。"
           }
         }
       }
@@ -41498,6 +44166,112 @@
         }
       }
     },
+    "Small practice panels can pop up automatically while you use Clipen, to teach you the most useful moves. You can turn this on or off anytime next to Tips in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Small practice panels can pop up automatically while you use Clipen, to teach you the most useful moves. You can turn this on or off anytime next to Tips in Settings."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kleine Übungsfenster können automatisch erscheinen, während du Clipen benutzt, um dir die nützlichsten Kniffe zu zeigen. Du kannst das jederzeit neben Tipps in den Einstellungen ein- oder ausschalten."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pueden aparecer pequeños paneles de práctica automáticamente mientras usas Clipen, para enseñarte los movimientos más útiles. Puedes activarlo o desactivarlo cuando quieras junto a Consejos en Ajustes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "De petits panneaux d'entraînement peuvent apparaître automatiquement pendant que vous utilisez Clipen, pour vous montrer les gestes les plus utiles. Vous pouvez activer ou désactiver cela à tout moment à côté d'Astuces dans les réglages."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Panel latihan kecil bisa muncul otomatis saat kamu memakai Clipen, untuk mengajarkan gerakan yang paling berguna. Kamu bisa mengaktifkan atau menonaktifkannya kapan saja di sebelah Tips di Pengaturan."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Piccoli pannelli di pratica possono comparire automaticamente mentre usi Clipen, per insegnarti le mosse più utili. Puoi attivarlo o disattivarlo in qualsiasi momento accanto a Suggerimenti nelle Impostazioni."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen を使っている間、最も便利な操作を教える小さな練習パネルが自動的に表示されることがあります。設定の「ヒント」の横でいつでもオン・オフを切り替えられます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen을 사용하는 동안 가장 유용한 동작을 알려주는 작은 연습 패널이 자동으로 나타날 수 있습니다. 설정의 팁 옆에서 언제든지 켜거나 끌 수 있습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kleine oefenpanelen kunnen automatisch verschijnen terwijl je Clipen gebruikt, om je de handigste stappen te leren. Je kunt dit altijd aan- of uitzetten naast Tips in Instellingen."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Małe panele ćwiczeniowe mogą pojawiać się automatycznie podczas korzystania z Clipen, aby nauczyć Cię najbardziej przydatnych ruchów. Możesz to włączyć lub wyłączyć w dowolnym momencie obok Wskazówek w Ustawieniach."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pequenos painéis de prática podem aparecer automaticamente enquanto você usa o Clipen, para ensinar os movimentos mais úteis. Você pode ativar ou desativar isso a qualquer momento ao lado de Dicas nas Configurações."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Небольшие панели практики могут появляться автоматически во время использования Clipen, чтобы научить вас самым полезным приёмам. Вы можете включить или отключить это в любой момент рядом с разделом «Советы» в настройках."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Små övningspaneler kan dyka upp automatiskt medan du använder Clipen, för att lära dig de mest användbara greppen. Du kan slå på eller av det när som helst bredvid Tips i Inställningar."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipen'i kullanırken en yararlı hareketleri öğretmek için küçük alıştırma panelleri otomatik olarak açılabilir. Bunu Ayarlar'da İpuçları'nın yanından istediğiniz zaman açıp kapatabilirsiniz."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Các bảng luyện tập nhỏ có thể tự động xuất hiện khi bạn sử dụng Clipen, để dạy bạn những thao tác hữu ích nhất. Bạn có thể bật hoặc tắt tính năng này bất cứ lúc nào bên cạnh Mẹo trong Cài đặt."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你使用 Clipen 时，小型练习面板可能会自动弹出，教你最实用的操作。你可以随时在设置中的“提示”旁边开启或关闭此功能。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在你使用 Clipen 時，小型練習面板可能會自動彈出，教你最實用的操作。你可以隨時在設定中的「提示」旁邊開啟或關閉此功能。"
+          }
+        }
+      }
+    },
     "Smart Reference": {
       "localizations": {
         "de": {
@@ -42500,6 +45274,218 @@
           "stringUnit": {
             "state": "translated",
             "value": "垂直拼接"
+          }
+        }
+      }
+    },
+    "Stop blocking paste for this app": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Stop blocking paste for this app"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einfügen-Blockierung für diese App aufheben"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dejar de bloquear el pegado para esta app"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ne plus bloquer le collage pour cette app"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Berhenti memblokir tempel untuk aplikasi ini"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interrompi il blocco dell'incolla per questa app"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このアプリの貼り付けブロックを解除"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 앱의 붙여넣기 차단 해제"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop met plakken blokkeren voor deze app"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Przestań blokować wklejanie dla tej aplikacji"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parar de bloquear a colagem para este app"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Прекратить блокировать вставку для этого приложения"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sluta blockera inklistring för den här appen"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu uygulama için yapıştırma engellemeyi durdur"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ngừng chặn dán cho ứng dụng này"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止阻止此应用的粘贴"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止封鎖此應用程式的貼上"
+          }
+        }
+      }
+    },
+    "Stop copying from these apps": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Stop copying from these apps"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aus diesen Apps nichts kopieren"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No copiar desde estas apps"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ne rien copier depuis ces apps"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Berhenti menyalin dari aplikasi ini"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non copiare da queste app"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これらのアプリからコピーしない"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 앱에서 복사하지 않기"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Niet kopiëren uit deze apps"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie kopiuj z tych aplikacji"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Não copiar destes apps"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не копировать из этих приложений"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopiera inte från dessa appar"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu uygulamalardan kopyalama"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ngừng sao chép từ các ứng dụng này"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不从这些应用复制"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不從這些應用程式複製"
           }
         }
       }
@@ -45234,6 +48220,112 @@
         }
       }
     },
+    "That copy is no longer on the clipboard": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Kopie ist nicht mehr in der Zwischenablage"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "That copy is no longer on the clipboard"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Esa copia ya no está en el portapapeles"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette copie n'est plus dans le presse-papiers"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Salinan itu tidak ada lagi di clipboard"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quella copia non è più negli appunti"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "そのコピーはクリップボードに残っていません"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "그 복사본은 클립보드에 더 이상 없습니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die kopie staat niet meer op het klembord"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tej kopii nie ma już w schowku"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Essa cópia não está mais na área de transferência"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этой копии больше нет в буфере обмена"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den kopian finns inte längre i urklipp"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu kopya artık panoda değil"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bản sao đó không còn trong khay nhớ tạm"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该内容已不在剪贴板中"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "該內容已不在剪貼簿中"
+          }
+        }
+      }
+    },
     "There's a lot more behind the popup": {
       "localizations": {
         "de": {
@@ -45530,6 +48622,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "此項目有備註"
+          }
+        }
+      }
+    },
+    "This one can only be pasted on its own.": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Element kann nur einzeln eingefügt werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "This one can only be pasted on its own."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este elemento solo se puede pegar por separado."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cet élément ne peut être collé que seul."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Item ini hanya bisa ditempel sendiri."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo elemento può essere incollato solo da solo."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この項目は単独でのみ貼り付けできます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 항목은 단독으로만 붙여넣을 수 있습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dit item kan alleen los worden geplakt."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ten element można wkleić tylko osobno."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este item só pode ser colado sozinho."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этот элемент можно вставить только отдельно."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Det här objektet kan bara klistras in ensamt."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu öğe yalnızca tek başına yapıştırılabilir."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mục này chỉ có thể dán riêng lẻ."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此项目只能单独粘贴。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此項目只能單獨貼上。"
           }
         }
       }
@@ -48246,6 +51444,112 @@
         }
       }
     },
+    "Uses system default paste when the newest item can't be copied. Doesn't apply to older items in history.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Uses system default paste when the newest item can't be copied. Doesn't apply to older items in history."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nutzt Systemeinfügen, wenn das neueste Element nicht kopiert werden kann. Gilt nicht für ältere Elemente im Verlauf."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa el pegado del sistema cuando el elemento más reciente no se puede copiar. No se aplica a elementos anteriores del historial."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utilise le collage système lorsque le dernier élément ne peut pas être copié. Ne s'applique pas aux éléments plus anciens."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memakai tempel sistem saat item terbaru tidak bisa disalin. Tidak berlaku untuk item lama di riwayat."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa l'incolla di sistema quando l'elemento più recente non può essere copiato. Non si applica agli elementi più vecchi."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "最新の項目をコピーできない場合、システムの貼り付けを使用します。履歴内の古い項目には適用されません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "최신 항목을 복사할 수 없을 때 시스템 붙여넣기를 사용합니다. 기록의 이전 항목에는 적용되지 않습니다."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gebruikt systeemplakken wanneer het nieuwste item niet kan worden gekopieerd. Geldt niet voor oudere items."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Używa wklejania systemowego, gdy najnowszego elementu nie można skopiować. Nie dotyczy starszych elementów w historii."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Usa a colagem do sistema quando o item mais recente não pode ser copiado. Não se aplica a itens mais antigos."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Использует системную вставку, если новейший элемент нельзя скопировать. Не применяется к более старым элементам."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Använder systemets inklistring när det senaste objektet inte kan kopieras. Gäller inte äldre objekt i historiken."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En yeni öğe kopyalanamadığında sistem yapıştırmasını kullanır. Geçmişteki eski öğeler için geçerli değildir."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dùng thao tác dán hệ thống khi không thể sao chép mục mới nhất. Không áp dụng cho các mục cũ hơn trong lịch sử."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当最新项目无法复制时，使用系统默认粘贴。不适用于历史记录中较早的项目。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當最新項目無法複製時，使用系統預設貼上。不適用於歷史記錄中較早的項目。"
+          }
+        }
+      }
+    },
     "Video": {
       "localizations": {
         "de": {
@@ -48652,6 +51956,112 @@
         }
       }
     },
+    "While one of these apps is active, Clipen's Cmd+V and other shortcuts pass straight through untouched — copying still works as normal": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "While one of these apps is active, Clipen's Cmd+V and other shortcuts pass straight through untouched — copying still works as normal"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Solange eine dieser Apps aktiv ist, werden Clipens ⌘V und andere Tastenkombinationen unverändert durchgereicht — Kopieren funktioniert weiterhin normal"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mientras una de estas apps esté activa, el ⌘V de Clipen y otros atajos pasan directamente sin interceptarse — copiar sigue funcionando con normalidad"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tant qu'une de ces apps est active, le ⌘V de Clipen et les autres raccourcis passent directement sans interception — la copie continue de fonctionner normalement"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saat salah satu aplikasi ini aktif, ⌘V Clipen dan pintasan lainnya diteruskan begitu saja — menyalin tetap berfungsi normal"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mentre una di queste app è attiva, il ⌘V di Clipen e le altre scorciatoie passano inalterate — la copia continua a funzionare normalmente"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "これらのアプリのいずれかがアクティブな間、Clipen の ⌘V や他のショートカットはそのまま素通りします — コピーは通常どおり機能します"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 앱 중 하나가 활성 상태인 동안 Clipen의 ⌘V 및 다른 단축키는 그대로 통과됩니다 — 복사는 평소처럼 작동합니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zolang een van deze apps actief is, gaan Clipens ⌘V en andere sneltoetsen ongewijzigd door — kopiëren blijft gewoon werken"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gdy jedna z tych aplikacji jest aktywna, ⌘V Clipen i inne skróty przechodzą bez zmian — kopiowanie nadal działa normalnie"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enquanto um desses apps estiver ativo, o ⌘V do Clipen e outros atalhos passam direto, sem interceptação — copiar continua funcionando normalmente"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Пока одно из этих приложений активно, ⌘V и другие сочетания клавиш Clipen проходят без перехвата — копирование по-прежнему работает как обычно"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medan en av dessa appar är aktiv går Clipens ⌘V och andra kortkommandon rakt igenom opåverkade — kopiering fungerar fortfarande som vanligt"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu uygulamalardan biri etkinken Clipen'in ⌘V ve diğer kısayolları hiç dokunulmadan geçer — kopyalama normal şekilde çalışmaya devam eder"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Khi một trong các ứng dụng này đang hoạt động, ⌘V và các phím tắt khác của Clipen sẽ đi qua nguyên vẹn — sao chép vẫn hoạt động bình thường"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当这些应用中的任意一个处于活动状态时，Clipen 的 ⌘V 及其他快捷键将原样直接通过 — 复制功能仍正常工作"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "當這些應用程式中的任一個處於使用中狀態時，Clipen 的 ⌘V 及其他快捷鍵將原樣直接通過 — 複製功能仍正常運作"
+          }
+        }
+      }
+    },
     "With the popup open, HOLD V to mark the highlighted item.\nRelease ⌘ to paste every marked item, in marking order.": {
       "localizations": {
         "de": {
@@ -48748,6 +52158,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "在彈出視窗開啟時，按住 V 可標記醒目提示項目。\n放開 ⌘ 即可依標記順序貼上所有已標記項目。"
+          }
+        }
+      }
+    },
+    "Yes, show me tips": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "Yes, show me tips"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja, Tipps zeigen"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sí, mostrarme consejos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oui, montrer les astuces"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ya, tampilkan tips"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sì, mostrami i suggerimenti"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "はい、ヒントを表示"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "네, 팁 보여주기"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja, laat tips zien"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tak, pokaż wskazówki"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sim, mostrar dicas"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Да, показывать подсказки"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja, visa tips"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Evet, ipuçlarını göster"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Có, hiển thị mẹo"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "是的，显示提示"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "是的，顯示提示"
           }
         }
       }
@@ -50052,6 +53568,112 @@
         }
       }
     },
+    "items": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "items"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Elemente"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "elementos"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "éléments"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "item"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "elementi"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "項目"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "개"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "items"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "elementów"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "itens"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "элем."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "objekt"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "öğe"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "mục"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "项"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "項"
+          }
+        }
+      }
+    },
     "kebab-case": {
       "localizations": {
         "de": {
@@ -50248,6 +53870,112 @@
           "stringUnit": {
             "state": "translated",
             "value": "小寫"
+          }
+        }
+      }
+    },
+    "macOS wouldn't let Clipen copy this — pasting uses the system clipboard instead": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS hat Clipen das Kopieren verweigert — beim Einfügen wird die Systemzwischenablage verwendet"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "new",
+            "value": "macOS wouldn't let Clipen copy this — pasting uses the system clipboard instead"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS no permitió que Clipen copiara esto — al pegar se usa el portapapeles del sistema"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS n'a pas autorisé Clipen à copier ceci — le collage utilise le presse-papiers du système"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS tidak mengizinkan Clipen menyalin ini — menempel memakai clipboard sistem"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS non ha permesso a Clipen di copiarlo — incollando si usano gli appunti di sistema"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS が Clipen にこのコピーを許可しませんでした — 貼り付けにはシステムのクリップボードを使用します"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS가 Clipen의 복사를 허용하지 않았습니다 — 붙여넣기는 시스템 클립보드를 사용합니다"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS liet Clipen dit niet kopiëren — bij plakken wordt het systeemklembord gebruikt"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS nie pozwolił Clipen tego skopiować — wklejanie korzysta ze schowka systemowego"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "O macOS não deixou o Clipen copiar isto — ao colar, usa a área de transferência do sistema"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS не позволил Clipen скопировать это — при вставке используется системный буфер обмена"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS lät inte Clipen kopiera det här — inklistring använder systemets urklipp"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS, Clipen'in bunu kopyalamasına izin vermedi — yapıştırma sistem panosunu kullanır"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS không cho Clipen sao chép mục này — khi dán sẽ dùng khay nhớ tạm của hệ thống"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 不允许 Clipen 复制此内容 — 粘贴时将使用系统剪贴板"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 不允許 Clipen 複製此內容 — 貼上時將使用系統剪貼簿"
           }
         }
       }
@@ -53692,7 +57420,107 @@
       }
     },
     "▌": {},
-    "✕": {}
+    "✕": {},
+    "A unique interaction": {
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Eine einzigartige Interaktion"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Una interacción única"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une interaction unique"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Interaksi unik"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un'interazione unica"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "独自の操作"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "고유한 상호작용"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Een unieke interactie"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unikalna interakcja"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uma interação única"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Уникальное взаимодействие"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "En unik interaktion"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Benzersiz bir etkileşim"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Một tương tác độc đáo"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "独特的交互"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "獨特的互動"
+          }
+        }
+      }
+    }
   },
   "version": "1.0"
 }

@@ -4,6 +4,18 @@ import SwiftUI
 
 extension ClipboardManager {
 
+    /// The one piece of math every shift-reverses-cycling feature shares
+    /// (main ring, category filter, transform tools, share services,
+    /// similar items): step an index by ±1 with wraparound. Each feature
+    /// still wires its own key/hold-timer trigger (they differ: the main
+    /// ring's V key, category's plain keydown, transform/share's
+    /// hold-and-release), but the actual "shift = backward" arithmetic is
+    /// this single function everywhere instead of five separate copies.
+    static func cyclicIndex(_ index: Int, count: Int, backward: Bool) -> Int {
+        guard count > 0 else { return 0 }
+        return backward ? (index - 1 + count) % count : (index + 1) % count
+    }
+
     func items(forIDs ids: some Sequence<UUID>) -> [ClipboardItem] {
         let index = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return ids.compactMap { index[$0] }
@@ -68,6 +80,14 @@ extension ClipboardManager {
     func enterTransformStage() {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
 
+        // Nothing to transform: this entry's only text is its own label,
+        // and the content it stands for lives on the system pasteboard
+        // where no tool here can reach it.
+        if displayItems[selectedIndex].isUncaptured {
+            flashStatus(String(localized: "Clipen never received this copy, so it can't be transformed."))
+            return
+        }
+
         setSidePanelStage(.transform)
         markNudgeUsedNaturally(.transformPanel)
 
@@ -97,7 +117,7 @@ extension ClipboardManager {
         transformCycleCount += 1
 
         guard !transformDisplaysCache.isEmpty else { return }
-        transformIndex = (transformIndex + 1) % transformDisplaysCache.count
+        transformIndex = Self.cyclicIndex(transformIndex, count: transformDisplaysCache.count, backward: false)
         updateTransformPanel()
     }
 
@@ -106,8 +126,7 @@ extension ClipboardManager {
         transformCycleCount += 1
 
         guard !transformDisplaysCache.isEmpty else { return }
-        let n = transformDisplaysCache.count
-        transformIndex = (transformIndex - 1 + n) % n
+        transformIndex = Self.cyclicIndex(transformIndex, count: transformDisplaysCache.count, backward: true)
         updateTransformPanel()
     }
 
@@ -208,7 +227,13 @@ extension ClipboardManager {
 
     func cycleShare() {
         guard inShareStage, !shareServices.isEmpty else { return }
-        shareIndex = (shareIndex + 1) % shareServices.count
+        shareIndex = Self.cyclicIndex(shareIndex, count: shareServices.count, backward: false)
+        updateSharePanel()
+    }
+
+    func cycleShareBackward() {
+        guard inShareStage, !shareServices.isEmpty else { return }
+        shareIndex = Self.cyclicIndex(shareIndex, count: shareServices.count, backward: true)
         updateSharePanel()
     }
 
@@ -433,6 +458,9 @@ extension ClipboardManager {
         }
         if inShareStage {
             updateSharePanel()
+        }
+        if inSimilarStage {
+            updateSimilarPanel()
         }
     }
 
@@ -721,6 +749,7 @@ extension ClipboardManager {
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
         syncShareStageWithSelection()
+        syncSimilarPanelWithSelection()
     }
 
     private static let itemPreviewSyncDelay: TimeInterval = 0.07
@@ -864,7 +893,7 @@ extension ClipboardManager {
            ) {
             pb.writeObjects([makeFilePasteboardItem(for: ImageService.exportFileURL(fileName: fileName))])
         } else {
-            write(item, to: pb)
+            write(item, to: pb, plainOnly: pastePlainTextByDefault)
         }
 
         lastChangeCount = pb.changeCount
@@ -999,7 +1028,7 @@ extension ClipboardManager {
                     openPopupNow()
                 }
             } else {
-                selectedIndex = (selectedIndex + 1) % display.count
+                selectedIndex = Self.cyclicIndex(selectedIndex, count: display.count, backward: false)
             }
             return true
         }
@@ -1028,7 +1057,7 @@ extension ClipboardManager {
                 selectedIndex = display.count - 1
                 openPopupNow()
             } else {
-                selectedIndex = (selectedIndex - 1 + display.count) % display.count
+                selectedIndex = Self.cyclicIndex(selectedIndex, count: display.count, backward: true)
             }
         }
 
@@ -1085,7 +1114,7 @@ extension ClipboardManager {
         } else {
             current = 0
         }
-        selectCategoryByIndex((current + 1) % total)
+        selectCategoryByIndex(Self.cyclicIndex(current, count: total, backward: false))
         AuthManager.shared.registerActionUsage(actionID: "action.next-category")
 
         popupHintCategory = true
@@ -1104,7 +1133,7 @@ extension ClipboardManager {
         } else {
             current = 0
         }
-        selectCategoryByIndex((current - 1 + total) % total)
+        selectCategoryByIndex(Self.cyclicIndex(current, count: total, backward: true))
         AuthManager.shared.registerActionUsage(actionID: "action.prev-category")
 
         popupHintCategory = true
@@ -1145,6 +1174,11 @@ extension ClipboardManager {
     }
 
     func openPopupNow() {
+        // Opening the popup means a copy or paste is imminent — treated the
+        // same as an actually-detected pasteboard change for the poll
+        // timer's idle backoff (see startPolling), so this doesn't sit at
+        // the slow 500ms interval right when it matters most.
+        lastPollActivityAt = Date()
         popupTagFilter = nil
         let withinRememberWindow: Bool = {
             guard let savedAt = rememberedSelectionSavedAt else { return false }
@@ -1160,6 +1194,9 @@ extension ClipboardManager {
             }
         }
         capturedPasteTarget = NSWorkspace.shared.frontmostApplication
+        if rememberForeverBannerOpensRemaining > 0 {
+            rememberForeverBannerOpensRemaining -= 1
+        }
 
         ProGate.shared.evaluate()
         ProGate.shared.refresh()
@@ -1386,6 +1423,13 @@ extension ClipboardManager {
             }
             await MainActor.run {
                 self.updateTransformPanelProcessing(false)
+                // Same stale-target risk as the marked-batch transform path in
+                // ClipboardManager+Paste.swift: exitLanguagePickerMode() already
+                // ran before this Task even started, so `inLanguagePickerMode`
+                // can't be used to detect staleness here — previewWindow.isVisible
+                // is the actual signal for "did the user dismiss (or otherwise
+                // move on) while this translation was still in flight."
+                guard self.previewWindow.isVisible else { return }
                 self.setSidePanelStage(.none)
                 self.previewWindow.hide()
                 self.markedItemIDs = []
@@ -1603,6 +1647,15 @@ extension ClipboardManager {
 
     @discardableResult
     func toggleMark(id: UUID) -> Bool {
+        // An uncaptured placeholder holds no content — only a label. Marking
+        // it would feed that label into multi-paste, transforms or share as
+        // if it were real text, pasting the words "Not captured…" into the
+        // user's document. It can only ever be pasted alone, straight from
+        // the system pasteboard, so it is never markable.
+        if let item = items.first(where: { $0.id == id }), item.isUncaptured {
+            flashStatus(String(localized: "This one can only be pasted on its own."))
+            return false
+        }
         let nowMarked: Bool
         if let idx = markedItemIDs.firstIndex(of: id) {
             markedItemIDs.remove(at: idx)

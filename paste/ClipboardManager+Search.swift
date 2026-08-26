@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 import NaturalLanguage
 import Accelerate
-import Vision
 @preconcurrency import PDFKit
 
 extension ClipboardManager {
@@ -46,6 +45,89 @@ extension ClipboardManager {
         pendingFirstOpen = false
     }
 
+    /// R either opens the similar-items side panel for the current
+    /// selection, or — if it's already open — advances to the next (or,
+    /// with Shift held, previous) related item within it. Deliberately
+    /// doesn't touch search, the item preview panel's own auto-show logic,
+    /// or the main list's selectedIndex: this panel drives its own cursor
+    /// independently, same as TransformPanel does for its tool list.
+    func handleFindSimilarKey(backward: Bool = false) {
+        guard previewWindow.isVisible,
+              displayItems.indices.contains(selectedIndex) else { return }
+        if inSimilarStage {
+            backward ? cycleSimilarBackward() : cycleSimilarForward()
+        } else {
+            enterSimilarStage()
+        }
+    }
+
+    func enterSimilarStage() {
+        guard displayItems.indices.contains(selectedIndex) else { return }
+        let item = displayItems[selectedIndex]
+        let results = similarItems(to: item)
+        guard !results.isEmpty else {
+            flashStatus("No similar items found.")
+            return
+        }
+        similarPanelItems = results
+        similarPanelIndex = 0
+        similarPanelSourceItemID = item.id
+        setSidePanelStage(.similar)
+        AuthManager.shared.registerActionUsage(actionID: "action.find-similar")
+        playInteractionSoundIfEnabled(.similar)
+        updateSimilarPanel()
+    }
+
+    func cycleSimilarForward() {
+        guard inSimilarStage, !similarPanelItems.isEmpty else { return }
+        similarPanelIndex = Self.cyclicIndex(similarPanelIndex, count: similarPanelItems.count, backward: false)
+        AuthManager.shared.registerActionUsage(actionID: "action.find-similar")
+        playInteractionSoundIfEnabled(.similar)
+        updateSimilarPanel()
+    }
+
+    func cycleSimilarBackward() {
+        guard inSimilarStage, !similarPanelItems.isEmpty else { return }
+        similarPanelIndex = Self.cyclicIndex(similarPanelIndex, count: similarPanelItems.count, backward: true)
+        AuthManager.shared.registerActionUsage(actionID: "action.find-similar")
+        playInteractionSoundIfEnabled(.similar)
+        updateSimilarPanel()
+    }
+
+    func updateSimilarPanel() {
+        guard inSimilarStage, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        let anchor = previewWindow.selectedRowAnchorPoint(
+            selectedIndex: selectedIndex,
+            totalItems: displayItems.count
+        )
+        // Computed here and passed in as a prop, same pattern PopoverRow
+        // already uses for the main list — SimilarPanelView used to read
+        // ClipboardManager.shared.markOrder(for:) itself from inside body,
+        // a global read SwiftUI has no visibility into. Marking the
+        // CURRENTLY displayed item doesn't change `items` or
+        // `selectedIndex` (the view's only real props), so SwiftUI saw no
+        // reason to re-invoke body and the badge never appeared until
+        // selectedIndex genuinely changed later (navigating away and
+        // back). An explicit prop makes the change visible to SwiftUI's
+        // own diffing, the same way it already works for the main list.
+        let currentMarkOrder = similarPanelItems.indices.contains(similarPanelIndex)
+            ? markOrder(for: similarPanelItems[similarPanelIndex].id) : nil
+        similarPanel.show(sourceItem: displayItems[selectedIndex],
+                          items: similarPanelItems,
+                          selectedIndex: similarPanelIndex,
+                          markOrder: currentMarkOrder,
+                          near: previewWindow.frame,
+                          anchorPoint: anchor)
+    }
+
+    func syncSimilarPanelWithSelection() {
+        guard inSimilarStage, previewWindow.isVisible,
+              !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        let currentID = displayItems[selectedIndex].id
+        guard currentID != similarPanelSourceItemID else { return }
+        setSidePanelStage(.none)
+    }
+
     func fastPasteFront() {
         clearPopupHintHighlights()
         cancelPendingFirstOpen()
@@ -58,7 +140,7 @@ extension ClipboardManager {
         selectedIndex = 0
         setSidePanelStage(.none)
         AuthManager.shared.registerFastPasteAction()
-        commitPaste()
+        commitPaste(countsAsFastPaste: true)
         showFastPasteHintIfNeeded()
     }
 
@@ -169,7 +251,6 @@ extension ClipboardManager {
     }
 
     func dismissPreview() {
-
         if isInlineEditing { inlineEditItemID = nil; itemPreviewPanel.hide() }
         if previewWindow.isVisible {
             if let openedAt = popupOpenedAt {
@@ -204,6 +285,8 @@ extension ClipboardManager {
         caseTransformOriginals.removeAll()
         xTapHoldTimer?.invalidate()
         xTapHoldTimer = nil
+        rTapHoldTimer?.invalidate()
+        rTapHoldTimer = nil
         setSidePanelStage(.none)
         selectedIndex    = 0
         popupTagFilter   = nil
@@ -248,10 +331,31 @@ extension ClipboardManager {
     func openQuickClipPanel(for item: ClipboardItem, focusContent: Bool = false) {
         let ownerBundleID = capturedPasteTarget?.bundleIdentifier
             ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let ownerContext = ownerBundleID.flatMap { AppContextService.currentContext(for: $0) }
+
+        // The owning app's live context (front tab URL, Finder path, etc.)
+        // used to be fetched here via a synchronous AppleScript/AX
+        // round-trip before the panel was even created — that's
+        // cross-process IPC on the main thread, blocking the popup UI for
+        // however long the target app takes to answer. The panel opens
+        // immediately without it now; the context attaches to this
+        // specific page a moment later, off-main, same pattern already
+        // used by fetchReferenceContext.
+        if let ownerBundleID {
+            referenceContextQueue.async { [weak self] in
+                let context = AppContextService.currentContext(for: ownerBundleID)
+                guard let context else { return }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    guard let panel = self.quickClipPanels.first(where: { panel in
+                        panel.carousel.pages.contains(where: { $0.id == item.id })
+                    }) else { return }
+                    panel.carousel.attachContext(context, toPage: item.id, bundleID: ownerBundleID)
+                }
+            }
+        }
 
         if let panel = sharedCarouselPanel {
-            panel.addPage(item, focusContent: focusContent, ownerBundleID: ownerBundleID, ownerContext: ownerContext)
+            panel.addPage(item, focusContent: focusContent, ownerBundleID: ownerBundleID)
             panel.orderFrontRegardless()
             return
         }
@@ -261,10 +365,11 @@ extension ClipboardManager {
             oldest.close()
         }
         let panel = QuickClipPanel(item: item, offset: 0, focusContent: focusContent,
-                                   ownerBundleID: ownerBundleID, ownerContext: ownerContext)
+                                   ownerBundleID: ownerBundleID)
         panel.orderFrontRegardless()
         quickClipPanels.append(panel)
         sharedCarouselPanel = panel
+        surfaceAllPanelsAgainstFrontmostApp()
     }
 
     func openStandaloneQuickClipPanel(for item: ClipboardItem) {
@@ -276,6 +381,20 @@ extension ClipboardManager {
         let panel = QuickClipPanel(item: item, offset: offset)
         panel.orderFrontRegardless()
         quickClipPanels.append(panel)
+        surfaceAllPanelsAgainstFrontmostApp()
+    }
+
+    /// A freshly created panel only ever gets evaluated against whichever
+    /// app happens to activate NEXT — but the QuickClip popup that just
+    /// created it is .nonactivatingPanel, so the app the user was actually
+    /// in (Claude, ChatGPT, whatever) never fires a fresh
+    /// didActivateApplicationNotification around this whole interaction —
+    /// it was frontmost before, during, and after. Without this, a brand
+    /// new panel could sit expanded indefinitely, never checked against
+    /// what's really on top, until the user happens to switch apps again.
+    private func surfaceAllPanelsAgainstFrontmostApp() {
+        guard let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return }
+        surfaceReferencePanel(forActiveApp: bundleID)
     }
 
     func quickClipPanelDidClose(_ panel: NSPanel) {
@@ -283,13 +402,36 @@ extension ClipboardManager {
         if sharedCarouselPanel === panel { sharedCarouselPanel = nil }
     }
 
-    func hybridSearch(query: String) -> [ClipboardItem] {
+    /// `logRanking`: prints each result's lexical/semantic/recency
+    /// breakdown to DebugLog. Off by default — this is for the popup search
+    /// bar, where a user can directly compare "why did the item I expected
+    /// rank low" against real numbers instead of a guess about how the
+    /// scorer behaves. Confirmed live: a URL clipboard item ranked 7th-8th
+    /// for a descriptive query, and the scorer's fractional token-overlap
+    /// (hits/totalTokens) means a query with words not literally present in
+    /// the URL string loses to unrelated items that happen to contain more
+    /// of the query's literal words.
+    /// `affinityBundleID`: when set, items this app has been involved with
+    /// score higher — see `appAffinityBoost`. Opt-in and defaulted to nil so
+    /// the popup search bar, related-items, and every other caller keep
+    /// exactly the ranking they had.
+    /// `preferValues`: rank short, self-contained items (a command, an
+    /// address, a URL, an ID) above long prose that merely shares
+    /// vocabulary. Opt-in and off by default so the popup search bar is
+    /// untouched.
+    func hybridSearch(query: String, logRanking: Bool = false, affinityBundleID: String? = nil, preferValues: Bool = false) -> [ClipboardItem] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, q.count >= 2 else { return [] }
 
+        // The cached result is only reusable for the same affinity, since
+        // affinity changes the ordering. Without this, switching from
+        // Terminal to Notes would keep serving Terminal-boosted results.
         if q == lastSearchQuery
             && itemsRevision == lastSearchItemsRev
-            && embeddedItemCount == lastSearchEmbedRev {
+            && embeddedItemCount == lastSearchEmbedRev
+            && affinityBundleID == lastSearchAffinity
+            && preferValues == lastSearchPreferValues
+            && !logRanking {
             return lastSearchResult
         }
 
@@ -302,10 +444,16 @@ extension ClipboardManager {
            let v = ClipenEmbedder.shared.vector(for: qNorm) {
             queryVec = v
         }
+        if logRanking {
+            DebugLog.write("SEARCH-RANK: query=\"\(q)\" tokens=\(qTokens) hasQueryEmbedding=\(queryVec != nil)")
+        }
 
         let now = Date()
         var scored: [(ClipboardItem, Float)] = []
         scored.reserveCapacity(items.count)
+        // Only populated when logRanking, and only on the path below that
+        // computes lex/sem/rec as separate locals per item.
+        var detail: [(ClipboardItem, lex: Float, sem: Float, rec: Float, combined: Float)] = []
 
         if items.count >= 128 {
             var scores = [Float](repeating: 0, count: items.count)
@@ -315,7 +463,9 @@ extension ClipboardManager {
                     let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, firstToken: firstToken, item: item)
                     let sem = Self.semanticComponent(queryVec: queryVec, itemVec: item.embedding)
                     let rec = Self.recencyBoost(item: item, now: now)
-                    buf[i] = 0.55 * lex + 0.40 * sem + rec
+                    let aff = Self.appAffinityBoost(item: item, bundleID: affinityBundleID)
+                    let val = preferValues ? Self.valueShapeScore(item: item) : 0
+                    buf[i] = 0.55 * lex + 0.40 * sem + rec + aff + val
                 }
             }
             for i in items.indices where scores[i] >= 0.15 {
@@ -326,11 +476,30 @@ extension ClipboardManager {
                 let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, firstToken: firstToken, item: item)
                 let sem = Self.semanticComponent(queryVec: queryVec, itemVec: item.embedding)
                 let rec = Self.recencyBoost(item: item, now: now)
+                let aff = Self.appAffinityBoost(item: item, bundleID: affinityBundleID)
+                let val = preferValues ? Self.valueShapeScore(item: item) : 0
 
-                let combined = 0.55 * lex + 0.40 * sem + rec
+                let combined = 0.55 * lex + 0.40 * sem + rec + aff + val
+                if logRanking {
+                    detail.append((item, lex, sem, rec, combined))
+                }
                 if combined >= 0.15 {
                     scored.append((item, combined))
                 }
+            }
+        }
+
+        if logRanking {
+            // Every item that scored ANYTHING, not just the ones that
+            // cleared the 0.15 display threshold — an item ranking 7th
+            // needs to be visible here even if it's below that bar, since
+            // that's precisely the case worth inspecting.
+            let ranked = detail.sorted { $0.combined > $1.combined }
+            DebugLog.write("SEARCH-RANK: \(ranked.count) items scored, top 10:")
+            for (i, r) in ranked.prefix(10).enumerated() {
+                let preview = String(r.0.searchPreviewNorm.prefix(60))
+                DebugLog.write(String(format: "  #%d combined=%.3f lex=%.3f sem=%.3f rec=%.3f  \"%@\"",
+                                         i + 1, r.combined, r.lex, r.sem, r.rec, preview))
             }
         }
 
@@ -339,6 +508,8 @@ extension ClipboardManager {
         lastSearchResult = sorted
         lastSearchItemsRev = itemsRevision
         lastSearchEmbedRev = embeddedItemCount
+        lastSearchAffinity = affinityBundleID
+        lastSearchPreferValues = preferValues
         return sorted
     }
 
@@ -357,7 +528,34 @@ extension ClipboardManager {
         best = max(best, score(text: item.searchPreviewNorm, query: query, tokens: tokens, firstToken: firstToken) * 1.00)
         best = max(best, score(text: item.searchEmbedNorm,   query: query, tokens: tokens, firstToken: firstToken) * 0.70)
         best = max(best, score(text: item.searchMetaNorm,    query: query, tokens: tokens, firstToken: firstToken) * 0.55)
+        best = max(best, tagBoost(tokens: tokens, item: item))
         return best
+    }
+
+    /// A query word can name the KIND of thing the user wants ("url",
+    /// "code", "pdf") without that word ever literally appearing in the
+    /// item's own text — a bare GitHub link contains none of the letters
+    /// u-r-l. `score()`'s literal substring overlap has no way to credit
+    /// that, so a query like "github project url" scored a real .url item
+    /// at 0.33 (only "github" matched) while an unrelated item containing
+    /// all three words literally scored 1.0 and outranked it 7th-8th.
+    /// This checks each query token against the same synonym table
+    /// `parseSearchIntent` uses for category filters, and if a token names
+    /// a tag the item actually carries, credits it as a match. Deliberately
+    /// capped below 1.0 (a single-tag match alone shouldn't beat an item
+    /// that also matches every word literally) and only fires per-token —
+    /// it does not replace literal scoring, only supplements it.
+    @inline(__always)
+    nonisolated static func tagBoost(tokens: [String], item: ClipboardItem) -> Float {
+        guard !item.tags.isEmpty else { return 0 }
+        var hits = 0
+        for t in tokens {
+            if let tag = tagSynonymLookup[t], item.tags.contains(tag) {
+                hits += 1
+            }
+        }
+        guard hits > 0 else { return 0 }
+        return min(0.85, 0.5 + 0.15 * Float(hits - 1))
     }
 
     @inline(__always)
@@ -379,6 +577,93 @@ extension ClipboardManager {
         guard let qv = queryVec, let iv = itemVec else { return 0 }
         let cos = cosineSimilarity(qv, iv)
         return max(0, min(1, (cos - 0.3) / 0.5))
+    }
+
+    /// Extra weight for clipboard items tied to the app the user is
+    /// currently typing in.
+    ///
+    /// Retrieval previously ranked purely on how much an item *reads like*
+    /// the sentence being written, which meant the best match for your own
+    /// prose was usually your own earlier prose — the model then continued
+    /// that old text instead of the live sentence. What app an item belongs
+    /// to is a much sharper relevance signal for completion: a shell command
+    /// is what you want in Terminal, a code fragment in an editor, a
+    /// recipient address in Mail.
+    ///
+    /// Two tiers, because they mean different things. An item COPIED FROM
+    /// this app is the strongest signal — it is literally content from this
+    /// context. An item PASTED INTO this app is weaker but still real: it is
+    /// something the user has chosen to put here before.
+    ///
+    /// Deliberately additive and small. It reorders items that already
+    /// matched the query; it must never drag in an unrelated item purely
+    /// because the app lines up.
+    /// Rewards items shaped like an answer rather than a description.
+    ///
+    /// The ranker's dominant term is literal word overlap, which is exactly
+    /// backwards when the user is reaching for a value. Typing "the terminal
+    /// command for the user reply from clipen database is " shares ZERO words
+    /// with `cd "/Users/…" && python3 -m venv` — a path and a binary name —
+    /// so the command scored near nothing, while any long note containing
+    /// "clipen" and "database" scored well and won. No amount of reordering
+    /// within that ranking fixes it; the shape of the item has to count.
+    ///
+    /// Short and structurally typed wins; long prose is pushed down. The
+    /// magnitudes sit above a lexical near-miss but below a strong literal
+    /// match, so this reorders genuinely ambiguous cases without letting an
+    /// unrelated URL outrank an item the user actually named.
+    nonisolated static func valueShapeScore(item: ClipboardItem) -> Float {
+        let text = item.searchPreviewNorm
+        guard !text.isEmpty else { return 0 }
+
+        var score: Float = 0
+
+        // Structurally identified content: an address, a link, a snippet.
+        let valueTags: Set<ClipboardTag> = [.url, .email, .phone, .code, .json, .color]
+        if !valueTags.isDisjoint(with: item.tags) { score += 0.22 }
+
+        // Shell command or filesystem path — the case that motivated this.
+        if looksLikeCommandOrPath(text) { score += 0.30 }
+
+        // Brevity is the signal that something IS the answer rather than
+        // discussing it. A one-line command, an address, an ID.
+        if text.count <= 200 { score += 0.12 }
+
+        // Long prose merely sharing vocabulary is what kept winning.
+        if text.count > 600 { score -= 0.18 }
+
+        return score
+    }
+
+    private static let commandHeads: Set<String> = [
+        "cd", "ls", "mkdir", "rm", "cp", "mv", "git", "npm", "npx", "yarn", "pnpm",
+        "python", "python3", "pip", "pip3", "brew", "sudo", "curl", "wget", "ssh",
+        "scp", "docker", "kubectl", "make", "cargo", "go", "swift", "xcodebuild",
+        "chmod", "chown", "grep", "awk", "sed", "export", "source", "open"
+    ]
+
+    nonisolated static func looksLikeCommandOrPath(_ normalized: String) -> Bool {
+        let head = normalized
+            .components(separatedBy: .whitespacesAndNewlines)
+            .first(where: { !$0.isEmpty }) ?? ""
+        if commandHeads.contains(head) { return true }
+        if normalized.hasPrefix("/") || normalized.hasPrefix("~/") || normalized.hasPrefix("./") { return true }
+        return false
+    }
+
+    nonisolated static func appAffinityBoost(item: ClipboardItem, bundleID: String?) -> Float {
+        guard let bundleID, !bundleID.isEmpty else { return 0 }
+        // Symmetric on purpose. The two tiers used to be 0.18 / 0.10, which
+        // quietly decided that content copied FROM this app matters more
+        // than content the user has deliberately PASTED INTO it. For
+        // completion that is backwards as often as not: a command pasted
+        // into a note is exactly what belongs in the sentence being written,
+        // while prose that merely originated in this app is usually just
+        // more prose. Observed live — a real shell command scored 0.10 and
+        // lost to two unrelated Notes items at 0.18.
+        if item.sourceBundleID == bundleID { return 0.15 }
+        if item.pastedToAppNames[bundleID] != nil { return 0.15 }
+        return 0
     }
 
     nonisolated static func recencyBoost(item: ClipboardItem, now: Date) -> Float {
@@ -434,95 +719,91 @@ extension ClipboardManager {
         return best.map { ($0.panel, $0.pageID) }
     }
 
-    func similarItems(to item: ClipboardItem, count: Int = 7) async -> [ClipboardItem] {
-        let candidates = items.filter { $0.id != item.id }
-        guard !candidates.isEmpty else { return [] }
-        let queryVec = item.embedding
-        let queryPrint = ImageSimilarityService.featurePrint(id: item.id) { Self.visualCGImage(for: item) }
-        let lexicalSource = (item.content.plainText ?? item.ocrText)?
-            .trimmingCharacters(in: .whitespacesAndNewlines).prefix(120)
-        let lexNorm = lexicalSource.map { ClipboardItem.normalize(String($0)) } ?? ""
-
-        return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: Self.combinedSimilarItems(
-                    queryNorm: lexNorm, queryVec: queryVec, queryPrint: queryPrint,
-                    in: candidates, count: count))
-            }
-        }
+    func similarItems(to item: ClipboardItem, count: Int = 7) -> [ClipboardItem] {
+        let queryText = Self.similarSearchText(for: item)
+        guard !queryText.isEmpty, queryText.count >= 2 else { return [] }
+        let results = hybridSearch(query: queryText)
+        return Array(results.filter { $0.id != item.id }.prefix(count))
     }
 
-    private nonisolated static func combinedSimilarItems(queryNorm: String, queryVec: [Float]?,
-                                              queryPrint: VNFeaturePrintObservation?,
-                                              in candidates: [ClipboardItem], count: Int) -> [ClipboardItem] {
-        let qTokens = queryNorm.isEmpty ? [] : queryTokens(queryNorm)
-        let firstToken = qTokens.first
-        let maxDistance: Float = 1.4
-        func visualScore(_ candidate: ClipboardItem) -> Float {
-            guard let queryPrint,
-                  let candidatePrint = ImageSimilarityService.featurePrint(id: candidate.id, cgImage: { visualCGImage(for: candidate) }),
-                  let distance = ImageSimilarityService.distance(queryPrint, candidatePrint),
-                  distance <= maxDistance
-            else { return 0 }
-            return max(0, 1 - distance / maxDistance)
+    static func similarSearchText(for item: ClipboardItem) -> String {
+        if let text = item.content.plainText,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
         }
-
-        let now = Date()
-        return candidates
-            .map { candidate in
-                let lex = lexicalScore(query: queryNorm, tokens: qTokens, firstToken: firstToken, item: candidate)
-                let sem = semanticComponent(queryVec: queryVec, itemVec: candidate.embedding)
-                return (candidate,
-                        max(0.55 * lex + 0.40 * sem, visualScore(candidate))
-                        + recencyBoost(item: candidate, now: now))
-            }
-            .sorted { $0.1 > $1.1 }
-            .prefix(count)
-            .map(\.0)
+        if let ocr = item.ocrText,
+           !ocr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(ocr.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        }
+        if let note = item.userNote,
+           !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        }
+        return ""
     }
 
-    private static func visualCGImage(for item: ClipboardItem) -> CGImage? {
-        if case .image(let img, _, _) = item.content {
-            return img.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    // MARK: - Natural language intent parsing
+
+    /// Shared by `parseSearchIntent` (whole-query category filter) and
+    /// `lexicalScore`'s tag boost (single-token match against an item's
+    /// actual tags) — one table, two different match granularities.
+    static let tagSynonyms: [(Set<String>, ClipboardTag)] = [
+        (["url", "urls", "link", "links", "websites", "website"], .url),
+        (["image", "images", "picture", "pictures", "photo", "photos", "screenshot", "screenshots"], .image),
+        (["gif", "gifs", "animated"], .gif),
+        (["pdf", "pdfs"], .pdf),
+        (["svg", "svgs", "vector", "vectors"], .svg),
+        (["file", "files"], .file),
+        (["video", "videos", "movie", "movies", "clip", "clips"], .video),
+        (["audio", "audios", "sound", "sounds", "music"], .audio),
+        (["code", "codes", "snippet", "snippets", "programming"], .code),
+        (["json"], .json),
+        (["markdown", "md"], .markdown),
+        (["latex", "tex", "math", "equation", "equations"], .latex),
+        (["table", "tables", "spreadsheet", "spreadsheets", "csv"], .table),
+        (["email", "emails", "mail", "mails", "e-mail", "e-mails"], .email),
+        (["phone", "phones", "number", "numbers", "telephone"], .phone),
+        (["address", "addresses", "location", "locations"], .address),
+        (["color", "colors", "colour", "colours", "hex"], .color),
+        (["text", "texts", "plain text"], .text),
+        (["html"], .html),
+        (["rich", "rich text", "formatted", "richtext"], .richText),
+        (["document", "documents", "doc", "docs", "word"], .document),
+        (["archive", "archives", "zip", "zips", "compressed"], .archive),
+        (["design", "designs", "sketch", "figma"], .design),
+        (["font", "fonts", "typeface", "typefaces"], .font),
+        (["installer", "installers", "dmg", "pkg"], .installer),
+        (["3d", "model", "models", "3d model", "3d models"], .model3D),
+        (["group", "groups", "grouped"], .group),
+    ]
+
+    /// token -> tag lookup for `lexicalScore`'s boost, flattened once from
+    /// `tagSynonyms` rather than rebuilt/rescanned per query.
+    static let tagSynonymLookup: [String: ClipboardTag] = {
+        var map: [String: ClipboardTag] = [:]
+        for (words, tag) in tagSynonyms {
+            for w in words { map[w] = tag }
         }
-        if let input = PDFTools.pdfInput(for: item), let page = input.pdf.page(at: 0) {
-            return PDFService.renderCGImage(page: page, scale: 1.0)
+        return map
+    }()
+
+    static func parseSearchIntent(_ query: String) -> ClipboardTag? {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return nil }
+
+        let stripped = q.replacingOccurrences(
+            of: #"^(show\s+(me\s+)?(all\s+(the\s+|my\s+)?)?|find\s+(all\s+)?(my\s+)?|get\s+(all\s+)?(my\s+)?|list\s+(all\s+)?(my\s+)?|all\s+(the\s+|my\s+)?|what\s+are\s+(all\s+)?(the\s+|my\s+)?)"#,
+            with: "",
+            options: .regularExpression
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !stripped.isEmpty else { return nil }
+
+        for (keywords, tag) in tagSynonyms {
+            if keywords.contains(stripped) { return tag }
         }
+
         return nil
-    }
-}
-
-enum ImageSimilarityService {
-    private static let cache = NSCache<NSUUID, VNFeaturePrintObservation>()
-
-    static func invalidate(itemID: UUID) {
-        cache.removeObject(forKey: itemID as NSUUID)
-    }
-
-    static func featurePrint(id: UUID, cgImage: () -> CGImage?) -> VNFeaturePrintObservation? {
-        let key = id as NSUUID
-        if let cached = cache.object(forKey: key) { return cached }
-        guard let image = cgImage() else { return nil }
-        let request = VNGenerateImageFeaturePrintRequest()
-        let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        do {
-            try handler.perform([request])
-            guard let observation = request.results?.first as? VNFeaturePrintObservation else { return nil }
-            cache.setObject(observation, forKey: key)
-            return observation
-        } catch {
-            return nil
-        }
-    }
-
-    static func distance(_ a: VNFeaturePrintObservation, _ b: VNFeaturePrintObservation) -> Float? {
-        var distance: Float = 0
-        do {
-            try a.computeDistance(&distance, to: b)
-            return distance
-        } catch {
-            return nil
-        }
     }
 }
 
@@ -564,22 +845,38 @@ final class ClipenEmbedder {
 
     func vector(for text: String) -> [Float]? {
         if #available(macOS 14.0, *), let model = contextual as? NLContextualEmbedding {
-            guard let result = try? model.embeddingResult(for: text, language: nil) else { return nil }
-            let dim = model.dimension
-            guard dim > 0 else { return nil }
-            var sum = [Double](repeating: 0, count: dim)
-            var count = 0
-            result.enumerateTokenVectors(in: text.startIndex..<text.endIndex) { vec, _ in
-                if vec.count == dim {
-                    for i in 0..<dim { sum[i] += vec[i] }
-                    count += 1
-                }
-                return true
+            // NLContextualEmbedding's tokenizer has been observed to raise a
+            // bare NSException from deep inside CoreNLP for certain input
+            // text (a framework bug, not something callers can predict or
+            // sanitize for in advance) instead of surfacing it through its
+            // own `throws` API — Swift's try? only catches NSError-bridged
+            // failures, so a raw exception like that crashes the whole app
+            // unless caught at the Objective-C level first. See
+            // ClipenExceptionCatcher.
+            var vector: [Float]? = nil
+            let completedSafely = ClipenCatchingExceptions {
+                vector = Self.computeContextualVector(model: model, text: text)
             }
-            guard count > 0 else { return nil }
-            let inv = 1.0 / Double(count)
-            return sum.map { Float($0 * inv) }
+            return completedSafely ? vector : nil
         }
         return fallback?.vector(for: text)?.map { Float($0) }
+    }
+
+    private static func computeContextualVector(model: NLContextualEmbedding, text: String) -> [Float]? {
+        guard let result = try? model.embeddingResult(for: text, language: nil) else { return nil }
+        let dim = model.dimension
+        guard dim > 0 else { return nil }
+        var sum = [Double](repeating: 0, count: dim)
+        var count = 0
+        result.enumerateTokenVectors(in: text.startIndex..<text.endIndex) { vec, _ in
+            if vec.count == dim {
+                for i in 0..<dim { sum[i] += vec[i] }
+                count += 1
+            }
+            return true
+        }
+        guard count > 0 else { return nil }
+        let inv = 1.0 / Double(count)
+        return sum.map { Float($0 * inv) }
     }
 }

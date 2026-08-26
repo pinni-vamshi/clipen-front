@@ -171,7 +171,7 @@ struct MainWindowView: View {
                 .tracking(3)
                 .foregroundStyle(Color(hex: "#4E8DF7"))
 
-            if proGate.paywallApplies || proGate.isPro {
+            if proGate.paywallApplies {
 
                 Text(".")
                     .font(.system(size: 26, weight: .heavy))
@@ -195,7 +195,20 @@ struct MainWindowView: View {
     private var toolbarSwitcher: some View {
         HStack(spacing: 2) {
             toolbarSegment("Dashboard", active: !showSettings) { showSettings = false }
-            toolbarSegment("Settings",  active: showSettings)  { showSettings = true }
+            toolbarSegment("Settings",  active: showSettings)  {
+                showSettings = true
+                // Feedback replies otherwise only refresh on the 30-minute
+                // background timer or when a popup opens — neither of which
+                // fires just from looking at Settings. This makes opening
+                // the tab itself request the latest data, in the
+                // background, without blocking the tab switch on the
+                // network call — refresh() is fire-and-forget, the UI
+                // updates on ProGate's own @Published properties whenever
+                // the response lands. ProGate.refresh() throttles itself
+                // (15s) so flipping tabs repeatedly can't hammer the
+                // endpoint.
+                ProGate.shared.refresh()
+            }
         }
         .padding(3)
         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -358,7 +371,7 @@ struct MainWindowView: View {
             searchText:       debouncedSearchText,
             pinStartPosition: manager.pinStartPosition,
             selectedID:       $mainSelectedID,
-            manager:          manager
+            manager:          manager,
         )
         .equatable()
         .onKeyPress(.return) {
@@ -732,9 +745,15 @@ private struct ItemDetailView: View {
         case .text:
 
             ContentPreviewView(item: item, chrome: .panel)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .richText, .html, .rtfd:
 
+            // Same fix as ItemPreviewPanel.swift / matches what
+            // QuickClipPanel already does for the reference panel —
+            // without this, HTML/RTFD content sizes itself to its own
+            // narrowest element instead of filling the available panel.
             ContentPreviewView(item: item, chrome: .panel)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .image(let img, let data, let dataType):
             Group {
                 if dataType.rawValue.contains("pdf"), let pdf = PDFDocument(data: data) {
@@ -893,6 +912,18 @@ private struct ItemDetailView: View {
             .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
         }
+    }
+
+ 
+ 
+ 
+    private func relatedItemLabel(for entityID: String) -> String {
+        guard let id = UUID(uuidString: entityID),
+              let related = ClipboardManager.shared.items.first(where: { $0.id == id }) else { return "Item no longer in history" }
+        if let text = related.content.plainText, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
+        }
+        return related.typeLabel
     }
 
     private func propertyRow(_ label: String, _ value: String) -> some View {
@@ -1137,6 +1168,7 @@ private struct CompactItemRow: View, Equatable {
         l.item.urlTitle == r.item.urlTitle &&
         l.item.metadataSummary == r.item.metadataSummary
     }
+
 
     var body: some View {
         GeometryReader { geo in

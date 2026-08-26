@@ -2,34 +2,79 @@ import AppKit
 import SwiftUI
 import Vision
 import NaturalLanguage
+import ImageIO
 @preconcurrency import PDFKit
 
 extension ClipboardManager {
 
+    /// 100ms while recently active, backing off to 500ms after a minute of
+    /// nothing happening. macOS gives third-party apps no push notification
+    /// for "the pasteboard changed" — this timer polling changeCount is the
+    /// only mechanism available, at any interval — so the real tradeoff is
+    /// just latency vs. always-on CPU/battery cost. A fixed 100ms forever
+    /// pays that cost during the long idle stretches (laptop open, working
+    /// in another app, watching something) that make up most of a real
+    /// day, for detection speed nobody is around to benefit from. Snaps
+    /// back to 100ms the instant real activity resumes — see
+    /// lastPollActivityAt, bumped both by an actual detected change here
+    /// and by the popup opening (openPopupNow), since opening it is itself
+    /// a strong signal a copy or paste is imminent.
+    ///
+    /// A self-rescheduling one-shot chain, not a fixed repeating Timer,
+    /// because Timer's own interval can't be changed after creation.
+    static let pollIntervalActive: TimeInterval = 0.1
+    static let pollIntervalIdle: TimeInterval = 0.5
+    static let pollIdleThreshold: TimeInterval = 60
+
     func startPolling() {
         lastChangeCount = NSPasteboard.general.changeCount
+        lastPollActivityAt = Date()
+        scheduleNextPoll()
+    }
 
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            self?.pollClipboard()
+    private func scheduleNextPoll() {
+        let idleFor = Date().timeIntervalSince(lastPollActivityAt)
+        let interval = idleFor > Self.pollIdleThreshold ? Self.pollIntervalIdle : Self.pollIntervalActive
+        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.pollClipboard()
+            self.scheduleNextPoll()
         }
         RunLoop.main.add(pollTimer!, forMode: .common)
     }
 
     func pollClipboard() {
+        // Ahead of every other guard on purpose. The placeholder has to go
+        // the moment the pasteboard moves on, and two of the ways that
+        // happens skip the rest of this function entirely: Clipen's own
+        // paste (which sets isSimulatingPaste to suppress re-capture) and
+        // any window where capture is paused.
+        purgeUncapturedPlaceholderIfSuperseded()
+
         guard !isCapturingPaused else { return }
 
         guard !isSimulatingPaste else { return }
         let pb = NSPasteboard.general
         guard pb.changeCount != lastChangeCount else { return }
+        lastPollActivityAt = Date()
 
         if Self.pasteboardIsConcealed(pb) {
             lastChangeCount = pb.changeCount
+            addUncapturedPlaceholder(
+                reason: String(localized: "Not captured — pastes with system default"),
+                changeCount: pb.changeCount)
             return
         }
 
-        if let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           let bundleID = frontmost.bundleIdentifier,
            excludedCaptureBundleIDs.contains(bundleID) {
             lastChangeCount = pb.changeCount
+            let appName = frontmost.localizedName ?? "This app"
+            CopyFeedbackPanel.shared.show(message: "\(appName) is excluded from copying")
+            addUncapturedPlaceholder(
+                reason: String(localized: "Not captured — pastes with system default"),
+                changeCount: pb.changeCount)
             return
         }
 
@@ -43,7 +88,25 @@ extension ClipboardManager {
         remoteClipboardRetryCount = 0
         lastChangeCount = pb.changeCount
 
-        captureQueue.async { [weak self] in self?.processCapturedPasteboard(pb) }
+        // Universal backstop, independent of which content-type branch this
+        // change ends up taking: if nothing reaches addItem — real insert OR
+        // a legitimate duplicate-of-the-top-entry skip, either counts —
+        // within a generous window, show the "can't copy" badge. This is on
+        // top of the specific feedback calls already in each branch below
+        // (those fire immediately; this only ever matters when every one of
+        // them missed a case), not a replacement for them.
+        let generationBefore = captureAttemptGeneration
+        let changeCountAtAttempt = pb.changeCount
+        captureQueue.async { [weak self] in
+            self?.processCapturedPasteboard(pb)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+                guard let self, self.captureAttemptGeneration == generationBefore else { return }
+                CopyFeedbackPanel.shared.show()
+                self.addUncapturedPlaceholder(
+                    reason: String(localized: "Not captured — pastes with system default"),
+                    changeCount: changeCountAtAttempt)
+            }
+        }
     }
 
     func processCapturedPasteboard(_ pb: NSPasteboard) {
@@ -54,7 +117,10 @@ extension ClipboardManager {
             if !urls.isEmpty {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let snapshots = FileSnapshotStore.snapshot(urls)
-                guard !snapshots.isEmpty else { return }
+                guard !snapshots.isEmpty else {
+                    DispatchQueue.main.async { CopyFeedbackPanel.shared.show() }
+                    return
+                }
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.addCaptured(ClipboardItem(content: snapshots.count == 1
@@ -67,7 +133,28 @@ extension ClipboardManager {
             if resolvePromisedFiles(from: pb) { return }
         }
 
-        if captureRichText, let rtfdData = pb.data(forType: .rtfd) {
+        // HTML is read once, up front, so both the RTFD-vs-HTML priority
+        // decision below and the actual HTML capture path use the exact
+        // same decoded string — never two independent reads that could
+        // disagree.
+        let htmlCandidate = Self.readHTML(from: pb)
+        let htmlIsSubstantial = htmlCandidate.map {
+            Self.htmlContainsTable($0.html) || Self.htmlContainsImage($0.html)
+                || Self.htmlContainsInlineFormatting($0.html)
+        } ?? false
+
+        // Prefer substantial HTML (a table, an image, or real inline
+        // formatting) over RTFD when both are on the pasteboard at once —
+        // RTF/RTFD can't express CSS backgrounds, button-styled links, or
+        // real table styling, so an app that offers both on the same copy
+        // (Mail.app copying an email, a browser copying a page) was always
+        // silently getting the weaker RTFD capture, purely because RTFD
+        // used to be checked first regardless of which one actually
+        // preserved more of the original. Trivial/plain HTML (no table,
+        // image, or formatting worth keeping) still defers to RTFD when
+        // RTFD is available — RTFD is the richer signal for plain rich
+        // text documents that never had real HTML behind them.
+        if captureRichText, !htmlIsSubstantial, let rtfdData = pb.data(forType: .rtfd) {
             let fallback = basicItem(from: pb)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
@@ -89,25 +176,15 @@ extension ClipboardManager {
                         }
                     } else if let fallback {
                         self.addCaptured(fallback, sidecar: sidecarSnapshot)
+                    } else {
+                        CopyFeedbackPanel.shared.show()
                     }
                 }
             }
             return
         }
 
-        let htmlTypes: [NSPasteboard.PasteboardType] = [
-            .init("public.html"),
-            .init("Apple HTML pasteboard type")
-        ]
-        for type in htmlTypes {
-            guard let htmlData = pb.data(forType: type) else { continue }
-            let html: String? = String(data: htmlData, encoding: .utf8)
-                ?? String(data: htmlData, encoding: .utf16)
-                ?? String(data: htmlData, encoding: .utf16BigEndian)
-                ?? String(data: htmlData, encoding: .utf16LittleEndian)
-                ?? String(data: htmlData, encoding: .isoLatin1)
-                ?? String(data: htmlData, encoding: .ascii)
-            guard let html, !html.isEmpty else { continue }
+        if let (_, htmlData, html) = htmlCandidate {
             let fallback = basicItem(from: pb)
             if case .image = fallback?.content, Self.isImageOnlyHTML(html) {
                 if let fallback {
@@ -119,7 +196,7 @@ extension ClipboardManager {
             }
             let pasteboardPlain = pb.string(forType: .string)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let htmlMustSurvive = Self.htmlContainsTable(html) || Self.htmlContainsImage(html)
+            let htmlMustSurvive = htmlIsSubstantial
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
                 let plain = Self.plainText(fromHTML: htmlData)?
@@ -135,6 +212,8 @@ extension ClipboardManager {
                         }
                     } else if let fallback {
                         self.addCaptured(fallback, sidecar: sidecarSnapshot)
+                    } else {
+                        CopyFeedbackPanel.shared.show()
                     }
                 }
             }
@@ -173,13 +252,17 @@ extension ClipboardManager {
                         }
                     } else if let fallback {
                         self.addCaptured(fallback, sidecar: sidecarSnapshot)
+                    } else {
+                        CopyFeedbackPanel.shared.show()
                     }
                 }
             }
             return
         }
 
-        if let str = pb.string(forType: .string), !str.isEmpty {
+        // Same whitespace-only guard as basicItem's identical check below —
+        // see its comment for why this can't just be !str.isEmpty.
+        if let str = pb.string(forType: .string), !str.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let sidecar = sidecarSnapshot
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
@@ -203,9 +286,32 @@ extension ClipboardManager {
                 self?.addCaptured(item, sidecar: sidecarSnapshot)
             }
         } else if !(pb.types ?? []).isEmpty {
-
-            DispatchQueue.main.async {
-                AuthManager.shared.registerActionUsage(actionID: "fail.capture")
+            // Some apps (Mac Catalyst ones especially — measured directly
+            // against WhatsApp Desktop: ~200ms from the first pasteboard
+            // write to public.png actually appearing) write the pasteboard
+            // in stages under one changeCount generation. A poll landing in
+            // that window sees a genuinely incomplete write and correctly,
+            // at that instant, finds nothing decodable — but the full write
+            // finishes moments later. One retry after a delay comfortably
+            // past the measured worst case catches that instead of giving
+            // up off a single poll. Guarded by changeCount so a genuinely
+            // different copy landing in the meantime isn't mistaken for
+            // this one finishing.
+            let ccAtFailure = pb.changeCount
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self else { return }
+                let pb = NSPasteboard.general
+                guard pb.changeCount == ccAtFailure else { return }
+                if let retryItem = self.basicItem(from: pb) {
+                    DispatchQueue.main.async {
+                        self.addCaptured(retryItem, sidecar: sidecarSnapshot)
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        CopyFeedbackPanel.shared.show()
+                        AuthManager.shared.registerActionUsage(actionID: "fail.capture")
+                    }
+                }
             }
         }
     }
@@ -275,6 +381,17 @@ extension ClipboardManager {
         var excluded: Set<String> = [
             "public.utf8-plain-text", "public.plain-text",
             "public.utf16-external-plain-text", "NSStringPboardType",
+            // TIFF is never read back out of the sidecar by anything — the
+            // one place TIFF matters (image paste) writes it explicitly at
+            // the primary content step (see shouldAttachTiffFallback in
+            // ClipboardManager+Paste.swift), not from here. Left in, it's
+            // dead weight that rides along on every single paste: apps that
+            // offer TIFF (Mail, most raster-heavy senders) often make it
+            // the single biggest item on the pasteboard — one observed copy
+            // carried a 22MB TIFF next to a 2MB PNG of the same image —
+            // and `applySidecar` writes every surviving sidecar entry
+            // synchronously on every paste regardless of content type.
+            "public.tiff", "NSTIFFPboardType",
         ]
         switch content {
         case .richText(let attrStr, _):
@@ -289,9 +406,22 @@ extension ClipboardManager {
                                 "public.rtf", "NSRTFPboardType",
                                 "public.html", "Apple HTML pasteboard type"])
         case .html:
+            // Excludes HTML's own types only — the RTF/RTFD siblings MUST
+            // survive here. When a source offers both at once (Mail.app,
+            // every newsletter), the HTML holds the CSS but its <img> tags
+            // are just references the pasteboard doesn't carry, while the
+            // RTFD holds the actual image bytes as attachments. Dropping
+            // RTFD therefore throws every image away: the capture still
+            // previews perfectly, because the preview is a WKWebView that
+            // fetches those URLs off the network, but a target app that
+            // doesn't fetch remote images (Notes, Pages, most editors)
+            // pastes an empty box for every one of them. Keeping both lets
+            // the target pick — CSS where HTML is preferred, images where
+            // RTFD is, which is exactly what pasting from Mail directly
+            // does.
             excluded.formUnion(["public.html", "Apple HTML pasteboard type"])
         case .image(_, _, let dataType):
-            excluded.formUnion([dataType.rawValue, "public.tiff", "NSTIFFPboardType"])
+            excluded.formUnion([dataType.rawValue])
         case .svg:
             excluded.formUnion(["public.svg-image", "com.adobe.illustrator.svg", "org.w3.svg"])
         case .file, .files:
@@ -304,7 +434,15 @@ extension ClipboardManager {
     }
 
     func basicItem(from pb: NSPasteboard) -> ClipboardItem? {
-        if let str = pb.string(forType: .string), !str.isEmpty {
+        // Trimmed before the emptiness check, not raw — a source that
+        // writes a single space or newline as its plain-text fallback (Google
+        // Slides does this on a shape/group selection: the whole pasteboard
+        // is genuinely empty content dressed up as one whitespace byte)
+        // used to pass `!str.isEmpty` and get captured as a real history
+        // entry with nothing in it. Untrimmed `str` is still what gets
+        // stored below — only the gate changes, so real content that
+        // happens to start/end with whitespace is untouched.
+        if let str = pb.string(forType: .string), !str.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return ClipboardItem(content: .text(str))
         }
 
@@ -319,6 +457,38 @@ extension ClipboardManager {
                !str.isEmpty {
                 return ClipboardItem(content: .svg(str))
             }
+        }
+
+        // Mac Catalyst apps (WhatsApp Desktop among them) sometimes write a
+        // UIImage frozen with NSKeyedArchiver instead of real image bytes —
+        // "com.apple.uikit.image" is a binary-plist encoding of a UIKit
+        // object graph, not a file in any format a decoder could open.
+        // Confirmed live against a real WhatsApp copy: the archive's
+        // "UIImageData" key references a $objects entry that IS the raw
+        // image bytes (a PNG in the observed case) — reading that plist
+        // entry directly recovers the real picture without needing UIKit
+        // itself. This also tends to land first in a Catalyst app's staged
+        // pasteboard write, before public.png/heic/jpeg appear moments
+        // later, so this check running early can succeed sooner than
+        // waiting for those.
+        if let extracted = Self.imageFromUIKitArchive(pb) {
+            return ClipboardItem(content: extracted)
+        }
+
+        // WebP isn't decodable via plain NSImage(data:) — AppKit has no native
+        // decoder for it — so it needs its own check ahead of the loop below,
+        // using the same WebPDecoder the rest of the app already relies on
+        // (see ImageService.decodeWebP). Without this, a WebP clipboard write
+        // (WhatsApp Desktop copies images as WebP) falls through every image
+        // check below, then even the generic NSImage(pasteboard:) fallback
+        // fails for the same reason, and the whole capture degrades to
+        // .blob — shown in the UI as "Private" with a lock icon, which is
+        // not a privacy protection here, just a failed image decode.
+        if let data = pb.data(forType: ImageService.webpPasteboardType),
+           let img = ImageService.decodeWebP(data: data),
+           let content = ClipboardContent.imageContent(rawData: data, dataType: ImageService.webpPasteboardType,
+                                                        fallback: img) {
+            return ClipboardItem(content: content)
         }
 
         let imageTypes: [NSPasteboard.PasteboardType] = [
@@ -346,17 +516,61 @@ extension ClipboardManager {
             }
         }
 
-        var blobMap: [String: Data] = [:]
-        for t in pb.types ?? [] {
-            if let data = pb.data(forType: t), !data.isEmpty, data.count < Self.maxDataBytes {
-                blobMap[t.rawValue] = data
+        // Last resort before giving up on this being an image at all: ask
+        // ImageIO directly, format-agnostic, instead of only ever checking
+        // the specific UTIs enumerated above. This is what actually catches
+        // "some format we didn't think to list" (ICO, ICNS, RAW variants,
+        // whatever a given app happens to write) rather than requiring a
+        // new hardcoded case every time one more app surprises us the way
+        // WebP did — decoding it once here beats enumerating formats forever.
+        for type in pb.types ?? [] {
+            guard let data = pb.data(forType: type), !data.isEmpty else { continue }
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  CGImageSourceGetCount(source) > 0,
+                  let cg = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
+            let img = NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+            if let content = ClipboardContent.imageContent(rawData: data, dataType: type, fallback: img) {
+                return ClipboardItem(content: content)
             }
         }
-        if !blobMap.isEmpty {
-            return ClipboardItem(content: .blob(blobMap))
-        }
 
+        // Deliberately not falling back to .blob anymore: an entry showing
+        // up in history labeled "Private" with nothing behind it was never
+        // useful, just clutter. The caller shows brief cursor feedback
+        // instead of capturing anything here. .blob stays a real
+        // ClipboardContent case for paste-back on any items a user already
+        // has saved from before this changed.
         return nil
+    }
+
+    /// Recovers a real image from a Mac Catalyst app's frozen UIImage
+    /// object on the pasteboard, without linking UIKit. NSKeyedArchiver
+    /// plists reference shared objects via `CFKeyedArchiverUID`, a private
+    /// class not exposed through public API or KVC — its numeric index is
+    /// only available via its debug description ("...{value = N}"), which
+    /// is why this parses that string instead of using the UID object
+    /// directly. Verified against real captured WhatsApp Desktop data: the
+    /// dictionary holding "UIImageData" references an $objects entry that
+    /// is the actual image bytes (a PNG in every case observed), not
+    /// further archived state — reading it directly recovers the picture.
+    static func imageFromUIKitArchive(_ pb: NSPasteboard) -> ClipboardContent? {
+        guard let data = pb.data(forType: .init("com.apple.uikit.image")),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let objects = plist["$objects"] as? [Any],
+              let imgDict = objects.compactMap({ $0 as? [String: Any] }).first(where: { $0["UIImageData"] != nil }),
+              let uid = imgDict["UIImageData"],
+              let match = "\(uid)".range(of: #"value = (\d+)"#, options: .regularExpression),
+              let index = Int("\(uid)"[match].replacingOccurrences(of: "value = ", with: "")),
+              objects.indices.contains(index),
+              let imgData = objects[index] as? Data,
+              let img = NSImage(data: imgData)
+        else { return nil }
+        // Every case observed so far embeds a PNG, but tag by the actual
+        // magic bytes rather than assume — this only affects which UTI the
+        // recovered image is declared as, not whether it decoded.
+        let isJPEG = imgData.starts(with: [0xFF, 0xD8, 0xFF])
+        let dataType = NSPasteboard.PasteboardType(isJPEG ? "public.jpeg" : "public.png")
+        return ClipboardContent.imageContent(rawData: imgData, dataType: dataType, fallback: img)
     }
 
     func fileURLs(from pasteboard: NSPasteboard) -> [URL] {
@@ -455,9 +669,15 @@ extension ClipboardManager {
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             let existing = resolved.filter { FileManager.default.fileExists(atPath: $0.path) }
-            guard !existing.isEmpty else { return }
+            guard !existing.isEmpty else {
+                CopyFeedbackPanel.shared.show()
+                return
+            }
             let snapshots = FileSnapshotStore.snapshot(existing)
-            guard !snapshots.isEmpty else { return }
+            guard !snapshots.isEmpty else {
+                CopyFeedbackPanel.shared.show()
+                return
+            }
             self.addItem(ClipboardItem(
                 content: snapshots.count == 1 ? .file(snapshots[0]) : .files(snapshots)))
         }
@@ -518,12 +738,53 @@ extension ClipboardManager {
         return found
     }
 
+    static let htmlPasteboardTypes: [NSPasteboard.PasteboardType] = [
+        .init("public.html"),
+        .init("Apple HTML pasteboard type")
+    ]
+
+    /// The one place that decodes `public.html` off a pasteboard — shared by
+    /// the substantial-HTML-vs-RTFD priority check and the actual HTML
+    /// capture path below, so there's exactly one multi-encoding fallback
+    /// list to maintain, not two copies that could drift apart.
+    static func readHTML(from pb: NSPasteboard) -> (type: NSPasteboard.PasteboardType, data: Data, html: String)? {
+        for type in htmlPasteboardTypes {
+            guard let htmlData = pb.data(forType: type) else { continue }
+            let html: String? = String(data: htmlData, encoding: .utf8)
+                ?? String(data: htmlData, encoding: .utf16)
+                ?? String(data: htmlData, encoding: .utf16BigEndian)
+                ?? String(data: htmlData, encoding: .utf16LittleEndian)
+                ?? String(data: htmlData, encoding: .isoLatin1)
+                ?? String(data: htmlData, encoding: .ascii)
+            guard let html, !html.isEmpty else { continue }
+            return (type, htmlData, html)
+        }
+        return nil
+    }
+
     static func htmlContainsTable(_ html: String) -> Bool {
         html.range(of: "<table", options: .caseInsensitive) != nil
     }
 
     static func htmlContainsImage(_ html: String) -> Bool {
         html.range(of: "<img", options: .caseInsensitive) != nil
+    }
+
+    /// Bold, italic, links, colors, headings, lists — anything the plain-
+    /// text comparison right above this can't see, because none of it
+    /// changes the plain-text characters, only how they look. Without this,
+    /// copying e.g. a paragraph with a couple of bold words downgrades
+    /// silently to plain .text (same characters either way, so the
+    /// pasteboardPlain == plain check passes) and every bit of that
+    /// formatting is gone on paste — indistinguishable from the user having
+    /// turned "paste plain text by default" on, which they never touched.
+    static func htmlContainsInlineFormatting(_ html: String) -> Bool {
+        let tags = ["<b>", "<b ", "<strong", "<i>", "<i ", "<em>", "<em ",
+                    "<u>", "<u ", "<a ", "<h1", "<h2", "<h3", "<h4", "<h5", "<h6",
+                    "<ul", "<ol", "<li", "<blockquote", "<mark", "<font", "style=",
+                    "<code", "<pre", "<s>", "<s ", "<strike", "<del", "<sub", "<sup"]
+        let lower = html.lowercased()
+        return tags.contains { lower.contains($0) }
     }
 
     static func plainText(fromHTML data: Data) -> String? {
@@ -570,7 +831,64 @@ extension ClipboardManager {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Record a copy macOS never let us read as a visible, flagged ring
+    /// entry instead of dropping it silently. The real bytes are not ours
+    /// to store (that is the whole reason this path exists), so the entry
+    /// carries only a label plus the pasteboard change count that was
+    /// current when it failed — enough for the paste path to prove, later,
+    /// whether that content is still the live pasteboard content.
+    ///
+    /// Deliberately does NOT route through addItem: that bumps
+    /// captureAttemptGeneration, which is exactly the signal the 0.7s
+    /// backstop in pollClipboard uses to decide a capture failed. Feeding
+    /// this insert through it would make a failure look like a success.
+    func addUncapturedPlaceholder(reason: String, changeCount: Int) {
+        guard uncapturedFallbackEnabled else { return }
+        var item = ClipboardItem(content: .text(reason))
+        item.isUncaptured = true
+        item.uncapturedChangeCount = changeCount
+        if let app = NSWorkspace.shared.frontmostApplication {
+            item.sourceAppName  = app.localizedName
+            item.sourceBundleID = app.bundleIdentifier
+        }
+        // Only ever one live placeholder: the system pasteboard holds a
+        // single slot, so at most one uncaptured copy can still be
+        // pastable at any moment. Older ones are already unreachable.
+        items.removeAll { $0.isUncaptured }
+        items.insert(item, at: 0)
+        selectedIndex = 0
+        uncapturedPlaceholderChangeCount = changeCount
+    }
+
+    /// Drop the uncaptured placeholder as soon as the pasteboard moves past
+    /// the copy it stands for.
+    ///
+    /// The entry owns no content — it is only a pointer at whatever is live
+    /// on the system pasteboard, and for the cases that produce it (promised
+    /// data: an undownloaded Mail attachment, some WhatsApp images) there are
+    /// no bytes for anyone to keep. macOS drops the source app's promise the
+    /// instant another copy takes ownership, so at that moment the content is
+    /// unreachable by every app on the machine, Clipen included. An entry
+    /// that can never paste again is worse than no entry, so it is removed
+    /// rather than left to fail later.
+    func purgeUncapturedPlaceholderIfSuperseded() {
+        guard let stamped = uncapturedPlaceholderChangeCount else { return }
+        guard stamped != NSPasteboard.general.changeCount else { return }
+        uncapturedPlaceholderChangeCount = nil
+        guard items.contains(where: { $0.isUncaptured }) else { return }
+        let wasSelectedID = displayItems.indices.contains(selectedIndex)
+            ? displayItems[selectedIndex].id : nil
+        items.removeAll { $0.isUncaptured }
+        if let wasSelectedID,
+           let idx = displayItems.firstIndex(where: { $0.id == wasSelectedID }) {
+            selectedIndex = idx
+        } else {
+            selectedIndex = 0
+        }
+    }
+
     func addItem(_ item: ClipboardItem) {
+        captureAttemptGeneration &+= 1
         if let first = items.first(where: { !$0.isPinned }),
            item.isDuplicate(of: first) { return }
 
@@ -590,17 +908,21 @@ extension ClipboardManager {
 
         if case .text(let newText) = item.content {
             var mutableItem = item
-            if let (badge, detail) = computeDiffBadge(newText: newText, against: items) {
+            if let badge = computeDiffBadge(newText: newText, against: items) {
                 mutableItem.diffBadge = badge
-                mutableItem.diffDetail = detail
             }
             items.insert(mutableItem, at: 0)
         } else {
             items.insert(item, at: 0)
         }
 
-        let unpinned = items.indices.filter { !items[$0].isPinned }
-        if unpinned.count > maxItems, let oldest = unpinned.last {
+        // Items in a remember-forever collection are excluded here, same
+        // as pinned items — never deleted by ring trimming. Unlike
+        // pinning, they still eventually stop appearing in "All" once
+        // they fall outside the ring window (handled in displayItems),
+        // but the item itself and its files are never removed.
+        let trimmable = items.indices.filter { !items[$0].isPinned && !isRememberProtected(items[$0]) }
+        if trimmable.count > maxItems, let oldest = trimmable.last {
             evictFileSnapshots(for: items[oldest])
             items.remove(at: oldest)
             markBlobPurgeNeeded()
@@ -672,39 +994,18 @@ extension ClipboardManager {
 
         // Warm the row thumbnail here, off-main, so materialising an image
         // row mid-scroll is a cache hit instead of a synchronous decode.
-        if case .image(_, let data, _) = content,
+        // Resized from the image capture already decoded (ringThumbnail, at
+        // capture time) rather than re-run through ImageIO on the raw
+        // compressed bytes a second time — that redecode is where the cost
+        // actually was, especially for alpha-heavy screenshots. See
+        // resizedThumbnail's doc comment for the measurement.
+        if case .image(let decodedImage, _, _) = content,
            ItemThumbnailCache.shared.cachedDataThumbnail(key: item.id.uuidString) == nil,
-           let thumb = ItemThumbnailCache.decodeDataThumbnail(data: data) {
+           let thumb = ItemThumbnailCache.resizedThumbnail(from: decodedImage, maxPixel: 360) {
             ItemThumbnailCache.shared.storeDataThumbnail(thumb, key: item.id.uuidString)
         }
 
         guard let plainText = content.plainText, !plainText.isEmpty else { return }
-
-        let cacheKey = TextInsightService.cacheKey(id: item.id, text: plainText)
-
-        if TextInsightService.shared.cached(forKey: cacheKey) == nil {
-            let result = TextInsightExtractor.computeInsights(in: plainText)
-            TextInsightService.shared.store(result, forKey: cacheKey)
-        }
-
-        if TextInsightService.shared.cachedLinks(forKey: cacheKey) == nil {
-            let links: [ExtractedLink]
-            switch content {
-            case .html(let html, _):
-                links = LinkExtractor.links(fromHTML: html)
-            case .richText(let attr, _):
-                links = LinkExtractor.links(from: attr)
-            case .rtfd(let data, _):
-                if let attr = NSAttributedString(rtfd: data, documentAttributes: nil) {
-                    links = LinkExtractor.links(from: attr)
-                } else {
-                    links = LinkExtractor.links(fromPlainText: plainText)
-                }
-            default:
-                links = LinkExtractor.links(fromPlainText: plainText)
-            }
-            TextInsightService.shared.storeLinks(links, forKey: cacheKey)
-        }
 
         let language: String? = {
             switch item.detectedType {
@@ -749,9 +1050,7 @@ extension ClipboardManager {
         }.resume()
     }
 
-    private static let maxDiffDetailItems = 8
-
-    func computeDiffBadge(newText: String, against existing: [ClipboardItem]) -> (badge: String, detail: DiffDetail)? {
+    func computeDiffBadge(newText: String, against existing: [ClipboardItem]) -> String? {
         guard newText.count <= Self.maxDiffBadgeTextLength else { return nil }
         let newLines = newText.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -764,7 +1063,7 @@ extension ClipboardManager {
         return wordDiffBadge(newText: newText, against: existing)
     }
 
-    private func lineDiffBadge(newLines: [String], against existing: [ClipboardItem]) -> (badge: String, detail: DiffDetail)? {
+    private func lineDiffBadge(newLines: [String], against existing: [ClipboardItem]) -> String? {
         let newSet = Set(newLines)
 
         for (i, item) in existing.prefix(10).enumerated() {
@@ -790,16 +1089,12 @@ extension ClipboardManager {
             var parts: [String] = []
             if !addedLines.isEmpty   { parts.append("+\(addedLines.count)") }
             if !removedLines.isEmpty { parts.append("-\(removedLines.count)") }
-            let badge = parts.joined(separator: " ") + " from #\(rank)"
-            let detail = DiffDetail(added: Array(addedLines.prefix(Self.maxDiffDetailItems)),
-                                    removed: Array(removedLines.prefix(Self.maxDiffDetailItems)),
-                                    fromRank: rank)
-            return (badge, detail)
+            return parts.joined(separator: " ") + " from #\(rank)"
         }
         return nil
     }
 
-    private func wordDiffBadge(newText: String, against existing: [ClipboardItem]) -> (badge: String, detail: DiffDetail)? {
+    private func wordDiffBadge(newText: String, against existing: [ClipboardItem]) -> String? {
         let newWords = newText.split(whereSeparator: { $0.isWhitespace }).map(String.init)
         guard newWords.count >= 2 else { return nil }
         let newSet = Set(newWords.map { $0.lowercased() })
@@ -829,13 +1124,218 @@ extension ClipboardManager {
             var parts: [String] = []
             if !addedWords.isEmpty   { parts.append("+" + addedWords.joined(separator: " ")) }
             if !removedWords.isEmpty { parts.append("-" + removedWords.joined(separator: " ")) }
-            let badge = parts.joined(separator: " ") + " from #\(rank)"
-            let detail = DiffDetail(added: Array(addedWords.prefix(Self.maxDiffDetailItems)),
-                                    removed: Array(removedWords.prefix(Self.maxDiffDetailItems)),
-                                    fromRank: rank)
-            return (badge, detail)
+            return parts.joined(separator: " ") + " from #\(rank)"
         }
         return nil
+    }
+
+    // MARK: - Automatic screenshot capture
+
+    /// Where macOS itself saves screenshots — user-configurable via the
+    /// screenshot toolbar (Cmd+Shift+5, Options, Save to), stored under the
+    /// key "location" in the com.apple.screencapture defaults domain.
+    /// Reading that, rather than hardcoding ~/Desktop, is what makes this
+    /// work for anyone who has changed the save folder; ~/Desktop is only
+    /// the fallback macOS itself uses when that key was never set.
+    static func screenshotSaveDirectory() -> URL {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        task.arguments = ["read", "com.apple.screencapture", "location"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let path = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let path, !path.isEmpty {
+                let expanded = (path as NSString).expandingTildeInPath
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir), isDir.boolValue {
+                    return URL(fileURLWithPath: expanded)
+                }
+            }
+        } catch {
+            // Falls through to the Desktop default below.
+        }
+        return FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
+    }
+
+    /// Matches both the current macOS naming ("Screenshot" prefix) and the
+    /// pre-Big Sur one ("Screen Shot" prefix) some users still have their
+    /// Mac set to via language/region settings, across every format the
+    /// screenshot tool can be configured to save as — PNG by default, but
+    /// JPEG, TIFF, PDF and HEIC are all valid via the screencapture "type"
+    /// default.
+    static func isScreenshotFilename(_ name: String) -> Bool {
+        guard name.hasPrefix("Screenshot ") || name.hasPrefix("Screen Shot ") else { return false }
+        let ext = (name as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "tiff", "tif", "heic", "pdf"].contains(ext)
+    }
+
+    /// Read one key out of the com.apple.screencapture domain.
+    private static func screenCaptureDefault(_ key: String) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        task.arguments = ["read", "com.apple.screencapture", key]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        guard (try? task.run()) != nil else { return nil }
+        task.waitUntilExit()
+        guard task.terminationStatus == 0 else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func setScreenCaptureThumbnail(_ enabled: Bool) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        task.arguments = ["write", "com.apple.screencapture", "show-thumbnail",
+                          "-bool", enabled ? "true" : "false"]
+        try? task.run()
+        task.waitUntilExit()
+    }
+
+    /// Everything that must happen at the moment the user turns the toggle
+    /// ON — deliberately not at launch, so Clipen never stacks this prompt
+    /// on top of its Accessibility one.
+    ///
+    /// Two separate obstacles, both of which silently produce "nothing
+    /// happens" if left alone:
+    ///
+    /// 1. macOS gates the screenshot folder behind Files-and-Folders TCC
+    ///    even for non-sandboxed apps. The prompt only appears on a real
+    ///    read attempt, so one is made here, on a background thread,
+    ///    explicitly at opt-in time.
+    /// 2. The floating screenshot thumbnail. While it is showing, macOS has
+    ///    NOT yet written the file — and if the user drags that thumbnail
+    ///    straight into another app, the file is never written at all.
+    ///    Nothing lands on disk, so no folder watcher of any kind can see
+    ///    it. Turning the thumbnail off makes every screenshot hit disk
+    ///    immediately, which is what makes this work every time rather than
+    ///    only when the user waits for the preview to fade. The previous
+    ///    value is remembered so switching the toggle back off restores
+    ///    whatever the user had before Clipen touched it.
+    func enableScreenshotCaptureWithPermission() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+
+            let priorThumbnail = Self.screenCaptureDefault("show-thumbnail") ?? "1"
+            UserDefaults.standard.set(priorThumbnail, forKey: "clipen.priorScreenshotThumbnail")
+            Self.setScreenCaptureThumbnail(false)
+
+            let dir = Self.screenshotSaveDirectory()
+            // The read itself is what raises the TCC prompt.
+            let readable = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) != nil
+
+            DispatchQueue.main.async {
+                if readable {
+                    self.startScreenshotWatcher()
+                } else {
+                    CopyFeedbackPanel.shared.show(
+                        message: String(localized: "Allow Clipen to access your screenshot folder in System Settings"))
+                }
+            }
+        }
+    }
+
+    /// Undo only what we actually changed — restores the thumbnail to
+    /// whatever it was before, rather than blindly turning it back on.
+    func disableScreenshotCapture() {
+        stopScreenshotWatcher()
+        let prior = UserDefaults.standard.string(forKey: "clipen.priorScreenshotThumbnail")
+        // Absent or "1"/"true" both mean it was on; anything else means the
+        // user already had it off and we leave it that way.
+        let restoreOn = prior == nil || prior == "1" || prior?.lowercased() == "true"
+        DispatchQueue.global(qos: .utility).async {
+            Self.setScreenCaptureThumbnail(restoreOn)
+        }
+    }
+
+    func startScreenshotWatcher() {
+        stopScreenshotWatcher()
+
+        let dir = Self.screenshotSaveDirectory()
+        let existing = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        // Seed with whatever's already there so only screenshots taken
+        // AFTER the watcher starts get copied — not every old one already
+        // sitting in the folder.
+        seenScreenshotPaths = Set(existing.map { dir.appendingPathComponent($0).path })
+
+        let fd = open(dir.path, O_EVTONLY)
+        guard fd >= 0 else {
+            NSLog("[Clipen] screenshot watcher: couldn't open %@ (errno %d)", dir.path, errno)
+            return
+        }
+        screenshotWatcherFD = fd
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: .write, queue: DispatchQueue.global(qos: .utility))
+        source.setEventHandler { [weak self] in
+            self?.scanForNewScreenshots(in: dir)
+        }
+        source.setCancelHandler { [weak self] in
+            if let fd = self?.screenshotWatcherFD, fd >= 0 { close(fd) }
+            self?.screenshotWatcherFD = -1
+        }
+        source.resume()
+        screenshotWatcherSource = source
+    }
+
+    func stopScreenshotWatcher() {
+        screenshotWatcherSource?.cancel()
+        screenshotWatcherSource = nil
+        seenScreenshotPaths.removeAll()
+    }
+
+    private func scanForNewScreenshots(in dir: URL) {
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {
+            // Almost always TCC: macOS protects Desktop/Documents/Downloads
+            // for non-sandboxed apps, and a denied read fails silently rather
+            // than throwing anything actionable. Logged so this is
+            // diagnosable rather than looking like the feature "just does
+            // nothing".
+            NSLog("[Clipen] screenshot watcher: %@ unreadable — likely missing Files-and-Folders permission", dir.path)
+            return
+        }
+        for name in entries where Self.isScreenshotFilename(name) {
+            let path = dir.appendingPathComponent(name).path
+            guard !seenScreenshotPaths.contains(path) else { continue }
+            seenScreenshotPaths.insert(path)
+            // A short settle delay: the directory write event can fire
+            // while the screenshot tool is still flushing the file to disk,
+            // especially for a large or multi-display capture — reading it
+            // too early risks a truncated image. Re-checking the file size
+            // is stable across a short wait is cheap insurance against that.
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                self?.pushScreenshotToClipboard(at: path)
+            }
+        }
+    }
+
+    private func pushScreenshotToClipboard(at path: String) {
+        let url = URL(fileURLWithPath: path)
+        guard let sizeBefore = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int else { return }
+        Thread.sleep(forTimeInterval: 0.15)
+        let sizeAfter = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? Int
+        guard sizeAfter == sizeBefore, sizeAfter ?? 0 > 0 else { return } // still being written — the next directory event will retry it
+        guard let image = NSImage(contentsOf: url) else { return }
+        DispatchQueue.main.async {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            // Deliberately NOT markPasteboardWriteAsOwn() — that flag exists
+            // to make the NEXT poll ignore a write Clipen made on the
+            // user's behalf when pasting FROM history, so that re-pasting an
+            // item never re-captures it as "new". A screenshot is exactly
+            // the opposite case: it genuinely IS new content the user just
+            // created, and skipping capture here would defeat the entire
+            // point of this feature.
+            pb.writeObjects([image])
+        }
     }
 
 }
