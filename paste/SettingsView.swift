@@ -1352,17 +1352,19 @@ struct ClipenSettingsView: View {
                 .padding(.horizontal, 14).padding(.vertical, 12)
                 .frame(maxHeight: .infinity)
 
-                rowDivider(leading: 40)
+                if DeviceIdentity.isDeveloperDevice {
+                    rowDivider(leading: 40)
 
-                HStack(spacing: 10) {
-                    Image(systemName: "testtube.2").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
-                    Text("Beta updates").font(.system(size: 13)).foregroundColor(.textPri)
-                    Spacer()
-                    Toggle("", isOn: $betaUpdatesEnabled)
-                        .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                    HStack(spacing: 10) {
+                        Image(systemName: "testtube.2").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                        Text("Beta updates").font(.system(size: 13)).foregroundColor(.textPri)
+                        Spacer()
+                        Toggle("", isOn: $betaUpdatesEnabled)
+                            .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .frame(maxHeight: .infinity)
                 }
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                .frame(maxHeight: .infinity)
 
                 rowDivider(leading: 40)
 

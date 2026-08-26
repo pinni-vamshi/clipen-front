@@ -12,6 +12,15 @@ enum DeviceIdentity {
         return (value.takeRetainedValue() as? String) ?? "unknown"
     }
 
+    /// Gates developer-only Settings UI (currently just the Beta updates
+    /// toggle) to this one machine. A hardcoded installKey rather than a
+    /// server-side flag on purpose — this needs to keep working even if
+    /// the backend is unreachable, and it's a UI-visibility gate, not a
+    /// security boundary.
+    static var isDeveloperDevice: Bool {
+        installKey == "7D6AAA64-A175-5865-939D-B9B519B5B399"
+    }
+
     /// clipen.app has no DNS record yet (tracked separately) — points at
     /// the Lovable-hosted domain directly until that's fixed. hardware_uuid
     /// is required: the Paddle checkout forwards it into custom_data, and
