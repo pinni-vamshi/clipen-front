@@ -155,28 +155,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
-    /// Blocks quit only long enough for any in-flight local-model generation
-    /// to actually finish, then lets it proceed.
-    ///
-    /// Without this, quitting mid-generation is a live SIGSEGV: `terminate:`
-    /// leads straight into `exit()`, whose static-destructor sequence tears
-    /// down MLX's global scheduler and compiler cache on the main thread
-    /// while a background thread can still be reading those same globals
-    /// inside `TokenIterator`. Observed directly — a crash landed exactly
-    /// one second after a `GATE: entered` log line, in
-    /// `mlx::core::detail::CompilerCache::find`, `far: 0x0`.
-    ///
-    /// The common case (nothing running) resolves in under a millisecond;
-    /// 2s is a ceiling in case a generation is stuck, so quitting is never
-    /// blocked indefinitely.
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Task {
-            await LocalModelRuntime.waitUntilIdle(timeoutSeconds: 2.0)
-            await MainActor.run { NSApp.reply(toApplicationShouldTerminate: true) }
-        }
-        return .terminateLater
-    }
-
     func applicationWillTerminate(_ notification: Notification) {
         AuthManager.shared.flushPendingDailyUsage()
         pendingUpdateInstall?()

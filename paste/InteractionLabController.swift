@@ -50,10 +50,6 @@ final class InteractionLabController: ObservableObject {
     @Published var activeTransform: Int? = nil
     @Published var transformLabels = ["Capitalize", "Small Case", "Base64"]
 
-    @Published var similarVisible = false
-    @Published var activeSimilar: Int? = nil
-    @Published var similarLabels = ["Similar note 1", "Similar note 2", "Similar note 3"]
-
     @Published var resultText: String? = nil
     @Published var instruction: LocalizedStringKey? = nil
 
@@ -131,9 +127,6 @@ final class InteractionLabController: ObservableObject {
         transformVisible = false
         activeTransform = nil
         transformLabels = ["Capitalize", "Small Case", "Base64"]
-        similarVisible = false
-        activeSimilar = nil
-        similarLabels = ["Similar note 1", "Similar note 2", "Similar note 3"]
         resultText = nil
         instruction = nil
         pasteTapTarget = 0
@@ -206,7 +199,6 @@ final class InteractionLabController: ObservableObject {
         case .spacePreview:  try await runSpacePreview()
         case .pinPreview:    try await runPinPreview()
         case .transform:     try await runTransform()
-        case .similar:       try await runSimilar()
         case .moveToFront:   try await runMoveToFront()
         case .delete:        try await runDelete()
         case .reverseCycle:  try await runReverseCycle()
@@ -544,40 +536,6 @@ final class InteractionLabController: ObservableObject {
         withAnimation(.easeOut(duration: 0.25)) { transformVisible = false }
         hint(nil)
         finish("%@ applied → pasted", applied)
-    }
-
-    private func runSimilar() async throws {
-        stageKeys = [.cmd, .v, .r]
-        press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
-        await Self.nextRunLoopTurn()
-        try await pause(400)
-        try await tap(.v)
-        showPanel(true)
-        hint("Release ⌘ to paste")
-        try await pause(350)
-        try await tap(.v)
-        selectItem(1)
-        try await pause(400)
-        try await tap(.r)
-        withAnimation(.easeOut(duration: 0.25)) { similarVisible = true }
-        try await pause(500)
-        var current = 0
-        for i in 0..<2 {
-            try await tap(.r)
-            withAnimation(.easeOut(duration: 0.12)) { activeSimilar = i }
-            current = i
-            try await pause(450)
-        }
-        try await pause(400)
-        release(.cmd)
-        showPanel(false)
-        withAnimation(.easeOut(duration: 0.25)) { similarVisible = false }
-        hint(nil)
-        finish("Stepped through similar items — “%@” was the last one shown", similarLabels[current])
     }
 
     private func runMoveToFront() async throws {

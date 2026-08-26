@@ -316,11 +316,6 @@ extension ClipboardManager {
                 }
             }
 
-            if selectedToolID == "ai.translate" {
-                enterLanguagePickerMode(item: item)
-                return
-            }
-
             let isAsync  = ToolRegistry.isAsync(item: item, toolID: selectedToolID)
 
             if isAsync {

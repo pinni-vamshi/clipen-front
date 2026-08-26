@@ -67,58 +67,7 @@ enum TextTools {
                 .joined()
             return out == $0 ? nil : out
         },
-    ] + aiTools
-
-    private static let aiTools: [ClipboardTool] = [
-        makeAI("ai.proofread", icon: "checkmark.seal", label: "Proofread & Fix Grammar", group: "AI",
-               minLength: 4) { text in
-            await AIService.transform(
-                instructions: "You are a careful proofreader. Fix spelling, grammar, and punctuation in the given text WITHOUT changing its meaning, tone, or structure. This is a CORRECTION task: produce a corrected version of the SAME text, not a response, reply, or answer to it. Output ONLY the corrected text, no preamble.",
-                text: text
-            )
-        },
     ]
-
-    static let supportedTranslationLanguages: [(name: String, code: String)] = [
-        ("English", "en"), ("Spanish", "es"), ("French", "fr"), ("German", "de"),
-        ("Italian", "it"), ("Portuguese", "pt"), ("Dutch", "nl"), ("Russian", "ru"),
-        ("Chinese (Simplified)", "zh-Hans"), ("Japanese", "ja"), ("Korean", "ko"),
-        ("Arabic", "ar"), ("Hindi", "hi"), ("Turkish", "tr"), ("Vietnamese", "vi"),
-        ("Polish", "pl"), ("Swedish", "sv"), ("Thai", "th"), ("Indonesian", "id"),
-        ("Greek", "el"),
-    ]
-
-    private static func makeAI(
-        _ id: String,
-        icon: String,
-        label: String,
-        group: String,
-        minLength: Int,
-        apply: @escaping (String) async -> String?
-    ) -> ClipboardTool {
-        ClipboardTool(
-            id: id,
-            icon: icon,
-            label: label,
-            group: group,
-            preview: { item in
-                guard AIService.isModelAvailable(),
-                      let text = input(for: item), AIService.fits(text),
-                      text.count >= minLength else { return nil }
-                return label
-            },
-            runAsync: { item in
-                guard let text = input(for: item), AIService.fits(text) else { return nil }
-                guard let result = await apply(text) else {
-                    await MainActor.run {
-                        AuthManager.shared.registerActionUsage(actionID: "fail.\(id.replacingOccurrences(of: ".", with: "_"))")
-                    }
-                    return .status("Apple Intelligence couldn't process this.")
-                }
-                return .text(result)
-            }
-        )
-    }
 
     private static func isEditDenied(_ item: ClipboardItem) -> Bool {
         guard item.tags.contains(.markdown) else { return false }

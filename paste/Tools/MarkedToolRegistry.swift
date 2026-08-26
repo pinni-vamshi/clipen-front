@@ -179,13 +179,6 @@ enum MarkedToolRegistry {
                 let quoted = parts.map { "'" + $0.replacingOccurrences(of: "'", with: "''") + "'" }
                 return .text(quoted.joined(separator: ", "))
             }),
-        MarkedTool(id: "marked.ai-summarize", icon: "text.line.first.and.arrowtriangle.forward",
-            label: "Summarize All (Apple Intelligence)",
-            preview: { items in
-                guard AIService.isModelAvailable() else { return nil }
-                return "Summarize \(items.count) items into one paragraph"
-            },
-            run: { items in await MarkedToolService.summarizeAll(items) }),
     ]
 
     private static let imageTools: [MarkedTool] = [
@@ -246,13 +239,6 @@ enum MarkedToolRegistry {
         MarkedTool(id: "marked.file-bundle", icon: "folder", label: "Paste as File Bundle",
             preview: { "Materialise \($0.count) items as files, pasted together" },
             run: { items in await MarkedToolService.fileBundle(items) }),
-        MarkedTool(id: "marked.ai-summarize-mixed", icon: "text.line.first.and.arrowtriangle.forward",
-            label: "Summarize All (Apple Intelligence)",
-            preview: { items in
-                guard AIService.isModelAvailable() else { return nil }
-                return "Flatten \(items.count) items and summarize into one paragraph"
-            },
-            run: { items in await MarkedToolService.summarizeAll(items) }),
     ]
 }
 
@@ -530,28 +516,6 @@ enum MarkedToolService {
             return .status("Couldn't flatten the marked items to text.")
         }
         return .text(parts.joined(separator: "\n\n"))
-    }
-
-    static func summarizeAll(_ items: [ClipboardItem]) async -> TransformOutput? {
-        guard items.count >= 2 else { return nil }
-        let parts = await flattenToText(items)
-        guard !parts.isEmpty else {
-            AuthManager.shared.registerActionUsage(actionID: "fail.marked_merge_document")
-            return .status("Couldn't flatten the marked items to text.")
-        }
-        let combined = parts.joined(separator: "\n\n")
-        guard AIService.fits(combined) else {
-            AuthManager.shared.registerActionUsage(actionID: "fail.ai_summarize_too_long")
-            return .status("Combined text is too long to summarize at once.")
-        }
-        guard let summary = await AIService.transform(
-            instructions: "You are a concise summarizer. Summarize the given text (assembled from multiple clipboard items) in one clear paragraph, 3-6 sentences. Output ONLY the summary, no preamble.",
-            text: combined
-        ) else {
-            AuthManager.shared.registerActionUsage(actionID: "fail.ai_summarize")
-            return .status("Apple Intelligence couldn't summarize this.")
-        }
-        return .text(summary)
     }
 
     static func fileBundle(_ items: [ClipboardItem]) async -> TransformOutput? {

@@ -459,9 +459,6 @@ extension ClipboardManager {
         if inShareStage {
             updateSharePanel()
         }
-        if inSimilarStage {
-            updateSimilarPanel()
-        }
     }
 
     func applyCaseTransformForSelection(_ kind: CaseTransformKind) {
@@ -749,7 +746,6 @@ extension ClipboardManager {
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
         syncShareStageWithSelection()
-        syncSimilarPanelWithSelection()
     }
 
     private static let itemPreviewSyncDelay: TimeInterval = 0.07
@@ -1376,120 +1372,6 @@ extension ClipboardManager {
             let content: ClipboardContent = (urls.count == 1) ? .file(urls[0]) : .files(urls)
             let previewItem = ClipboardItem(content: content)
             itemPreviewPanel.show(for: previewItem, near: transformPanel.frame)
-        }
-    }
-
-    func enterLanguagePickerMode(item: ClipboardItem) {
-        languagePickerSourceItem     = item
-        languagePickerQuery          = ""
-        languagePickerSelectedIndex  = 0
-        inLanguagePickerMode         = true
-        flashStatus("Type to search · ↑↓ choose · ↵ translate · ⎋ cancel")
-    }
-
-    func exitLanguagePickerMode() {
-        inLanguagePickerMode        = false
-        languagePickerQuery         = ""
-        languagePickerSelectedIndex = 0
-        languagePickerSourceItem    = nil
-    }
-
-    func commitLanguagePickerTranslation() {
-        guard let item = languagePickerSourceItem else {
-            exitLanguagePickerMode()
-            return
-        }
-        let languages = languagePickerFilteredLanguages
-        guard languages.indices.contains(languagePickerSelectedIndex),
-              let text = TextTools.input(for: item), AIService.fits(text) else {
-            flashStatus("Nothing to translate.")
-            exitLanguagePickerMode()
-            return
-        }
-        let target = languages[languagePickerSelectedIndex]
-        TrackingService.shared.recordToolVariant(id: "ai.translate.\(target.code)")
-        exitLanguagePickerMode()
-        updateTransformPanelProcessing(true)
-        Task { [weak self] in
-            guard let self else { return }
-            let translated = await AIService.transform(
-                instructions: "You are a translator. Translate the given text to \(target.name). Output ONLY the translated text, no preamble, no explanation.",
-                text: text
-            )
-            let result: TransformOutput = translated.map { .text($0) }
-                ?? .status("Apple Intelligence couldn't translate this.")
-            if translated == nil {
-                AuthManager.shared.registerActionUsage(actionID: "fail.ai_translate")
-            }
-            await MainActor.run {
-                self.updateTransformPanelProcessing(false)
-                // Same stale-target risk as the marked-batch transform path in
-                // ClipboardManager+Paste.swift: exitLanguagePickerMode() already
-                // ran before this Task even started, so `inLanguagePickerMode`
-                // can't be used to detect staleness here — previewWindow.isVisible
-                // is the actual signal for "did the user dismiss (or otherwise
-                // move on) while this translation was still in flight."
-                guard self.previewWindow.isVisible else { return }
-                self.setSidePanelStage(.none)
-                self.previewWindow.hide()
-                self.markedItemIDs = []
-                self.handleTransformResult(result, restoring: item, toolID: "ai.translate")
-            }
-        }
-    }
-
-    func handleLanguagePickerKeyDown(key: Int64, event: CGEvent) -> Unmanaged<CGEvent>? {
-        switch key {
-        case 53:
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                self.exitLanguagePickerMode()
-                self.dismissPreview()
-            }
-            return nil
-        case 51:
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                if !self.languagePickerQuery.isEmpty { self.languagePickerQuery.removeLast() }
-                self.languagePickerSelectedIndex = 0
-            }
-            return nil
-        case 36, 76:
-            DispatchQueue.main.async { [weak self] in self?.commitLanguagePickerTranslation() }
-            return nil
-        case 126:
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let count = self.languagePickerFilteredLanguages.count
-                guard count > 0 else { return }
-                self.languagePickerSelectedIndex = (self.languagePickerSelectedIndex - 1 + count) % count
-            }
-            return nil
-        case 125:
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                let count = self.languagePickerFilteredLanguages.count
-                guard count > 0 else { return }
-                self.languagePickerSelectedIndex = (self.languagePickerSelectedIndex + 1) % count
-            }
-            return nil
-        default:
-            var length: Int = 0
-            var chars = [UniChar](repeating: 0, count: 4)
-            event.keyboardGetUnicodeString(maxStringLength: 4,
-                                           actualStringLength: &length,
-                                           unicodeString: &chars)
-            guard length > 0 else { return nil }
-            let typed = String(utf16CodeUnits: Array(chars.prefix(length)), count: length)
-            let filtered = typed.filter { $0.isLetter || $0 == " " }
-            if !filtered.isEmpty {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.languagePickerQuery += filtered
-                    self.languagePickerSelectedIndex = 0
-                }
-            }
-            return nil
         }
     }
 

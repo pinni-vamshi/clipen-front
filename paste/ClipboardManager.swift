@@ -391,7 +391,7 @@ class ClipboardManager: ObservableObject {
     }
 
     enum InteractionSound {
-        case cycle, preview, transform, moveFront, share, pin, mark, delete, category, denied, similar
+        case cycle, preview, transform, moveFront, share, pin, mark, delete, category, denied
 
         var frequency: Double {
             switch self {
@@ -405,7 +405,6 @@ class ClipboardManager: ObservableObject {
             case .delete:    return 523
             case .category:  return 587
             case .denied:    return 220
-            case .similar:   return 1175
             }
         }
     }
@@ -531,7 +530,6 @@ class ClipboardManager: ObservableObject {
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
     let sharePanel = SharePanel()
-    let similarPanel = SimilarPanel()
     let nudgeLessonPanel = NudgeLessonPanel()
     let fastPasteHintPanel = FastPasteHintPanel()
     @Published var hasAccessibilityPermission: Bool = AXIsProcessTrusted()
@@ -793,7 +791,6 @@ class ClipboardManager: ObservableObject {
     var historyLoadedCleanly = false
 
     var xTapHoldTimer: Timer?
-    var rTapHoldTimer: Timer?
     static let xHoldThreshold: TimeInterval = 0.35
 
     var escapeWillDismiss = false
@@ -857,19 +854,14 @@ class ClipboardManager: ObservableObject {
 
     @Published var isItemPreviewVisible = false
 
-    enum SidePanelStage: Equatable { case none, transform, share, similar }
+    enum SidePanelStage: Equatable { case none, transform, share }
     @Published private(set) var sidePanelStage: SidePanelStage = .none
 
     var inTransformStage: Bool { sidePanelStage == .transform }
     var inShareStage:     Bool { sidePanelStage == .share }
-    var inSimilarStage:   Bool { sidePanelStage == .similar }
 
     var transformIndex   = 0
     var transformDisplaysCache: [TransformDisplay] = []
-
-    var similarPanelItems: [ClipboardItem] = []
-    var similarPanelIndex = 0
-    var similarPanelSourceItemID: UUID? = nil
 
     func setSidePanelStage(_ new: SidePanelStage) {
         guard new != sidePanelStage else { return }
@@ -887,11 +879,6 @@ class ClipboardManager: ObservableObject {
             shareTargetItems   = []
             shareServicesCache = [:]
             shareIndex         = 0
-        case .similar:
-            similarPanel.hide()
-            similarPanelItems        = []
-            similarPanelIndex        = 0
-            similarPanelSourceItemID = nil
         case .none:
             break
         }
@@ -928,23 +915,6 @@ class ClipboardManager: ObservableObject {
     var pageRangeEffectiveSelection: Set<Int> {
         PageRangeParser.parse(pageRangeQuery, maxPage: pageRangePageCount)
             .union(pageRangeManualPages)
-    }
-
-    @Published var inLanguagePickerMode: Bool = false
-    @Published var languagePickerQuery: String = ""
-    @Published var languagePickerSelectedIndex: Int = 0
-    var languagePickerSourceItem: ClipboardItem?
-
-    var languagePickerFilteredLanguages: [(name: String, code: String)] {
-        var candidates = TextTools.supportedTranslationLanguages
-        if let item = languagePickerSourceItem,
-           let text = TextTools.input(for: item),
-           let detected = AIService.dominantLanguage(text) {
-            candidates = candidates.filter { $0.code != detected }
-        }
-        let q = languagePickerQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return candidates }
-        return candidates.filter { $0.name.lowercased().contains(q) }
     }
 
     let saveQueue = DispatchQueue(label: "com.clipen.history-save", qos: .utility)

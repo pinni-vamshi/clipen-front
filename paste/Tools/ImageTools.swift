@@ -123,29 +123,6 @@ enum ImageTools {
                     return .status("Couldn't find a clear subject to cut out.")
                 }
             }
-        ),
-        ClipboardTool(
-            id: "ai.describe-image",
-            icon: "text.below.photo",
-            label: "Describe Image",
-            group: "AI",
-            preview: { item in
-                guard AIService.isImageDescribeAvailable(),
-                      ImageService.imageInput(for: item) != nil else { return nil }
-                return "Generate a description (alt text) for this image"
-            },
-            runAsync: { item in
-                guard let input = ImageService.imageInput(for: item) else { return nil }
-                guard let cgImage = input.image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.image_decode") }
-                    return .status("Couldn't read this image.")
-                }
-                guard let description = await AIService.describeImage(cgImage) else {
-                    await MainActor.run { AuthManager.shared.registerActionUsage(actionID: "fail.ai_describe_image") }
-                    return .status("Apple Intelligence couldn't describe this image.")
-                }
-                return .text(description)
-            }
         )
     ]
 

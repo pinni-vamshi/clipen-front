@@ -478,20 +478,6 @@ extension ClipboardManager {
             self.originalFilePath = originalFilePath
         }
 
-        /// A single item's extractedFacts/worldKnowledge/relatedContext
-        /// shape has already changed once (and will likely change again as
-        /// these AI sections evolve) — with Swift's synthesized Decodable,
-        /// a shape mismatch on ANY one of those three fields throws and
-        /// takes the ENTIRE history array decode down with it, since
-        /// loadHistory decodes `[PersistedItem]` as one shot. That's what
-        /// happened going into this version: old-shape persisted data
-        /// (facts/links) failed against the new schema (entities), and the
-        /// whole manifest got quarantined as "corrupt" even though every
-        /// other field was completely fine. These three fields are
-        /// therefore decoded leniently — a shape mismatch drops just that
-        /// field (silently falls back to nil, same as if it were never
-        /// computed) instead of failing the whole item, and a failure on
-        /// this item must never fail every other item in the array.
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(UUID.self, forKey: .id)

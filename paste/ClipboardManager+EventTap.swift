@@ -275,9 +275,6 @@ extension ClipboardManager {
             if inPageRangeMode && previewWindow.isVisible {
                 return Unmanaged.passUnretained(event)
             }
-            if inLanguagePickerMode && previewWindow.isVisible {
-                return Unmanaged.passUnretained(event)
-            }
             if popupPinnedOpen && previewWindow.isVisible {
                 return Unmanaged.passUnretained(event)
             }
@@ -305,7 +302,6 @@ extension ClipboardManager {
             vTapHoldTimer?.invalidate();      vTapHoldTimer = nil
             firstOpenHoldTimer?.invalidate(); firstOpenHoldTimer = nil
             xTapHoldTimer?.invalidate();      xTapHoldTimer = nil
-            rTapHoldTimer?.invalidate();      rTapHoldTimer = nil
             bTapHoldTimer?.invalidate();      bTapHoldTimer = nil
             pTapHoldTimer?.invalidate();      pTapHoldTimer = nil
             sTapHoldTimer?.invalidate();      sTapHoldTimer = nil
@@ -338,13 +334,6 @@ extension ClipboardManager {
                 } else {
                     self.enterTransformStage()
                 }
-            }
-        }
-        if key == 15, let timer = rTapHoldTimer {
-            timer.invalidate()
-            rTapHoldTimer = nil
-            DispatchQueue.main.async { [weak self] in
-                self?.handleFindSimilarKey(backward: false)
             }
         }
         if key == 11, let timer = bTapHoldTimer {
@@ -402,7 +391,7 @@ extension ClipboardManager {
         let opt   = flags.contains(.maskAlternate)
         let ctrl  = flags.contains(.maskControl)
 
-        if previewWindow.isVisible && !inPageRangeMode && !inLanguagePickerMode {
+        if previewWindow.isVisible && !inPageRangeMode {
             resetAutoDismissTimer()
         }
 
@@ -412,10 +401,6 @@ extension ClipboardManager {
 
         if inPageRangeMode && !cmd {
             return handlePageRangeKeyDown(key: key, event: event)
-        }
-
-        if inLanguagePickerMode && !cmd {
-            return handleLanguagePickerKeyDown(key: key, event: event)
         }
 
         if key == 53 && previewWindow.isVisible {
@@ -643,73 +628,6 @@ extension ClipboardManager {
                 } else {
                     self?.cycleCategoryForward()
                 }
-            }
-            return nil
-        }
-
-        if key == 15 && previewWindow.isVisible && !isSearchActive
-           && !inTransformStage && !isInlineEditing && !opt {
-            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
-
-            // Shift+R always steps backward immediately — same as
-            // Shift+V bypassing V's hold-to-mark entirely below, direction
-            // isn't something you'd want gated behind a hold delay.
-            if shift {
-                DispatchQueue.main.async { [weak self] in
-                    self?.handleFindSimilarKey(backward: true)
-                }
-                return nil
-            }
-
-            // Once the carousel is open, a plain R is tap-or-hold: quick
-            // tap advances (handled on key-up below, mirroring V exactly),
-            // holding marks the currently-centered similar item instead —
-            // same gesture, same threshold, same mark primitive as V's
-            // hold-to-mark for the main list, just aimed at this panel's
-            // own cursor instead of `selectedIndex`.
-            if inSimilarStage {
-                rTapHoldTimer?.invalidate()
-                let pendingID: UUID? = similarPanelItems.indices.contains(similarPanelIndex)
-                    ? similarPanelItems[similarPanelIndex].id : nil
-                let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
-                    // Runs directly, no extra DispatchQueue.main.async hop —
-                    // the Timer itself already fires on the main run loop
-                    // (RunLoop.main.add below), so that hop only opened a
-                    // window where the key-up handler could see
-                    // rTapHoldTimer still non-nil (this closure hadn't
-                    // cleared it yet) and race in with its own
-                    // handleFindSimilarKey() call, advancing the panel to
-                    // the next item before this mark's own
-                    // updateSimilarPanel() ever painted. The mark itself
-                    // still landed — markedItemIDs is unaffected by any of
-                    // this — but the badge never appeared on the item you
-                    // were actually holding R on, only later if you
-                    // navigated back to it.
-                    guard let self else { return }
-                    self.rTapHoldTimer = nil
-                    guard let id = pendingID,
-                          self.items.contains(where: { $0.id == id }) else { return }
-                    self.playInteractionSoundIfEnabled(.mark)
-                    if self.toggleMark(id: id) {
-                        AuthManager.shared.registerActionUsage(actionID: "action.mark")
-                    }
-                    // SimilarPanelView is a one-shot snapshot handed to
-                    // the popover on each show() call, not a live
-                    // @ObservedObject view — unlike the main ring's
-                    // rows, it won't pick up markedItemIDs changing on
-                    // its own, so the mark badge needs this nudge to
-                    // appear right away instead of on the next R press.
-                    self.updateSimilarPanel()
-                }
-                RunLoop.main.add(t, forMode: .common)
-                rTapHoldTimer = t
-                return nil
-            }
-
-            // Not open yet: the first R press only ever opens the panel,
-            // so there's nothing to hold-mark — go straight to entering it.
-            DispatchQueue.main.async { [weak self] in
-                self?.handleFindSimilarKey(backward: false)
             }
             return nil
         }

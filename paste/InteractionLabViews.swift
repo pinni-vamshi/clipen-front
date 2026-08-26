@@ -143,18 +143,6 @@ private struct LabSidePanel: View {
                     .font(.system(size: 9)).foregroundColor(.textDim)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-            } else if lab.similarVisible {
-                Text("Similar items").font(.system(size: 10, weight: .bold)).foregroundColor(.textPri)
-                ForEach(Array(lab.similarLabels.enumerated()), id: \.offset) { idx, label in
-                    Text(label)
-                        .font(.system(size: 9, weight: lab.activeSimilar == idx ? .semibold : .regular))
-                        .foregroundColor(lab.activeSimilar == idx ? .white : .textDim)
-                        .padding(.horizontal, 8).padding(.vertical, 5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(lab.activeSimilar == idx ? Color.accent : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 5))
-                }
-                Spacer(minLength: 0)
             } else {
                 ForEach(Array(lab.transformLabels.enumerated()), id: \.offset) { idx, label in
                     Text(label)
@@ -239,8 +227,6 @@ struct InteractionLabStage: View {
             return [.grave]
         case .transform:
             return [.x]
-        case .similar:
-            return [.r]
         case .moveToFront:
             return [.c]
         case .delete:
@@ -255,11 +241,11 @@ struct InteractionLabStage: View {
         HStack(spacing: 14) {
             LabMockPanel(lab: lab)
                 .opacity(lab.panelVisible ? 1 : 0)
-            if lab.previewVisible || lab.transformVisible || lab.similarVisible {
+            if lab.previewVisible || lab.transformVisible {
                 LabSidePanel(lab: lab)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: lab.previewVisible || lab.transformVisible || lab.similarVisible)
+        .animation(.easeOut(duration: 0.25), value: lab.previewVisible || lab.transformVisible)
     }
 
     var body: some View {

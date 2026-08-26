@@ -23,7 +23,6 @@ struct ClipenSettingsView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
     @ObservedObject private var proGate = ProGate.shared
-    @ObservedObject private var llm = LocalLLMManager.shared
 
     @Binding var showResetConfirm: Bool
 
@@ -92,9 +91,6 @@ struct ClipenSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .onPreferenceChange(SettingsRow2HeightKey.self) { row2Height = $0 }
 
-                aiSection
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-
                 tipsSection
 
                 feedbackSection
@@ -105,12 +101,12 @@ struct ClipenSettingsView: View {
     }
 
     private static let tipFeatures: [NudgeFeature] =
-        [.multiPaste, .groups, .preview, .pinPreview, .transformPanel, .collections, .search, .similar]
+        [.multiPaste, .groups, .preview, .pinPreview, .transformPanel, .collections, .search]
 
     private var tipsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                sectionHeader("06", "TIPS")
+                sectionHeader("05", "TIPS")
 
                 Button {
                     manager.autoTipsEnabled.toggle()
@@ -175,7 +171,7 @@ struct ClipenSettingsView: View {
 
     private var feedbackSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("07", "FEEDBACK")
+            sectionHeader("06", "FEEDBACK")
 
             feedbackCommunityBanner
 
@@ -1484,101 +1480,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    private var aiSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("05", "AI")
-
-            Text("AI facts extraction runs automatically in the background — nothing to turn on.")
-                .font(.system(size: 11))
-                .foregroundColor(.textDim)
-
-            Text("AI MODEL")
-                .font(.system(size: 9, weight: .bold))
-                .tracking(2)
-                .foregroundColor(.textDim)
-                .padding(.top, 6)
-
-            rowCard { aiEngineRow }
-
-            if let error = llm.lastError {
-                Text(error)
-                    .font(.system(size: 11))
-                    .foregroundColor(.red)
-            } else {
-                Text("Picking a downloaded model here switches every AI feature above to run on-device instead of Apple Intelligence. Picking one that isn't downloaded yet starts the download automatically.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.textDim)
-            }
-        }
-    }
-
-    /// What's actually running right now, distinct from what's merely
-    /// selected — a selected-but-still-downloading tier keeps everything
-    /// on Apple Intelligence in the meantime (see
-    /// LocalLLMManager.effectiveEngine), and this line is the one place
-    /// that tells the user which of those two is true at this moment.
-    private var currentEngineStatusLine: (title: String, detail: String) {
-        switch llm.selectedEngine {
-        case .apple:
-            return ("Apple Intelligence", AIService.isModelAvailable() ? "Available · running now" : "Unavailable on this Mac")
-        case .local(let tier):
-            if llm.downloadingTiers.contains(tier) {
-                let pct = Int((llm.downloadProgress[tier] ?? 0) * 100)
-                return (tier.displayName, "Downloading \(pct)% · using Apple Intelligence until ready")
-            } else if llm.downloadedTiers.contains(tier) {
-                return (tier.displayName, "Downloaded · running now, on device")
-            } else {
-                return (tier.displayName, "Not downloaded")
-            }
-        }
-    }
-
-    private func menuOptionLabel(_ title: String, _ status: String) -> String {
-        "\(title) — \(status)"
-    }
-
-    private var aiEngineRow: some View {
-        let current = currentEngineStatusLine
-        return HStack(spacing: 10) {
-            Image(systemName: "cpu").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(current.title).font(.system(size: 13)).foregroundColor(.textPri)
-                Text(current.detail).font(.system(size: 10)).foregroundColor(.textDim)
-            }
-
-            Spacer(minLength: 8)
-
-            Picker("", selection: Binding(
-                get: { llm.selectedEngine },
-                set: { llm.selectEngine($0) }
-            )) {
-                Text(menuOptionLabel("Apple Intelligence", AIService.isModelAvailable() ? "Available" : "Unavailable"))
-                    .tag(AIEngineSelection.apple)
-                    .disabled(!AIService.isModelAvailable())
-
-                ForEach(LocalModelTier.allCases) { tier in
-                    Text(menuOptionLabel(tier.displayName, localTierStatusText(tier)))
-                        .tag(AIEngineSelection.local(tier))
-                }
-            }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .fixedSize()
-        }
-        .padding(.horizontal, 14).padding(.vertical, 14)
-    }
-
-    private func localTierStatusText(_ tier: LocalModelTier) -> String {
-        if llm.downloadingTiers.contains(tier) {
-            return "Downloading \(Int((llm.downloadProgress[tier] ?? 0) * 100))%"
-        } else if llm.downloadedTiers.contains(tier) {
-            return "Downloaded"
-        } else {
-            return "Not downloaded"
-        }
-    }
-
     private func systemFallbackRow(_ n: Int) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
@@ -1625,7 +1526,7 @@ struct ClipenSettingsView: View {
         [.cycle, .pinnedOpen],
         [.reverseCycle, .multiPaste],
         [.spacePreview, .pinPreview],
-        [.transform, .similar, .search, .nextCategory, .moveToFront, .delete],
+        [.transform, .search, .nextCategory, .moveToFront, .delete],
         [.cyclePinned, .pinItem, .group, .collections],
     ]
 
@@ -1700,7 +1601,7 @@ struct ClipenSettingsView: View {
              KBKey(id: "DELETE", label: "⌫", width: 1.6, demos: [.delete])],
             [KBKey(id: "TAB", label: "tab", width: 1.4),
              KBKey(id: "Q", label: "Q"), KBKey(id: "W", label: "W"), KBKey(id: "E", label: "E"),
-             KBKey(id: "R", label: "R", demos: [.similar]), KBKey(id: "T", label: "T"), KBKey(id: "Y", label: "Y"),
+             KBKey(id: "R", label: "R"), KBKey(id: "T", label: "T"), KBKey(id: "Y", label: "Y"),
              KBKey(id: "U", label: "U"), KBKey(id: "I", label: "I"), KBKey(id: "O", label: "O"),
              KBKey(id: "P", label: "P", demos: [.cyclePinned, .pinItem]),
              KBKey(id: "LBRACKET", label: "["), KBKey(id: "RBRACKET", label: "]"),

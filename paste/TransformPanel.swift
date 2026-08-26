@@ -219,10 +219,6 @@ struct TransformView: View {
                     FlatHint(key: "↵", label: "Paste")
                     FlatHint(key: "␣", label: "Preview", isActive: manager.popupHintSpace)
                     FlatHint(key: "⎋", label: "Cancel")
-                } else if manager.inLanguagePickerMode {
-                    FlatHint(key: "↑↓", label: "Choose")
-                    FlatHint(key: "↵", label: "Translate")
-                    FlatHint(key: "⎋", label: "Cancel")
                 } else {
                     FlatHint(key: "X", label: "Next", isActive: manager.popupHintX)
                     FlatHint(key: "⇧X", label: "Prev", isActive: manager.popupHintShiftX)
@@ -297,25 +293,6 @@ struct TransformView: View {
                                     // row list — see the note below on why that
                                     // matters.
                                     .animation(.easeInOut(duration: 0.15), value: manager.inPageRangeMode)
-                            }
-
-                            if display.id == "ai.translate" && manager.inLanguagePickerMode {
-                                InlineLanguagePicker()
-                                    .padding(.leading, 36)
-                                    .padding(.trailing, 8)
-                                    .padding(.vertical, 6)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.accentColor.opacity(0.05))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.accentColor.opacity(0.3), lineWidth: 1)
-                                    )
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 4)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
-                                    .animation(.easeInOut(duration: 0.15), value: manager.inLanguagePickerMode)
                             }
 
                             if idx < displays.count - 1 {
