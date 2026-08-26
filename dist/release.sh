@@ -100,6 +100,30 @@ if [ ! -d "$APP_PATH" ]; then
     exit 1
 fi
 
+# Sparkle.framework ships its embedded helpers (Autoupdate, Updater.app,
+# the XPC services) signed by Sparkle's own build, not ours — notarization
+# rejects them ("not signed with a valid Developer ID certificate", "no
+# secure timestamp"). Re-sign bottom-up: nested executables/bundles first,
+# then the framework, then the outer app again (its seal covers the
+# framework's bytes, so it goes stale the moment those change).
+echo "-- re-signing Sparkle's embedded helpers --"
+SPARKLE_VERSIONED="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/Current"
+codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_VERSIONED/Autoupdate"
+codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_VERSIONED/Updater.app/Contents/MacOS/Updater"
+codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_VERSIONED/Updater.app"
+codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_VERSIONED/XPCServices/Downloader.xpc"
+codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" \
+    "$SPARKLE_VERSIONED/XPCServices/Installer.xpc"
+codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" \
+    "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" \
+    --entitlements "paste/paste.entitlements" \
+    "$APP_PATH"
+
 codesign --verify --deep --strict "$APP_PATH"
 
 if [ "$DO_NOTARIZE" = "1" ]; then
