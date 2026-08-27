@@ -459,6 +459,9 @@ extension ClipboardManager {
         if inShareStage {
             updateSharePanel()
         }
+        if inSimilarStage {
+            updateSimilarPanel()
+        }
     }
 
     func applyCaseTransformForSelection(_ kind: CaseTransformKind) {
@@ -746,6 +749,7 @@ extension ClipboardManager {
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
         syncShareStageWithSelection()
+        syncSimilarPanelWithSelection()
     }
 
     private static let itemPreviewSyncDelay: TimeInterval = 0.07

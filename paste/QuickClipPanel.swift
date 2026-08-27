@@ -258,6 +258,8 @@ final class ReferenceCarousel: ObservableObject {
 
 class QuickClipPanel: NSPanel {
     let carousel: ReferenceCarousel
+    private let similarSidebarWidth: CGFloat = 220
+    private var similarGrewLeft = false
 
     private var expandedFrame: NSRect?
     private static let collapsedSize = NSSize(width: 108, height: 108)
@@ -297,7 +299,13 @@ class QuickClipPanel: NSPanel {
                 onClosePanel: { [weak self] in self?.close() },
                 onMinimize: { [weak self] in self?.minimize() },
                 onClosePage: { [weak self] in self?.closeCurrentPage() },
-                onPopOut: { [weak self] in self?.popOutCurrentPage() }
+                onPopOut: { [weak self] in self?.popOutCurrentPage() },
+                onToggleSimilar: { [weak self] show in self?.resizeForSimilarSidebar(show: show) },
+                onPreview: { [weak self] sim in
+                    guard let self else { return }
+                    ClipboardManager.shared.itemPreviewPanel.show(for: sim, near: self.frame)
+                },
+                onEndPreview: { ClipboardManager.shared.itemPreviewPanel.hide() }
             ))
         hostingView.wantsLayer = true
         hostingView.layer?.borderWidth = 0
@@ -481,6 +489,25 @@ class QuickClipPanel: NSPanel {
         expandedFrame = nil
     }
 
+    private func resizeForSimilarSidebar(show: Bool) {
+        var f = self.frame
+        let screen = NSScreen.main?.visibleFrame ?? f
+        if show {
+            if f.maxX + similarSidebarWidth <= screen.maxX {
+                similarGrewLeft = false
+                f.size.width += similarSidebarWidth
+            } else {
+                similarGrewLeft = true
+                f.origin.x -= similarSidebarWidth
+                f.size.width += similarSidebarWidth
+            }
+        } else {
+            f.size.width = max(contentMinSize.width, f.size.width - similarSidebarWidth)
+            if similarGrewLeft { f.origin.x += similarSidebarWidth }
+        }
+        setFrame(f, display: true, animate: true)
+    }
+
     override var canBecomeKey: Bool { true }
 
     override func close() {
@@ -501,8 +528,15 @@ private struct QuickClipPanelContentView: View {
     let onMinimize: () -> Void
     let onClosePage: () -> Void
     let onPopOut: () -> Void
+    let onToggleSimilar: (Bool) -> Void
+    let onPreview: (ClipboardItem) -> Void
+    let onEndPreview: () -> Void
 
+    @State private var showSimilar:  Bool = false
+    @State private var similarItems: [ClipboardItem] = []
     @StateObject private var pagerController = PagerController()
+
+    private var item: ClipboardItem { carousel.current }
 
     var body: some View {
         if carousel.isCollapsed {
@@ -528,6 +562,18 @@ private struct QuickClipPanelContentView: View {
                     onMinimize: onMinimize,
                     onClosePage: onClosePage,
                     onPopOut: onPopOut,
+                    showSimilar: pageItem.id == item.id && showSimilar,
+                    similarCount: pageItem.id == item.id ? similarItems.count : 0,
+                    onToggleSimilar: {
+                        showSimilar.toggle()
+                        if showSimilar {
+                            AuthManager.shared.registerActionUsage(actionID: "action.similar-items")
+                            if similarItems.isEmpty {
+                                similarItems = ClipboardManager.shared.similarItems(to: item)
+                            }
+                        }
+                        onToggleSimilar(showSimilar)
+                    },
                     tags: carousel.pageTags[pageItem.id] ?? [],
                     onRemoveTag: { tagID in carousel.removeTag(tagID, fromPage: pageItem.id) }
                 )
@@ -546,9 +592,21 @@ private struct QuickClipPanelContentView: View {
                 }
             }
             .frame(maxWidth: .infinity)
+
+            if showSimilar {
+                Divider()
+                SimilarItemsSidePanelView(pinned: item, onPreview: onPreview,
+                                          onEndPreview: onEndPreview, similars: $similarItems)
+                    .id(item.id)
+                    .frame(width: 220)
+            }
         }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onChange(of: item.id) { _, _ in
+            showSimilar = false
+            similarItems = []
+        }
     }
 
     private func pagerArrow(systemName: String, action: @escaping () -> Void) -> some View {
@@ -723,6 +781,9 @@ private struct ReferencePageContentView: View {
     let onMinimize: () -> Void
     let onClosePage: () -> Void
     let onPopOut: () -> Void
+    let showSimilar: Bool
+    let similarCount: Int
+    let onToggleSimilar: () -> Void
     let tags: [ReferenceTag]
     let onRemoveTag: (UUID) -> Void
 
@@ -777,6 +838,7 @@ private struct ReferencePageContentView: View {
          pageCount: Int, pageIndex: Int,
          onClosePanel: @escaping () -> Void, onMinimize: @escaping () -> Void,
          onClosePage: @escaping () -> Void, onPopOut: @escaping () -> Void,
+         showSimilar: Bool, similarCount: Int, onToggleSimilar: @escaping () -> Void,
          tags: [ReferenceTag] = [], onRemoveTag: @escaping (UUID) -> Void = { _ in }) {
         self.item = item
         self.shouldFocus = shouldFocus
@@ -787,6 +849,9 @@ private struct ReferencePageContentView: View {
         self.onMinimize = onMinimize
         self.onClosePage = onClosePage
         self.onPopOut = onPopOut
+        self.showSimilar = showSimilar
+        self.similarCount = similarCount
+        self.onToggleSimilar = onToggleSimilar
         self.tags = tags
         self.onRemoveTag = onRemoveTag
         let existingNote = item.userNote ?? ""
@@ -880,6 +945,20 @@ private struct ReferencePageContentView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Copy to clipboard")
+
+                Button(action: onToggleSimilar) {
+                    HStack(spacing: 3) {
+                        Image(systemName: showSimilar ? "square.stack.fill" : "square.stack")
+                            .font(.system(size: 11))
+                        if similarCount > 0 && showSimilar {
+                            Text("\(similarCount)")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                    }
+                    .foregroundColor(showSimilar ? .accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(showSimilar ? "Hide similar items" : "Show similar items from clipboard")
 
                 Button(action: onPopOut) {
                     Image(systemName: "square.on.square")
@@ -1050,6 +1129,179 @@ private struct QuickClipPreview: View {
 
     var body: some View {
         ContentPreviewView(item: item, chrome: .reference)
+    }
+}
+
+private struct SimilarItemsSidePanelView: View {
+    let pinned:      ClipboardItem
+    let onPreview:   (ClipboardItem) -> Void
+    let onEndPreview: () -> Void
+    @Binding var similars: [ClipboardItem]
+
+    @ObservedObject private var manager = ClipboardManager.shared
+
+    private var addableItems: [ClipboardItem] {
+        let shownIDs = Set(similars.map(\.id) + [pinned.id])
+        return manager.items.filter { !shownIDs.contains($0.id) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Text("Similar items")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+
+                Menu {
+                    let candidates = addableItems.prefix(20)
+                    if candidates.isEmpty {
+                        Text("No other items to add")
+                    } else {
+                        ForEach(Array(candidates)) { candidate in
+                            Button {
+                                similars.append(candidate)
+                            } label: {
+                                Text(String(candidate.previewText.prefix(50)))
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Add any clipboard item to this list")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            if similars.isEmpty {
+                Text("No similar items found")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 20)
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 8) {
+                        ForEach(similars) { sim in
+                            SimilarItemCard(pinned: pinned, similar: sim)
+                                .onTapGesture {
+                                    onPreview(sim)
+                                }
+                        }
+                    }
+                    .padding(10)
+                }
+            }
+        }
+    }
+}
+
+private struct SimilarItemCard: View {
+    let pinned:  ClipboardItem
+    let similar: ClipboardItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Image(systemName: similar.iconName)
+                    .font(.system(size: 9))
+                    .foregroundColor(.accentColor)
+                Text(similar.typeLabel)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+
+            diffView
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Spacer(minLength: 0)
+
+            Button {
+                if let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == similar.id }) {
+                    ClipboardManager.shared.pasteItem(at: idx)
+                }
+            } label: {
+                Text("Paste")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 100, alignment: .center)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10)
+            .stroke(Color.primary.opacity(0.08), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private var diffView: some View {
+        let pinnedText  = pinnedPlainText
+        let similarText = similarPlainText
+        if let p = pinnedText, let s = similarText {
+            DiffHighlightText(baseText: p, compareText: s)
+        } else if let s = similarText {
+            Text(s)
+                .font(.system(size: 10, design: .monospaced))
+                .lineLimit(4)
+                .foregroundColor(.primary)
+        } else {
+            Text(similar.typeLabel)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private var pinnedPlainText: String? { pinned.content.plainText }
+
+    private var similarPlainText: String? { similar.content.plainText }
+}
+
+private struct DiffHighlightText: View {
+    let baseText:    String
+    let compareText: String
+
+    var body: some View {
+        let baseWords = Set(baseText.lowercased()
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { $0.count > 2 })
+
+        let words = compareText
+            .components(separatedBy: .whitespacesAndNewlines)
+            .prefix(60)
+
+        var result = Text("")
+        var first  = true
+        for word in words {
+            if !first { result = result + Text(" ") }
+            first = false
+            let isNew = !baseWords.contains(word.lowercased())
+            if isNew {
+                result = result + Text(word)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.accentColor)
+                    .bold()
+            } else {
+                result = result + Text(word)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.primary.opacity(0.7))
+            }
+        }
+        return result.lineLimit(4)
     }
 }
 

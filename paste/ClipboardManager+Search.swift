@@ -45,6 +45,89 @@ extension ClipboardManager {
         pendingFirstOpen = false
     }
 
+    /// R either opens the similar-items side panel for the current
+    /// selection, or — if it's already open — advances to the next (or,
+    /// with Shift held, previous) related item within it. Deliberately
+    /// doesn't touch search, the item preview panel's own auto-show logic,
+    /// or the main list's selectedIndex: this panel drives its own cursor
+    /// independently, same as TransformPanel does for its tool list.
+    func handleFindSimilarKey(backward: Bool = false) {
+        guard previewWindow.isVisible,
+              displayItems.indices.contains(selectedIndex) else { return }
+        if inSimilarStage {
+            backward ? cycleSimilarBackward() : cycleSimilarForward()
+        } else {
+            enterSimilarStage()
+        }
+    }
+
+    func enterSimilarStage() {
+        guard displayItems.indices.contains(selectedIndex) else { return }
+        let item = displayItems[selectedIndex]
+        let results = similarItems(to: item)
+        guard !results.isEmpty else {
+            flashStatus("No similar items found.")
+            return
+        }
+        similarPanelItems = results
+        similarPanelIndex = 0
+        similarPanelSourceItemID = item.id
+        setSidePanelStage(.similar)
+        AuthManager.shared.registerActionUsage(actionID: "action.find-similar")
+        playInteractionSoundIfEnabled(.similar)
+        updateSimilarPanel()
+    }
+
+    func cycleSimilarForward() {
+        guard inSimilarStage, !similarPanelItems.isEmpty else { return }
+        similarPanelIndex = Self.cyclicIndex(similarPanelIndex, count: similarPanelItems.count, backward: false)
+        AuthManager.shared.registerActionUsage(actionID: "action.find-similar")
+        playInteractionSoundIfEnabled(.similar)
+        updateSimilarPanel()
+    }
+
+    func cycleSimilarBackward() {
+        guard inSimilarStage, !similarPanelItems.isEmpty else { return }
+        similarPanelIndex = Self.cyclicIndex(similarPanelIndex, count: similarPanelItems.count, backward: true)
+        AuthManager.shared.registerActionUsage(actionID: "action.find-similar")
+        playInteractionSoundIfEnabled(.similar)
+        updateSimilarPanel()
+    }
+
+    func updateSimilarPanel() {
+        guard inSimilarStage, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        let anchor = previewWindow.selectedRowAnchorPoint(
+            selectedIndex: selectedIndex,
+            totalItems: displayItems.count
+        )
+        // Computed here and passed in as a prop, same pattern PopoverRow
+        // already uses for the main list — SimilarPanelView used to read
+        // ClipboardManager.shared.markOrder(for:) itself from inside body,
+        // a global read SwiftUI has no visibility into. Marking the
+        // CURRENTLY displayed item doesn't change `items` or
+        // `selectedIndex` (the view's only real props), so SwiftUI saw no
+        // reason to re-invoke body and the badge never appeared until
+        // selectedIndex genuinely changed later (navigating away and
+        // back). An explicit prop makes the change visible to SwiftUI's
+        // own diffing, the same way it already works for the main list.
+        let currentMarkOrder = similarPanelItems.indices.contains(similarPanelIndex)
+            ? markOrder(for: similarPanelItems[similarPanelIndex].id) : nil
+        similarPanel.show(sourceItem: displayItems[selectedIndex],
+                          items: similarPanelItems,
+                          selectedIndex: similarPanelIndex,
+                          markOrder: currentMarkOrder,
+                          near: previewWindow.frame,
+                          anchorPoint: anchor)
+    }
+
+    func syncSimilarPanelWithSelection() {
+        guard inSimilarStage, previewWindow.isVisible,
+              !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        let currentID = displayItems[selectedIndex].id
+        guard currentID != similarPanelSourceItemID else { return }
+        setSidePanelStage(.none)
+    }
+
     func fastPasteFront() {
         clearPopupHintHighlights()
         cancelPendingFirstOpen()
@@ -202,6 +285,8 @@ extension ClipboardManager {
         caseTransformOriginals.removeAll()
         xTapHoldTimer?.invalidate()
         xTapHoldTimer = nil
+        rTapHoldTimer?.invalidate()
+        rTapHoldTimer = nil
         setSidePanelStage(.none)
         selectedIndex    = 0
         popupTagFilter   = nil
@@ -628,6 +713,29 @@ extension ClipboardManager {
             }
         }
         return best.map { ($0.panel, $0.pageID) }
+    }
+
+    func similarItems(to item: ClipboardItem, count: Int = 7) -> [ClipboardItem] {
+        let queryText = Self.similarSearchText(for: item)
+        guard !queryText.isEmpty, queryText.count >= 2 else { return [] }
+        let results = hybridSearch(query: queryText)
+        return Array(results.filter { $0.id != item.id }.prefix(count))
+    }
+
+    static func similarSearchText(for item: ClipboardItem) -> String {
+        if let text = item.content.plainText,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        }
+        if let ocr = item.ocrText,
+           !ocr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(ocr.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        }
+        if let note = item.userNote,
+           !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return String(note.trimmingCharacters(in: .whitespacesAndNewlines).prefix(120))
+        }
+        return ""
     }
 
     // MARK: - Natural language intent parsing

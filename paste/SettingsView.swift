@@ -101,7 +101,7 @@ struct ClipenSettingsView: View {
     }
 
     private static let tipFeatures: [NudgeFeature] =
-        [.multiPaste, .groups, .preview, .pinPreview, .transformPanel, .collections, .search]
+        [.multiPaste, .groups, .preview, .pinPreview, .transformPanel, .collections, .search, .similar]
 
     private var tipsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1603,7 +1603,7 @@ struct ClipenSettingsView: View {
              KBKey(id: "DELETE", label: "⌫", width: 1.6, demos: [.delete])],
             [KBKey(id: "TAB", label: "tab", width: 1.4),
              KBKey(id: "Q", label: "Q"), KBKey(id: "W", label: "W"), KBKey(id: "E", label: "E"),
-             KBKey(id: "R", label: "R"), KBKey(id: "T", label: "T"), KBKey(id: "Y", label: "Y"),
+             KBKey(id: "R", label: "R", demos: [.similar]), KBKey(id: "T", label: "T"), KBKey(id: "Y", label: "Y"),
              KBKey(id: "U", label: "U"), KBKey(id: "I", label: "I"), KBKey(id: "O", label: "O"),
              KBKey(id: "P", label: "P", demos: [.cyclePinned, .pinItem]),
              KBKey(id: "LBRACKET", label: "["), KBKey(id: "RBRACKET", label: "]"),

@@ -367,6 +367,7 @@ final class TrackingService {
             "schema_version": Self.schemaVersion,
             "hardware_uuid": DeviceIdentity.installKey,
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+            "app_build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "",
             "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
 
             "locale": Bundle.main.preferredLocalizations.first ?? Locale.current.identifier,

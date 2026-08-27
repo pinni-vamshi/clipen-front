@@ -391,7 +391,7 @@ class ClipboardManager: ObservableObject {
     }
 
     enum InteractionSound {
-        case cycle, preview, transform, moveFront, share, pin, mark, delete, category, denied
+        case cycle, preview, transform, moveFront, share, pin, mark, delete, category, denied, similar
 
         var frequency: Double {
             switch self {
@@ -405,6 +405,7 @@ class ClipboardManager: ObservableObject {
             case .delete:    return 523
             case .category:  return 587
             case .denied:    return 220
+            case .similar:   return 1175
             }
         }
     }
@@ -530,6 +531,7 @@ class ClipboardManager: ObservableObject {
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
     let sharePanel = SharePanel()
+    let similarPanel = SimilarPanel()
     let nudgeLessonPanel = NudgeLessonPanel()
     let fastPasteHintPanel = FastPasteHintPanel()
     @Published var hasAccessibilityPermission: Bool = AXIsProcessTrusted()
@@ -791,6 +793,7 @@ class ClipboardManager: ObservableObject {
     var historyLoadedCleanly = false
 
     var xTapHoldTimer: Timer?
+    var rTapHoldTimer: Timer?
     static let xHoldThreshold: TimeInterval = 0.35
 
     var escapeWillDismiss = false
@@ -854,14 +857,19 @@ class ClipboardManager: ObservableObject {
 
     @Published var isItemPreviewVisible = false
 
-    enum SidePanelStage: Equatable { case none, transform, share }
+    enum SidePanelStage: Equatable { case none, transform, share, similar }
     @Published private(set) var sidePanelStage: SidePanelStage = .none
 
     var inTransformStage: Bool { sidePanelStage == .transform }
     var inShareStage:     Bool { sidePanelStage == .share }
+    var inSimilarStage:   Bool { sidePanelStage == .similar }
 
     var transformIndex   = 0
     var transformDisplaysCache: [TransformDisplay] = []
+
+    var similarPanelItems: [ClipboardItem] = []
+    var similarPanelIndex = 0
+    var similarPanelSourceItemID: UUID? = nil
 
     func setSidePanelStage(_ new: SidePanelStage) {
         guard new != sidePanelStage else { return }
@@ -879,6 +887,11 @@ class ClipboardManager: ObservableObject {
             shareTargetItems   = []
             shareServicesCache = [:]
             shareIndex         = 0
+        case .similar:
+            similarPanel.hide()
+            similarPanelItems        = []
+            similarPanelIndex        = 0
+            similarPanelSourceItemID = nil
         case .none:
             break
         }
