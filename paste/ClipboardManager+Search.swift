@@ -37,6 +37,42 @@ extension ClipboardManager {
                 self.saveQueue.async { self.embeddingsDirty = true }
             }
         }
+        recomputeAIEmbeddingsInBackground()
+    }
+
+    /// Same shape as `recomputeEmbeddingsInBackground`, but for the
+    /// JSON-only vector: only items that actually have AI-structured text
+    /// and don't yet have `aiEmbedding` are picked up, so this is a no-op
+    /// pass on every call for items with no analysis at all.
+    func recomputeAIEmbeddingsInBackground() {
+        let snapshot = items.filter { $0.aiEmbedding == nil && $0.aiStructuredText != nil }
+        guard !snapshot.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard ClipenEmbedder.shared.isAvailable else { return }
+            var computed: [(id: UUID, vector: [Float])] = []
+            computed.reserveCapacity(snapshot.count)
+            for item in snapshot {
+                guard self != nil else { return }
+                guard let str = item.aiEmbeddingText,
+                      let vector = ClipenEmbedder.shared.vector(for: str) else { continue }
+                computed.append((item.id, vector))
+            }
+            guard !computed.isEmpty else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                var byID: [UUID: [Float]] = Dictionary(computed.map { ($0.id, $0.vector) }, uniquingKeysWith: { _, last in last })
+                var updated = self.items
+                var applied = 0
+                for idx in updated.indices where updated[idx].aiEmbedding == nil {
+                    guard let floats = byID.removeValue(forKey: updated[idx].id) else { continue }
+                    updated[idx].aiEmbedding = floats
+                    applied += 1
+                }
+                guard applied > 0 else { return }
+                self.items = updated
+                self.saveQueue.async { self.aiEmbeddingsDirty = true }
+            }
+        }
     }
 
     // MARK: - Details panel (D)
@@ -885,9 +921,36 @@ extension ClipboardManager {
 
     func similarItems(to item: ClipboardItem, count: Int = 7) -> [ClipboardItem] {
         let queryText = Self.similarSearchText(for: item)
-        guard !queryText.isEmpty, queryText.count >= 2 else { return [] }
-        let results = hybridSearch(query: queryText)
-        return Array(results.filter { $0.id != item.id }.prefix(count))
+        let base = (queryText.isEmpty || queryText.count < 2)
+            ? []
+            : hybridSearch(query: queryText).filter { $0.id != item.id }
+
+        guard let aiVec = item.aiEmbedding else { return Array(base.prefix(count)) }
+
+        // AI-JSON similarity is item-to-item (two receipts, two boarding
+        // passes are alike regardless of wording), not query-to-item, so it
+        // runs as its own scoring pass rather than through hybridSearch's
+        // text-query machinery, then merges with the lexical/OCR results.
+        var scored: [(ClipboardItem, Float)] = []
+        scored.reserveCapacity(items.count)
+        for (rank, candidate) in base.enumerated() {
+            let baseScore = Float(base.count - rank) / Float(max(base.count, 1))
+            let aiScore = candidate.aiEmbedding.map { Self.cosineSimilarity(aiVec, $0) } ?? 0
+            scored.append((candidate, baseScore + 0.6 * aiScore))
+        }
+        // Items with strong AI-JSON similarity but zero lexical/OCR overlap
+        // (two receipts from different stores, in different apps) never
+        // show up in `base` at all — pull those in too, or "similar
+        // items" for a pure-analysis match never surfaces them.
+        let baseIDs = Set(base.map(\.id))
+        for candidate in items where candidate.id != item.id && !baseIDs.contains(candidate.id) {
+            guard let cVec = candidate.aiEmbedding else { continue }
+            let aiScore = Self.cosineSimilarity(aiVec, cVec)
+            guard aiScore >= 0.55 else { continue }
+            scored.append((candidate, 0.6 * aiScore))
+        }
+        let sorted = scored.sorted { $0.1 > $1.1 }.map(\.0)
+        return Array(sorted.prefix(count))
     }
 
     static func similarSearchText(for item: ClipboardItem) -> String {

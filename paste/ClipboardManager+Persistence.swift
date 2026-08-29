@@ -97,6 +97,7 @@ extension ClipboardManager {
         guard items[idx].aiStructuredText != json else { return }
         items[idx].aiStructuredText = json
         items[idx].embedding = nil
+        items[idx].aiEmbedding = nil
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
     }
@@ -113,6 +114,7 @@ extension ClipboardManager {
         for i in updated.indices where updated[i].aiStructuredText != nil {
             updated[i].aiStructuredText = nil
             updated[i].embedding = nil
+            updated[i].aiEmbedding = nil
             changed = true
         }
         guard changed else { return }
@@ -626,6 +628,34 @@ extension ClipboardManager {
         }
     }
 
+    var aiEmbeddingsFileURL: URL {
+        historyDir.appendingPathComponent("ai-embeddings.clip")
+    }
+
+    func readAIEmbeddingsFile() -> [String: [Float]] {
+        guard let cipher = try? Data(contentsOf: aiEmbeddingsFileURL),
+              let plain  = HistoryCrypto.decrypt(cipher),
+              let dict   = try? JSONDecoder().decode([String: [Float]].self, from: plain)
+        else { return [:] }
+        return dict
+    }
+
+    func saveAIEmbeddingsIfDirty(snapshot: [ClipboardItem]) {
+        guard aiEmbeddingsDirty else { return }
+        var dict: [String: [Float]] = [:]
+        dict.reserveCapacity(snapshot.count)
+        for item in snapshot {
+            if let vec = item.aiEmbedding { dict[item.id.uuidString] = vec }
+        }
+        guard let plain  = try? JSONEncoder().encode(dict),
+              let cipher = HistoryCrypto.encrypt(plain) else { return }
+        do {
+            try cipher.write(to: aiEmbeddingsFileURL, options: [.atomic, .completeFileProtection])
+            aiEmbeddingsDirty = false
+        } catch {
+        }
+    }
+
     var legacyPlaintextHistoryURL: URL {
         historyDir.appendingPathComponent("history.json")
     }
@@ -751,6 +781,7 @@ extension ClipboardManager {
             try? headCipher.write(to: historyHeadURL, options: [.atomic, .completeFileProtection])
         }
         saveEmbeddingsIfDirty(snapshot: itemsToSave)
+        saveAIEmbeddingsIfDirty(snapshot: itemsToSave)
         if blobPurgeNeeded && historyLoadedCleanly {
             purgeOrphanBlobs(referenced: referencedBlobs)
             blobPurgeNeeded = false
@@ -958,7 +989,8 @@ extension ClipboardManager {
     }
 
     private func decodeHistoryBatch(_ batch: [PersistedItem],
-                                    loadedEmbeddings: [String: [Float]]) -> HistoryDecodedBatch {
+                                    loadedEmbeddings: [String: [Float]],
+                                    loadedAIEmbeddings: [String: [Float]] = [:]) -> HistoryDecodedBatch {
         var seedImage:   [UUID: (path: String, bytes: Int)] = [:]
         var seedPayload: [UUID: String] = [:]
         var seedSidecar: [UUID: String] = [:]
@@ -1039,6 +1071,7 @@ extension ClipboardManager {
                     item.embedding = inline
                     migratedInlineEmbedding = true
                 }
+                item.aiEmbedding = loadedAIEmbeddings[p.id.uuidString]
             }
             if let rel = p.sidecarBlob, let raw = self.readBlob(rel),
                let sidecar = try? JSONDecoder().decode([String: Data].self, from: raw),
@@ -1067,10 +1100,11 @@ extension ClipboardManager {
         dec.dateDecodingStrategy = .iso8601
 
         let loadedEmbeddings = readEmbeddingsFile()
+        let loadedAIEmbeddings = readAIEmbeddingsFile()
 
         var shownHeadIDs = Set<UUID>()
         if let headPersisted = readManifest(at: historyHeadURL, dec: dec), !headPersisted.isEmpty {
-            let headBatch = decodeHistoryBatch(headPersisted, loadedEmbeddings: loadedEmbeddings)
+            let headBatch = decodeHistoryBatch(headPersisted, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings)
             if !headBatch.items.isEmpty {
                 mergeHistoryBlobCaches(headBatch)
                 shownHeadIDs = Set(headBatch.items.map(\.id))
@@ -1143,7 +1177,7 @@ extension ClipboardManager {
         let priorityPersisted  = Self.historyPrioritySlice(persisted)
         let deferredPersisted  = Array(unpinnedPersisted.dropFirst(Self.historyPriorityUnpinnedCount))
 
-        let firstBatch = decodeHistoryBatch(priorityPersisted, loadedEmbeddings: loadedEmbeddings)
+        let firstBatch = decodeHistoryBatch(priorityPersisted, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings)
         mergeHistoryBlobCaches(firstBatch)
         let publish = firstBatch.items.filter(\.isPinned) + firstBatch.items.filter { !$0.isPinned }
         let publishIDs = Set(publish.map(\.id))
@@ -1175,7 +1209,7 @@ extension ClipboardManager {
         while start < deferredPersisted.count {
             let end = min(start + deferredChunkSize, deferredPersisted.count)
             let chunk = Array(deferredPersisted[start..<end])
-            let batch = decodeHistoryBatch(chunk, loadedEmbeddings: loadedEmbeddings)
+            let batch = decodeHistoryBatch(chunk, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings)
             mergeHistoryBlobCaches(batch)
             let isLastChunk = end >= deferredPersisted.count
             DispatchQueue.main.async { [weak self] in

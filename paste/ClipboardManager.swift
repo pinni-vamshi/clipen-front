@@ -20,6 +20,7 @@ class ClipboardManager: ObservableObject {
     var payloadBlobCache: [UUID: String] = [:]
     var sidecarBlobCache: [UUID: String] = [:]
     var embeddingsDirty = false
+    var aiEmbeddingsDirty = false
     var historyDirty = false
     var blobPurgeNeeded = true
 
@@ -1333,6 +1334,12 @@ struct ClipboardItem: Identifiable {
     let detectedColor: NSColor?
     var isPinned:  Bool     = false
     var embedding: [Float]? = nil
+    /// Embedding of just the AI-structured JSON (flattened key/value pairs,
+    /// one vector for the whole thing), kept separate from `embedding` so
+    /// two items with similar analyzed content (two receipts, two boarding
+    /// passes) can be matched on that alone, without OCR/notes/title text
+    /// diluting the comparison the way they do in the general item vector.
+    var aiEmbedding: [Float]? = nil
     var urlTitle:  String?  = nil { didSet { rebuildSearchHaystacks() } }
     var diffBadge: String?  = nil
 
@@ -1455,6 +1462,20 @@ struct ClipboardItem: Identifiable {
         if !destinations.isEmpty { parts.append("pasted into \(destinations.joined(separator: " "))") }
         guard !parts.isEmpty else { return nil }
         return String(parts.joined(separator: " ").prefix(1_500))
+    }
+
+    /// Flattened "key: value" lines from the AI-structured JSON alone,
+    /// joined into one string and embedded as a single vector — reuses
+    /// `AIFactIndex.flatten` (the same flattening the Details panel and
+    /// fact chips already use) so nested dictionaries become part of the
+    /// key path instead of needing separate handling, and never averages
+    /// per-field vectors together.
+    var aiEmbeddingText: String? {
+        guard let json = aiStructuredText, !json.isEmpty else { return nil }
+        let pairs = AIFactIndex.flatten(json)
+        guard !pairs.isEmpty else { return nil }
+        let joined = pairs.map { "\($0.key): \($0.value)" }.joined(separator: "; ")
+        return String(joined.prefix(1_500))
     }
 
     var previewText: String {
