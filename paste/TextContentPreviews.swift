@@ -972,7 +972,10 @@ final class CodeHighlighter {
     }
 
     func highlight(_ code: String, languageDisplayName: String?, dark: Bool) async -> NSAttributedString? {
-        let key = Self.cacheKey(code, languageDisplayName: languageDisplayName, dark: dark)
+        // NSString predates Sendable; this one is a fresh, immutable value
+        // from cacheKey() every time and never mutated after — safe to
+        // share into the background queue closure below.
+        nonisolated(unsafe) let key = Self.cacheKey(code, languageDisplayName: languageDisplayName, dark: dark)
 
         if let hit = cache.object(forKey: key) { return hit }
         return await withCheckedContinuation { continuation in
@@ -991,7 +994,10 @@ final class CodeHighlighter {
     static let maxHighlightLength = 100_000
 
     func highlightSync(_ code: String, languageDisplayName: String?, dark: Bool) -> NSAttributedString? {
-        let key = Self.cacheKey(code, languageDisplayName: languageDisplayName, dark: dark)
+        // NSString predates Sendable; this one is a fresh, immutable value
+        // from cacheKey() every time and never mutated after — safe to
+        // share into the background queue closure below.
+        nonisolated(unsafe) let key = Self.cacheKey(code, languageDisplayName: languageDisplayName, dark: dark)
         if let hit = cache.object(forKey: key) { return hit }
         return queue.sync { [weak self] () -> NSAttributedString? in
             if let hit = self?.cache.object(forKey: key) { return hit }

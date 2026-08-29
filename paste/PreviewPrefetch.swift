@@ -203,7 +203,11 @@ enum PreviewPrefetcher {
                 let request = QLThumbnailGenerator.Request(
                     fileAt: url, size: CGSize(width: 800, height: 800),
                     scale: 2, representationTypes: .all)
-                QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { _, _ in }
+                await withCheckedContinuation { continuation in
+                    QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { _, _ in
+                        continuation.resume()
+                    }
+                }
             }
         }
     }

@@ -13,7 +13,13 @@ import SwiftUI
 /// ISO8601DateFormatter on *every* keystroke, with no synchronization at
 /// all despite being called from the tap thread, the main actor, and
 /// inference tasks simultaneously.
-enum DebugLog {
+// Genuinely thread-safe already (its own NSLock guards the shared buffer,
+// file writes happen on a dedicated background queue) — it was designed to
+// be called from arbitrary threads, originally the event-tap callback,
+// which is nowhere near MainActor. nonisolated makes that explicit instead
+// of relying on every caller (including other actors, like
+// LocalModelRuntime) to `await` into it for no real reason.
+nonisolated enum DebugLog {
     private static let logURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Clipen", isDirectory: true)
@@ -337,6 +343,23 @@ extension ClipboardManager {
                 }
             }
         }
+        // Deferred via DispatchQueue.main.async, matching every other
+        // tap-hold key-up handler here (V, X, R, B, P, S) — this one was
+        // written calling straight through instead, the one inconsistency
+        // in this whole block. Executing UI-mutating AppKit work (opening
+        // the Details NSPopover) synchronously inside the CGEventTap
+        // callback, rather than deferring to the next run loop turn like
+        // every sibling handler, is exactly the kind of divergence from an
+        // established pattern that's worth never introducing again.
+        if key == 2, let timer = dTapHoldTimer {
+            timer.invalidate()
+            dTapHoldTimer = nil
+            DispatchQueue.main.async { [weak self] in
+                self?.handleDetailsKey(backward: false)
+            }
+            return nil
+        }
+
         if key == 15, let timer = rTapHoldTimer {
             timer.invalidate()
             rTapHoldTimer = nil
@@ -640,8 +663,57 @@ extension ClipboardManager {
             return nil
         }
 
+        // D — per-field details panel.
+        //
+        // Deliberately NOT guarded on another panel being open. X (line 607)
+        // and S (line 627) carry no stage guard either: pressing one while
+        // another is showing simply switches, because setSidePanelStage
+        // closes the previous stage. Guarding on !inTransformStage made D
+        // silently dead while Transform was up, which is not "one at a
+        // time", it is just a broken key.
+        if key == 2 && previewWindow.isVisible && !isSearchActive
+           && !isInlineEditing && !opt {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+
+            // Shift+D steps backward immediately — direction is never worth
+            // gating behind a hold delay (same reasoning as Shift+R).
+            if shift {
+                DispatchQueue.main.async { [weak self] in
+                    self?.handleDetailsKey(backward: true)
+                }
+                return nil
+            }
+
+            // Once open, plain D is tap-or-hold: the tap advances on key-up
+            // below, holding marks the field under the cursor. Same
+            // threshold and same gesture as V on the main list and R in the
+            // Similar panel. Fires directly rather than hopping through
+            // DispatchQueue.main.async — the Timer is already on the main
+            // run loop, and that hop is exactly what let the key-up handler
+            // race in and advance past the field being marked (see the
+            // note on rTapHoldTimer).
+            if inDetailsStage {
+                dTapHoldTimer?.invalidate()
+                let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
+                    guard let self else { return }
+                    self.dTapHoldTimer = nil
+                    self.toggleDetailFieldMark()
+                }
+                RunLoop.main.add(t, forMode: .common)
+                dTapHoldTimer = t
+                return nil
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.handleDetailsKey(backward: false)
+            }
+            return nil
+        }
+
+        // Same reasoning as D above: pressing R while Transform is open
+        // should switch to Similar, not do nothing.
         if key == 15 && previewWindow.isVisible && !isSearchActive
-           && !inTransformStage && !isInlineEditing && !opt {
+           && !isInlineEditing && !opt {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
 
             // Shift+R always steps backward immediately — same as

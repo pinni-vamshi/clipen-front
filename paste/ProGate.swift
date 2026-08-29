@@ -138,7 +138,7 @@ final class ProGate: ObservableObject {
         if isPro != paid { isPro = paid }
     }
 
-    private struct Entitlement: Decodable {
+    private nonisolated struct Entitlement: Decodable {
         let success: Bool
         let paywall: Bool
         let pro: Bool
@@ -168,7 +168,7 @@ final class ProGate: ObservableObject {
 
         var request = URLRequest(url: url, timeoutInterval: 20)
         request.httpMethod = "GET"
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard error == nil,
                   let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
                   let data,

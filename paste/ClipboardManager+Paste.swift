@@ -248,6 +248,62 @@ extension ClipboardManager {
         }
         captureRememberedSelection()
 
+        // Paste ONLY the highlighted field's value. Routed through the
+        // same result path Transform uses for derived text, so restoring
+        // the original clipboard afterwards behaves identically.
+        if inDetailsStage {
+            guard displayItems.indices.contains(selectedIndex),
+                  detailsFields.indices.contains(detailsIndex) else {
+                setSidePanelStage(.none); previewWindow.hide(); return
+            }
+            let source = displayItems[selectedIndex]
+            let order  = unifiedMarkOrder()
+
+            // Anything marked — rows in the main list AND fields here —
+            // pastes together in one go, in the order it was marked. Field
+            // values become plain-text items so the existing multi-paste
+            // path handles the mix, rather than this panel growing a second,
+            // parallel paste implementation.
+            if !order.items.isEmpty || !order.fields.isEmpty {
+                var ranked: [(rank: Int, item: ClipboardItem)] = []
+                let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+                for (id, rank) in order.items {
+                    if let it = byID[id] { ranked.append((rank, it)) }
+                }
+                for (idx, rank) in order.fields where detailsFields.indices.contains(idx) {
+                    ranked.append((rank, ClipboardItem(content: .text(detailsFields[idx].value))))
+                }
+                ranked.sort { $0.rank < $1.rank }
+                let ordered = ranked.map(\.item)
+                guard !ordered.isEmpty else { setSidePanelStage(.none); previewWindow.hide(); return }
+
+                let target = resolvedPasteTarget()
+                setSidePanelStage(.none)
+                previewWindow.hide()
+                markedItemIDs = []
+                commitMultiPaste(ordered, target: target,
+                                 nudgeKind: ordered.count > 1 ? .multiMarked : .single)
+                return
+            }
+
+            // Nothing marked anywhere — paste the field under the cursor.
+            // Re-checked here, redundantly with the guard above: this
+            // crashed once in production (index out of range on this exact
+            // subscript) despite that guard, and re-deriving the field
+            // fresh removes any possible doubt rather than trusting state
+            // captured several lines earlier hasn't shifted underneath it.
+            guard detailsFields.indices.contains(detailsIndex) else {
+                setSidePanelStage(.none)
+                previewWindow.hide()
+                return
+            }
+            let field = detailsFields[detailsIndex]
+            setSidePanelStage(.none)
+            previewWindow.hide()
+            handleTransformResult(.text(field.value), restoring: source)
+            return
+        }
+
         if inTransformStage, transformingMarkedSet {
             let markedItems = orderedMarkedItems
             guard markedItems.count >= 2,

@@ -87,6 +87,41 @@ private enum HistoryCrypto {
 
 extension ClipboardManager {
 
+    /// Lands a completed, validated AI analysis onto the item so it becomes
+    /// a real search signal — mirrors updateUserNote's shape exactly:
+    /// clearing `embedding` forces the vector to be rebuilt from text that
+    /// now includes the AI description, and dropping the cached query makes
+    /// the next search recompute instead of serving a stale result set.
+    func updateAIStructuredText(id: UUID, json: String?) {
+        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard items[idx].aiStructuredText != json else { return }
+        items[idx].aiStructuredText = json
+        items[idx].embedding = nil
+        lastSearchQuery = nil
+        recomputeEmbeddingsInBackground()
+    }
+
+    /// Strips the stored AI analysis from every item, so a regenerate
+    /// starts from genuinely nothing rather than overwriting entries
+    /// one-by-one and leaving any that fail still holding old data.
+    /// Embeddings go too — they were built from text that included the
+    /// analysis, so keeping them would leave the search index describing
+    /// content that no longer exists.
+    func clearAllAIStructuredText() {
+        var updated = items
+        var changed = false
+        for i in updated.indices where updated[i].aiStructuredText != nil {
+            updated[i].aiStructuredText = nil
+            updated[i].embedding = nil
+            changed = true
+        }
+        guard changed else { return }
+        items = updated
+        lastSearchQuery = nil
+        refreshPopupFactChips()
+        recomputeEmbeddingsInBackground()
+    }
+
     func updateUserNote(id: UUID, note: String) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         if items[idx].userNote == nil && !note.isEmpty {
@@ -306,6 +341,7 @@ extension ClipboardManager {
         updated.originalFileURL   = old.originalFileURL
         updated.sidecarTypes      = old.sidecarTypes
         updated.ocrText           = old.ocrText
+        updated.aiStructuredText  = old.aiStructuredText
         updated.collections       = old.collections
         updated.embedding         = old.embedding
         items[idx] = updated
@@ -442,6 +478,7 @@ extension ClipboardManager {
         let pastedToAppNames:  [String: String]?
         var userNote: String? = nil
         var ocrText: String? = nil
+        var aiStructuredText: String? = nil
         var sidecarBlob: String? = nil
 
         var groupChildren: [PersistedItem]? = nil
@@ -460,6 +497,7 @@ extension ClipboardManager {
              pastedToAppName: String?, pastedToBundleID: String?, lastPastedAt: Date?,
              pasteCount: Int?, pasteCountByApp: [String: Int]?, pastedToAppNames: [String: String]?,
              userNote: String? = nil, ocrText: String? = nil,
+             aiStructuredText: String? = nil,
              groupChildren: [PersistedItem]? = nil, collections: [String]? = nil,
              originalFilePath: String? = nil) {
             self.id = id; self.timestamp = timestamp; self.isPinned = isPinned
@@ -474,6 +512,7 @@ extension ClipboardManager {
             self.pasteCount = pasteCount; self.pasteCountByApp = pasteCountByApp
             self.pastedToAppNames = pastedToAppNames
             self.userNote = userNote; self.ocrText = ocrText
+            self.aiStructuredText = aiStructuredText
             self.groupChildren = groupChildren; self.collections = collections
             self.originalFilePath = originalFilePath
         }
@@ -505,6 +544,7 @@ extension ClipboardManager {
             pastedToAppNames = try c.decodeIfPresent([String: String].self, forKey: .pastedToAppNames)
             userNote = try c.decodeIfPresent(String.self, forKey: .userNote)
             ocrText = try c.decodeIfPresent(String.self, forKey: .ocrText)
+            aiStructuredText = try c.decodeIfPresent(String.self, forKey: .aiStructuredText)
             sidecarBlob = try c.decodeIfPresent(String.self, forKey: .sidecarBlob)
             groupChildren = try c.decodeIfPresent([PersistedItem].self, forKey: .groupChildren)
             collections = try c.decodeIfPresent([String].self, forKey: .collections)
@@ -536,6 +576,7 @@ extension ClipboardManager {
                 lastPastedAt: item.lastPastedAt, pasteCount: item.pasteCount,
                 pasteCountByApp: item.pasteCountByApp, pastedToAppNames: item.pastedToAppNames,
                 userNote: item.userNote, ocrText: item.ocrText,
+                aiStructuredText: item.aiStructuredText,
                 groupChildren: groupChildren,
                 collections: item.collections.isEmpty ? nil : Array(item.collections),
                 originalFilePath: item.originalFileURL?.path)
@@ -746,6 +787,7 @@ extension ClipboardManager {
                 var item = ClipboardItem(content: c, id: child.id, timestamp: child.timestamp,
                                      urlTitle: child.urlTitle, sourceAppName: child.sourceAppName,
                                      userNote: child.userNote, ocrText: child.ocrText)
+                item.aiStructuredText = child.aiStructuredText
                 item.isPinned = child.isPinned
                 item.collections = Set(child.collections ?? [])
                 if let orig = child.originalFilePath { item.originalFileURL = URL(fileURLWithPath: orig) }
@@ -973,6 +1015,7 @@ extension ClipboardManager {
             var item = ClipboardItem(content: content, id: p.id, timestamp: p.timestamp,
                                      urlTitle: p.urlTitle, sourceAppName: p.sourceAppName,
                                      userNote: p.userNote, ocrText: p.ocrText)
+            item.aiStructuredText = p.aiStructuredText
             item.isPinned = p.isPinned
 
             item.collections = Set(p.collections ?? [])

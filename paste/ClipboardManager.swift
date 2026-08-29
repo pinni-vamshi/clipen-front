@@ -73,6 +73,17 @@ class ClipboardManager: ObservableObject {
                 let cleaned = markedItemIDs.filter { live.contains($0) }
                 if cleaned.count != markedItemIDs.count { markedItemIDs = cleaned }
             }
+            // Every freshly captured item gets its one automatic AI
+            // structuring attempt — a single `didSet` here catches every
+            // insertion call site at once rather than needing a hook at
+            // each one individually. No-ops for items already seen
+            // (existing items reordering/pinning/etc. re-triggers this
+            // didSet too, but autoAnalyzeIfNeeded's own once-ever guard
+            // makes that a cheap no-op, not a re-run).
+            let oldIDs = Set(oldValue.map(\.id))
+            for item in items where !oldIDs.contains(item.id) {
+                AIStructuringService.shared.autoAnalyzeIfNeeded(item: item)
+            }
         }
     }
     @Published var selectedIndex: Int = 0 {
@@ -215,7 +226,27 @@ class ClipboardManager: ObservableObject {
         didSet {
             _displayItems = nil
             selectedIndex = 0
+            refreshPopupFactChips()
         }
+    }
+
+    /// AI fact chips for the current query.
+    ///
+    /// Computed HERE, on query change — never inside a SwiftUI view body.
+    /// Ranking mutates AIFactIndex's cache and kicks off background
+    /// embedding work; doing that during view evaluation is "Modifying
+    /// state during view update", which is undefined behaviour and in
+    /// practice broke the popup outright (empty rows, no tags rendering).
+    /// The view is now a pure read of this array.
+    @Published private(set) var popupFactChips: [AIFactChip] = []
+
+    func refreshPopupFactChips() {
+        let q = debouncedPopupSearchQuery
+        guard !q.trimmingCharacters(in: .whitespaces).isEmpty else {
+            if !popupFactChips.isEmpty { popupFactChips = [] }
+            return
+        }
+        popupFactChips = AIFactIndex.shared.chips(query: q, items: displayItems)
     }
     @Published var isSearchActive: Bool = false
     @Published private(set) var searchIntentTag: ClipboardTag? = nil
@@ -531,6 +562,25 @@ class ClipboardManager: ObservableObject {
     let transformPanel = TransformPanel()
     let itemPreviewPanel = ItemPreviewPanel()
     let sharePanel = SharePanel()
+    let detailsPanel = DetailsPanel()
+    var detailsFields: [DetailField] = []
+    var detailsIndex: Int = 0
+    var detailsSourceItemID: UUID? = nil
+    /// Marked FIELDS, by their position in `detailsFields`. Field-level,
+    /// not item-level, so it is deliberately separate from markedItemIDs —
+    /// and cleared whenever the field list is rebuilt, since an index into
+    /// one item's fields means nothing for another's.
+    var markedDetailIndices: Set<Int> = []
+    /// Marks from the main list and from the Details panel share ONE running
+    /// sequence, so numbering continues across both: mark two rows, open
+    /// Details and mark two fields, and they read 1,2,3,4 rather than each
+    /// surface starting again at 1. Ranks are derived from these stamps at
+    /// read time (see unifiedMarkOrder) rather than stored, so the many
+    /// places that clear markedItemIDs directly cannot leave stale numbers.
+    var markSeqCounter: Int = 0
+    var itemMarkSeq: [UUID: Int] = [:]
+    var fieldMarkSeq: [Int: Int] = [:]
+    var dTapHoldTimer: Timer? = nil
     let similarPanel = SimilarPanel()
     let nudgeLessonPanel = NudgeLessonPanel()
     let fastPasteHintPanel = FastPasteHintPanel()
@@ -567,6 +617,21 @@ class ClipboardManager: ObservableObject {
     }
 
     @Published var showFirstCycleHint: Bool = false
+
+    /// One-time discovery hint for the Details panel (D key) — shown until
+    /// the user has pressed D twice, then dismissed forever. Two presses
+    /// rather than one: the first press only reveals that D does something
+    /// (opens the panel), the second is what proves they registered it,
+    /// since it's what advances/cycles rather than merely opening.
+    @Published var showDetailsHint: Bool = !UserDefaults.standard.bool(forKey: "hasSeenDetailsHint")
+    private var detailsHintPressCount = 0
+    func registerDetailsKeyPress() {
+        guard showDetailsHint else { return }
+        detailsHintPressCount += 1
+        guard detailsHintPressCount >= 2 else { return }
+        showDetailsHint = false
+        UserDefaults.standard.set(true, forKey: "hasSeenDetailsHint")
+    }
 
     @Published var launchAtLoginEnabled: Bool = (SMAppService.mainApp.status == .enabled)
 
@@ -633,6 +698,34 @@ class ClipboardManager: ObservableObject {
 
     @Published var referenceAppAffinityEnabled: Bool = UserDefaults.standard.object(forKey: "referenceAppAffinityEnabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(referenceAppAffinityEnabled, forKey: "referenceAppAffinityEnabled") }
+    }
+    // Apple Intelligence / on-device structuring toggle.
+    @Published var aiStructuringEnabled: Bool = UserDefaults.standard.object(forKey: "aiStructuringEnabled") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(aiStructuringEnabled, forKey: "aiStructuringEnabled")
+            // Turning this on only affects the `items` didSet going forward
+            // (it gates autoAnalyzeIfNeeded there) — it does nothing for
+            // history captured before the toggle existed or while it was
+            // off. Without this, a user enabling the feature would see
+            // every existing item stay unanalyzed forever, since nothing
+            // else ever re-triggers analysis for items already in the
+            // array. Non-destructive: autoAnalyzeIfNeeded's own once-ever
+            // guard means an item already analyzed is a no-op, so this is
+            // safe to call on every toggle-on, not just the first.
+            guard aiStructuringEnabled, !oldValue else { return }
+            for item in items {
+                AIStructuringService.shared.autoAnalyzeIfNeeded(item: item)
+            }
+        }
+    }
+    /// Key is versioned because the prompt used to be only half the story —
+    /// a second block was appended in code behind the user's back. Now that
+    /// everything lives in this one editable string, a prompt saved under
+    /// the old key would be missing the description/keywords/data-boundary
+    /// instructions that search depends on, so the v2 key lets the complete
+    /// default take over once.
+    @Published var aiStructuringPrompt: String = UserDefaults.standard.string(forKey: "aiStructuringPrompt.v3") ?? aiStructuringDefaultPrompt {
+        didSet { UserDefaults.standard.set(aiStructuringPrompt, forKey: "aiStructuringPrompt.v3") }
     }
     @Published var advanceAfterMark: Bool = UserDefaults.standard.object(forKey: "advanceAfterMark") as? Bool ?? false {
         didSet {
@@ -857,12 +950,13 @@ class ClipboardManager: ObservableObject {
 
     @Published var isItemPreviewVisible = false
 
-    enum SidePanelStage: Equatable { case none, transform, share, similar }
+    enum SidePanelStage: Equatable { case none, transform, share, similar, details }
     @Published private(set) var sidePanelStage: SidePanelStage = .none
 
     var inTransformStage: Bool { sidePanelStage == .transform }
     var inShareStage:     Bool { sidePanelStage == .share }
     var inSimilarStage:   Bool { sidePanelStage == .similar }
+    var inDetailsStage:   Bool { sidePanelStage == .details }
 
     var transformIndex   = 0
     var transformDisplaysCache: [TransformDisplay] = []
@@ -892,6 +986,15 @@ class ClipboardManager: ObservableObject {
             similarPanelItems        = []
             similarPanelIndex        = 0
             similarPanelSourceItemID = nil
+        case .details:
+            detailsPanel.hide()
+            detailsFields            = []
+            detailsIndex             = 0
+            detailsSourceItemID      = nil
+            markedDetailIndices      = []
+            fieldMarkSeq             = [:]
+            dTapHoldTimer?.invalidate()
+            dTapHoldTimer            = nil
         case .none:
             break
         }
@@ -1255,6 +1358,19 @@ struct ClipboardItem: Identifiable {
     var sourceBundleID: String? = nil
     var userNote: String? = nil { didSet { rebuildSearchHaystacks() } }
     var ocrText: String? = nil { didSet { rebuildSearchHaystacks() } }
+
+    /// The validated JSON produced by AIStructuringService, plus whatever
+    /// `description` the model gave for what this item actually IS.
+    ///
+    /// This is a real search signal, not just display data. For an image,
+    /// the only text search ever had was OCR — and OCR gives you the words
+    /// printed on the thing, never what the thing *is*. A university
+    /// timetable screenshot OCRs to "MATHS 5065 Lecture Room: BOYD
+    /// ORR:406" and contains the word "university" nowhere, so searching
+    /// "university" could never find it. An LLM reading that same text can
+    /// say "university course timetable" — which is exactly the bridge
+    /// between what a user types and what the content is.
+    var aiStructuredText: String? = nil { didSet { rebuildSearchHaystacks() } }
      var sidecarTypes: [String: Data]? = nil
 
     var originalFileURL: URL? = nil
@@ -1270,6 +1386,13 @@ struct ClipboardItem: Identifiable {
     private(set) var searchPreviewNorm: String = ""
     private(set) var searchEmbedNorm:   String = ""
     private(set) var searchMetaNorm:    String = ""
+    /// OCR and AI text get their own haystacks rather than being blended
+    /// into `searchEmbedNorm` (where they used to live, diluted alongside
+    /// generic file metadata like "image JPEG photo 1156×868 pixels").
+    /// For an image these two ARE the content, so they need to be scored
+    /// at close to full weight — see `lexicalScore`.
+    private(set) var searchOCRNorm:     String = ""
+    private(set) var searchAINorm:      String = ""
 
     init(content: ClipboardContent, id: UUID = UUID(), timestamp: Date = Date(),
          urlTitle: String? = nil, sourceAppName: String? = nil,
@@ -1298,6 +1421,11 @@ struct ClipboardItem: Identifiable {
         searchPreviewNorm = Self.normalize(previewText)
         searchEmbedNorm   = Self.normalize(String((textForEmbedding ?? "").prefix(Self.maxSearchNormLength)))
         searchMetaNorm    = Self.normalize(String((metadataSummary ?? "").prefix(Self.maxSearchNormLength)))
+        searchOCRNorm     = Self.normalize(String((ocrText ?? "").prefix(Self.maxSearchNormLength)))
+        searchAINorm      = Self.normalize(String((aiStructuredText ?? "").prefix(Self.maxSearchNormLength)))
+        // Kept in the embed haystack too, so nothing that used to be
+        // findable via this field silently stops being findable — the
+        // dedicated haystacks above are additive, not a replacement.
         if let ocr = ocrText, !ocr.isEmpty {
             searchEmbedNorm += " " + Self.normalize(String(ocr.prefix(Self.maxSearchNormLength)))
         }
@@ -1314,6 +1442,11 @@ struct ClipboardItem: Identifiable {
         var parts: [String] = []
         if let base = textForEmbedding { parts.append(base) }
         if let ocr = ocrText, !ocr.isEmpty { parts.append(String(ocr.prefix(800))) }
+        // The embedding model is text-only — it never sees the image. This
+        // AI-written description of what the content actually is ("a
+        // university course timetable") is the only way it can ever score
+        // an image on meaning rather than on incidental OCR fragments.
+        if let ai = aiStructuredText, !ai.isEmpty { parts.append(String(ai.prefix(800))) }
         if let note = userNote, !note.isEmpty { parts.append(note) }
         if let title = urlTitle, !title.isEmpty, textForEmbedding?.contains(title) != true {
             parts.append(title)

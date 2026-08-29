@@ -187,7 +187,7 @@ private struct NudgeCalloutView: View {
             DispatchQueue.main.async { practiceFocused = true }
         }
 
-        .onChange(of: demo) { newDemo in
+        .onChange(of: demo) { _, newDemo in
             lab.select(newDemo)
             practiceText = ""
             DispatchQueue.main.async { practiceFocused = true }

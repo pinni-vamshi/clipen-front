@@ -8,52 +8,7 @@ import SwiftUI
 /// clipboard item directly. Each R/Shift+R press swaps which related item
 /// fills the box — the box itself never changes shape, so a related item
 /// previews exactly like viewing it directly would.
-class SimilarPanel: NSObject, NSPopoverDelegate {
-    private let anchorPanel: NSPanel
-    private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-    private let popover = NSPopover()
-
-    private var wantsVisible = false
-
-    func popoverDidShow(_ notification: Notification) {
-        popover.contentViewController?.view.window?.sharingType = .none
-        if !wantsVisible {
-            popover.performClose(nil)
-            anchorPanel.orderOut(nil)
-        }
-    }
-    private var shownStrip: NSRect? = nil
-
-    var isVisible: Bool { wantsVisible && popover.isShown }
-    var frame: NSRect {
-        if let view = popover.contentViewController?.view, let win = view.window {
-            return win.convertToScreen(view.convert(view.bounds, to: nil))
-        }
-        return anchorPanel.frame
-    }
-
-    override init() {
-        anchorPanel = NSPanel(
-            contentRect: .zero,
-            styleMask: [.nonactivatingPanel, .borderless],
-            backing: .buffered,
-            defer: false
-        )
-        anchorPanel.isOpaque = false
-        anchorPanel.backgroundColor = .clear
-        anchorPanel.hasShadow = false
-        anchorPanel.ignoresMouseEvents = true
-        anchorPanel.level = .popUpMenu
-        anchorPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        anchorPanel.contentView = anchorView
-
-        super.init()
-
-        popover.behavior = .applicationDefined
-        popover.animates = true
-        popover.delegate = self
-    }
-
+class SimilarPanel: AnchoredPopoverPanel {
     func show(sourceItem: ClipboardItem,
               items: [ClipboardItem],
               selectedIndex: Int,
@@ -69,55 +24,8 @@ class SimilarPanel: NSObject, NSPopoverDelegate {
 
         let w: CGFloat = 520
         let h: CGFloat = 420
-        let screen = NSScreen.main?.visibleFrame ?? .zero
-
-        let preferredRightX = popupFrame.maxX + 8
-        let rightFits = preferredRightX + w <= screen.maxX
-        let leftFits = popupFrame.minX - w - 8 >= screen.minX + 8
-        let placeRight = rightFits || !leftFits
-
-        popover.contentSize = NSSize(width: w, height: h)
-        if let hostingController = popover.contentViewController as? NSHostingController<SimilarPanelView> {
-            hostingController.rootView = content
-        } else {
-            popover.contentViewController = NSHostingController(rootView: content)
-        }
-
-        let anchorY = anchorPoint?.y ?? popupFrame.midY
-        let stripHeight = max(1, popupFrame.height)
-        let desiredStrip = NSRect(x: placeRight ? popupFrame.maxX : popupFrame.minX,
-                                  y: popupFrame.minY, width: 1, height: stripHeight)
-        let localY = max(0, min(stripHeight - 1, anchorY - desiredStrip.minY))
-        let rowRect = NSRect(x: 0, y: localY, width: 1, height: 1)
-
-        wantsVisible = true
-        if popover.isShown, shownStrip == desiredStrip {
-            popover.positioningRect = rowRect
-            return
-        }
-
-        if popover.isShown { popover.performClose(nil) }
-        anchorPanel.setFrame(desiredStrip, display: false)
-        if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
-        shownStrip = desiredStrip
-        let edge: NSRectEdge = placeRight ? .maxX : .minX
-        WakeGuard.afterWakeSettle { [popover, anchorView] in
-            popover.animates = false
-            popover.show(relativeTo: rowRect, of: anchorView, preferredEdge: edge)
-            popover.animates = true
-            popover.clipenAnimateIn()
-        }
-    }
-
-    func hide() {
-        wantsVisible = false
-        if popover.isShown {
-            popover.animates = false
-            popover.performClose(nil)
-            popover.animates = true
-        }
-        anchorPanel.orderOut(nil)
-        shownStrip = nil
+        present(content, size: NSSize(width: w, height: h),
+                near: popupFrame, anchorPoint: anchorPoint)
     }
 }
 

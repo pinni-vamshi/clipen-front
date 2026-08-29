@@ -39,6 +39,121 @@ extension ClipboardManager {
         }
     }
 
+    // MARK: - Details panel (D)
+
+    /// D opens the per-field panel for the selection, or — if already open —
+    /// steps to the next field (Shift+D for previous). Same control shape as
+    /// R/Similar and X/Transform, so it needs no new mental model.
+    ///
+    /// Works for any content type: the field list is whatever the item's AI
+    /// JSON actually contains, flattened generically, so a receipt, an ID
+    /// card and a config file all behave identically without special cases.
+    func handleDetailsKey(backward: Bool = false) {
+        guard previewWindow.isVisible,
+              displayItems.indices.contains(selectedIndex) else { return }
+        registerDetailsKeyPress()
+        if inDetailsStage {
+            guard !detailsFields.isEmpty else { return }
+            detailsIndex = Self.cyclicIndex(detailsIndex, count: detailsFields.count, backward: backward)
+            AuthManager.shared.registerActionUsage(actionID: "action.details")
+            playInteractionSoundIfEnabled(.similar)
+            updateDetailsPanel()
+        } else {
+            enterDetailsStage()
+        }
+    }
+
+    /// The single place an item's stored analysis becomes panel fields.
+    /// Both entry points (opening the panel, and following the selection to
+    /// another item) went through their own identical copy of this before.
+    func detailFields(for item: ClipboardItem) -> [DetailField] {
+        guard let json = item.aiStructuredText, !json.isEmpty else { return [] }
+        return AIFactIndex.flatten(json).map { DetailField(key: $0.key, value: $0.value) }
+    }
+
+    func enterDetailsStage() {
+        guard displayItems.indices.contains(selectedIndex) else { return }
+        let item = displayItems[selectedIndex]
+        // Same denial feedback the inline editor uses when an item can't be
+        // edited: signalEditDenied bumps a generation counter the row watches
+        // and plays the denied sound, so a second refusal on the same item
+        // shakes again rather than being swallowed as "no change".
+        let fields = detailFields(for: item)
+        guard !fields.isEmpty else {
+            signalEditDenied(for: item.id)
+            flashStatus("No analysis for this item.")
+            return
+        }
+        detailsFields = fields
+        detailsIndex = 0
+        detailsSourceItemID = item.id
+        setSidePanelStage(.details)
+        AuthManager.shared.registerActionUsage(actionID: "action.details")
+        playInteractionSoundIfEnabled(.similar)
+        updateDetailsPanel()
+    }
+
+    func updateDetailsPanel() {
+        guard inDetailsStage, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        let anchor = previewWindow.selectedRowAnchorPoint(
+            selectedIndex: selectedIndex,
+            totalItems: displayItems.count
+        )
+        detailsPanel.show(fields: detailsFields,
+                          selectedIndex: detailsIndex,
+                          markOrders: unifiedMarkOrder().fields,
+                          near: previewWindow.frame,
+                          anchorPoint: anchor)
+    }
+
+    /// Navigating to another item REBUILDS the panel for that item rather
+    /// than closing it — same behaviour as syncTransformPanelWithSelection,
+    /// so the panel tracks the selection instead of dropping out from under
+    /// the user mid-browse. Closes only when the new item has nothing to
+    /// show, which is the one case there is no panel to draw.
+    func syncDetailsPanelWithSelection() {
+        guard inDetailsStage, previewWindow.isVisible,
+              !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        let item = displayItems[selectedIndex]
+        guard item.id != detailsSourceItemID else { return }
+
+        let fields = detailFields(for: item)
+        guard !fields.isEmpty else {
+            setSidePanelStage(.none)
+            signalEditDenied(for: item.id)
+            flashStatus("No analysis for this item.")
+            return
+        }
+        detailsFields = fields
+        detailsIndex = 0
+        // Marks are indices into the PREVIOUS item's field list, so they
+        // cannot survive a rebuild.
+        markedDetailIndices = []
+        fieldMarkSeq = [:]
+        detailsSourceItemID = item.id
+        updateDetailsPanel()
+    }
+
+    /// Hold D to mark/unmark the field under the cursor — same gesture,
+    /// threshold and intent as hold-V on the main list and hold-R in the
+    /// Similar panel, aimed at this panel's own cursor.
+    func toggleDetailFieldMark() {
+        guard inDetailsStage, detailsFields.indices.contains(detailsIndex) else { return }
+        if markedDetailIndices.contains(detailsIndex) {
+            markedDetailIndices.remove(detailsIndex)
+            fieldMarkSeq[detailsIndex] = nil
+        } else {
+            markedDetailIndices.insert(detailsIndex)
+            markSeqCounter += 1
+            fieldMarkSeq[detailsIndex] = markSeqCounter
+            // Marking on only, never off — same asymmetry as the main
+            // list's and Similar panel's hold-to-mark call sites.
+            AuthManager.shared.registerActionUsage(actionID: "action.mark")
+        }
+        playInteractionSoundIfEnabled(.mark)
+        updateDetailsPanel()
+    }
+
     func cancelPendingFirstOpen() {
         pendingFirstOpenTimer?.invalidate()
         pendingFirstOpenTimer = nil
@@ -415,6 +530,19 @@ extension ClipboardManager {
     /// address, a URL, an ID) above long prose that merely shares
     /// vocabulary. Opt-in and off by default so the popup search bar is
     /// untouched.
+    /// Fraction of the query's own top-scoring match that a result must
+    /// clear to be shown at all. 0.45 means: once the best hit for this
+    /// search is known, anything scoring below 45% of it is treated as
+    /// noise and dropped, however many items that is — the point is that
+    /// the count is never fixed, it falls out of how confidently the top
+    /// result actually won. A tight, obvious match (one item scoring much
+    /// higher than everything else) yields very few results; a vague query
+    /// where several items are genuinely close in relevance keeps more of
+    /// them, because they earned it relative to each other, not because of
+    /// a hardcoded count. Tune this single number up (stricter, fewer
+    /// results) or down (looser, more results) if it needs revisiting.
+    nonisolated static let relativeSearchCutoff: Float = 0.45
+
     func hybridSearch(query: String, logRanking: Bool = false, affinityBundleID: String? = nil, preferValues: Bool = false) -> [ClipboardItem] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty, q.count >= 2 else { return [] }
@@ -464,10 +592,21 @@ extension ClipboardManager {
                     buf[i] = 0.55 * lex + 0.40 * sem + rec + aff + val
                 }
             }
-            for i in items.indices where scores[i] >= 0.15 {
+            // Two floors, take whichever is stricter: 0.15 absolute (still
+            // never shows outright noise even when nothing matches well)
+            // and a floor RELATIVE to this query's own best match. A fixed
+            // 0.15 alone is what let weak matches ride along any time the
+            // top hit itself only scored, say, 0.3 — everything down to
+            // 0.15 is "half as good as the best result" territory and
+            // shouldn't be shown as if it were comparably relevant.
+            let topScore = scores.max() ?? 0
+            let cutoff = max(0.15, topScore * Self.relativeSearchCutoff)
+            for i in items.indices where scores[i] >= cutoff {
                 scored.append((items[i], scores[i]))
             }
         } else {
+            var raw: [(ClipboardItem, Float)] = []
+            raw.reserveCapacity(items.count)
             for item in items {
                 let lex = Self.lexicalScore(query: qNorm, tokens: qTokens, firstToken: firstToken, item: item)
                 let sem = Self.semanticComponent(queryVec: queryVec, itemVec: item.embedding)
@@ -479,16 +618,22 @@ extension ClipboardManager {
                 if logRanking {
                     detail.append((item, lex, sem, rec, combined))
                 }
-                if combined >= 0.15 {
-                    scored.append((item, combined))
-                }
+                raw.append((item, combined))
+            }
+            // Same dynamic floor as the large-library path above.
+            let topScore = raw.map(\.1).max() ?? 0
+            let cutoff = max(0.15, topScore * Self.relativeSearchCutoff)
+            for pair in raw where pair.1 >= cutoff {
+                scored.append(pair)
             }
         }
 
         if logRanking {
             // Every item that scored ANYTHING, not just the ones that
-            // cleared the 0.15 display threshold — an item ranking 7th
-            // needs to be visible here even if it's below that bar, since
+            // cleared the display cutoff (0.15 absolute, or relativeSearchCutoff
+            // of this query's own top score, whichever is stricter) — an
+            // item ranking 7th needs to be visible here even if it's below
+            // that bar, since
             // that's precisely the case worth inspecting.
             let ranked = detail.sorted { $0.combined > $1.combined }
             DebugLog.write("SEARCH-RANK: \(ranked.count) items scored, top 10:")
@@ -522,6 +667,17 @@ extension ClipboardManager {
                                      item: ClipboardItem) -> Float {
         var best: Float = 0
         best = max(best, score(text: item.searchPreviewNorm, query: query, tokens: tokens, firstToken: firstToken) * 1.00)
+        // OCR and AI analysis at near-full weight, and in their own
+        // haystacks. For an image these ARE the content — the old code had
+        // both buried inside searchEmbedNorm at 0.70, sharing that field
+        // with generic metadata ("image JPEG photo 1156×868 pixels"), so a
+        // real word match against OCR was scored the same as matching the
+        // word "photo". searchPreviewNorm for an image is the literal
+        // string "[Image]", which can never match anything a user types,
+        // so without these two an image had no usable lexical signal at
+        // all — measured as lex=0.000 on every image in a real search.
+        best = max(best, score(text: item.searchOCRNorm,     query: query, tokens: tokens, firstToken: firstToken) * 0.95)
+        best = max(best, score(text: item.searchAINorm,      query: query, tokens: tokens, firstToken: firstToken) * 0.90)
         best = max(best, score(text: item.searchEmbedNorm,   query: query, tokens: tokens, firstToken: firstToken) * 0.70)
         best = max(best, score(text: item.searchMetaNorm,    query: query, tokens: tokens, firstToken: firstToken) * 0.55)
         best = max(best, tagBoost(tokens: tokens, item: item))
@@ -569,10 +725,22 @@ extension ClipboardManager {
         return s
     }
 
+    /// Cosine similarity between two genuinely unrelated short strings
+    /// routinely lands at 0.3–0.5 with general-purpose embeddings — that's
+    /// shared generic language structure, not real relatedness. Treating
+    /// 0.3 as the noise floor (the old range below) let that noise carry a
+    /// real, non-trivial weight at this component's 0.40 share of the
+    /// combined score, enough to let an unrelated item win once stacked
+    /// with a recency/affinity boost — a real reported case: searching for
+    /// an actual copied image (weak OCR text, so a middling lexical score)
+    /// lost to an unrelated text item that scored moderately on embedding
+    /// similarity alone. Raising the floor to 0.45 means only a
+    /// genuinely-similar match contributes anything; below that, it's
+    /// noise and now scores exactly 0.
     nonisolated static func semanticComponent(queryVec: [Float]?, itemVec: [Float]?) -> Float {
         guard let qv = queryVec, let iv = itemVec else { return 0 }
         let cos = cosineSimilarity(qv, iv)
-        return max(0, min(1, (cos - 0.3) / 0.5))
+        return max(0, min(1, (cos - 0.45) / 0.35))
     }
 
     /// Extra weight for clipboard items tied to the app the user is
@@ -631,7 +799,7 @@ extension ClipboardManager {
         return score
     }
 
-    private static let commandHeads: Set<String> = [
+    private nonisolated static let commandHeads: Set<String> = [
         "cd", "ls", "mkdir", "rm", "cp", "mv", "git", "npm", "npx", "yarn", "pnpm",
         "python", "python3", "pip", "pip3", "brew", "sudo", "curl", "wget", "ssh",
         "scp", "docker", "kubectl", "make", "cargo", "go", "swift", "xcodebuild",
@@ -775,7 +943,7 @@ extension ClipboardManager {
 
     /// token -> tag lookup for `lexicalScore`'s boost, flattened once from
     /// `tagSynonyms` rather than rebuilt/rescanned per query.
-    static let tagSynonymLookup: [String: ClipboardTag] = {
+    nonisolated static let tagSynonymLookup: [String: ClipboardTag] = {
         var map: [String: ClipboardTag] = [:]
         for (words, tag) in tagSynonyms {
             for w in words { map[w] = tag }
@@ -839,7 +1007,19 @@ final class ClipenEmbedder {
         usingContextual = usingCtx
     }
 
+    /// Serializes every call into the shared NLContextualEmbedding.
+    ///
+    /// That model is NOT thread-safe, and this is now called from more than
+    /// one place — the item-embedding pass and the AI fact-chip prewarm.
+    /// Two threads inside `embeddingResult(for:)` at once segfaults deep in
+    /// CoreNLP (`CompositeTagger::updateWordAndSentenceBoundaries`), which
+    /// is a hard crash the ClipenCatchingExceptions wrapper below cannot
+    /// catch — it intercepts NSExceptions, not SIGSEGV.
+    private let modelLock = NSLock()
+
     func vector(for text: String) -> [Float]? {
+        modelLock.lock()
+        defer { modelLock.unlock() }
         if #available(macOS 14.0, *), let model = contextual as? NLContextualEmbedding {
             // NLContextualEmbedding's tokenizer has been observed to raise a
             // bare NSException from deep inside CoreNLP for certain input

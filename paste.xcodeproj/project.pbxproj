@@ -7,8 +7,16 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CE0000000000000000000013 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000011 /* MLXLLM */; };
+		CE0000000000000000000014 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000012 /* MLXLMCommon */; };
+		CE0000000000000000000017 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000016 /* Hub */; };
 		B10000000000000000000001 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* AuthManager.swift */; };
 		B10000000000000000000002 /* ClipboardManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ClipboardManager.swift */; };
+		CE452D1008B4741D309F /* AIStructuring.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE66922BDFF5EE9AB679 /* AIStructuring.swift */; };
+		CE82134593D0ACE71719 /* LocalLLMManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */; };
+		CEC9F5CA2F04ACC71E0D /* AIChips.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE471C29A9564E468FA /* AIChips.swift */; };
+		CE6AA69F0687F4FE11DD /* AnchoredPopoverPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */; };
+		CE321F93354F4AAA1295 /* DetailsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC89148C5193E388EB5 /* DetailsPanel.swift */; };
 		B10000000000000000000003 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* Color+Hex.swift */; };
 		B10000000000000000000005 /* FileSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* FileSnapshotStore.swift */; };
 		B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ItemPreviewPanel.swift */; };
@@ -83,6 +91,11 @@
 /* Begin PBXFileReference section */
 		A10000000000000000000001 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		A10000000000000000000002 /* ClipboardManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardManager.swift; sourceTree = "<group>"; };
+		CE66922BDFF5EE9AB679 /* AIStructuring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIStructuring.swift; sourceTree = "<group>"; };
+		CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMManager.swift; sourceTree = "<group>"; };
+		CEE471C29A9564E468FA /* AIChips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChips.swift; sourceTree = "<group>"; };
+		CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredPopoverPanel.swift; sourceTree = "<group>"; };
+		CEC89148C5193E388EB5 /* DetailsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		A10000000000000000000005 /* FileSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSnapshotStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* ItemPreviewPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemPreviewPanel.swift; sourceTree = "<group>"; };
@@ -157,6 +170,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CE0000000000000000000013 /* MLXLLM in Frameworks */,
+				CE0000000000000000000014 /* MLXLMCommon in Frameworks */,
+				CE0000000000000000000017 /* Hub in Frameworks */,
 				EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */,
 				EE8C68652FB7847C002CA5C3 /* webp in Frameworks */,
 				B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */,
@@ -236,6 +252,11 @@
 				A10000000000000000000001 /* AuthManager.swift */,
 				A10000000000000000000025 /* DeviceIdentity.swift */,
 				A10000000000000000000002 /* ClipboardManager.swift */,
+				CE66922BDFF5EE9AB679 /* AIStructuring.swift */,
+				CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */,
+				CEE471C29A9564E468FA /* AIChips.swift */,
+				CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */,
+				CEC89148C5193E388EB5 /* DetailsPanel.swift */,
 				A10000000000000000000027 /* ClipboardManager+Capture.swift */,
 				A10000000000000000000028 /* ClipboardManager+EventTap.swift */,
 				A10000000000000000000029 /* ClipboardManager+Panels.swift */,
@@ -301,6 +322,9 @@
 			);
 			name = paste;
 			packageProductDependencies = (
+				CE0000000000000000000011 /* MLXLLM */,
+				CE0000000000000000000012 /* MLXLMCommon */,
+				CE0000000000000000000016 /* Hub */,
 				EE8C68612FB7847C002CA5C3 /* Sparkle */,
 				EE8C68642FB7847C002CA5C3 /* webp */,
 				FE00000000000000000002 /* Highlightr */,
@@ -353,6 +377,8 @@
 			mainGroup = EE8C68442FB7847A002CA5C3;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
+				CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 				EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp" */,
 				FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */,
@@ -390,6 +416,11 @@
 				B10000000000000000000001 /* AuthManager.swift in Sources */,
 				B10000000000000000000025 /* DeviceIdentity.swift in Sources */,
 				B10000000000000000000002 /* ClipboardManager.swift in Sources */,
+				CE452D1008B4741D309F /* AIStructuring.swift in Sources */,
+				CE82134593D0ACE71719 /* LocalLLMManager.swift in Sources */,
+				CEC9F5CA2F04ACC71E0D /* AIChips.swift in Sources */,
+				CE6AA69F0687F4FE11DD /* AnchoredPopoverPanel.swift in Sources */,
+				CE321F93354F4AAA1295 /* DetailsPanel.swift in Sources */,
 				B10000000000000000000027 /* ClipboardManager+Capture.swift in Sources */,
 				B10000000000000000000028 /* ClipboardManager+EventTap.swift in Sources */,
 				B10000000000000000000029 /* ClipboardManager+Panels.swift in Sources */,
@@ -591,7 +622,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 557;
+				CURRENT_PROJECT_VERSION = 564;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -610,7 +641,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.6.2;
+				MARKETING_VERSION = 1.6.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -632,7 +663,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 557;
+				CURRENT_PROJECT_VERSION = 564;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -651,7 +682,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.6.2;
+				MARKETING_VERSION = 1.6.9;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -689,6 +720,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.25.0;
+			};
+		};
+		CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.0;
+			};
+		};
 		B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
@@ -732,6 +779,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		CE0000000000000000000011 /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLLM;
+		};
+		CE0000000000000000000012 /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLMCommon;
+		};
+		CE0000000000000000000016 /* Hub */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Hub;
+		};
 		B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

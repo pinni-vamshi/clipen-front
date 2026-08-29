@@ -23,6 +23,7 @@ struct ClipenSettingsView: View {
     @ObservedObject private var manager = ClipboardManager.shared
     @ObservedObject private var auth    = AuthManager.shared
     @ObservedObject private var proGate = ProGate.shared
+    @ObservedObject private var localLLM = LocalLLMManager.shared
 
     @Binding var showResetConfirm: Bool
 
@@ -87,6 +88,8 @@ struct ClipenSettingsView: View {
                 }
                 .onPreferenceChange(Row1HeightKey.self) { row1Height = $0 }
 
+                aiStructuringSection
+
                 interactionsSection
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .onPreferenceChange(SettingsRow2HeightKey.self) { row2Height = $0 }
@@ -106,7 +109,7 @@ struct ClipenSettingsView: View {
     private var tipsSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                sectionHeader("05", "TIPS")
+                sectionHeader("06", "TIPS")
 
                 Button {
                     manager.autoTipsEnabled.toggle()
@@ -171,7 +174,7 @@ struct ClipenSettingsView: View {
 
     private var feedbackSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("06", "FEEDBACK")
+            sectionHeader("07", "FEEDBACK")
 
             feedbackCommunityBanner
 
@@ -1482,6 +1485,136 @@ struct ClipenSettingsView: View {
         }
     }
 
+    // Same "full width, separate box" visual
+    // treatment as interactionsSection's KeyboardInteractionPanel box below,
+    // not the thin leading-line rowCard style the other behaviour rows use —
+    // this one has its own editable content, not just toggle rows.
+    private var aiStructuringSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                sectionHeader("04", "APPLE INTELLIGENCE")
+                Spacer()
+                Button {
+                    AIStructuringService.shared.regenerateAll(items: manager.items)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold))
+                        Text("Regenerate All").font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundColor(.accent)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Color.accentDim, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Delete every stored AI analysis, then rebuild them all from scratch")
+            }
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                    Text("Structure copied text with Apple Intelligence").font(.system(size: 13)).foregroundColor(.textPri)
+                    Spacer()
+                    Toggle("", isOn: Binding(get: { manager.aiStructuringEnabled },
+                                              set: { manager.aiStructuringEnabled = $0 }))
+                        .toggleStyle(.switch).controlSize(.mini).tint(.accent)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 16)
+
+                rowDivider(leading: 14)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "cpu").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                    Text("Engine").font(.system(size: 13)).foregroundColor(.textPri)
+                    Spacer()
+                    engineControl
+                }
+                .padding(.horizontal, 14).padding(.vertical, 16)
+            }
+            .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
+    private func byteProgressText(_ tier: LocalModelTier) -> String {
+        let done = localLLM.downloadedBytes[tier] ?? 0
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        f.allowedUnits = [.useGB, .useMB]
+        let pct = Int((localLLM.downloadProgress[tier] ?? 0) * 100)
+        return "\(f.string(fromByteCount: done)) / \(f.string(fromByteCount: tier.totalBytes)) · \(pct)%"
+    }
+
+    private func speedText(_ tier: LocalModelTier) -> String {
+        let bps = localLLM.downloadSpeed[tier] ?? 0
+        guard bps > 1024 else { return "connecting\u{2026}" }
+        let f = ByteCountFormatter()
+        f.countStyle = .file
+        f.allowedUnits = [.useMB, .useKB]
+        let remaining = max(0, tier.totalBytes - (localLLM.downloadedBytes[tier] ?? 0))
+        let secs = Int(Double(remaining) / bps)
+        let eta = secs > 90 ? "\(secs / 60)m left" : "\(secs)s left"
+        return "\(f.string(fromByteCount: Int64(bps)))/s · \(eta)"
+    }
+
+    @ViewBuilder
+    private var engineControl: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+        HStack(spacing: 8) {
+            Picker("", selection: Binding(
+                get: { localLLM.selectedEngine },
+                set: { localLLM.selectEngine($0) }
+            )) {
+                Text("Apple Intelligence").tag(AIEngineSelection.apple)
+                ForEach(LocalModelTier.allCases) { tier in
+                    Text(tier.displayName).tag(AIEngineSelection.local(tier))
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 210)
+            .labelsHidden()
+
+            if case .local(let tier) = localLLM.selectedEngine {
+                if localLLM.downloadingTiers.contains(tier) {
+                    ProgressView(value: localLLM.downloadProgress[tier] ?? 0)
+                        .frame(width: 60)
+                    // Real bytes + speed, not a file-count percentage — a
+                    // multi-GB weights file otherwise pins the bar at one
+                    // number for many minutes and reads as a dead download.
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(byteProgressText(tier))
+                            .font(.system(size: 9)).foregroundColor(.textDim)
+                        Text(speedText(tier))
+                            .font(.system(size: 8)).foregroundColor(.textDim.opacity(0.6))
+                    }
+                    .frame(width: 110, alignment: .leading)
+                    Button("Cancel") { localLLM.cancelDownload(tier) }
+                        .font(.system(size: 9)).buttonStyle(.plain).foregroundColor(.red.opacity(0.75))
+                } else if localLLM.downloadedTiers.contains(tier) {
+                    Button("Delete") { localLLM.delete(tier) }
+                        .font(.system(size: 9)).buttonStyle(.plain).foregroundColor(.red.opacity(0.75))
+                } else if LocalModelPaths.hasAnyLocalFiles(tier) {
+                    // Leftover partial files from a prior stuck/cancelled
+                    // download that predates the cancel-cleanup fix, or one
+                    // abandoned by quitting the app instead of cancelling.
+                    Text("partial files").font(.system(size: 9)).foregroundColor(.orange.opacity(0.8))
+                    Button("Delete") { localLLM.delete(tier) }
+                        .font(.system(size: 9)).buttonStyle(.plain).foregroundColor(.red.opacity(0.75))
+                } else {
+                    Text(tier.approxSizeText)
+                        .font(.system(size: 9)).foregroundColor(.textDim.opacity(0.6))
+                }
+            }
+        }
+        .help(localLLM.lastError ?? "Choose which model runs AI structuring. Picking a local model starts its download automatically if it isn't on disk yet.")
+        if let err = localLLM.lastError {
+            Text(err).font(.system(size: 10)).foregroundColor(.red.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 260, alignment: .trailing)
+        }
+        }
+    }
+
     private func systemFallbackRow(_ n: Int) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
@@ -1535,7 +1668,7 @@ struct ClipenSettingsView: View {
     private var interactionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                sectionHeader("04", "INTERACTIONS")
+                sectionHeader("05", "INTERACTIONS")
 
                 Button {
                     manager.showPopupInteractionHints.toggle()

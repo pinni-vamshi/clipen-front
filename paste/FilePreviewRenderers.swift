@@ -351,7 +351,7 @@ struct Model3DPreview: NSViewRepresentable {
         let token = UUID()
         coordinator.loadToken = token
         coordinator.loadedURL = url
-        PreviewWorkQueue.run {
+        PreviewWorkQueue.run { [weak view] in
             let scene = loadScene(url)
             DispatchQueue.main.async { [weak view] in
                 guard let view, coordinator.loadToken == token else { return }

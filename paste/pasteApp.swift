@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Sparkle
+import ServiceManagement
 import FirebaseCore
 
 @main
@@ -122,6 +123,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             updaterController?.updater.automaticallyDownloadsUpdates = true
         }
 
+        // Launch at login: on by default, same one-time-bootstrap shape as
+        // the Sparkle auto-download default above. SMAppService.mainApp has
+        // no notion of "the user's chosen default" — its status is purely
+        // "registered or not" — so a separate stored flag is what makes
+        // this a one-time default rather than something that silently
+        // re-registers itself after a user has deliberately turned it off.
+        if !UserDefaults.standard.bool(forKey: "hasBootstrappedLaunchAtLogin") {
+            UserDefaults.standard.set(true, forKey: "hasBootstrappedLaunchAtLogin")
+            if SMAppService.mainApp.status != .enabled {
+                try? SMAppService.mainApp.register()
+            }
+        }
+
         ClipboardManager.shared.startMonitoring()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
@@ -157,6 +171,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         AuthManager.shared.flushPendingDailyUsage()
+        // History saves are debounced 1 second behind every `items` change
+        // (ClipboardManager's init: $items.debounce(for: .seconds(1), ...)).
+        // Quitting — or Sparkle relaunching the app to install an update —
+        // inside that window terminates the process before the debounced
+        // write ever fires, silently dropping whatever changed last: an AI
+        // analysis that just finished, a note, a pin, anything. saveHistory
+        // itself no-ops when historyDirty is already false, so calling it
+        // unconditionally here is free on a clean exit and closes the loss
+        // window on a dirty one.
+        ClipboardManager.shared.saveHistory()
         pendingUpdateInstall?()
         pendingUpdateInstall = nil
     }

@@ -9,6 +9,15 @@ final class TrackingService {
 
     static let schemaVersion = 3
     static let retentionDays = 150
+    // How many full calendar days a day's usage sits on-device before it's
+    // eligible to send. 1 (the old, hardcoded behavior) means "yesterday
+    // and older only" — today's data always waits for the date to roll
+    // over, a ~1 day lag before anything reaches the backend. 0 means
+    // today's own data becomes eligible too, so it goes out on the next
+    // 30-min flush timer tick (see flushTimer below) instead of waiting
+    // for tomorrow. 2+ widens the buffer instead. Change this single
+    // number to retune it — no other code here needs to change.
+    static let flushDelayDays = 1
     private static let baseURL = URL(string: "https://clipen-backend.onrender.com")!
 
     struct DayData: Codable {
@@ -334,9 +343,14 @@ final class TrackingService {
         guard !sendInFlight else { return }
         pruneOldDays()
         let today = Self.dateKey(Date())
+        // "Eligible" cutoff: today minus the configured buffer. flushDelayDays=1
+        // reproduces the old `$0.key < today` check exactly (cutoff = yesterday,
+        // `<=` yesterday means the same set as `<` today); flushDelayDays=0
+        // moves the cutoff to today itself, so today's own bucket qualifies too.
+        let cutoff = Self.dateKey(Date().addingTimeInterval(-Double(Self.flushDelayDays) * 86_400))
 
         lock.lock()
-        let pendingDays = store.days.filter { $0.key < today && !$0.value.isEmpty }
+        let pendingDays = store.days.filter { $0.key <= cutoff && !$0.value.isEmpty }
         let liveness = store.lastLivenessSent
         lock.unlock()
 
@@ -467,7 +481,7 @@ final class TrackingService {
         ]
     }
 
-    private struct RemoteMessage: Decodable {
+    private nonisolated struct RemoteMessage: Decodable {
         let enabled: Bool
         let id: String
         let title: String

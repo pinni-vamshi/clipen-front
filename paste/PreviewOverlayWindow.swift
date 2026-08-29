@@ -322,9 +322,11 @@ struct PopoverPreviewView: View {
             VStack(spacing: 0) {
                 popupSearchBar
                 categoryStrip
+                aiFactStrip
                 trialBanner
                 updateAvailableBanner
                 firstCycleHint
+                detailsHint
                 rememberForeverBanner
 
                 Divider().padding(.bottom, 4)
@@ -454,6 +456,37 @@ struct PopoverPreviewView: View {
         .background(Color.primary.opacity(0.02))
     }
 
+    /// Facts pulled from the AI-structured JSON of the current results,
+    /// ranked against the query — the specific key/value that explains why
+    /// something matched, rather than only the item as a whole.
+    ///
+    /// Collapses to nothing when there is no query or no fact clears the
+    /// relevance floor. That matters in a popup whose entire value is speed
+    /// and density: a permanently reserved empty band would cost real rows.
+    @ViewBuilder
+    private var aiFactStrip: some View {
+        let chips = manager.popupFactChips
+        if !chips.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(chips) { chip in
+                        AIFactChipView(chip: chip) {
+                            // Selecting the parent item makes the strip
+                            // navigation rather than decoration.
+                            if let idx = manager.displayItems.firstIndex(where: { $0.id == chip.itemID }) {
+                                manager.selectedIndex = idx
+                                manager.selectionDidChange()
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+            }
+            .frame(height: 40)
+            .background(Color.accentColor.opacity(0.05))
+        }
+    }
+
     /// Shown when Sparkle has found a STABLE release newer than this build.
     ///
     /// No dismiss count and no persistence: this is not a nudge that should
@@ -565,6 +598,25 @@ struct PopoverPreviewView: View {
                         .underline()
                 }
                 .buttonStyle(.plain)
+            }
+            .foregroundColor(Self.bannerBlue)
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var detailsHint: some View {
+        if manager.showDetailsHint {
+            HStack(spacing: 6) {
+                Image(systemName: "list.bullet.rectangle").font(.system(size: 10, weight: .semibold))
+                Text("Tip: Press D to view and paste individual details")
+                    .font(.system(size: 11, weight: .bold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                Spacer()
             }
             .foregroundColor(Self.bannerBlue)
             .padding(.horizontal, 14).padding(.vertical, 6)
@@ -1308,6 +1360,18 @@ struct PopoverRow: View, Equatable {
     }
 
     private static let markedTint = Color(red: 0.20, green: 0.78, blue: 0.35)
+    @State private var analysisRingWidth: CGFloat = 1
+
+    private func startOrStopRingAnimation(running: Bool) {
+        guard running else {
+            withAnimation(.easeOut(duration: 0.2)) { analysisRingWidth = 1 }
+            return
+        }
+        analysisRingWidth = 1
+        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+            analysisRingWidth = 2.6
+        }
+    }
 
     @ViewBuilder
     private var railBadge: some View {
@@ -1326,11 +1390,39 @@ struct PopoverRow: View, Equatable {
                 .background(Color.orange, in: Circle())
                 .help("macOS wouldn't let Clipen copy this — pasting uses the system clipboard instead")
         } else if isSelected {
+            let analysing = AIStructuringService.shared.state(for: item.id) == .running
             Image(systemName: item.primaryTag.icon)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.white)
                 .frame(width: 20, height: 20)
                 .background(Color.secondary.opacity(0.45), in: Circle())
+                // While this item is being analysed the badge keeps its own
+                // icon and gains a pink ring whose thickness breathes. No
+                // extra glyph and no layout change, so the row does not
+                // shift when analysis starts or finishes.
+                .overlay {
+                    if analysing {
+                        Circle()
+                            .strokeBorder(Color.pink, lineWidth: analysisRingWidth)
+                            .frame(width: 20, height: 20)
+                    }
+                }
+                // Restarts on the RUNNING flag AND on which item is
+                // selected. Flag-only was the bug: moving selection from
+                // one analysing item straight to another analysing item
+                // never flips true->false->true, so neither trigger fired
+                // and the ring froze at whatever width it last had — a
+                // static thin line rather than a visible pulse, easy to
+                // mistake for a plain, non-pulsing colour.
+                .onChange(of: analysing) { _, running in
+                    startOrStopRingAnimation(running: running)
+                }
+                .onChange(of: item.id) { _, _ in
+                    startOrStopRingAnimation(running: analysing)
+                }
+                .onAppear {
+                    startOrStopRingAnimation(running: analysing)
+                }
         } else if item.isPinned {
             Image(systemName: "pin.fill")
                 .font(.system(size: 10, weight: .semibold))
@@ -1565,9 +1657,9 @@ private struct FolderContentsPreview: View {
     }
 
     private static let cache = RecentItemCache<[Level]>(capacity: 8)
-    private static let maxDepth = 3
-    private static let maxGroupsPerLevel = 4
-    private static let maxLevels = 4
+    private nonisolated static let maxDepth = 3
+    private nonisolated static let maxGroupsPerLevel = 4
+    private nonisolated static let maxLevels = 4
 
     /// Shrinks per level so depth is legible at a glance: 26 → 20 → 15 → 12.
     private static func iconSize(forDepth depth: Int) -> CGFloat {

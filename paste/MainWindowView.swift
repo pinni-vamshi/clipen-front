@@ -647,6 +647,7 @@ private struct PastedToChipStrip: View {
 private struct ItemDetailView: View {
     let item: ClipboardItem
 
+    @ObservedObject private var aiService = AIStructuringService.shared
     @State private var noteText: String
     @State private var lastCommittedNote: String
     @State private var noteCommitTask: Task<Void, Never>? = nil
@@ -719,6 +720,7 @@ private struct ItemDetailView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     appsFlowCard
                     propertiesCard
+                    aiAnalysisCard
                     notesBlock
                 }
                 .padding(24)
@@ -914,9 +916,47 @@ private struct ItemDetailView: View {
         }
     }
 
- 
- 
- 
+    /// Only appears once there's something to show — nothing runs
+    /// automatically, so a never-analyzed item shows no card at all rather
+    /// than an empty "not run yet" placeholder cluttering every item.
+    @ViewBuilder
+    private var aiAnalysisCard: some View {
+        let state = aiService.state(for: item.id)
+        if state != .idle {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("AI ANALYSIS").font(.system(size: 9, weight: .semibold)).foregroundColor(.textDim).tracking(1.8)
+                Group {
+                    switch state {
+                    case .idle:
+                        EmptyView()
+                    case .running:
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Analyzing\u{2026}").font(.system(size: 12)).foregroundColor(.textDim)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    case .done(let json):
+                        Text(json)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.textPri)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    case .failed(let reason):
+                        Text(reason)
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    }
+                }
+                .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
+            }
+        }
+    }
+
     private func relatedItemLabel(for entityID: String) -> String {
         guard let id = UUID(uuidString: entityID),
               let related = ClipboardManager.shared.items.first(where: { $0.id == id }) else { return "Item no longer in history" }
@@ -1120,7 +1160,8 @@ private struct HistoryListPane: View, Equatable {
                                                   manager.removeItem(at: i)
                                               }
                                           },
-                                          onTogglePin: { manager.togglePin(id: item.id) })
+                                          onTogglePin: { manager.togglePin(id: item.id) },
+                                          onRefreshJSON: { AIStructuringService.shared.refresh(item: item) })
                                 .equatable()
                                 .onTapGesture(count: 1) { selectedID = item.id }
                                 .onTapGesture(count: 2) {
@@ -1156,10 +1197,17 @@ private struct CompactItemRow: View, Equatable {
     let isSelected: Bool
     var onDelete: () -> Void = {}
     var onTogglePin: () -> Void = {}
+    var onRefreshJSON: () -> Void = {}
 
     @State private var isHovered = false
+    @State private var borderPulse: Double = 0.15
+    @ObservedObject private var aiService = AIStructuringService.shared
 
-    private static let iconZoneWidth: CGFloat = 20 + 4 + 20 + 12
+    private static let iconZoneWidth: CGFloat = 20 + 4 + 20 + 4 + 20 + 12
+
+    private var isProcessing: Bool {
+        aiService.state(for: item.id) == .running
+    }
 
     static func == (l: CompactItemRow, r: CompactItemRow) -> Bool {
         l.item.id == r.item.id &&
@@ -1191,6 +1239,23 @@ private struct CompactItemRow: View, Equatable {
                            : (isHovered ? Color.white.opacity(0.05) : Color.clear),
                 in: RoundedRectangle(cornerRadius: 8)
             )
+            // Smooth pulsing boundary while this item is being analyzed —
+            // a field-level "this one's working" signal independent of
+            // hover, since the icons themselves may not be visible.
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.purple, lineWidth: 1.5)
+                    .opacity(isProcessing ? borderPulse : 0)
+            )
+            .onChange(of: isProcessing) { _, running in
+                if running {
+                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                        borderPulse = 0.85
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.25)) { borderPulse = 0.15 }
+                }
+            }
             .overlay(alignment: .trailing) {
                 ZStack(alignment: .trailing) {
                     if item.isPinned {
@@ -1204,12 +1269,24 @@ private struct CompactItemRow: View, Equatable {
                     HStack(spacing: 4) {
                         rowActionButton(icon: "xmark", background: .red, action: onDelete)
                             .help("Delete")
+                            .opacity(isHovered ? 1 : 0)
+                            .allowsHitTesting(isHovered)
                         rowActionButton(icon: item.isPinned ? "pin.slash.fill" : "pin.fill",
                                         background: .blue, action: onTogglePin)
                             .help(item.isPinned ? "Unpin" : "Pin to top")
+                            .opacity(isHovered ? 1 : 0)
+                            .allowsHitTesting(isHovered)
+                        // Deliberately NOT gated by isHovered like the two
+                        // above — this one has to stay visible for the
+                        // whole run so the spinner is actually seen even
+                        // after the mouse moves away.
+                        // Hidden while processing: the row's own pulsing
+                        // border already signals it, and a second spinning
+                        // glyph next to it was redundant noise.
+                        aiRefreshButton
+                            .opacity(isHovered && !isProcessing ? 1 : 0)
+                            .allowsHitTesting(isHovered && !isProcessing)
                     }
-                    .opacity(isHovered ? 1 : 0)
-                    .allowsHitTesting(isHovered)
                 }
                 .padding(.trailing, 12)
             }
@@ -1229,6 +1306,29 @@ private struct CompactItemRow: View, Equatable {
                 .background(background, in: Circle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// No popover — clicking runs structuring directly; the icon itself
+    /// spins while it's working, and the result lands in the properties
+    /// panel's "AI ANALYSIS" card, not a popup.
+    private var aiRefreshButton: some View {
+        Button {
+            guard !isProcessing else { return }
+            onRefreshJSON()
+        } label: {
+            Image(systemName: "sparkles")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 20, height: 20)
+                .background(Color.purple, in: Circle())
+                .rotationEffect(.degrees(isProcessing ? 360 : 0))
+                .animation(isProcessing
+                           ? .linear(duration: 0.9).repeatForever(autoreverses: false)
+                           : .default,
+                           value: isProcessing)
+        }
+        .buttonStyle(.plain)
+        .help(isProcessing ? "Analyzing\u{2026}" : "Analyze this item with AI")
     }
 
     @ViewBuilder

@@ -959,7 +959,7 @@ extension ClipboardManager {
                     req.recognitionLevel = .accurate
                     req.usesLanguageCorrection = true
                     try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([req])
-                    let text = (req.results as? [VNRecognizedTextObservation] ?? [])
+                    let text = (req.results ?? [])
                         .compactMap { $0.topCandidates(1).first?.string }
                         .joined(separator: " ")
                         .trimmingCharacters(in: .whitespacesAndNewlines)

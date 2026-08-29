@@ -750,6 +750,7 @@ extension ClipboardManager {
         syncTransformPanelWithSelection()
         syncShareStageWithSelection()
         syncSimilarPanelWithSelection()
+        syncDetailsPanelWithSelection()
     }
 
     private static let itemPreviewSyncDelay: TimeInterval = 0.07
@@ -1548,6 +1549,8 @@ extension ClipboardManager {
             nowMarked = false
         } else {
             markedItemIDs.append(id)
+            markSeqCounter += 1
+            itemMarkSeq[id] = markSeqCounter
             nowMarked = true
         }
         if inShareStage { refreshShareTargetsForMarkChange() }
@@ -1578,8 +1581,30 @@ extension ClipboardManager {
     }
 
     func markOrder(for id: UUID) -> Int? {
-        guard let idx = markedItemIDs.firstIndex(of: id) else { return nil }
-        return idx + 1
+        unifiedMarkOrder().items[id]
+    }
+
+    /// One continuous numbering across marked ITEMS and marked Details
+    /// FIELDS, ordered by when each was marked. Computed from the current
+    /// marks only, so anything cleared elsewhere simply drops out.
+    func unifiedMarkOrder() -> (items: [UUID: Int], fields: [Int: Int]) {
+        var entries: [(seq: Int, item: UUID?, field: Int?)] = []
+        for id in markedItemIDs {
+            entries.append((itemMarkSeq[id] ?? Int.max, id, nil))
+        }
+        if inDetailsStage {
+            for i in markedDetailIndices {
+                entries.append((fieldMarkSeq[i] ?? Int.max, nil, i))
+            }
+        }
+        entries.sort { $0.seq < $1.seq }
+        var itemOrder: [UUID: Int] = [:]
+        var fieldOrder: [Int: Int] = [:]
+        for (n, e) in entries.enumerated() {
+            if let id = e.item { itemOrder[id] = n + 1 }
+            else if let i = e.field { fieldOrder[i] = n + 1 }
+        }
+        return (itemOrder, fieldOrder)
     }
 
     func selectCollection(slot: Int) {
