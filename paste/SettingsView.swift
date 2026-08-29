@@ -52,7 +52,6 @@ struct ClipenSettingsView: View {
     @State private var showLanguagePicker = false
 
     @AppStorage("SUBetaUpdatesEnabled") private var betaUpdatesEnabled = false
-    @Environment(\.openWindow) private var openWindow
 
     private struct Row1HeightKey: PreferenceKey {
         static var defaultValue: CGFloat = 0
@@ -1495,19 +1494,6 @@ struct ClipenSettingsView: View {
             HStack(spacing: 8) {
                 sectionHeader("04", "APPLE INTELLIGENCE")
                 Spacer()
-                Button {
-                    openWindow(id: "semantic-network")
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "circle.hexagongrid").font(.system(size: 9, weight: .bold))
-                        Text("Semantic Network").font(.system(size: 9, weight: .semibold))
-                    }
-                    .foregroundColor(.accent)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.accentDim, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .help("Visualize how items and their analyzed fields relate to each other by embedding similarity")
                 Button {
                     AIStructuringService.shared.regenerateAll(items: manager.items)
                 } label: {

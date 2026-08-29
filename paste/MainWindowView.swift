@@ -57,7 +57,9 @@ struct MainWindowView: View {
     @State private var mainSelectedID: UUID? = nil
     @State private var showTutorial          = false
     @State private var showResetConfirm      = false
-    @State private var showSettings          = false
+    private enum MainTab { case dashboard, settings, patterns }
+    @State private var mainTab: MainTab = .dashboard
+    private var showSettings: Bool { mainTab == .settings }
     @AppStorage("hasSkippedAccessibility") private var hasSkippedAccessibility = false
     @AppStorage("hasSeenTutorial")         private var hasSeenTutorial         = false
 
@@ -99,9 +101,12 @@ struct MainWindowView: View {
                 } else {
                     VStack(spacing: 0) {
                         Divider().background(Color.border)
-                        if showSettings {
+                        switch mainTab {
+                        case .settings:
                             settingsFullView
-                        } else {
+                        case .patterns:
+                            SemanticNetworkView()
+                        case .dashboard:
                             browsingView
                                 .onAppear {
                                     guard !hasSeenTutorial else { return }
@@ -149,7 +154,7 @@ struct MainWindowView: View {
         .toolbarBackground(.regularMaterial, for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .sheet(isPresented: $showTutorial) {
-            TutorialSheet(isPresented: $showTutorial, onSeeMore: { showSettings = true })
+            TutorialSheet(isPresented: $showTutorial, onSeeMore: { mainTab = .settings })
         }
         .alert("Heads up",
                isPresented: Binding(get: { auth.lastError != nil },
@@ -194,9 +199,9 @@ struct MainWindowView: View {
 
     private var toolbarSwitcher: some View {
         HStack(spacing: 2) {
-            toolbarSegment("Dashboard", active: !showSettings) { showSettings = false }
-            toolbarSegment("Settings",  active: showSettings)  {
-                showSettings = true
+            toolbarSegment("Dashboard", active: mainTab == .dashboard) { mainTab = .dashboard }
+            toolbarSegment("Settings",  active: mainTab == .settings)  {
+                mainTab = .settings
                 // Feedback replies otherwise only refresh on the 30-minute
                 // background timer or when a popup opens — neither of which
                 // fires just from looking at Settings. This makes opening
@@ -209,6 +214,7 @@ struct MainWindowView: View {
                 // endpoint.
                 ProGate.shared.refresh()
             }
+            toolbarSegment("Patterns", active: mainTab == .patterns) { mainTab = .patterns }
         }
         .padding(3)
         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))

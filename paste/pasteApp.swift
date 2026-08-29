@@ -24,11 +24,6 @@ struct pasteApp: App {
                     .keyboardShortcut("q", modifiers: .command)
             }
         }
-        Window("Semantic Network", id: "semantic-network") {
-            SemanticNetworkView()
-        }
-        .defaultSize(width: 900, height: 640)
-        .windowResizability(.contentSize)
         Settings { EmptyView() }
     }
 }
