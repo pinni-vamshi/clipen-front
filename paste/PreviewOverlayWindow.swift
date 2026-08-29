@@ -1016,18 +1016,58 @@ struct ImageRunRow: View, Equatable {
         return tagLabelText(for: run[0].item)
     }
 
+    @State private var analysisRingWidth: CGFloat = 1
+
+    private func startOrStopRingAnimation(running: Bool) {
+        guard running else {
+            withAnimation(.easeOut(duration: 0.2)) { analysisRingWidth = 1 }
+            return
+        }
+        analysisRingWidth = 1
+        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+            analysisRingWidth = 2.6
+        }
+    }
+
     /// Mirrors `PopoverRow.railBadge`'s default/selected split exactly:
     /// the rotated tag-label TEXT at rest, the tag ICON only once
     /// something in this run is actually selected — never a generic
-    /// "this is a group of photos" icon.
+    /// "this is a group of photos" icon. The pink analysis ring was added
+    /// to PopoverRow (single-item rows) but never mirrored here, so a
+    /// run/group row never showed it at all, pulsing or otherwise — not a
+    /// timing or overlap issue, the drawing code simply didn't exist on
+    /// this side.
     @ViewBuilder
     private var railBadge: some View {
         if let selectedEntry = run.first(where: { $0.index == selectedIndex }) {
+            let analysisState = AIStructuringService.shared.state(for: selectedEntry.item.id)
+            let analysing = analysisState == .running
+            let hasAnalysis: Bool = { if case .done = analysisState { return true }; return false }()
             Image(systemName: selectedEntry.item.primaryTag.icon)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.white)
                 .frame(width: 20, height: 20)
                 .background(Color.secondary.opacity(0.45), in: Circle())
+                .overlay {
+                    if analysing {
+                        Circle()
+                            .strokeBorder(Color.pink, lineWidth: analysisRingWidth)
+                            .frame(width: 20, height: 20)
+                    } else if hasAnalysis {
+                        Circle()
+                            .strokeBorder(Color.pink, lineWidth: 1)
+                            .frame(width: 20, height: 20)
+                    }
+                }
+                .onChange(of: analysing) { _, running in
+                    startOrStopRingAnimation(running: running)
+                }
+                .onChange(of: selectedEntry.item.id) { _, _ in
+                    startOrStopRingAnimation(running: analysing)
+                }
+                .onAppear {
+                    startOrStopRingAnimation(running: analysing)
+                }
         } else {
             Text(sourceAppLabelText(for: run))
                 .font(.system(size: 8, weight: .black))
@@ -1390,7 +1430,9 @@ struct PopoverRow: View, Equatable {
                 .background(Color.orange, in: Circle())
                 .help("macOS wouldn't let Clipen copy this — pasting uses the system clipboard instead")
         } else if isSelected {
-            let analysing = AIStructuringService.shared.state(for: item.id) == .running
+            let analysisState = AIStructuringService.shared.state(for: item.id)
+            let analysing = analysisState == .running
+            let hasAnalysis: Bool = { if case .done = analysisState { return true }; return false }()
             Image(systemName: item.primaryTag.icon)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.white)
@@ -1399,11 +1441,19 @@ struct PopoverRow: View, Equatable {
                 // While this item is being analysed the badge keeps its own
                 // icon and gains a pink ring whose thickness breathes. No
                 // extra glyph and no layout change, so the row does not
-                // shift when analysis starts or finishes.
+                // shift when analysis starts or finishes. Once analysis is
+                // done the ring stays, but goes static (thin, non-breathing)
+                // — a persistent "this item has analysis" cue rather than
+                // an in-progress one. No ring at all when there's nothing
+                // to show (idle, or a failed run with no result).
                 .overlay {
                     if analysing {
                         Circle()
                             .strokeBorder(Color.pink, lineWidth: analysisRingWidth)
+                            .frame(width: 20, height: 20)
+                    } else if hasAnalysis {
+                        Circle()
+                            .strokeBorder(Color.pink, lineWidth: 1)
                             .frame(width: 20, height: 20)
                     }
                 }
