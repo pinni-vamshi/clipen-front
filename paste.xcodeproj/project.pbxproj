@@ -7,16 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CE0000000000000000000013 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000011 /* MLXLLM */; };
-		CE0000000000000000000014 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000012 /* MLXLMCommon */; };
-		CE0000000000000000000017 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000016 /* Hub */; };
+		7C1AA920FF5B280549562ECA /* SemanticNetworkModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BFD3896F5FC69DD1903A6E /* SemanticNetworkModel.swift */; };
 		B10000000000000000000001 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* AuthManager.swift */; };
 		B10000000000000000000002 /* ClipboardManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ClipboardManager.swift */; };
-		CE452D1008B4741D309F /* AIStructuring.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE66922BDFF5EE9AB679 /* AIStructuring.swift */; };
-		CE82134593D0ACE71719 /* LocalLLMManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */; };
-		CEC9F5CA2F04ACC71E0D /* AIChips.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE471C29A9564E468FA /* AIChips.swift */; };
-		CE6AA69F0687F4FE11DD /* AnchoredPopoverPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */; };
-		CE321F93354F4AAA1295 /* DetailsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC89148C5193E388EB5 /* DetailsPanel.swift */; };
 		B10000000000000000000003 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* Color+Hex.swift */; };
 		B10000000000000000000005 /* FileSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* FileSnapshotStore.swift */; };
 		B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* ItemPreviewPanel.swift */; };
@@ -43,7 +36,6 @@
 		B1000000000000000000001F /* TagDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000001F /* TagDetector.swift */; };
 		B10000000000000000000021 /* PageRangePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000021 /* PageRangePanel.swift */; };
 		B10000000000000000000022 /* FastPasteHintPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000022 /* FastPasteHintPanel.swift */; };
-		B10000000000000000000201 /* CopyFeedbackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000201 /* CopyFeedbackPanel.swift */; };
 		B10000000000000000000024 /* QuickClipPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000024 /* QuickClipPanel.swift */; };
 		B10000000000000000000025 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000025 /* DeviceIdentity.swift */; };
 		B10000000000000000000027 /* ClipboardManager+Capture.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000027 /* ClipboardManager+Capture.swift */; };
@@ -51,7 +43,6 @@
 		B10000000000000000000029 /* ClipboardManager+Panels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000029 /* ClipboardManager+Panels.swift */; };
 		B1000000000000000000002A /* ClipboardManager+Paste.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002A /* ClipboardManager+Paste.swift */; };
 		B1000000000000000000002B /* ClipboardManager+Search.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002B /* ClipboardManager+Search.swift */; };
-		CE0000000000000000000002 /* ClipenExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000001 /* ClipenExceptionCatcher.m */; };
 		B1000000000000000000002C /* ClipboardManager+Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002C /* ClipboardManager+Persistence.swift */; };
 		B1000000000000000000002D /* OnboardingAndTutorial.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002D /* OnboardingAndTutorial.swift */; };
 		B1000000000000000000002E /* ImageCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000002E /* ImageCodec.swift */; };
@@ -63,8 +54,6 @@
 		B10000000000000000000035 /* ClipboardManager+Nudges.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000035 /* ClipboardManager+Nudges.swift */; };
 		B10000000000000000000036 /* ProGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000036 /* ProGate.swift */; };
 		B10000000000000000000037 /* SelectionHighlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000037 /* SelectionHighlight.swift */; };
-		B10000000000000000000302 /* ClipenDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000302 /* ClipenDiag.swift */; };
-		B10000000000000000000303 /* SimilarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000303 /* SimilarPanel.swift */; };
 		B10000000000000000000099 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000099 /* Localizable.xcstrings */; };
 		B10000000000000000000100 /* ContentPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000100 /* ContentPreviewView.swift */; };
 		B10000000000000000000101 /* TextContentPreviews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000101 /* TextContentPreviews.swift */; };
@@ -80,22 +69,31 @@
 		B10000000000000000000111 /* PreviewPrefetch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000111 /* PreviewPrefetch.swift */; };
 		B10000000000000000000112 /* RecentItemCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* RecentItemCache.swift */; };
 		B10000000000000000000200 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000200 /* GoogleService-Info.plist */; };
+		B10000000000000000000201 /* CopyFeedbackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000201 /* CopyFeedbackPanel.swift */; };
+		B10000000000000000000302 /* ClipenDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000302 /* ClipenDiag.swift */; };
+		B10000000000000000000303 /* SimilarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000303 /* SimilarPanel.swift */; };
+		B6216F40C560815C2E6C2E7F /* SemanticNetworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A540A06BF30CC9579F71206 /* SemanticNetworkView.swift */; };
 		B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */; };
 		B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC7302505C7008E5DD1 /* FirebaseFirestore */; };
 		B670AECB302521BD008E5DD1 /* LaTeXSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = B670AECA302521BD008E5DD1 /* LaTeXSwiftUI */; };
+		CE0000000000000000000002 /* ClipenExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000001 /* ClipenExceptionCatcher.m */; };
+		CE0000000000000000000013 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000011 /* MLXLLM */; };
+		CE0000000000000000000014 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000012 /* MLXLMCommon */; };
+		CE0000000000000000000017 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000016 /* Hub */; };
+		CE321F93354F4AAA1295 /* DetailsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC89148C5193E388EB5 /* DetailsPanel.swift */; };
+		CE452D1008B4741D309F /* AIStructuring.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE66922BDFF5EE9AB679 /* AIStructuring.swift */; };
+		CE6AA69F0687F4FE11DD /* AnchoredPopoverPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */; };
+		CE82134593D0ACE71719 /* LocalLLMManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */; };
+		CEC9F5CA2F04ACC71E0D /* AIChips.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE471C29A9564E468FA /* AIChips.swift */; };
 		EE8C68622FB7847C002CA5C3 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68612FB7847C002CA5C3 /* Sparkle */; };
 		EE8C68652FB7847C002CA5C3 /* webp in Frameworks */ = {isa = PBXBuildFile; productRef = EE8C68642FB7847C002CA5C3 /* webp */; };
 		FE00000000000000000003 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = FE00000000000000000002 /* Highlightr */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		7A540A06BF30CC9579F71206 /* SemanticNetworkView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SemanticNetworkView.swift; sourceTree = "<group>"; };
 		A10000000000000000000001 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		A10000000000000000000002 /* ClipboardManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardManager.swift; sourceTree = "<group>"; };
-		CE66922BDFF5EE9AB679 /* AIStructuring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIStructuring.swift; sourceTree = "<group>"; };
-		CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMManager.swift; sourceTree = "<group>"; };
-		CEE471C29A9564E468FA /* AIChips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChips.swift; sourceTree = "<group>"; };
-		CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredPopoverPanel.swift; sourceTree = "<group>"; };
-		CEC89148C5193E388EB5 /* DetailsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
 		A10000000000000000000005 /* FileSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileSnapshotStore.swift; sourceTree = "<group>"; };
 		A10000000000000000000006 /* ItemPreviewPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemPreviewPanel.swift; sourceTree = "<group>"; };
@@ -123,7 +121,6 @@
 		A1000000000000000000001F /* TagDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagDetector.swift; sourceTree = "<group>"; };
 		A10000000000000000000021 /* PageRangePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageRangePanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000022 /* FastPasteHintPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FastPasteHintPanel.swift; sourceTree = "<group>"; };
-		A10000000000000000000201 /* CopyFeedbackPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopyFeedbackPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000024 /* QuickClipPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickClipPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000025 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		A10000000000000000000027 /* ClipboardManager+Capture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Capture.swift"; sourceTree = "<group>"; };
@@ -131,9 +128,6 @@
 		A10000000000000000000029 /* ClipboardManager+Panels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Panels.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002A /* ClipboardManager+Paste.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Paste.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002B /* ClipboardManager+Search.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Search.swift"; sourceTree = "<group>"; };
-		CE0000000000000000000001 /* ClipenExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "ClipenExceptionCatcher.m"; sourceTree = "<group>"; };
-		CE0000000000000000000003 /* ClipenExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "ClipenExceptionCatcher.h"; sourceTree = "<group>"; };
-		CE0000000000000000000004 /* paste-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "paste-Bridging-Header.h"; sourceTree = "<group>"; };
 		A1000000000000000000002C /* ClipboardManager+Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Persistence.swift"; sourceTree = "<group>"; };
 		A1000000000000000000002D /* OnboardingAndTutorial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingAndTutorial.swift; sourceTree = "<group>"; };
 		A1000000000000000000002E /* ImageCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageCodec.swift; sourceTree = "<group>"; };
@@ -145,8 +139,6 @@
 		A10000000000000000000035 /* ClipboardManager+Nudges.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ClipboardManager+Nudges.swift"; sourceTree = "<group>"; };
 		A10000000000000000000036 /* ProGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProGate.swift; sourceTree = "<group>"; };
 		A10000000000000000000037 /* SelectionHighlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectionHighlight.swift; sourceTree = "<group>"; };
-		A10000000000000000000302 /* ClipenDiag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipenDiag.swift; sourceTree = "<group>"; };
-		A10000000000000000000303 /* SimilarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimilarPanel.swift; sourceTree = "<group>"; };
 		A10000000000000000000099 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		A10000000000000000000100 /* ContentPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentPreviewView.swift; sourceTree = "<group>"; };
 		A10000000000000000000101 /* TextContentPreviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextContentPreviews.swift; sourceTree = "<group>"; };
@@ -162,7 +154,19 @@
 		A10000000000000000000111 /* PreviewPrefetch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPrefetch.swift; sourceTree = "<group>"; };
 		A10000000000000000000112 /* RecentItemCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentItemCache.swift; sourceTree = "<group>"; };
 		A10000000000000000000200 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		A10000000000000000000201 /* CopyFeedbackPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopyFeedbackPanel.swift; sourceTree = "<group>"; };
+		A10000000000000000000302 /* ClipenDiag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipenDiag.swift; sourceTree = "<group>"; };
+		A10000000000000000000303 /* SimilarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimilarPanel.swift; sourceTree = "<group>"; };
+		CE0000000000000000000001 /* ClipenExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ClipenExceptionCatcher.m; sourceTree = "<group>"; };
+		CE0000000000000000000003 /* ClipenExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ClipenExceptionCatcher.h; sourceTree = "<group>"; };
+		CE0000000000000000000004 /* paste-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "paste-Bridging-Header.h"; sourceTree = "<group>"; };
+		CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMManager.swift; sourceTree = "<group>"; };
+		CE66922BDFF5EE9AB679 /* AIStructuring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIStructuring.swift; sourceTree = "<group>"; };
+		CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredPopoverPanel.swift; sourceTree = "<group>"; };
+		CEC89148C5193E388EB5 /* DetailsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsPanel.swift; sourceTree = "<group>"; };
+		CEE471C29A9564E468FA /* AIChips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChips.swift; sourceTree = "<group>"; };
 		EE8C684D2FB7847A002CA5C3 /* Clipen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipen.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F4BFD3896F5FC69DD1903A6E /* SemanticNetworkModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SemanticNetworkModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -301,6 +305,8 @@
 				A1000000000000000000000C /* TransformPanel.swift */,
 				A1000000000000000000001D /* paste.entitlements */,
 				A10000000000000000000200 /* GoogleService-Info.plist */,
+				F4BFD3896F5FC69DD1903A6E /* SemanticNetworkModel.swift */,
+				7A540A06BF30CC9579F71206 /* SemanticNetworkView.swift */,
 			);
 			path = paste;
 			sourceTree = "<group>";
@@ -380,7 +386,7 @@
 				CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
 				CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */,
 				EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */,
-				EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp" */,
+				EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp.swift" */,
 				FE00000000000000000001 /* XCRemoteSwiftPackageReference "Highlightr" */,
 				B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				B670AEC9302521BD008E5DD1 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */,
@@ -480,6 +486,8 @@
 				B10000000000000000000019 /* TextTools.swift in Sources */,
 				B1000000000000000000001A /* Tool.swift in Sources */,
 				B1000000000000000000001B /* ToolRegistry.swift in Sources */,
+				7C1AA920FF5B280549562ECA /* SemanticNetworkModel.swift in Sources */,
+				B6216F40C560815C2E6C2E7F /* SemanticNetworkView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -490,6 +498,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -542,7 +551,6 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				ARCHS = arm64;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -558,6 +566,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -604,7 +613,6 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				ARCHS = arm64;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -649,8 +657,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "paste/paste-Bridging-Header.h";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -690,8 +698,8 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "paste/paste-Bridging-Header.h";
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -720,22 +728,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.25.0;
-			};
-		};
-		CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/huggingface/swift-transformers";
-			requirement = {
-				kind = exactVersion;
-				version = 1.0.0;
-			};
-		};
 		B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
@@ -752,6 +744,22 @@
 				minimumVersion = 1.0.0;
 			};
 		};
+		CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.25.0;
+			};
+		};
+		CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.0;
+			};
+		};
 		EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
@@ -760,7 +768,7 @@
 				minimumVersion = 2.6.0;
 			};
 		};
-		EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp" */ = {
+		EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/awxkee/webp.swift";
 			requirement = {
@@ -779,21 +787,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		CE0000000000000000000011 /* MLXLLM */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
-			productName = MLXLLM;
-		};
-		CE0000000000000000000012 /* MLXLMCommon */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
-			productName = MLXLMCommon;
-		};
-		CE0000000000000000000016 /* Hub */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */;
-			productName = Hub;
-		};
 		B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B670AEC33024FECC008E5DD1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
@@ -809,6 +802,21 @@
 			package = B670AEC9302521BD008E5DD1 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */;
 			productName = LaTeXSwiftUI;
 		};
+		CE0000000000000000000011 /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLLM;
+		};
+		CE0000000000000000000012 /* MLXLMCommon */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000010 /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLMCommon;
+		};
+		CE0000000000000000000016 /* Hub */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE0000000000000000000015 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Hub;
+		};
 		EE8C68612FB7847C002CA5C3 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = EE8C68602FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "Sparkle" */;
@@ -816,7 +824,7 @@
 		};
 		EE8C68642FB7847C002CA5C3 /* webp */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp" */;
+			package = EE8C68632FB7847C002CA5C3 /* XCRemoteSwiftPackageReference "webp.swift" */;
 			productName = webp;
 		};
 		FE00000000000000000002 /* Highlightr */ = {
