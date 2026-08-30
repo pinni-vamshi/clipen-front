@@ -574,6 +574,13 @@ class ClipboardManager: ObservableObject {
     /// whole point of combined mode is a stable view of the marked set,
     /// independent of which single row currently has focus.
     var detailsCombinedItemIDs: Set<UUID> = []
+    /// Set right after auto-retriggering analysis for an item the Details
+    /// panel landed on with nothing to show (see
+    /// `retriggerAnalysisForMissingDetails`). Cleared as soon as that
+    /// item's analysis resolves, whichever way — this is only ever used to
+    /// recognise "this is the run the panel is waiting on" inside
+    /// `handleDetailsAwaitingAnalysisUpdate`.
+    var detailsAwaitingAnalysisItemID: UUID? = nil
     /// Marked FIELDS, by their position in `detailUnits`. Field-level,
     /// not item-level, so it is deliberately separate from markedItemIDs —
     /// and cleared whenever the field list is rebuilt, since an index into
@@ -1036,6 +1043,7 @@ class ClipboardManager: ObservableObject {
     var shareSyncGeneration = 0
 
     var saveCancellable: AnyCancellable?
+    var aiStateCancellable: AnyCancellable?
 
 
 
@@ -1068,6 +1076,11 @@ class ClipboardManager: ObservableObject {
                 self.saveQueue.async {
                     self.saveHistory(snapshot: snapshot)
                 }
+            }
+        aiStateCancellable = AIStructuringService.shared.$states
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.handleDetailsAwaitingAnalysisUpdate()
             }
         previewWindow.onHide = { [weak self] in
             self?.popupSearchQuery = ""

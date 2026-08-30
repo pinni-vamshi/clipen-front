@@ -142,6 +142,7 @@ extension ClipboardManager {
         guard !units.isEmpty else {
             signalEditDenied(for: item.id)
             flashStatus(isCombined ? "No analysis for any marked item." : "No analysis for this item.")
+            if !isCombined { retriggerAnalysisForMissingDetails(item) }
             return
         }
         detailUnits = units
@@ -189,6 +190,7 @@ extension ClipboardManager {
             setSidePanelStage(.none)
             signalEditDenied(for: item.id)
             flashStatus("No analysis for this item.")
+            retriggerAnalysisForMissingDetails(item)
             return
         }
         detailUnits = units
@@ -198,6 +200,55 @@ extension ClipboardManager {
         markedDetailIndices = []
         fieldMarkSeq = [:]
         detailsSourceItemID = item.id
+        updateDetailsPanel()
+    }
+
+    /// Landing on an item with no AI analysis inside the Details flow (D's
+    /// first press, or navigating to another item while it's open) used to
+    /// just shake and flash "No analysis for this item." forever — nothing
+    /// ever asked for that analysis, so an unanalyzed item stayed that way
+    /// until the user found the separate refresh button in the main
+    /// history window. This fires that same refresh automatically instead,
+    /// so browsing through Details is what causes coverage to fill in.
+    ///
+    /// Combined mode (2+ marked items) is deliberately excluded by both
+    /// call sites — there's no single item to retrigger for a "some of
+    /// these have no analysis" result.
+    func retriggerAnalysisForMissingDetails(_ item: ClipboardItem) {
+        guard aiStructuringEnabled else { return }
+        guard AIStructuringService.shared.state(for: item.id) != .running else { return }
+        detailsAwaitingAnalysisItemID = item.id
+        AIStructuringService.shared.refresh(item: item)
+    }
+
+    /// Combine sink target for `AIStructuringService.$states`. Only acts
+    /// while the Details panel is actually waiting on the one item
+    /// `retriggerAnalysisForMissingDetails` kicked off a run for — every
+    /// other state change (some other item's refresh button, Regenerate
+    /// All) is a no-op here, same as if this subscription didn't exist.
+    func handleDetailsAwaitingAnalysisUpdate() {
+        guard let waitingID = detailsAwaitingAnalysisItemID else { return }
+        switch AIStructuringService.shared.state(for: waitingID) {
+        case .idle, .running:
+            return
+        case .done, .failed:
+            detailsAwaitingAnalysisItemID = nil
+        }
+        // Still on the same item, and still in the Details flow — a failed
+        // run or a navigate-away in the meantime just leaves things as they
+        // are, no further shake/flash needed on top of what already fired.
+        guard previewWindow.isVisible,
+              !displayItems.isEmpty, selectedIndex < displayItems.count,
+              displayItems[selectedIndex].id == waitingID else { return }
+        let item = displayItems[selectedIndex]
+        let units = detailUnits(for: item)
+        guard !units.isEmpty else { return }
+        detailUnits = units
+        detailsIndex = 0
+        markedDetailIndices = []
+        fieldMarkSeq = [:]
+        detailsSourceItemID = item.id
+        setSidePanelStage(.details)
         updateDetailsPanel()
     }
 
