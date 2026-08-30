@@ -57,7 +57,7 @@ struct MainWindowView: View {
     @State private var mainSelectedID: UUID? = nil
     @State private var showTutorial          = false
     @State private var showResetConfirm      = false
-    private enum MainTab { case dashboard, settings, patterns }
+    private enum MainTab { case dashboard, settings }
     @State private var mainTab: MainTab = .dashboard
     private var showSettings: Bool { mainTab == .settings }
     @AppStorage("hasSkippedAccessibility") private var hasSkippedAccessibility = false
@@ -104,8 +104,6 @@ struct MainWindowView: View {
                         switch mainTab {
                         case .settings:
                             settingsFullView
-                        case .patterns:
-                            SemanticNetworkView()
                         case .dashboard:
                             browsingView
                                 .onAppear {
@@ -214,7 +212,6 @@ struct MainWindowView: View {
                 // endpoint.
                 ProGate.shared.refresh()
             }
-            toolbarSegment("Patterns", active: mainTab == .patterns) { mainTab = .patterns }
         }
         .padding(3)
         .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -943,12 +940,8 @@ private struct ItemDetailView: View {
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     case .done(let json):
-                        Text(json)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.textPri)
-                            .textSelection(.enabled)
+                        JSONTreeView(json: json)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
                     case .failed(let reason):
                         Text(reason)
                             .font(.system(size: 12))

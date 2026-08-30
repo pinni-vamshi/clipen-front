@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		7C1AA920FF5B280549562ECA /* SemanticNetworkModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4BFD3896F5FC69DD1903A6E /* SemanticNetworkModel.swift */; };
 		B10000000000000000000001 /* AuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* AuthManager.swift */; };
 		B10000000000000000000002 /* ClipboardManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* ClipboardManager.swift */; };
 		B10000000000000000000003 /* Color+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* Color+Hex.swift */; };
@@ -72,10 +71,10 @@
 		B10000000000000000000201 /* CopyFeedbackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000201 /* CopyFeedbackPanel.swift */; };
 		B10000000000000000000302 /* ClipenDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000302 /* ClipenDiag.swift */; };
 		B10000000000000000000303 /* SimilarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000303 /* SimilarPanel.swift */; };
-		B6216F40C560815C2E6C2E7F /* SemanticNetworkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A540A06BF30CC9579F71206 /* SemanticNetworkView.swift */; };
 		B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */; };
 		B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC7302505C7008E5DD1 /* FirebaseFirestore */; };
 		B670AECB302521BD008E5DD1 /* LaTeXSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = B670AECA302521BD008E5DD1 /* LaTeXSwiftUI */; };
+		C6C6F1834A68255F591CEA50 /* JSONTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BFE2C483D0D992B8E741D6F /* JSONTreeView.swift */; };
 		CE0000000000000000000002 /* ClipenExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = CE0000000000000000000001 /* ClipenExceptionCatcher.m */; };
 		CE0000000000000000000013 /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000011 /* MLXLLM */; };
 		CE0000000000000000000014 /* MLXLMCommon in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000012 /* MLXLMCommon */; };
@@ -91,7 +90,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		7A540A06BF30CC9579F71206 /* SemanticNetworkView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SemanticNetworkView.swift; sourceTree = "<group>"; };
+		2BFE2C483D0D992B8E741D6F /* JSONTreeView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = JSONTreeView.swift; sourceTree = "<group>"; };
 		A10000000000000000000001 /* AuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthManager.swift; sourceTree = "<group>"; };
 		A10000000000000000000002 /* ClipboardManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardManager.swift; sourceTree = "<group>"; };
 		A10000000000000000000003 /* Color+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Hex.swift"; sourceTree = "<group>"; };
@@ -166,7 +165,6 @@
 		CEC89148C5193E388EB5 /* DetailsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsPanel.swift; sourceTree = "<group>"; };
 		CEE471C29A9564E468FA /* AIChips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChips.swift; sourceTree = "<group>"; };
 		EE8C684D2FB7847A002CA5C3 /* Clipen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clipen.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		F4BFD3896F5FC69DD1903A6E /* SemanticNetworkModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SemanticNetworkModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -305,8 +303,7 @@
 				A1000000000000000000000C /* TransformPanel.swift */,
 				A1000000000000000000001D /* paste.entitlements */,
 				A10000000000000000000200 /* GoogleService-Info.plist */,
-				F4BFD3896F5FC69DD1903A6E /* SemanticNetworkModel.swift */,
-				7A540A06BF30CC9579F71206 /* SemanticNetworkView.swift */,
+				2BFE2C483D0D992B8E741D6F /* JSONTreeView.swift */,
 			);
 			path = paste;
 			sourceTree = "<group>";
@@ -486,8 +483,7 @@
 				B10000000000000000000019 /* TextTools.swift in Sources */,
 				B1000000000000000000001A /* Tool.swift in Sources */,
 				B1000000000000000000001B /* ToolRegistry.swift in Sources */,
-				7C1AA920FF5B280549562ECA /* SemanticNetworkModel.swift in Sources */,
-				B6216F40C560815C2E6C2E7F /* SemanticNetworkView.swift in Sources */,
+				C6C6F1834A68255F591CEA50 /* JSONTreeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -630,7 +626,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 566;
+				CURRENT_PROJECT_VERSION = 567;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -649,7 +645,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.6.11;
+				MARKETING_VERSION = 1.6.12;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -671,7 +667,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 566;
+				CURRENT_PROJECT_VERSION = 567;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -690,7 +686,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.6.11;
+				MARKETING_VERSION = 1.6.12;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

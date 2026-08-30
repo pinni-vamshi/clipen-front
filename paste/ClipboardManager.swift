@@ -564,10 +564,17 @@ class ClipboardManager: ObservableObject {
     let itemPreviewPanel = ItemPreviewPanel()
     let sharePanel = SharePanel()
     let detailsPanel = DetailsPanel()
-    var detailsFields: [DetailField] = []
+    var detailUnits: [DetailUnit] = []
     var detailsIndex: Int = 0
     var detailsSourceItemID: UUID? = nil
-    /// Marked FIELDS, by their position in `detailsFields`. Field-level,
+    /// Non-empty while the panel shows COMBINED details from every marked
+    /// item at once (D pressed with 2+ items marked in the main list),
+    /// rather than the single item under the cursor. While this is set,
+    /// moving the cursor between rows must NOT rebuild the panel — the
+    /// whole point of combined mode is a stable view of the marked set,
+    /// independent of which single row currently has focus.
+    var detailsCombinedItemIDs: Set<UUID> = []
+    /// Marked FIELDS, by their position in `detailUnits`. Field-level,
     /// not item-level, so it is deliberately separate from markedItemIDs —
     /// and cleared whenever the field list is rebuilt, since an index into
     /// one item's fields means nothing for another's.
@@ -620,16 +627,26 @@ class ClipboardManager: ObservableObject {
     @Published var showFirstCycleHint: Bool = false
 
     /// One-time discovery hint for the Details panel (D key) — shown until
-    /// the user has pressed D twice, then dismissed forever. Two presses
-    /// rather than one: the first press only reveals that D does something
-    /// (opens the panel), the second is what proves they registered it,
-    /// since it's what advances/cycles rather than merely opening.
+    /// the user has pressed D five times, or dismisses it manually via its
+    /// own close button, whichever comes first. Was 2 presses; PostHog
+    /// showed that left the feature almost undiscovered (2 of 791 active
+    /// users had ever opened Details), so the hint was very likely
+    /// disappearing before it had a real chance to register — 5 gives it
+    /// meaningfully longer to be noticed.
     @Published var showDetailsHint: Bool = !UserDefaults.standard.bool(forKey: "hasSeenDetailsHint")
     private var detailsHintPressCount = 0
+    static let detailsHintDismissThreshold = 5
     func registerDetailsKeyPress() {
         guard showDetailsHint else { return }
         detailsHintPressCount += 1
-        guard detailsHintPressCount >= 2 else { return }
+        guard detailsHintPressCount >= Self.detailsHintDismissThreshold else { return }
+        dismissDetailsHint()
+    }
+
+    /// Manual dismissal via the hint's own close button — same permanent
+    /// "don't show again" outcome as reaching the press threshold, just
+    /// triggered by the user directly instead of by usage count.
+    func dismissDetailsHint() {
         showDetailsHint = false
         UserDefaults.standard.set(true, forKey: "hasSeenDetailsHint")
     }
@@ -725,8 +742,8 @@ class ClipboardManager: ObservableObject {
     /// the old key would be missing the description/keywords/data-boundary
     /// instructions that search depends on, so the v2 key lets the complete
     /// default take over once.
-    @Published var aiStructuringPrompt: String = UserDefaults.standard.string(forKey: "aiStructuringPrompt.v3") ?? aiStructuringDefaultPrompt {
-        didSet { UserDefaults.standard.set(aiStructuringPrompt, forKey: "aiStructuringPrompt.v3") }
+    @Published var aiStructuringPrompt: String = UserDefaults.standard.string(forKey: "aiStructuringPrompt.v4") ?? aiStructuringDefaultPrompt {
+        didSet { UserDefaults.standard.set(aiStructuringPrompt, forKey: "aiStructuringPrompt.v4") }
     }
     @Published var advanceAfterMark: Bool = UserDefaults.standard.object(forKey: "advanceAfterMark") as? Bool ?? false {
         didSet {
@@ -989,9 +1006,10 @@ class ClipboardManager: ObservableObject {
             similarPanelSourceItemID = nil
         case .details:
             detailsPanel.hide()
-            detailsFields            = []
+            detailUnits              = []
             detailsIndex             = 0
             detailsSourceItemID      = nil
+            detailsCombinedItemIDs   = []
             markedDetailIndices      = []
             fieldMarkSeq             = [:]
             dTapHoldTimer?.invalidate()

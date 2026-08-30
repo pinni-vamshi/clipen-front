@@ -89,8 +89,8 @@ extension ClipboardManager {
               displayItems.indices.contains(selectedIndex) else { return }
         registerDetailsKeyPress()
         if inDetailsStage {
-            guard !detailsFields.isEmpty else { return }
-            detailsIndex = Self.cyclicIndex(detailsIndex, count: detailsFields.count, backward: backward)
+            guard !detailUnits.isEmpty else { return }
+            detailsIndex = Self.cyclicIndex(detailsIndex, count: detailUnits.count, backward: backward)
             AuthManager.shared.registerActionUsage(actionID: "action.details")
             playInteractionSoundIfEnabled(.similar)
             updateDetailsPanel()
@@ -99,30 +99,55 @@ extension ClipboardManager {
         }
     }
 
-    /// The single place an item's stored analysis becomes panel fields.
+    /// The single place an item's stored analysis becomes panel units.
     /// Both entry points (opening the panel, and following the selection to
     /// another item) went through their own identical copy of this before.
-    func detailFields(for item: ClipboardItem) -> [DetailField] {
+    /// `sourceLabel` is set only when this item's units are part of a
+    /// combined multi-item view (see `enterDetailsStage`), so each row can
+    /// show which item it came from.
+    func detailUnits(for item: ClipboardItem, sourceLabel: String? = nil) -> [DetailUnit] {
         guard let json = item.aiStructuredText, !json.isEmpty else { return [] }
-        return AIFactIndex.flatten(json).map { DetailField(key: $0.key, value: $0.value) }
+        return AIFactIndex.groupedFlatten(json).map { DetailUnit($0, sourceLabel: sourceLabel) }
+    }
+
+    /// Short, human-identifiable label for an item, used only in combined
+    /// multi-item Details mode so each row can be traced back to which
+    /// marked item it came from.
+    private func detailsSourceLabel(for item: ClipboardItem) -> String {
+        let preview = item.previewText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !preview.isEmpty else { return item.primaryTag.rawValue.capitalized }
+        return String(preview.prefix(28))
     }
 
     func enterDetailsStage() {
         guard displayItems.indices.contains(selectedIndex) else { return }
         let item = displayItems[selectedIndex]
+
+        // With 2+ items marked in the main list, D shows the COMBINED
+        // details of every marked item at once, not just the one under the
+        // cursor — marking a set of items and pressing D is asking "show me
+        // everything analyzed about this whole set," not just one of them.
+        let combinedSources = orderedMarkedItems.count >= 2 ? orderedMarkedItems : [item]
+        let isCombined = combinedSources.count > 1
+
+        var units: [DetailUnit] = []
+        for source in combinedSources {
+            units.append(contentsOf: detailUnits(for: source,
+                                                  sourceLabel: isCombined ? detailsSourceLabel(for: source) : nil))
+        }
         // Same denial feedback the inline editor uses when an item can't be
         // edited: signalEditDenied bumps a generation counter the row watches
         // and plays the denied sound, so a second refusal on the same item
         // shakes again rather than being swallowed as "no change".
-        let fields = detailFields(for: item)
-        guard !fields.isEmpty else {
+        guard !units.isEmpty else {
             signalEditDenied(for: item.id)
-            flashStatus("No analysis for this item.")
+            flashStatus(isCombined ? "No analysis for any marked item." : "No analysis for this item.")
             return
         }
-        detailsFields = fields
+        detailUnits = units
         detailsIndex = 0
-        detailsSourceItemID = item.id
+        detailsSourceItemID = isCombined ? nil : item.id
+        detailsCombinedItemIDs = isCombined ? Set(combinedSources.map(\.id)) : []
         setSidePanelStage(.details)
         AuthManager.shared.registerActionUsage(actionID: "action.details")
         playInteractionSoundIfEnabled(.similar)
@@ -135,7 +160,7 @@ extension ClipboardManager {
             selectedIndex: selectedIndex,
             totalItems: displayItems.count
         )
-        detailsPanel.show(fields: detailsFields,
+        detailsPanel.show(units: detailUnits,
                           selectedIndex: detailsIndex,
                           markOrders: unifiedMarkOrder().fields,
                           near: previewWindow.frame,
@@ -147,22 +172,28 @@ extension ClipboardManager {
     /// so the panel tracks the selection instead of dropping out from under
     /// the user mid-browse. Closes only when the new item has nothing to
     /// show, which is the one case there is no panel to draw.
+    ///
+    /// Skipped entirely while in combined mode: the whole point of pressing
+    /// D with several items marked is a stable view of that whole set, so
+    /// moving the cursor between rows must not collapse it back down to
+    /// whichever single row happens to have focus.
     func syncDetailsPanelWithSelection() {
         guard inDetailsStage, previewWindow.isVisible,
+              detailsCombinedItemIDs.isEmpty,
               !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
         let item = displayItems[selectedIndex]
         guard item.id != detailsSourceItemID else { return }
 
-        let fields = detailFields(for: item)
-        guard !fields.isEmpty else {
+        let units = detailUnits(for: item)
+        guard !units.isEmpty else {
             setSidePanelStage(.none)
             signalEditDenied(for: item.id)
             flashStatus("No analysis for this item.")
             return
         }
-        detailsFields = fields
+        detailUnits = units
         detailsIndex = 0
-        // Marks are indices into the PREVIOUS item's field list, so they
+        // Marks are indices into the PREVIOUS item's unit list, so they
         // cannot survive a rebuild.
         markedDetailIndices = []
         fieldMarkSeq = [:]
@@ -170,11 +201,13 @@ extension ClipboardManager {
         updateDetailsPanel()
     }
 
-    /// Hold D to mark/unmark the field under the cursor — same gesture,
+    /// Hold D to mark/unmark the unit under the cursor — same gesture,
     /// threshold and intent as hold-V on the main list and hold-R in the
-    /// Similar panel, aimed at this panel's own cursor.
+    /// Similar panel, aimed at this panel's own cursor. Marking a GROUP
+    /// marks it as one whole unit — its `pasteText` (all sub-fields joined
+    /// as readable lines) is what pastes, not one sub-field.
     func toggleDetailFieldMark() {
-        guard inDetailsStage, detailsFields.indices.contains(detailsIndex) else { return }
+        guard inDetailsStage, detailUnits.indices.contains(detailsIndex) else { return }
         if markedDetailIndices.contains(detailsIndex) {
             markedDetailIndices.remove(detailsIndex)
             fieldMarkSeq[detailsIndex] = nil

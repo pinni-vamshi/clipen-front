@@ -38,6 +38,16 @@ final class AIFactIndex: ObservableObject {
     static let scoreFloor: Float = 0.40
     /// Horizontal scrolling stops being scannable past roughly this many.
     static let maxChips = 10
+    /// Chip-strip-only exclusions — deliberately NOT added to `flatten`'s
+    /// shared `skippedKeys`, since that set also feeds the Semantic
+    /// Network graph and Details panel, where a description field is
+    /// legitimate data, just not a good fit for a one-line pill.
+    private static let chipHiddenKeys: Set<String> = ["description"]
+    /// A pill wide enough to hold a long value stops being scannable at a
+    /// glance, which is the entire point of this strip over just reading
+    /// the item directly — so values past this length are skipped here,
+    /// not truncated (a cut-off value reads as wrong, not as omitted).
+    private static let maxChipDisplayLength = 30
 
     private struct Pair {
         let key: String
@@ -83,8 +93,28 @@ final class AIFactIndex: ObservableObject {
             if !entry.vectorsReady { prewarm(item.id) }
 
             for (i, pair) in entry.pairs.enumerated() {
+                // "description" is prose, not a fact — it never belongs in
+                // a strip of short pills. And a pill wide enough to hold a
+                // long value stops being scannable, which is the whole
+                // point of this strip over just reading the item, so a
+                // value longer than this simply isn't shown here (the
+                // field itself, and its full value, are still visible
+                // everywhere else — Details panel, Semantic Network, etc).
+                guard !Self.chipHiddenKeys.contains(pair.key.lowercased()) else { continue }
+                guard pair.value.count <= Self.maxChipDisplayLength else { continue }
+
                 let lex = ClipboardManager.score(text: pair.haystack, query: qNorm,
                                                  tokens: tokens, firstToken: firstToken)
+                // AI-generated keys don't reliably match the words a user
+                // types — "expiryDate" vs. "expiration", "orgName" vs.
+                // "organization" — so on top of the exact substring match
+                // above, also try a typo/spelling-tolerant match against
+                // the key specifically (never the value: fuzzy-matching a
+                // value like an account number against arbitrary query
+                // text would produce nonsense hits).
+                let fuzzyKey = Self.fuzzyKeyScore(key: pair.key, queryTokens: tokens)
+                let lexOrFuzzy = max(lex, fuzzyKey)
+
                 // Compare against the KEY alone as well as the whole pair.
                 // A query is often about the field name ("phone number",
                 // "when does it expire") rather than the value, and blending
@@ -93,7 +123,7 @@ final class AIFactIndex: ObservableObject {
                 // either a value-shaped or a field-name-shaped query can win.
                 let sem = max(Self.pairSemantic(queryVec, pair.vec),
                               Self.pairSemantic(queryVec, pair.keyVec))
-                let combined = 0.60 * lex + 0.40 * sem
+                let combined = 0.60 * lexOrFuzzy + 0.40 * sem
                 guard combined >= Self.scoreFloor else { continue }
                 scored.append(AIFactChip(id: "\(item.id)#\(i)", itemID: item.id,
                                          key: pair.key, value: pair.value, score: combined))
@@ -128,6 +158,73 @@ final class AIFactIndex: ObservableObject {
         guard let q, let v else { return 0 }
         let cos = ClipboardManager.cosineSimilarity(q, v)
         return max(0, min(1, (cos - 0.32) / 0.38))
+    }
+
+    /// Typo/spelling-tolerant match against a key's own words — AI-picked
+    /// keys use whatever phrasing the model happened to generate
+    /// ("expiryDate", "orgName", "phoneNo"), which a query typed in plain
+    /// English routinely doesn't share as an exact substring. Splits the
+    /// key on camelCase/snake_case/spaces so "expiryDate" is compared as
+    /// ["expiry", "date"], then takes the best edit-distance ratio between
+    /// any query token and any key word. A ratio below 0.7 is discarded —
+    /// two genuinely different short words often share enough letters by
+    /// coincidence to score 0.4-0.6, and letting that through would just
+    /// reintroduce noise the exact-match path doesn't have.
+    private static func fuzzyKeyScore(key: String, queryTokens: [String]) -> Float {
+        guard !queryTokens.isEmpty else { return 0 }
+        let keyWords = keyWords(key)
+        guard !keyWords.isEmpty else { return 0 }
+        var best: Float = 0
+        for qt in queryTokens {
+            for kw in keyWords {
+                best = max(best, fuzzyRatio(qt, kw))
+            }
+        }
+        return best >= 0.7 ? best : 0
+    }
+
+    /// "expiryDate" / "expiry_date" / "Expiry Date" all split to
+    /// ["expiry", "date"] — the same normalized word list regardless of
+    /// which casing convention the model happened to generate the key in.
+    private static func keyWords(_ key: String) -> [String] {
+        var spaced = ""
+        for ch in key {
+            if ch.isUppercase, !spaced.isEmpty, spaced.last?.isUppercase == false {
+                spaced += " "
+            }
+            spaced.append(ch)
+        }
+        return spaced.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { $0.count >= 3 }   // "a", "of", "id" are too short for edit-distance to mean anything
+    }
+
+    /// Normalized Levenshtein similarity: 1.0 for an exact match, 0.0 for
+    /// nothing in common, scaled by the longer of the two strings so
+    /// short/long word pairs aren't penalized just for a length mismatch.
+    private static func fuzzyRatio(_ a: String, _ b: String) -> Float {
+        guard !a.isEmpty, !b.isEmpty else { return 0 }
+        let maxLen = max(a.count, b.count)
+        guard maxLen > 0 else { return 0 }
+        return 1 - Float(levenshteinDistance(a, b)) / Float(maxLen)
+    }
+
+    private static func levenshteinDistance(_ a: String, _ b: String) -> Int {
+        let a = Array(a), b = Array(b)
+        if a.isEmpty { return b.count }
+        if b.isEmpty { return a.count }
+        var prev = Array(0...b.count)
+        var curr = [Int](repeating: 0, count: b.count + 1)
+        for i in 1...a.count {
+            curr[0] = i
+            for j in 1...b.count {
+                let cost = a[i - 1] == b[j - 1] ? 0 : 1
+                curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+            }
+            prev = curr
+        }
+        return prev[b.count]
     }
 
     /// Drops every cached pair and embedding. Used by Regenerate All —
@@ -239,6 +336,71 @@ final class AIFactIndex: ObservableObject {
         default:
             if let s = scalarString(node) { append(path: path, value: s, into: &out) }
         }
+    }
+
+    /// Same walk as `flatten`, but a nested object whose direct children
+    /// are ALL scalars (or scalar arrays) — an address, a name, an
+    /// amount+currency pair — comes out as one `.group` unit instead of
+    /// being flattened into N separate leaves. An array of repeated
+    /// objects (line items, steps, entries) and any deeper nesting still
+    /// flattens to individual `.single` leaves exactly as before: those
+    /// genuinely read better one at a time than crammed onto one screen.
+    static func groupedFlatten(_ json: String) -> [DetailUnit.Kind] {
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        else { return [] }
+        var out: [DetailUnit.Kind] = []
+        walkGrouped(obj, path: [], into: &out)
+        return out
+    }
+
+    private static func walkGrouped(_ node: Any, path: [String], into out: inout [DetailUnit.Kind]) {
+        switch node {
+        case let dict as [String: Any]:
+            let entries = dict.filter { !skippedKeys.contains($0.key.lowercased()) }
+            if !path.isEmpty, !entries.isEmpty, entries.allSatisfy({ isScalarLike($0.value) }) {
+                var fields: [DetailField] = []
+                for (k, v) in entries {
+                    if let s = scalarString(v) {
+                        let vv = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !vv.isEmpty, vv.count <= maxValueLength else { continue }
+                        fields.append(DetailField(key: k.replacingOccurrences(of: "_", with: " "), value: vv))
+                    } else if let arr = v as? [Any] {
+                        let scalars = arr.compactMap { scalarString($0) }
+                        guard scalars.count == arr.count, !arr.isEmpty else { continue }
+                        fields.append(DetailField(key: k.replacingOccurrences(of: "_", with: " "),
+                                                   value: scalars.joined(separator: ", ")))
+                    }
+                }
+                guard !fields.isEmpty else { return }
+                let groupKey = path.joined(separator: ".").replacingOccurrences(of: "_", with: " ")
+                out.append(.group(key: groupKey, fields: fields))
+            } else {
+                for (k, v) in entries { walkGrouped(v, path: path + [k], into: &out) }
+            }
+        case let arr as [Any]:
+            let scalars = arr.compactMap { scalarString($0) }
+            if scalars.count == arr.count, !arr.isEmpty {
+                appendSingle(path: path, value: scalars.joined(separator: ", "), into: &out)
+            } else {
+                for (i, v) in arr.enumerated() { walkGrouped(v, path: path + ["\(i + 1)"], into: &out) }
+            }
+        default:
+            if let s = scalarString(node) { appendSingle(path: path, value: s, into: &out) }
+        }
+    }
+
+    private static func isScalarLike(_ v: Any) -> Bool {
+        if scalarString(v) != nil { return true }
+        if let arr = v as? [Any] { return !arr.isEmpty && arr.allSatisfy { scalarString($0) != nil } }
+        return false
+    }
+
+    private static func appendSingle(path: [String], value: String, into out: inout [DetailUnit.Kind]) {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty, v.count <= maxValueLength, !path.isEmpty else { return }
+        let key = path.joined(separator: ".").replacingOccurrences(of: "_", with: " ")
+        out.append(.single(DetailField(key: key, value: v)))
     }
 
     private static func scalarString(_ node: Any) -> String? {

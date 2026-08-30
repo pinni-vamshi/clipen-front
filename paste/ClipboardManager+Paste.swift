@@ -253,25 +253,27 @@ extension ClipboardManager {
         // the original clipboard afterwards behaves identically.
         if inDetailsStage {
             guard displayItems.indices.contains(selectedIndex),
-                  detailsFields.indices.contains(detailsIndex) else {
+                  detailUnits.indices.contains(detailsIndex) else {
                 setSidePanelStage(.none); previewWindow.hide(); return
             }
             let source = displayItems[selectedIndex]
             let order  = unifiedMarkOrder()
 
-            // Anything marked — rows in the main list AND fields here —
-            // pastes together in one go, in the order it was marked. Field
+            // Anything marked — rows in the main list AND units here —
+            // pastes together in one go, in the order it was marked. Unit
             // values become plain-text items so the existing multi-paste
             // path handles the mix, rather than this panel growing a second,
-            // parallel paste implementation.
+            // parallel paste implementation. A marked GROUP contributes its
+            // `pasteText` — every sub-field joined as readable lines — as
+            // one single item, not one item per sub-field.
             if !order.items.isEmpty || !order.fields.isEmpty {
                 var ranked: [(rank: Int, item: ClipboardItem)] = []
                 let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
                 for (id, rank) in order.items {
                     if let it = byID[id] { ranked.append((rank, it)) }
                 }
-                for (idx, rank) in order.fields where detailsFields.indices.contains(idx) {
-                    ranked.append((rank, ClipboardItem(content: .text(detailsFields[idx].value))))
+                for (idx, rank) in order.fields where detailUnits.indices.contains(idx) {
+                    ranked.append((rank, ClipboardItem(content: .text(detailUnits[idx].pasteText))))
                 }
                 ranked.sort { $0.rank < $1.rank }
                 let ordered = ranked.map(\.item)
@@ -286,21 +288,21 @@ extension ClipboardManager {
                 return
             }
 
-            // Nothing marked anywhere — paste the field under the cursor.
+            // Nothing marked anywhere — paste the unit under the cursor.
             // Re-checked here, redundantly with the guard above: this
             // crashed once in production (index out of range on this exact
-            // subscript) despite that guard, and re-deriving the field
+            // subscript) despite that guard, and re-deriving the unit
             // fresh removes any possible doubt rather than trusting state
             // captured several lines earlier hasn't shifted underneath it.
-            guard detailsFields.indices.contains(detailsIndex) else {
+            guard detailUnits.indices.contains(detailsIndex) else {
                 setSidePanelStage(.none)
                 previewWindow.hide()
                 return
             }
-            let field = detailsFields[detailsIndex]
+            let unit = detailUnits[detailsIndex]
             setSidePanelStage(.none)
             previewWindow.hide()
-            handleTransformResult(.text(field.value), restoring: source)
+            handleTransformResult(.text(unit.pasteText), restoring: source)
             return
         }
 

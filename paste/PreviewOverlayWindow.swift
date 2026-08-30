@@ -617,6 +617,18 @@ struct PopoverPreviewView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
                 Spacer()
+                // On the opposite edge from the tip icon, same "close this
+                // hint" affordance as every other dismissible banner in the
+                // app — lets someone who's already seen enough drop it
+                // without needing to hit D five times first.
+                Button {
+                    manager.dismissDetailsHint()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss this tip")
             }
             .foregroundColor(Self.bannerBlue)
             .padding(.horizontal, 14).padding(.vertical, 6)
