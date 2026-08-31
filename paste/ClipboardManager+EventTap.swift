@@ -1,24 +1,6 @@
 import AppKit
-import CommonCrypto
 import SwiftUI
 
-/// File logger for event-tap and AI-service diagnostics.
-///
-/// `write` is called from the CGEvent tap callback — a hard realtime path
-/// the system will disable outright if the handler is slow — so it must
-/// never touch the filesystem inline. Lines are timestamped immediately
-/// (so ordering stays truthful), appended to an in-memory buffer under a
-/// lock, and flushed on a background queue. The previous version opened,
-/// seeked, wrote and closed the file plus allocated a fresh
-/// ISO8601DateFormatter on *every* keystroke, with no synchronization at
-/// all despite being called from the tap thread, the main actor, and
-/// inference tasks simultaneously.
-// Genuinely thread-safe already (its own NSLock guards the shared buffer,
-// file writes happen on a dedicated background queue) — it was designed to
-// be called from arbitrary threads, originally the event-tap callback,
-// which is nowhere near MainActor. nonisolated makes that explicit instead
-// of relying on every caller (including other actors, like
-// LocalModelRuntime) to `await` into it for no real reason.
 nonisolated enum DebugLog {
     private static let logURL: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -27,8 +9,6 @@ nonisolated enum DebugLog {
         return dir.appendingPathComponent("debug.log")
     }()
 
-    /// Rotated at 5 MB so a long-running session can't grow an unbounded
-    /// file — the old logger never rotated at all.
     private static let maxBytes: Int64 = 5 * 1024 * 1024
 
     private static let queue = DispatchQueue(label: "com.clipen.debug-log", qos: .utility)
@@ -36,29 +16,16 @@ nonisolated enum DebugLog {
     private static var buffer: [String] = []
     private static var flushScheduled = false
 
-    /// One shared formatter. Constructing an ISO8601DateFormatter is
-    /// expensive enough that doing it per line was itself measurable.
     nonisolated(unsafe) private static let formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    /// Off in shipping builds.
-    ///
-    /// The diagnostics here were written to chase real bugs — event-tap
-    /// lifecycle, AI-service errors and timings — and they are worth
-    /// keeping for the next investigation. They are also expensive: a file
-    /// write on a background queue on paths that can run while the user
-    /// types.
-    ///
-    /// Flip this (or set the `clipenDebugLogging` default to YES) to get
-    /// it back without touching any call site.
     static let isEnabled: Bool = UserDefaults.standard.bool(forKey: "clipenDebugLogging")
 
     static func write(_ msg: String) {
-        // Returns before any work — no timestamp formatting, no
-        // interpolation cost beyond what the caller already paid.
+
         guard isEnabled else { return }
         let line = "[\(formatter.string(from: Date()))] \(msg)\n"
 
@@ -104,8 +71,6 @@ nonisolated enum DebugLog {
 
 extension ClipboardManager {
 
-    private static let lastTrustedBinaryHashKey = "clipen.ax.lastTrustedBinaryHash"
-
     func attemptEventTap() {
         if eventTap != nil { return }
 
@@ -116,49 +81,12 @@ extension ClipboardManager {
         if AXIsProcessTrusted() {
             DebugLog.write("AXIsProcessTrusted = true, creating event tap")
             createEventTap()
-            saveBinaryHash()
         } else {
             DebugLog.write("AXIsProcessTrusted = false — Accessibility permission missing")
-            resetStaleTCCEntryIfNeeded()
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
             AXIsProcessTrustedWithOptions(opts as CFDictionary)
             scheduleNextPermissionRetry()
         }
-    }
-
-    private func resetStaleTCCEntryIfNeeded() {
-        guard let bundleID = Bundle.main.bundleIdentifier else { return }
-        let savedHash = UserDefaults.standard.string(forKey: Self.lastTrustedBinaryHashKey)
-        guard savedHash != nil else { return }
-        let currentHash = Self.binaryHash()
-        guard currentHash != savedHash else { return }
-
-        DispatchQueue.global(qos: .utility).async {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-            proc.arguments = ["reset", "Accessibility", bundleID]
-            try? proc.run()
-            proc.waitUntilExit()
-        }
-    }
-
-    private func saveBinaryHash() {
-        if let hash = Self.binaryHash() {
-            UserDefaults.standard.set(hash, forKey: Self.lastTrustedBinaryHashKey)
-        }
-    }
-
-    private static func binaryHash() -> String? {
-        guard let path = Bundle.main.executablePath,
-              let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-        var hash = [UInt8](repeating: 0, count: 32)
-        // The discarded return is CC_SHA256's pointer to `hash`, which we
-        // already hold — the digest itself is written through the inout
-        // argument, so this is complete despite the unused result.
-        data.withUnsafeBytes { buf in
-            _ = CC_SHA256(buf.baseAddress, CC_LONG(buf.count), &hash)
-        }
-        return hash.map { String(format: "%02x", $0) }.joined()
     }
 
     func scheduleNextPermissionRetry() {
@@ -170,7 +98,6 @@ extension ClipboardManager {
                 self.permissionRetryTimer = nil
                 self.permissionRetryBackoff = 1.0
                 self.createEventTap()
-                self.saveBinaryHash()
             } else {
                 self.permissionRetryBackoff = min(self.permissionRetryBackoff * 2, 30.0)
                 self.scheduleNextPermissionRetry()
@@ -223,12 +150,7 @@ extension ClipboardManager {
 
     func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            // macOS disables an event tap outright if its callback is ever
-            // too slow, and re-enabling is silent unless logged — every
-            // keystroke and Tab press would simply stop being seen, which
-            // looks identical to "the feature just isn't working" with no
-            // trace of why. If this fires often, something upstream (AX
-            // reads, the log flush, anything on this thread) is too slow.
+
             DebugLog.write("EVENT TAP: \(type == .tapDisabledByTimeout ? "disabled by timeout" : "disabled by user input") — re-enabling")
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
@@ -267,11 +189,7 @@ extension ClipboardManager {
     }
 
     func handleFlagsChanged(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        // Ahead of everything else, same as handleKeyDown's check below —
-        // an app the user has paste-blocked gets zero special handling from
-        // Clipen at all, not just "paste doesn't commit." Checked first so
-        // none of this function's state tracking (popup hints, auto-dismiss,
-        // etc.) reacts to an app that's supposed to be invisible to Clipen.
+
         guard !pasteBlockingActiveForFrontmostApp else {
             return Unmanaged.passUnretained(event)
         }
@@ -343,14 +261,7 @@ extension ClipboardManager {
                 }
             }
         }
-        // Deferred via DispatchQueue.main.async, matching every other
-        // tap-hold key-up handler here (V, X, R, B, P, S) — this one was
-        // written calling straight through instead, the one inconsistency
-        // in this whole block. Executing UI-mutating AppKit work (opening
-        // the Details NSPopover) synchronously inside the CGEventTap
-        // callback, rather than deferring to the next run loop turn like
-        // every sibling handler, is exactly the kind of divergence from an
-        // established pattern that's worth never introducing again.
+
         if key == 2, let timer = dTapHoldTimer {
             timer.invalidate()
             dTapHoldTimer = nil
@@ -372,7 +283,7 @@ extension ClipboardManager {
             bTapHoldTimer = nil
             DispatchQueue.main.async { [weak self] in
                 self?.playInteractionSoundIfEnabled(.cycle)
-                self?.cyclePrevious()
+                self?.performSmartBack()
             }
         }
         if key == 35, let timer = pTapHoldTimer {
@@ -405,10 +316,8 @@ extension ClipboardManager {
         return Unmanaged.passUnretained(event)
     }
 
-
     func handleKeyDown(_ event: CGEvent) -> Unmanaged<CGEvent>? {
-        // See handleFlagsChanged's matching guard — same reasoning, same
-        // position (before any other state in this function is touched).
+
         guard !pasteBlockingActiveForFrontmostApp else {
             return Unmanaged.passUnretained(event)
         }
@@ -472,6 +381,7 @@ extension ClipboardManager {
         }
 
         if isSearchActive && previewWindow.isVisible && (key == 125 || key == 126) {
+            if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
             if key == 126 {
                 DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }
             } else {
@@ -528,11 +438,6 @@ extension ClipboardManager {
             return nil
         }
 
-        // fn held alongside Cmd (e.g. fn+Cmd+V) is left completely alone —
-        // some other app may have its own fn-based shortcut (a text-to-speech
-        // "hold fn to speak" binding, an RDP client's own Cmd+C/V remap,
-        // etc.), and Clipen intercepting it anyway breaks that. Only a bare
-        // Cmd (no fn) opens/drives the ring.
         guard cmd && !ctrl && !flags.contains(.maskSecondaryFn) else {
             return Unmanaged.passUnretained(event)
         }
@@ -549,24 +454,23 @@ extension ClipboardManager {
                     let pendingID: UUID? = displayItems.indices.contains(selectedIndex)
                         ? displayItems[selectedIndex].id : nil
                     vTapHoldTimer?.invalidate()
+
                     let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
-                        DispatchQueue.main.async { [weak self] in
-                            guard let self else { return }
-                            self.vTapHoldTimer = nil
-                            self.popupHintVMark = true
-                            self.popupHintV = false
-                            self.popupHintShiftV = false
-                            guard let id = pendingID,
-                                  self.items.contains(where: { $0.id == id }) else { return }
-                            self.playInteractionSoundIfEnabled(.mark)
-                            if self.toggleMark(id: id) {
-                                AuthManager.shared.registerActionUsage(actionID: "action.mark")
-                            }
-                            if self.advanceAfterMark, self.previewWindow.isVisible,
-                               !self.displayItems.isEmpty {
-                                self.selectedIndex = (self.selectedIndex + 1) % self.displayItems.count
-                                self.selectionDidChange()
-                            }
+                        guard let self else { return }
+                        self.vTapHoldTimer = nil
+                        self.popupHintVMark = true
+                        self.popupHintV = false
+                        self.popupHintShiftV = false
+                        guard let id = pendingID,
+                              self.items.contains(where: { $0.id == id }) else { return }
+                        self.playInteractionSoundIfEnabled(.mark)
+                        if self.toggleMark(id: id) {
+                            AuthManager.shared.registerActionUsage(actionID: "action.mark")
+                        }
+                        if self.advanceAfterMark, self.previewWindow.isVisible,
+                           !self.displayItems.isEmpty {
+                            self.selectedIndex = (self.selectedIndex + 1) % self.displayItems.count
+                            self.selectionDidChange()
                         }
                     }
                     RunLoop.main.add(t, forMode: .common)
@@ -581,6 +485,7 @@ extension ClipboardManager {
 
             if shift && !opt {
 
+                if isAutorepeat { return nil }
                 if !reverseCycleUsesB {
                     DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }
                 }
@@ -619,15 +524,14 @@ extension ClipboardManager {
                 return nil
             }
             xTapHoldTimer?.invalidate()
+
             let t = Timer(timeInterval: Self.xHoldThreshold, repeats: false) { [weak self] _ in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.xTapHoldTimer = nil
-                    self.popupHintXHold = true
-                    self.popupHintX = false
-                    self.popupHintShiftX = false
-                    self.setSidePanelStage(.none)
-                }
+                guard let self else { return }
+                self.xTapHoldTimer = nil
+                self.popupHintXHold = true
+                self.popupHintX = false
+                self.popupHintShiftX = false
+                self.setSidePanelStage(.none)
             }
             RunLoop.main.add(t, forMode: .common)
             xTapHoldTimer = t
@@ -637,12 +541,11 @@ extension ClipboardManager {
         if key == 1 && previewWindow.isVisible {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
             sTapHoldTimer?.invalidate()
+
             let t = Timer(timeInterval: Self.xHoldThreshold, repeats: false) { [weak self] _ in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.sTapHoldTimer = nil
-                    self.setSidePanelStage(.none)
-                }
+                guard let self else { return }
+                self.sTapHoldTimer = nil
+                self.setSidePanelStage(.none)
             }
             RunLoop.main.add(t, forMode: .common)
             sTapHoldTimer = t
@@ -663,20 +566,10 @@ extension ClipboardManager {
             return nil
         }
 
-        // D — per-field details panel.
-        //
-        // Deliberately NOT guarded on another panel being open. X (line 607)
-        // and S (line 627) carry no stage guard either: pressing one while
-        // another is showing simply switches, because setSidePanelStage
-        // closes the previous stage. Guarding on !inTransformStage made D
-        // silently dead while Transform was up, which is not "one at a
-        // time", it is just a broken key.
         if key == 2 && previewWindow.isVisible && !isSearchActive
            && !isInlineEditing && !opt {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
 
-            // Shift+D steps backward immediately — direction is never worth
-            // gating behind a hold delay (same reasoning as Shift+R).
             if shift {
                 DispatchQueue.main.async { [weak self] in
                     self?.handleDetailsKey(backward: true)
@@ -684,14 +577,6 @@ extension ClipboardManager {
                 return nil
             }
 
-            // Once open, plain D is tap-or-hold: the tap advances on key-up
-            // below, holding marks the field under the cursor. Same
-            // threshold and same gesture as V on the main list and R in the
-            // Similar panel. Fires directly rather than hopping through
-            // DispatchQueue.main.async — the Timer is already on the main
-            // run loop, and that hop is exactly what let the key-up handler
-            // race in and advance past the field being marked (see the
-            // note on rTapHoldTimer).
             if inDetailsStage {
                 dTapHoldTimer?.invalidate()
                 let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
@@ -710,15 +595,10 @@ extension ClipboardManager {
             return nil
         }
 
-        // Same reasoning as D above: pressing R while Transform is open
-        // should switch to Similar, not do nothing.
         if key == 15 && previewWindow.isVisible && !isSearchActive
            && !isInlineEditing && !opt {
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
 
-            // Shift+R always steps backward immediately — same as
-            // Shift+V bypassing V's hold-to-mark entirely below, direction
-            // isn't something you'd want gated behind a hold delay.
             if shift {
                 DispatchQueue.main.async { [weak self] in
                     self?.handleFindSimilarKey(backward: true)
@@ -726,30 +606,12 @@ extension ClipboardManager {
                 return nil
             }
 
-            // Once the carousel is open, a plain R is tap-or-hold: quick
-            // tap advances (handled on key-up below, mirroring V exactly),
-            // holding marks the currently-centered similar item instead —
-            // same gesture, same threshold, same mark primitive as V's
-            // hold-to-mark for the main list, just aimed at this panel's
-            // own cursor instead of `selectedIndex`.
             if inSimilarStage {
                 rTapHoldTimer?.invalidate()
                 let pendingID: UUID? = similarPanelItems.indices.contains(similarPanelIndex)
                     ? similarPanelItems[similarPanelIndex].id : nil
                 let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
-                    // Runs directly, no extra DispatchQueue.main.async hop —
-                    // the Timer itself already fires on the main run loop
-                    // (RunLoop.main.add below), so that hop only opened a
-                    // window where the key-up handler could see
-                    // rTapHoldTimer still non-nil (this closure hadn't
-                    // cleared it yet) and race in with its own
-                    // handleFindSimilarKey() call, advancing the panel to
-                    // the next item before this mark's own
-                    // updateSimilarPanel() ever painted. The mark itself
-                    // still landed — markedItemIDs is unaffected by any of
-                    // this — but the badge never appeared on the item you
-                    // were actually holding R on, only later if you
-                    // navigated back to it.
+
                     guard let self else { return }
                     self.rTapHoldTimer = nil
                     guard let id = pendingID,
@@ -758,12 +620,7 @@ extension ClipboardManager {
                     if self.toggleMark(id: id) {
                         AuthManager.shared.registerActionUsage(actionID: "action.mark")
                     }
-                    // SimilarPanelView is a one-shot snapshot handed to
-                    // the popover on each show() call, not a live
-                    // @ObservedObject view — unlike the main ring's
-                    // rows, it won't pick up markedItemIDs changing on
-                    // its own, so the mark badge needs this nudge to
-                    // appear right away instead of on the next R press.
+
                     self.updateSimilarPanel()
                 }
                 RunLoop.main.add(t, forMode: .common)
@@ -771,8 +628,6 @@ extension ClipboardManager {
                 return nil
             }
 
-            // Not open yet: the first R press only ever opens the panel,
-            // so there's nothing to hold-mark — go straight to entering it.
             DispatchQueue.main.async { [weak self] in
                 self?.handleFindSimilarKey(backward: false)
             }
@@ -841,19 +696,18 @@ extension ClipboardManager {
             let pendingID: UUID? = displayItems.indices.contains(selectedIndex)
                 ? displayItems[selectedIndex].id : nil
             pTapHoldTimer?.invalidate()
-            let t = Timer(timeInterval: pinHoldThreshold, repeats: false) { [weak self] _ in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.pTapHoldTimer = nil
-                    guard let id = pendingID,
-                          self.items.contains(where: { $0.id == id }) else { return }
-                    self.playInteractionSoundIfEnabled(.pin)
-                    self.togglePin(id: id)
-                    self.resetAutoDismissTimer()
 
-                    self.selectionDidChange()
-                    AuthManager.shared.registerActionUsage(actionID: "action.pin")
-                }
+            let t = Timer(timeInterval: pinHoldThreshold, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                self.pTapHoldTimer = nil
+                guard let id = pendingID,
+                      self.items.contains(where: { $0.id == id }) else { return }
+                self.playInteractionSoundIfEnabled(.pin)
+                self.togglePin(id: id)
+                self.resetAutoDismissTimer()
+
+                self.selectionDidChange()
+                AuthManager.shared.registerActionUsage(actionID: "action.pin")
             }
             RunLoop.main.add(t, forMode: .common)
             pTapHoldTimer = t
@@ -865,22 +719,21 @@ extension ClipboardManager {
             let pendingID: UUID? = displayItems.indices.contains(selectedIndex)
                 ? displayItems[selectedIndex].id : nil
             bTapHoldTimer?.invalidate()
+
             let t = Timer(timeInterval: vHoldThreshold, repeats: false) { [weak self] _ in
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    self.bTapHoldTimer = nil
-                    self.popupHintVMark = true
-                    guard let id = pendingID,
-                          self.items.contains(where: { $0.id == id }) else { return }
-                    self.playInteractionSoundIfEnabled(.mark)
-                    if self.toggleMark(id: id) {
-                        AuthManager.shared.registerActionUsage(actionID: "action.mark")
-                    }
-                    if self.advanceAfterMark, self.previewWindow.isVisible,
-                       !self.displayItems.isEmpty {
-                        self.selectedIndex = (self.selectedIndex - 1 + self.displayItems.count) % self.displayItems.count
-                        self.selectionDidChange()
-                    }
+                guard let self else { return }
+                self.bTapHoldTimer = nil
+                self.popupHintVMark = true
+                guard let id = pendingID,
+                      self.items.contains(where: { $0.id == id }) else { return }
+                self.playInteractionSoundIfEnabled(.mark)
+                if self.toggleMark(id: id) {
+                    AuthManager.shared.registerActionUsage(actionID: "action.mark")
+                }
+                if self.advanceAfterMark, self.previewWindow.isVisible,
+                   !self.displayItems.isEmpty {
+                    self.selectedIndex = (self.selectedIndex - 1 + self.displayItems.count) % self.displayItems.count
+                    self.selectionDidChange()
                 }
             }
             RunLoop.main.add(t, forMode: .common)

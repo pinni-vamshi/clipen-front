@@ -69,8 +69,8 @@
 		B10000000000000000000112 /* RecentItemCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000112 /* RecentItemCache.swift */; };
 		B10000000000000000000200 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000200 /* GoogleService-Info.plist */; };
 		B10000000000000000000201 /* CopyFeedbackPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000201 /* CopyFeedbackPanel.swift */; };
-		B10000000000000000000302 /* ClipenDiag.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000302 /* ClipenDiag.swift */; };
 		B10000000000000000000303 /* SimilarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000303 /* SimilarPanel.swift */; };
+		B10000000000000000000304 /* RowAnimationHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000304 /* RowAnimationHelpers.swift */; };
 		B670AEC6302505C0008E5DD1 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC5302505C0008E5DD1 /* FirebaseAnalytics */; };
 		B670AEC8302505C7008E5DD1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = B670AEC7302505C7008E5DD1 /* FirebaseFirestore */; };
 		B670AECB302521BD008E5DD1 /* LaTeXSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = B670AECA302521BD008E5DD1 /* LaTeXSwiftUI */; };
@@ -154,8 +154,8 @@
 		A10000000000000000000112 /* RecentItemCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentItemCache.swift; sourceTree = "<group>"; };
 		A10000000000000000000200 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 		A10000000000000000000201 /* CopyFeedbackPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopyFeedbackPanel.swift; sourceTree = "<group>"; };
-		A10000000000000000000302 /* ClipenDiag.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipenDiag.swift; sourceTree = "<group>"; };
 		A10000000000000000000303 /* SimilarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimilarPanel.swift; sourceTree = "<group>"; };
+		A10000000000000000000304 /* RowAnimationHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RowAnimationHelpers.swift; sourceTree = "<group>"; };
 		CE0000000000000000000001 /* ClipenExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ClipenExceptionCatcher.m; sourceTree = "<group>"; };
 		CE0000000000000000000003 /* ClipenExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ClipenExceptionCatcher.h; sourceTree = "<group>"; };
 		CE0000000000000000000004 /* paste-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "paste-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -275,8 +275,8 @@
 				A10000000000000000000032 /* QuickLookPreview.swift */,
 				A10000000000000000000033 /* SharePanel.swift */,
 				A10000000000000000000037 /* SelectionHighlight.swift */,
-				A10000000000000000000302 /* ClipenDiag.swift */,
 				A10000000000000000000303 /* SimilarPanel.swift */,
+				A10000000000000000000304 /* RowAnimationHelpers.swift */,
 				A10000000000000000000005 /* FileSnapshotStore.swift */,
 				A10000000000000000000006 /* ItemPreviewPanel.swift */,
 				A10000000000000000000100 /* ContentPreviewView.swift */,
@@ -438,8 +438,8 @@
 				B10000000000000000000032 /* QuickLookPreview.swift in Sources */,
 				B10000000000000000000033 /* SharePanel.swift in Sources */,
 				B10000000000000000000037 /* SelectionHighlight.swift in Sources */,
-				B10000000000000000000302 /* ClipenDiag.swift in Sources */,
 				B10000000000000000000303 /* SimilarPanel.swift in Sources */,
+				B10000000000000000000304 /* RowAnimationHelpers.swift in Sources */,
 				B10000000000000000000005 /* FileSnapshotStore.swift in Sources */,
 				B10000000000000000000006 /* ItemPreviewPanel.swift in Sources */,
 				B10000000000000000000100 /* ContentPreviewView.swift in Sources */,
@@ -626,7 +626,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 568;
+				CURRENT_PROJECT_VERSION = 569;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -645,7 +645,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.6.13;
+				MARKETING_VERSION = 1.6.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -667,7 +667,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 568;
+				CURRENT_PROJECT_VERSION = 569;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -686,7 +686,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.6.13;
+				MARKETING_VERSION = 1.6.14;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
