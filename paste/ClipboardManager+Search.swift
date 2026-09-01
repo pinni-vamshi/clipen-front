@@ -523,6 +523,7 @@ extension ClipboardManager {
         rTapHoldTimer?.invalidate()
         rTapHoldTimer = nil
         setSidePanelStage(.none)
+        lastNoStageAction = .mainList
         selectedIndex    = 0
         popupTagFilter   = nil
         cycleCount       = 0

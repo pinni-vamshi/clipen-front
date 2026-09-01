@@ -167,7 +167,13 @@ final class AIStructuringService: ObservableObject {
         AIFactIndex.shared.reset()
         ClipboardManager.shared.clearAllAIStructuredText()
         DebugLog.write("AI: wiped all analyses, regenerating \(items.count) item(s)")
-        for item in items { runAndValidate(item: item) }
+        for item in items {
+            let breakdown = ImportanceScoringService.shared.evaluate(item)
+            guard !breakdown.isIndeterminate else { continue }
+            autoAttempted.insert(item.id)
+            guard breakdown.decision else { continue }
+            runAndValidate(item: item)
+        }
     }
 
     private static let autoAttemptedDefaultsKey = "AIStructuringService.autoAttempted"

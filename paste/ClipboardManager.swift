@@ -356,6 +356,7 @@ class ClipboardManager: ObservableObject {
     var screenshotWatcherSource: DispatchSourceFileSystemObject?
     var screenshotWatcherFD: Int32 = -1
     var seenScreenshotPaths: Set<String> = []
+    let seenScreenshotPathsLock = NSLock()
 
     /// Whether an item macOS wouldn't let Clipen capture falls back to a
     /// flagged, system-default paste instead of being silently dropped.
@@ -982,6 +983,9 @@ class ClipboardManager: ObservableObject {
     var inShareStage:     Bool { sidePanelStage == .share }
     var inSimilarStage:   Bool { sidePanelStage == .similar }
     var inDetailsStage:   Bool { sidePanelStage == .details }
+
+    enum SmartBackContext { case mainList, category, pinned }
+    var lastNoStageAction: SmartBackContext = .mainList
 
     var transformIndex   = 0
     var transformDisplaysCache: [TransformDisplay] = []

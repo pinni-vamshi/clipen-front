@@ -1053,10 +1053,21 @@ extension ClipboardManager {
     }
 
     func performSmartBack() {
-        switch lastNoStageAction {
-        case .mainList: cyclePrevious()
-        case .category: cycleCategoryBackward()
-        case .pinned:   cyclePinnedItemsBackward()
+        switch sidePanelStage {
+        case .transform:
+            cycleTransformBackward()
+        case .details:
+            handleDetailsKey(backward: true)
+        case .similar:
+            cycleSimilarBackward()
+        case .share:
+            cycleShareBackward()
+        case .none:
+            switch lastNoStageAction {
+            case .mainList: cyclePrevious()
+            case .category: cycleCategoryBackward()
+            case .pinned:   cyclePinnedItemsBackward()
+            }
         }
     }
 

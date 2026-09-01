@@ -200,16 +200,7 @@ struct MainWindowView: View {
             toolbarSegment("Dashboard", active: mainTab == .dashboard) { mainTab = .dashboard }
             toolbarSegment("Settings",  active: mainTab == .settings)  {
                 mainTab = .settings
-                // Feedback replies otherwise only refresh on the 30-minute
-                // background timer or when a popup opens — neither of which
-                // fires just from looking at Settings. This makes opening
-                // the tab itself request the latest data, in the
-                // background, without blocking the tab switch on the
-                // network call — refresh() is fire-and-forget, the UI
-                // updates on ProGate's own @Published properties whenever
-                // the response lands. ProGate.refresh() throttles itself
-                // (15s) so flipping tabs repeatedly can't hammer the
-                // endpoint.
+
                 ProGate.shared.refresh()
             }
         }
@@ -605,48 +596,6 @@ struct MainWindowView: View {
     }
 }
 
-private struct PastedToChipStrip: View {
-    let names: [String]
-
-    @State private var committedOffset: CGFloat = 0
-    @State private var dragOffset: CGFloat = 0
-    @State private var contentWidth: CGFloat = 0
-    @State private var stripWidth: CGFloat = 0
-
-    private var maxOffset: CGFloat { max(0, contentWidth - stripWidth) }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ForEach(names, id: \.self) { name in
-                Text(name)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.textPri)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.white.opacity(0.08), in: Capsule())
-            }
-        }
-        .background(GeometryReader { geo in
-            Color.clear.onAppear { contentWidth = geo.size.width }
-                .onChange(of: geo.size.width) { _, newWidth in contentWidth = newWidth }
-        })
-        .offset(x: -min(maxOffset, max(0, committedOffset + dragOffset)))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .clipped()
-        .background(GeometryReader { geo in
-            Color.clear.onAppear { stripWidth = geo.size.width }
-                .onChange(of: geo.size.width) { _, newWidth in stripWidth = newWidth }
-        })
-        .gesture(
-            DragGesture()
-                .onChanged { value in dragOffset = -value.translation.width }
-                .onEnded { value in
-                    committedOffset = min(maxOffset, max(0, committedOffset - value.translation.width))
-                    dragOffset = 0
-                }
-        )
-    }
-}
-
 private struct ItemDetailView: View {
     let item: ClipboardItem
 
@@ -753,10 +702,6 @@ private struct ItemDetailView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .richText, .html, .rtfd:
 
-            // Same fix as ItemPreviewPanel.swift / matches what
-            // QuickClipPanel already does for the reference panel —
-            // without this, HTML/RTFD content sizes itself to its own
-            // narrowest element instead of filling the available panel.
             ContentPreviewView(item: item, chrome: .panel)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .image(let img, let data, let dataType):
@@ -913,15 +858,23 @@ private struct ItemDetailView: View {
                     cardDivider()
                     propertyRow("Collections", item.collections.sorted().joined(separator: ", "))
                 }
+                if ClipboardManager.shared.aiStructuringEnabled {
+                    cardDivider()
+                    propertyRow("AI Decision", aiDecisionLabel)
+                }
             }
             .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
         }
     }
 
-    /// Only appears once there's something to show — nothing runs
-    /// automatically, so a never-analyzed item shows no card at all rather
-    /// than an empty "not run yet" placeholder cluttering every item.
+    private var aiDecisionLabel: String {
+        let breakdown = ImportanceScoringService.shared.evaluate(item)
+        if breakdown.isIndeterminate { return "Pending" }
+        let scoreStr = String(format: "%.2f", breakdown.finalScore)
+        return breakdown.decision ? "Yes \u{00B7} \(scoreStr)" : "No \u{00B7} \(scoreStr)"
+    }
+
     @ViewBuilder
     private var aiAnalysisCard: some View {
         let state = aiService.state(for: item.id)
@@ -1216,7 +1169,6 @@ private struct CompactItemRow: View, Equatable {
         l.item.metadataSummary == r.item.metadataSummary
     }
 
-
     var body: some View {
         GeometryReader { geo in
             HStack(spacing: 10) {
@@ -1238,22 +1190,16 @@ private struct CompactItemRow: View, Equatable {
                            : (isHovered ? Color.white.opacity(0.05) : Color.clear),
                 in: RoundedRectangle(cornerRadius: 8)
             )
-            // Smooth pulsing boundary while this item is being analyzed —
-            // a field-level "this one's working" signal independent of
-            // hover, since the icons themselves may not be visible.
+
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.purple, lineWidth: 1.5)
                     .opacity(isProcessing ? borderPulse : 0)
             )
             .onChange(of: isProcessing) { _, running in
-                if running {
-                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                        borderPulse = 0.85
-                    }
-                } else {
-                    withAnimation(.easeOut(duration: 0.25)) { borderPulse = 0.15 }
-                }
+                startOrStopAnalysisPulse($borderPulse, active: running,
+                                         restValue: 0.15, activeValue: 0.85,
+                                         activeDuration: 0.9, restDuration: 0.25)
             }
             .overlay(alignment: .trailing) {
                 ZStack(alignment: .trailing) {
@@ -1275,13 +1221,7 @@ private struct CompactItemRow: View, Equatable {
                             .help(item.isPinned ? "Unpin" : "Pin to top")
                             .opacity(isHovered ? 1 : 0)
                             .allowsHitTesting(isHovered)
-                        // Deliberately NOT gated by isHovered like the two
-                        // above — this one has to stay visible for the
-                        // whole run so the spinner is actually seen even
-                        // after the mouse moves away.
-                        // Hidden while processing: the row's own pulsing
-                        // border already signals it, and a second spinning
-                        // glyph next to it was redundant noise.
+
                         aiRefreshButton
                             .opacity(isHovered && !isProcessing ? 1 : 0)
                             .allowsHitTesting(isHovered && !isProcessing)
@@ -1307,9 +1247,6 @@ private struct CompactItemRow: View, Equatable {
         .buttonStyle(.plain)
     }
 
-    /// No popover — clicking runs structuring directly; the icon itself
-    /// spins while it's working, and the result lands in the properties
-    /// panel's "AI ANALYSIS" card, not a popup.
     private var aiRefreshButton: some View {
         Button {
             guard !isProcessing else { return }
