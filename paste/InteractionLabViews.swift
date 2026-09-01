@@ -8,20 +8,17 @@ struct LabKeyCapView: View {
     let pressed: Bool
     var size: CGFloat = 44
 
-    /// "HOLD" / "TAP" — shown under the cap only while `pressed`, same
-    /// treatment as the website's How It Works demo. Reserves its height
-    /// unconditionally (rather than only while pressed) so toggling it on
-    /// and off never shifts anything else in the stack around it. Nil for
-    /// callers that don't have a fixed hold-vs-tap role to report (e.g.
-    /// the per-demo special-key row, whose role varies by demo).
     var roleLabel: String? = nil
+
+    private static let reverseColor = Color(red: 0.82, green: 0.29, blue: 0.14)
+    private var isReverseKey: Bool { key == .shift || key == .b }
 
     var body: some View {
         VStack(spacing: 7) {
             RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
                 .fill(pressed ? Color.accent : Color.surfaceHi)
                 .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                    .stroke(Color.border, lineWidth: 1))
+                    .stroke(isReverseKey ? Self.reverseColor : Color.border, lineWidth: isReverseKey ? 1.6 : 1))
                 .frame(width: key.isWide ? size * 2.2 : size, height: size)
                 .shadow(color: .black.opacity(pressed ? 0 : 0.45), radius: 0, y: pressed ? 0 : 4)
                 .overlay(
@@ -155,6 +152,18 @@ private struct LabSidePanel: View {
                                     in: RoundedRectangle(cornerRadius: 5))
                 }
                 Spacer(minLength: 0)
+            } else if lab.detailsVisible {
+                Text("Details").font(.system(size: 10, weight: .bold)).foregroundColor(.textPri)
+                ForEach(Array(lab.detailFieldLabels.enumerated()), id: \.offset) { idx, label in
+                    Text(label)
+                        .font(.system(size: 9, weight: lab.activeDetailField == idx ? .semibold : .regular))
+                        .foregroundColor(lab.activeDetailField == idx ? .white : .textDim)
+                        .padding(.horizontal, 8).padding(.vertical, 5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(lab.activeDetailField == idx ? Color.accent : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 5))
+                }
+                Spacer(minLength: 0)
             } else {
                 ForEach(Array(lab.transformLabels.enumerated()), id: \.offset) { idx, label in
                     Text(label)
@@ -182,38 +191,17 @@ struct InteractionLabStage: View {
 
     var showKeyRow: Bool = true
 
-    /// Keys beyond the opening ⌘+V pair, specific to the selected demo —
-    /// rendered as special buttons below the pair instead of in one long
-    /// row of everything at once. This is a display-only grouping; every
-    /// `run*` choreography in InteractionLabController already presses
-    /// ⌘ then taps V first, before anything demo-specific happens, so
-    /// splitting the pair out from the rest doesn't touch that logic —
-    /// it just draws the same live `pressedKeys` state in two places.
-    /// HOLD vs TAP for the ⌘V pair that opens the popup. Every demo opens
-    /// it with a tap except `.pinnedOpen`, whose entire subject is holding V
-    /// *through* the open so the popup stays pinned — this pair used to be
-    /// hardcoded "Tap", which contradicted that demo's own caption ("HOLD V
-    /// on the very first press") and its `keyLabel` ("⌘ + hold V").
     private var openingVRole: String {
         lab.selectedDemo == .pinnedOpen ? "Hold" : "Tap"
     }
 
-    /// HOLD vs TAP for the per-demo key(s) under the popup, which carried no
-    /// role label at all before.
-    ///
-    /// Mirrors `InteractionDemo.keyLabel` — the user-facing wording of the
-    /// same gesture — and both agree with the event tap: a key released
-    /// before its hold threshold runs the tap action (cycleNext,
-    /// cycleTransform, cyclePinnedItems, cyclePrevious…), while crossing the
-    /// threshold runs the hold action (mark for multi-paste, pin). The three
-    /// hold cases below are exactly the ones whose keyLabel says "hold".
     private func specialRole(for key: LabKey) -> String {
         switch lab.selectedDemo {
-        // "hold V" / "hold V → G" — V marks, G then groups on a plain tap.
+
         case .multiPaste, .group:  return key == .v ? "Hold" : "Tap"
-        // "hold P" — a tap on P cycles pinned items instead of pinning one.
+
         case .pinItem:             return "Hold"
-        // "⇧ + tap V" — shift is the held modifier, V is still tapped.
+
         case .reverseCycle:        return key == .shift ? "Hold" : "Tap"
         default:                   return "Tap"
         }
@@ -226,7 +214,7 @@ struct InteractionLabStage: View {
         case .multiPaste:
             return [.v]
         case .reverseCycle:
-            return ClipboardManager.shared.reverseCycleUsesB ? [.b] : [.shift, .v]
+            return [.shift, .v]
         case .cyclePinned, .pinItem:
             return [.p]
         case .spacePreview, .pinPreview:
@@ -247,6 +235,12 @@ struct InteractionLabStage: View {
             return [.backspace]
         case .collections:
             return [.two, .one]
+        case .details:
+            return [.d]
+        case .smartBack:
+            return [.x, .b]
+        case .shiftReverses:
+            return [.shift, .v, .x]
         }
     }
 
@@ -255,11 +249,11 @@ struct InteractionLabStage: View {
         HStack(spacing: 14) {
             LabMockPanel(lab: lab)
                 .opacity(lab.panelVisible ? 1 : 0)
-            if lab.previewVisible || lab.transformVisible || lab.similarVisible {
+            if lab.previewVisible || lab.transformVisible || lab.similarVisible || lab.detailsVisible {
                 LabSidePanel(lab: lab)
             }
         }
-        .animation(.easeOut(duration: 0.25), value: lab.previewVisible || lab.transformVisible || lab.similarVisible)
+        .animation(.easeOut(duration: 0.25), value: lab.previewVisible || lab.transformVisible || lab.similarVisible || lab.detailsVisible)
     }
 
     var body: some View {
@@ -273,11 +267,7 @@ struct InteractionLabStage: View {
                 .frame(height: 20)
 
             if showKeyRow {
-                // ⌘+V beside the popup, not above or below it — this pair
-                // is what opens the popup in every demo, so it's fixed and
-                // demo-independent, not derived from lab.stageKeys (whose
-                // order/contents vary per demo and used to be dumped into
-                // one flat row below instead).
+
                 HStack(spacing: 14) {
                     HStack(alignment: .top, spacing: 8) {
                         LabKeyCapView(key: .cmd, pressed: lab.pressedKeys.contains(.cmd), size: 54, roleLabel: "Hold")
@@ -287,9 +277,7 @@ struct InteractionLabStage: View {
                 }
                 .frame(minHeight: 190)
             } else {
-                // Real-keyboard mode: the physical keyboard illustration
-                // shows which keys to press, so the popup stands alone
-                // here instead of duplicating a ⌘V pair beside it.
+
                 popupRow
                     .frame(minHeight: 190)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -310,9 +298,7 @@ struct InteractionLabStage: View {
             if showKeyRow {
                 VStack(spacing: 8) {
                     if lab.selectedDemo == .pinnedOpen {
-                        // No keycap, no animation — this only matters at
-                        // the moment the popup opens, on the very first
-                        // press, so there's nothing to loop or highlight.
+
                         Text("V held during opening")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.textDim)
@@ -320,11 +306,7 @@ struct InteractionLabStage: View {
                     } else if !specialKeys.isEmpty {
                         HStack(spacing: 10) {
                             ForEach(Array(specialKeys.enumerated()), id: \.offset) { _, key in
-                                // V shows up here for multiPaste/group/reverseCycle
-                                // — reads specialVPressed, a state kept completely
-                                // separate from the top pair's V, so a hold or a
-                                // repeated tap down here doesn't also light up the
-                                // opening pair above it.
+
                                 LabKeyCapView(key: key,
                                               pressed: key == .v ? lab.specialVPressed : lab.pressedKeys.contains(key),
                                               size: 54,

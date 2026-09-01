@@ -79,6 +79,7 @@ extension ClipboardManager {
         }
 
         setSidePanelStage(.transform)
+        lastBackAction = .transform
         markNudgeUsedNaturally(.transformPanel)
 
         let marked = orderedMarkedItems
@@ -104,6 +105,7 @@ extension ClipboardManager {
 
     func cycleTransform() {
         guard inTransformStage, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        lastBackAction = .transform
         transformCycleCount += 1
 
         guard !transformDisplaysCache.isEmpty else { return }
@@ -113,6 +115,7 @@ extension ClipboardManager {
 
     func cycleTransformBackward() {
         guard inTransformStage, !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
+        lastBackAction = .transform
         transformCycleCount += 1
 
         guard !transformDisplaysCache.isEmpty else { return }
@@ -193,6 +196,7 @@ extension ClipboardManager {
         }
 
         setSidePanelStage(.share)
+        lastBackAction = .share
         shareTargetItems = targets
         shareServices = Self.rankedShareServices(services)
         shareIndex = 0
@@ -217,12 +221,14 @@ extension ClipboardManager {
 
     func cycleShare() {
         guard inShareStage, !shareServices.isEmpty else { return }
+        lastBackAction = .share
         shareIndex = Self.cyclicIndex(shareIndex, count: shareServices.count, backward: false)
         updateSharePanel()
     }
 
     func cycleShareBackward() {
         guard inShareStage, !shareServices.isEmpty else { return }
+        lastBackAction = .share
         shareIndex = Self.cyclicIndex(shareIndex, count: shareServices.count, backward: true)
         updateSharePanel()
     }
@@ -981,7 +987,7 @@ extension ClipboardManager {
     func cycleNext() {
         let display = displayItems
         guard !display.isEmpty else { return }
-        lastNoStageAction = .mainList
+        lastBackAction = .mainList
         let wasVisible = previewWindow.isVisible
 
         let shouldContinue = withRateLimitedSelectionAnimation { () -> Bool in
@@ -1031,7 +1037,7 @@ extension ClipboardManager {
     func cyclePrevious() {
         let display = displayItems
         guard !display.isEmpty else { return }
-        lastNoStageAction = .mainList
+        lastBackAction = .mainList
         let wasVisible = previewWindow.isVisible
         AuthManager.shared.registerActionUsage(actionID: "action.prev")
 
@@ -1053,21 +1059,14 @@ extension ClipboardManager {
     }
 
     func performSmartBack() {
-        switch sidePanelStage {
-        case .transform:
-            cycleTransformBackward()
-        case .details:
-            handleDetailsKey(backward: true)
-        case .similar:
-            cycleSimilarBackward()
-        case .share:
-            cycleShareBackward()
-        case .none:
-            switch lastNoStageAction {
-            case .mainList: cyclePrevious()
-            case .category: cycleCategoryBackward()
-            case .pinned:   cyclePinnedItemsBackward()
-            }
+        switch lastBackAction {
+        case .mainList:  cyclePrevious()
+        case .category:  cycleCategoryBackward()
+        case .pinned:    cyclePinnedItemsBackward()
+        case .transform: cycleTransformBackward()
+        case .details:   handleDetailsKey(backward: true)
+        case .similar:   cycleSimilarBackward()
+        case .share:     cycleShareBackward()
         }
     }
 
@@ -1078,7 +1077,7 @@ extension ClipboardManager {
             flashStatus("No pinned items yet.")
             return
         }
-        lastNoStageAction = .pinned
+        lastBackAction = .pinned
         if let currentPos = pinnedIndices.firstIndex(of: selectedIndex) {
             selectedIndex = pinnedIndices[(currentPos + 1) % pinnedIndices.count]
         } else {
@@ -1096,7 +1095,7 @@ extension ClipboardManager {
             flashStatus("No pinned items yet.")
             return
         }
-        lastNoStageAction = .pinned
+        lastBackAction = .pinned
         if let currentPos = pinnedIndices.firstIndex(of: selectedIndex) {
             selectedIndex = pinnedIndices[(currentPos - 1 + pinnedIndices.count) % pinnedIndices.count]
         } else {
@@ -1129,7 +1128,7 @@ extension ClipboardManager {
     func cycleCategoryForward() {
         let total = 1 + availableTags.count
         guard total > 1 else { return }
-        lastNoStageAction = .category
+        lastBackAction = .category
         let current: Int
         if let filter = popupTagFilter,
            let pos = availableTags.firstIndex(where: { $0 == filter }) {
@@ -1149,7 +1148,7 @@ extension ClipboardManager {
     func cycleCategoryBackward() {
         let total = 1 + availableTags.count
         guard total > 1 else { return }
-        lastNoStageAction = .category
+        lastBackAction = .category
         let current: Int
         if let filter = popupTagFilter,
            let pos = availableTags.firstIndex(where: { $0 == filter }) {

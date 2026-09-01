@@ -984,8 +984,8 @@ class ClipboardManager: ObservableObject {
     var inSimilarStage:   Bool { sidePanelStage == .similar }
     var inDetailsStage:   Bool { sidePanelStage == .details }
 
-    enum SmartBackContext { case mainList, category, pinned }
-    var lastNoStageAction: SmartBackContext = .mainList
+    enum SmartBackAction { case mainList, category, pinned, transform, details, similar, share }
+    var lastBackAction: SmartBackAction = .mainList
 
     var transformIndex   = 0
     var transformDisplaysCache: [TransformDisplay] = []

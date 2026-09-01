@@ -87,6 +87,7 @@ extension ClipboardManager {
     func handleDetailsKey(backward: Bool = false) {
         guard previewWindow.isVisible,
               displayItems.indices.contains(selectedIndex) else { return }
+        lastBackAction = .details
         registerDetailsKeyPress()
         if inDetailsStage {
             guard !detailUnits.isEmpty else { return }
@@ -289,6 +290,7 @@ extension ClipboardManager {
     func handleFindSimilarKey(backward: Bool = false) {
         guard previewWindow.isVisible,
               displayItems.indices.contains(selectedIndex) else { return }
+        lastBackAction = .similar
         if inSimilarStage {
             backward ? cycleSimilarBackward() : cycleSimilarForward()
         } else {
@@ -523,7 +525,7 @@ extension ClipboardManager {
         rTapHoldTimer?.invalidate()
         rTapHoldTimer = nil
         setSidePanelStage(.none)
-        lastNoStageAction = .mainList
+        lastBackAction = .mainList
         selectedIndex    = 0
         popupTagFilter   = nil
         cycleCount       = 0

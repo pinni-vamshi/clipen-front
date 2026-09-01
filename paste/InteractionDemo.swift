@@ -7,6 +7,7 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
     case cycle, pinnedOpen, multiPaste, search, nextCategory
     case spacePreview, pinPreview, transform, similar, moveToFront, delete, reverseCycle
     case cyclePinned, pinItem, group, collections
+    case details, smartBack, shiftReverses
 
     case pasteOne, pasteTwo, pasteThree
 
@@ -30,6 +31,9 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .pinItem:      return "hold P"
         case .group:        return "hold V → G"
         case .collections:  return "⌘ + V → 1 – 9"
+        case .details:      return "tap D"
+        case .smartBack:    return "tap B"
+        case .shiftReverses: return "⇧ + tap"
         case .pasteOne:     return "⌘ + tap V"
         case .pasteTwo:     return "⌘ + V ×2"
         case .pasteThree:   return "⌘ + V ×3"
@@ -54,6 +58,9 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .pinItem:      return "Pin / Unpin"
         case .group:        return "Group Marked"
         case .collections:  return "Switch Collection"
+        case .details:      return "Details"
+        case .smartBack:    return "Smart Back"
+        case .shiftReverses: return "Shift Reverses"
         case .pasteOne:     return "Paste 1st Item"
         case .pasteTwo:     return "Paste 2nd Item"
         case .pasteThree:   return "Paste 3rd Item"
@@ -78,6 +85,9 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .pinItem:      return "HOLD P to pin the highlighted item (or unpin it if already pinned).\nUp to 5 items can be pinned at once."
         case .group:        return "Mark a few items (hold V on each), then tap G.\nThey fold into one group at the first-marked spot — paste, share or ungroup it as one."
         case .collections:  return "Hold ⌘ and tap V to open the ring, then press 1 for All — your whole clipboard — or 2 onward for each collection you created.\nThe ring switches to that view instantly."
+        case .details:      return "Tap D to open the extracted fields for the highlighted item, tap D again to step through each one.\nHold D to mark a field for multi-paste · release ⌘ pastes the highlighted field."
+        case .smartBack:    return "B always undoes whichever action you did last — not just the main list.\nCycling with V? B steps back through items. Inside Transform with X? B steps back through tools instead. It follows you."
+        case .shiftReverses: return "Hold Shift with any of these keys to reverse its direction — same key, opposite way.\nV → forward, ⇧V → backward. X → next tool, ⇧X → previous. ` → next category, ⇧` → previous. P → next pin, ⇧P → previous. B (Smart Back) is just this rule built into one dedicated key."
         case .pasteOne:     return "Hold ⌘ and tap V once to land on the top item.\nRelease ⌘ to paste it."
         case .pasteTwo:     return "Hold ⌘ and tap V twice to reach the second item.\nRelease ⌘ to paste it."
         case .pasteThree:   return "Hold ⌘ and tap V three times to reach the third item.\nRelease ⌘ to paste it."
@@ -102,13 +112,16 @@ enum InteractionDemo: String, CaseIterable, Identifiable {
         case .pinItem:      return [.cmd, .v, .p]
         case .group:        return [.cmd, .v, .g]
         case .collections:  return [.cmd, .v, .one, .two]
+        case .details:      return [.cmd, .v, .d]
+        case .smartBack:    return [.cmd, .v, .b]
+        case .shiftReverses: return [.cmd, .shift, .v, .x]
         case .pasteOne, .pasteTwo, .pasteThree: return [.cmd, .v]
         }
     }
 }
 
 enum LabKey: String, Identifiable, Hashable {
-    case cmd, v, x, f, c, b, p, g, r, shift, space, backspace, one, two, grave
+    case cmd, v, x, f, c, b, p, g, r, d, shift, space, backspace, one, two, grave
 
     var id: String { rawValue }
 
@@ -123,6 +136,7 @@ enum LabKey: String, Identifiable, Hashable {
         case .p:         return "P"
         case .g:         return "G"
         case .r:         return "R"
+        case .d:         return "D"
         case .shift:     return "⇧"
         case .space:     return "SPACE"
         case .backspace: return "⌫"
@@ -145,6 +159,7 @@ enum LabKey: String, Identifiable, Hashable {
         case .p:         return ["P"]
         case .g:         return ["G"]
         case .r:         return ["R"]
+        case .d:         return ["D"]
         case .shift:     return ["LSHIFT", "RSHIFT"]
         case .space:     return ["SPACE"]
         case .backspace: return ["DELETE"]

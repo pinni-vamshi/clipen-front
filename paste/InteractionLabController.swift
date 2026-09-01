@@ -27,15 +27,6 @@ final class InteractionLabController: ObservableObject {
     @Published var pressedKeys: Set<LabKey> = []
     @Published var stageKeys: [LabKey] = [.cmd, .v]
 
-    /// V is rendered twice in the redesigned popup — once in the fixed
-    /// ⌘+V pair that opens the popup, and again as the demo-specific
-    /// special button below (multiPaste's hold-to-mark, group's hold-to-
-    /// mark-then-G, reverseCycle's ⇧+V reverse taps). Both used to read
-    /// the same `pressedKeys.contains(.v)`, so every later V press — a
-    /// hold, or a repeated tap — lit up the TOP pair too, making it look
-    /// like the opener was re-triggering instead of the special action
-    /// running on its own. This tracks only the special-button V,
-    /// completely separate from the opening tap in `pressedKeys`.
     @Published var specialVPressed = false
 
     @Published var panelVisible = false
@@ -54,6 +45,10 @@ final class InteractionLabController: ObservableObject {
     @Published var activeSimilar: Int? = nil
     @Published var similarLabels = ["Similar note 1", "Similar note 2", "Similar note 3"]
 
+    @Published var detailsVisible = false
+    @Published var activeDetailField: Int? = nil
+    @Published var detailFieldLabels = ["Name: Jane Doe", "Email: jane@site.com", "Phone: 555-0142"]
+
     @Published var resultText: String? = nil
     @Published var instruction: LocalizedStringKey? = nil
 
@@ -63,12 +58,7 @@ final class InteractionLabController: ObservableObject {
     private var task: Task<Void, Never>? = nil
     private let tabNames = ["Recents", "Image"]
 
-    var currentCaption: String {
-        if selectedDemo == .reverseCycle, ClipboardManager.shared.reverseCycleUsesB {
-            return "Hold ⌘ and tap B to move to the previous item.\nHOLD B to mark the item and step back in one go."
-        }
-        return selectedDemo.caption
-    }
+    var currentCaption: String { selectedDemo.caption }
 
     func select(_ demo: InteractionDemo) {
         selectedDemo = demo
@@ -134,6 +124,9 @@ final class InteractionLabController: ObservableObject {
         similarVisible = false
         activeSimilar = nil
         similarLabels = ["Similar note 1", "Similar note 2", "Similar note 3"]
+        detailsVisible = false
+        activeDetailField = nil
+        detailFieldLabels = ["Name: Jane Doe", "Email: jane@site.com", "Phone: 555-0142"]
         resultText = nil
         instruction = nil
         pasteTapTarget = 0
@@ -158,10 +151,6 @@ final class InteractionLabController: ObservableObject {
         withAnimation(.easeOut(duration: 0.1)) { _ = pressedKeys.remove(key) }
     }
 
-    // 200ms read as too fast to actually register as a discrete key press
-    // when watching the demo rather than performing the gesture yourself.
-    // Explicit shorter holds (e.g. pinPreview's 140ms double-tap) are
-    // unaffected — only the default used everywhere else changes.
     private func tap(_ key: LabKey, hold: UInt64 = 260) async throws {
         press(key)
         try await pause(hold)
@@ -214,6 +203,9 @@ final class InteractionLabController: ObservableObject {
         case .pinItem:       try await runPinItem()
         case .group:         try await runGroup()
         case .collections:   try await runCollections()
+        case .details:       try await runDetails()
+        case .smartBack:     try await runSmartBack()
+        case .shiftReverses: try await runShiftReverses()
         case .pasteOne:      try await runPasteOne()
         case .pasteTwo:      try await runPasteTwo()
         case .pasteThree:    try await runPasteThree()
@@ -225,13 +217,7 @@ final class InteractionLabController: ObservableObject {
         pasteTapTarget = 1
         pasteTapDone = 0
         press(.cmd)
-        // A single DispatchQueue.main.async hop only guarantees a later
-        // run-loop turn, not that AppKit actually composited the
-        // ⌘-alone frame — on a fast pass the ⌘ and V flashes could still
-        // land in the same display refresh and read as one simultaneous
-        // press. Two hops plus a longer, unmistakable pause (400ms read
-        // as no gap at all when watching this specific demo) gives the
-        // ⌘-alone state a real beat on screen before V appears.
+
         await Self.nextRunLoopTurn()
         await Self.nextRunLoopTurn()
         try await pause(750)
@@ -255,8 +241,7 @@ final class InteractionLabController: ObservableObject {
         pasteTapTarget = 2
         pasteTapDone = 0
         press(.cmd)
-        // See runPasteOne — two run-loop hops plus a longer pause make
-        // the ⌘-alone beat actually register before V appears.
+
         await Self.nextRunLoopTurn()
         await Self.nextRunLoopTurn()
         try await pause(750)
@@ -284,8 +269,7 @@ final class InteractionLabController: ObservableObject {
         pasteTapTarget = 3
         pasteTapDone = 0
         press(.cmd)
-        // See runPasteOne — two run-loop hops plus a longer pause make
-        // the ⌘-alone beat actually register before V appears.
+
         await Self.nextRunLoopTurn()
         await Self.nextRunLoopTurn()
         try await pause(750)
@@ -315,10 +299,7 @@ final class InteractionLabController: ObservableObject {
     private func runCycle() async throws {
         stageKeys = [.cmd, .v]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -342,10 +323,7 @@ final class InteractionLabController: ObservableObject {
     private func runPinnedOpen() async throws {
         stageKeys = [.cmd, .v]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         press(.v)
@@ -364,25 +342,20 @@ final class InteractionLabController: ObservableObject {
     private func runMultiPaste() async throws {
         stageKeys = [.cmd, .v]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
         showPanel(true)
         hint("Release ⌘ to paste")
         try await pause(400)
-        // HOLD marks — that's the special button's job, below the pair.
+
         pressSpecialV()
         try await pause(600)
         releaseSpecialV()
         withAnimation(.easeOut(duration: 0.15)) { items[0].mark = 1 }
         try await pause(450)
-        // TAP navigates between items — that's still the opening V's job,
-        // in the top pair, exactly like every tap-based demo. Only the
-        // HOLD is special here, not every later V interaction.
+
         try await tap(.v)
         selectItem(1)
         try await pause(350)
@@ -403,10 +376,7 @@ final class InteractionLabController: ObservableObject {
     private func runSearch() async throws {
         stageKeys = [.cmd, .v, .f]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -427,10 +397,7 @@ final class InteractionLabController: ObservableObject {
 
         stageKeys = [.cmd, .v, .grave]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         hint("Tap V to open")
@@ -462,10 +429,7 @@ final class InteractionLabController: ObservableObject {
     private func runSpacePreview() async throws {
         stageKeys = [.cmd, .v, .space]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -488,10 +452,7 @@ final class InteractionLabController: ObservableObject {
     private func runPinPreview() async throws {
         stageKeys = [.cmd, .v, .space]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -513,10 +474,7 @@ final class InteractionLabController: ObservableObject {
     private func runTransform() async throws {
         stageKeys = [.cmd, .v, .x]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -549,10 +507,7 @@ final class InteractionLabController: ObservableObject {
     private func runSimilar() async throws {
         stageKeys = [.cmd, .v, .r]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -583,10 +538,7 @@ final class InteractionLabController: ObservableObject {
     private func runMoveToFront() async throws {
         stageKeys = [.cmd, .v, .c]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -610,10 +562,7 @@ final class InteractionLabController: ObservableObject {
     private func runDelete() async throws {
         stageKeys = [.cmd, .v, .backspace]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -635,36 +584,24 @@ final class InteractionLabController: ObservableObject {
     }
 
     private func runReverseCycle() async throws {
-        let usesB = ClipboardManager.shared.reverseCycleUsesB
-        stageKeys = usesB ? [.cmd, .v, .b] : [.cmd, .shift, .v]
+        stageKeys = [.cmd, .shift, .v]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
         showPanel(true)
         try await pause(400)
-        if !usesB {
-            press(.shift)
-            try await pause(200)
-        }
+        press(.shift)
+        try await pause(200)
         var idx = 0
         for _ in 0..<2 {
-            if usesB {
-                try await tap(.b)
-            } else {
-                try await tapSpecialV()
-            }
+            try await tapSpecialV()
             idx = (idx - 1 + items.count) % items.count
             selectItem(idx)
             try await pause(450)
         }
-        if !usesB {
-            release(.shift)
-        }
+        release(.shift)
         try await pause(300)
         release(.cmd)
         showPanel(false)
@@ -676,10 +613,7 @@ final class InteractionLabController: ObservableObject {
         items[0].pin = true
         items[2].pin = true
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -704,10 +638,7 @@ final class InteractionLabController: ObservableObject {
     private func runPinItem() async throws {
         stageKeys = [.cmd, .v, .p]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -739,10 +670,7 @@ final class InteractionLabController: ObservableObject {
     private func runGroup() async throws {
         stageKeys = [.cmd, .v, .g]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -750,14 +678,12 @@ final class InteractionLabController: ObservableObject {
         try await pause(300)
         hint("Hold V to mark items")
 
-        // HOLD marks — special button's job.
         pressSpecialV()
         try await pause(550)
         releaseSpecialV()
         withAnimation(.easeOut(duration: 0.15)) { items[0].mark = 1 }
         try await pause(400)
 
-        // TAP navigates — stays on the opening V in the top pair.
         try await tap(.v)
         selectItem(1)
         try await pause(300)
@@ -783,10 +709,7 @@ final class InteractionLabController: ObservableObject {
     private func runCollections() async throws {
         stageKeys = [.cmd, .v, .one, .two]
         press(.cmd)
-        // Forces SwiftUI to actually paint the ⌘-alone frame before the
-        // sleep starts, instead of the ⌘ press and the pause potentially
-        // landing in the same render pass and reading as simultaneous
-        // with V's press right after.
+
         await Self.nextRunLoopTurn()
         try await pause(400)
         try await tap(.v)
@@ -816,5 +739,136 @@ final class InteractionLabController: ObservableObject {
         showPanel(false)
         hint(nil)
         finish("1 is All, 2 onward are your collections")
+    }
+
+    private func runDetails() async throws {
+        stageKeys = [.cmd, .v, .d]
+        press(.cmd)
+
+        await Self.nextRunLoopTurn()
+        try await pause(400)
+        try await tap(.v)
+        showPanel(true)
+        try await pause(350)
+        try await tap(.v)
+        selectItem(1)
+        try await pause(400)
+        hint("Tap D to open Details")
+        try await tap(.d)
+        withAnimation(.easeOut(duration: 0.25)) { detailsVisible = true; activeDetailField = 0 }
+        try await pause(500)
+        var current = 0
+        for i in 1..<3 {
+            try await tap(.d)
+            withAnimation(.easeOut(duration: 0.12)) { activeDetailField = i }
+            current = i
+            try await pause(450)
+        }
+        try await pause(400)
+        release(.cmd)
+        showPanel(false)
+        withAnimation(.easeOut(duration: 0.25)) { detailsVisible = false }
+        hint(nil)
+        finish("Stepped through every extracted field — “%@” was last highlighted", detailFieldLabels[current])
+    }
+
+    private func runSmartBack() async throws {
+        stageKeys = [.cmd, .v, .x, .b]
+        press(.cmd)
+
+        await Self.nextRunLoopTurn()
+        try await pause(400)
+        try await tap(.v)
+        showPanel(true)
+        hint("Cycling the main list")
+        try await pause(400)
+        var idx = 0
+        for _ in 0..<2 {
+            try await tap(.v)
+            idx = (idx + 1) % items.count
+            selectItem(idx)
+            try await pause(400)
+        }
+        try await pause(300)
+        hint("Tap B to go back")
+        try await tap(.b)
+        idx = (idx - 1 + items.count) % items.count
+        selectItem(idx)
+        try await pause(700)
+        hint("B reversed the list — now try Transform")
+        try await pause(900)
+
+        try await tap(.x)
+        withAnimation(.easeOut(duration: 0.25)) { transformVisible = true; activeTransform = 0 }
+        try await pause(500)
+        var toolIdx = 0
+        for i in 1..<3 {
+            try await tap(.x)
+            withAnimation(.easeOut(duration: 0.12)) { activeTransform = i }
+            toolIdx = i
+            try await pause(400)
+        }
+        try await pause(300)
+        hint("Tap B again")
+        try await tap(.b)
+        toolIdx -= 1
+        withAnimation(.easeOut(duration: 0.12)) { activeTransform = toolIdx }
+        try await pause(900)
+
+        release(.cmd)
+        showPanel(false)
+        withAnimation(.easeOut(duration: 0.25)) { transformVisible = false }
+        hint(nil)
+        finish("B followed you into Transform — same key, different context")
+    }
+
+    private func runShiftReverses() async throws {
+        stageKeys = [.cmd, .shift, .v, .x]
+        press(.cmd)
+
+        await Self.nextRunLoopTurn()
+        try await pause(400)
+        try await tap(.v)
+        showPanel(true)
+        hint("V moves forward")
+        var idx = 0
+        try await pause(400)
+        idx = (idx + 1) % items.count
+        selectItem(idx)
+        try await pause(500)
+
+        hint("Hold Shift — the same key now goes backward")
+        press(.shift)
+        try await pause(300)
+        try await tap(.v)
+        idx = (idx - 1 + items.count) % items.count
+        selectItem(idx)
+        try await pause(600)
+        release(.shift)
+        try await pause(300)
+
+        hint("Same rule everywhere — Transform too")
+        try await tap(.x)
+        withAnimation(.easeOut(duration: 0.25)) { transformVisible = true; activeTransform = 0 }
+        try await pause(500)
+        var toolIdx = 1
+        withAnimation(.easeOut(duration: 0.12)) { activeTransform = toolIdx }
+        try await pause(400)
+
+        hint("Shift + X steps back")
+        press(.shift)
+        try await pause(200)
+        try await tap(.x)
+        toolIdx -= 1
+        withAnimation(.easeOut(duration: 0.12)) { activeTransform = toolIdx }
+        try await pause(700)
+        release(.shift)
+
+        try await pause(400)
+        release(.cmd)
+        showPanel(false)
+        withAnimation(.easeOut(duration: 0.25)) { transformVisible = false }
+        hint(nil)
+        finish("Shift always reverses — V, X, `, P all follow the same rule")
     }
 }

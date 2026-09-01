@@ -178,19 +178,9 @@ struct ClipenSettingsView: View {
 
             feedbackCommunityBanner
 
-            // One continuous panel — history and composer used to be two
-            // separate bordered cards with a gap between them; this is a
-            // single rowCard with the history scrolling above and the
-            // composer pinned at its bottom, like an actual chat app
-            // instead of "a card, then a second unrelated card below it."
             rowCard(border: .allSides) {
                 VStack(alignment: .leading, spacing: 0) {
-                    // Hint text now leads the whole panel — it used to sit
-                    // right above the text box at the bottom, which read as
-                    // "instructions for the box" rather than "what this
-                    // whole feedback panel is for." Reordered top to bottom:
-                    // hint -> history (if any) -> composer, so the panel
-                    // reads the same direction a real conversation would.
+
                     Text("Send a message straight to the developer — suggest a feature, report a bug, share how you'd improve your own workflow, or paste a macOS crash report.")
                         .font(.system(size: 11)).foregroundColor(.textSec)
                         .padding(14)
@@ -240,14 +230,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    /// Sits above the feedback box, spanning the same full content width as
-    /// proUpsellBanner — this app has no true edge-to-edge banner anywhere
-    /// (everything respects the settings column's side padding), so this
-    /// matches that established pattern rather than introducing a new one.
-    /// Replaces the old inline "you can see replies on Instagram" hint that
-    /// used to sit crammed next to the Send button — replies now render
-    /// directly in-app as feedbackChatThread below, so this is a community
-    /// invite, not the only way to see a reply anymore.
     private var feedbackCommunityBanner: some View {
         Button {
             if let url = URL(string: "https://www.instagram.com/clipen.official") {
@@ -293,22 +275,6 @@ struct ClipenSettingsView: View {
         let replyText: String?
     }
 
-    /// Merges two sources that were never designed to line up automatically:
-    /// proGate.sentFeedback (every message this device has ever sent,
-    /// recorded locally the moment each send succeeds — see SentFeedback's
-    /// doc comment) and proGate.feedbackReplies (server-side, but ONLY ever
-    /// contains messages that already have a developer reply attached).
-    ///
-    /// Every sent message is matched to at most one reply with the same
-    /// (date, text) — "claimed" so a second identical message sent the same
-    /// day (two "hi"s back to back, the exact case that surfaced this) isn't
-    /// paired with the same reply twice. A sent message with no matching
-    /// reply still gets its own row, just with replyText == nil, instead of
-    /// being left out entirely — showing your own message the instant you
-    /// send it, before any reply exists, is the whole point of this. Any
-    /// reply left unclaimed after that (data from before sentFeedback
-    /// existed, or a rare cross-device edge case) still gets shown too,
-    /// using its own bundled `message` field — nothing is ever dropped.
     private var feedbackThreadRows: [FeedbackThreadRow] {
         var claimed = Set<String>()
         var rows: [FeedbackThreadRow] = []
@@ -334,20 +300,11 @@ struct ClipenSettingsView: View {
         let dayTimeFormatter: DateFormatter = {
             let f = DateFormatter()
             f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-            f.timeZone = TimeZone.current  // `time` is the sender's own local clock, not UTC
+            f.timeZone = TimeZone.current
             return f
         }()
         for reply in proGate.feedbackReplies where !claimed.contains(reply.id) {
-            // The server now includes a real send time (see FeedbackReply.time)
-            // for any entry sent after that started being recorded — use it
-            // for an exact sort position, on the SAME timescale as
-            // sent.sentAt (timeIntervalSince1970, seconds since 1970).
-            // Entries from before `time` existed fall back to an
-            // approximate position (start of that day + index) — still on
-            // the same timescale, just coarser, rather than comparing
-            // against the raw date string's digits, which would silently
-            // sort every one of these before every sent message regardless
-            // of actual order.
+
             let sortKey: Double
             if let time = reply.time,
                let exact = dayTimeFormatter.date(from: "\(reply.date) \(time)")?.timeIntervalSince1970 {
@@ -366,12 +323,6 @@ struct ClipenSettingsView: View {
         return rows.sorted { $0.sortKey < $1.sortKey }
     }
 
-    /// A real two-sided chat thread — your original message on the left,
-    /// the developer's reply on the right (swapped from the first pass,
-    /// which had them the other way around), oldest exchange first. No
-    /// longer its own card — see feedbackSection, this is now just the
-    /// scrolling top portion of that one panel, with the composer below it
-    /// in the same box.
     private var feedbackChatHistory: some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(feedbackThreadRows) { row in
@@ -418,11 +369,7 @@ struct ClipenSettingsView: View {
         guard !trimmed.isEmpty, !feedbackSending else { return }
         feedbackSending = true
         feedbackSendState = .idle
-        // Same dateKey the request itself files this under server-side
-        // (see TrackingService.sendFeedback's client_today) — captured here
-        // rather than threaded back through the completion, since the
-        // server never echoes it and this is the one place that already
-        // knows it independently.
+
         let dateKey = TrackingService.dateKey(Date())
         TrackingService.shared.sendFeedback(trimmed) { success in
             feedbackSending = false
@@ -920,13 +867,6 @@ struct ClipenSettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-            // The blue pill lives on the full instruction sentence itself,
-            // not the small "NEW" label above — that's the badge people
-            // actually need to read to know what to do, so it's the one
-            // that should read as a call to action. Same position as
-            // before (this line, right under the header), always visible
-            // for as long as the feature counts as new, not gated behind
-            // a hover-only tooltip.
             if manager.isRememberForeverFeatureNew {
                 HStack(spacing: 4) {
                     Text("Tap")
@@ -1110,11 +1050,6 @@ struct ClipenSettingsView: View {
         return bundleID
     }
 
-    // Mirrors excludedAppsManagerPopover/excludedAppRow/
-    // browseForApplicationToExclude exactly, targeting pasteBlockedBundleIDs
-    // instead of excludedCaptureBundleIDs — same picker mechanics, same
-    // NSOpenPanel browse flow, same icon/name lookups (excludedAppDisplayName
-    // is already generic on bundleID, reused as-is rather than duplicated).
     private var pasteBlockedAppsManagerPopover: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
@@ -1262,9 +1197,6 @@ struct ClipenSettingsView: View {
         VStack(alignment: .leading, spacing: 14) {
             sectionHeader("01", "RING SIZE")
 
-            // "items" sits on the number's baseline rather than centered
-            // under it, so the pair reads as one unit ("50 items") and frees
-            // the line below for the infinite toggle.
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(manager.unlimitedRingSize ? "∞" : "\(manager.maxItems)")
                     .font(.system(size: 64, weight: .black))
@@ -1275,10 +1207,6 @@ struct ClipenSettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-            // Replaces the full-width toggle card this section used to end
-            // with — same pill treatment as the Interactions/Tips headers,
-            // so a secondary switch doesn't visually outweigh the slider
-            // that is the actual subject of this section.
             Button {
                 withAnimation { manager.unlimitedRingSize.toggle() }
             } label: {
@@ -1485,10 +1413,6 @@ struct ClipenSettingsView: View {
         }
     }
 
-    // Same "full width, separate box" visual
-    // treatment as interactionsSection's KeyboardInteractionPanel box below,
-    // not the thin leading-line rowCard style the other behaviour rows use —
-    // this one has its own editable content, not just toggle rows.
     private var aiStructuringSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
@@ -1578,9 +1502,7 @@ struct ClipenSettingsView: View {
                 if localLLM.downloadingTiers.contains(tier) {
                     ProgressView(value: localLLM.downloadProgress[tier] ?? 0)
                         .frame(width: 60)
-                    // Real bytes + speed, not a file-count percentage — a
-                    // multi-GB weights file otherwise pins the bar at one
-                    // number for many minutes and reads as a dead download.
+
                     VStack(alignment: .leading, spacing: 1) {
                         Text(byteProgressText(tier))
                             .font(.system(size: 9)).foregroundColor(.textDim)
@@ -1594,9 +1516,7 @@ struct ClipenSettingsView: View {
                     Button("Delete") { localLLM.delete(tier) }
                         .font(.system(size: 9)).buttonStyle(.plain).foregroundColor(.red.opacity(0.75))
                 } else if LocalModelPaths.hasAnyLocalFiles(tier) {
-                    // Leftover partial files from a prior stuck/cancelled
-                    // download that predates the cancel-cleanup fix, or one
-                    // abandoned by quitting the app instead of cancelling.
+
                     Text("partial files").font(.system(size: 9)).foregroundColor(.orange.opacity(0.8))
                     Button("Delete") { localLLM.delete(tier) }
                         .font(.system(size: 9)).buttonStyle(.plain).foregroundColor(.red.opacity(0.75))
@@ -1742,23 +1662,24 @@ struct ClipenSettingsView: View {
              KBKey(id: "LBRACKET", label: "["), KBKey(id: "RBRACKET", label: "]"),
              KBKey(id: "BACKSLASH", label: "\\", width: 1.2)],
             [KBKey(id: "CAPS", label: "caps", width: 1.6),
-             KBKey(id: "A", label: "A"), KBKey(id: "S", label: "S"), KBKey(id: "D", label: "D"),
+             KBKey(id: "A", label: "A"), KBKey(id: "S", label: "S"),
+             KBKey(id: "D", label: "D", demos: [.details]),
              KBKey(id: "F", label: "F", demos: [.search]),
              KBKey(id: "G", label: "G", demos: [.group]),
              KBKey(id: "H", label: "H"), KBKey(id: "J", label: "J"), KBKey(id: "K", label: "K"),
              KBKey(id: "L", label: "L"), KBKey(id: "SEMI", label: ";"), KBKey(id: "QUOTE", label: "'"),
              KBKey(id: "RETURN", label: "return", width: 1.8)],
-            [KBKey(id: "LSHIFT", label: "shift", width: 2.0),
+            [KBKey(id: "LSHIFT", label: "shift", width: 2.0, demos: [.shiftReverses]),
              KBKey(id: "Z", label: "Z"),
              KBKey(id: "X", label: "X", demos: [.transform]),
              KBKey(id: "C", label: "C", demos: [.moveToFront]),
 
              KBKey(id: "V", label: "V", demos: [.cycle, .multiPaste, .pinnedOpen, .reverseCycle]),
 
-             KBKey(id: "B", label: "B", demos: [.reverseCycle]),
+             KBKey(id: "B", label: "B", demos: [.smartBack]),
              KBKey(id: "N", label: "N"), KBKey(id: "M", label: "M"),
              KBKey(id: "COMMA", label: ","), KBKey(id: "PERIOD", label: "."), KBKey(id: "SLASH", label: "/"),
-             KBKey(id: "RSHIFT", label: "shift", width: 2.4)],
+             KBKey(id: "RSHIFT", label: "shift", width: 2.4, demos: [.shiftReverses])],
             [KBKey(id: "FN", label: "fn", width: 1.2),
              KBKey(id: "CTRL", label: "control", width: 1.3),
              KBKey(id: "OPT", label: "option", width: 1.3),
@@ -1791,8 +1712,10 @@ struct ClipenSettingsView: View {
         private var hasDemo: Bool { !key.demos.isEmpty }
         private var showBlue: Bool { hasDemo && !dimmed }
         private var showGold: Bool { key.isCommand && !dimmed }
+        private var isReverseKey: Bool { key.id == "LSHIFT" || key.id == "RSHIFT" || key.id == "B" }
         private static let interactiveColor = Color(hex: "#4F8EF7")
         private static let commandColor = Color(hex: "#D4AF37")
+        private static let reverseColor = Color(red: 0.82, green: 0.29, blue: 0.14)
 
         var body: some View {
             Text(key.label)
@@ -1808,9 +1731,10 @@ struct ClipenSettingsView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(
-                            showGold ? Self.commandColor
-                                : (showBlue ? Self.interactiveColor.opacity(isActive || hovered || isPressed ? 1 : (pulse ? 1 : 0.4)) : Color.border),
-                            lineWidth: (showGold || showBlue) ? (isActive || isPressed ? 2.5 : 1.6) : 1)
+                            isReverseKey && !dimmed ? Self.reverseColor
+                                : (showGold ? Self.commandColor
+                                    : (showBlue ? Self.interactiveColor.opacity(isActive || hovered || isPressed ? 1 : (pulse ? 1 : 0.4)) : Color.border)),
+                            lineWidth: (showGold || showBlue || (isReverseKey && !dimmed)) ? (isActive || isPressed ? 2.5 : 1.6) : 1)
                 )
                 .offset(y: isPressed ? 2 : 0)
                 .animation(.easeOut(duration: 0.15), value: isActive)
@@ -1871,10 +1795,6 @@ struct ClipenSettingsView: View {
 
                 InteractionLabStage(lab: lab, showKeyRow: showInnerButtons)
 
-                // Only meaningful in the full Settings lab, where a real
-                // system keyboard overlay exists to sync against — the
-                // tutorial's mock popup has nothing to switch to, so this
-                // never shows there (showRealKeyboardToggle: false).
                 if showRealKeyboardToggle {
                     Button {
                         showInnerButtons.toggle()
@@ -1886,11 +1806,7 @@ struct ClipenSettingsView: View {
                             Text(showInnerButtons ? "Animate on keyboard instead" : "Animate keys in popup instead")
                                 .font(.system(size: 10, weight: .semibold))
                         }
-                        // Solid blue + white once real-keyboard sync is
-                        // active, dim outline while still in popup mode —
-                        // previously this looked identical either way, so
-                        // there was no way to tell which mode had actually
-                        // been clicked into without reading the label text.
+
                         .foregroundColor(showInnerButtons ? .accent : .white)
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .frame(maxWidth: .infinity)
@@ -1921,14 +1837,14 @@ struct ClipenSettingsView: View {
                     }
                 }
 
-                if selected == .reverseCycle {
+                if selected == .smartBack {
                     HStack(spacing: 8) {
-                        Text("Reverse key").font(.system(size: 9)).foregroundColor(.textDim)
-                        reverseKeyChoice(label: "Shift + V", isOn: !manager.reverseCycleUsesB) {
+                        Text("Smart B").font(.system(size: 9)).foregroundColor(.textDim)
+                        settingsChoicePill(label: "Off", isOn: !manager.reverseCycleUsesB) {
                             manager.reverseCycleUsesB = false
                             lab.select(selected)
                         }
-                        reverseKeyChoice(label: "B", isOn: manager.reverseCycleUsesB) {
+                        settingsChoicePill(label: "On", isOn: manager.reverseCycleUsesB) {
                             manager.reverseCycleUsesB = true
                             lab.select(selected)
                         }
@@ -1936,11 +1852,7 @@ struct ClipenSettingsView: View {
                 }
             }
             .padding(14)
-            // No fixed width — the popup sizes to whatever's actually
-            // inside it. LabMockPanel (190pt) is always present, so that
-            // alone gives this a natural minimum; the row above grows on
-            // its own when the side panel joins it, instead of the popup
-            // being pre-tuned to a width that only fit one specific case.
+
             .task {
                 lab.syncRealKeyboard = !showInnerButtons
 
@@ -1950,7 +1862,7 @@ struct ClipenSettingsView: View {
             .onDisappear { lab.stopIfStillPlaying(selected) }
         }
 
-        private func reverseKeyChoice(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
+        private func settingsChoicePill(label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
             Button(action: action) {
                 Text(label)
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -2022,12 +1934,7 @@ struct ClipenSettingsView: View {
         var body: some View {
             GeometryReader { geo in
                 let totalWidth = geo.size.width
-                // specialVPressed drives the HOLD-to-mark beat (multiPaste,
-                // group, reverseCycle) on a key-cap deliberately kept
-                // separate from pressedKeys so it doesn't also light up the
-                // opening ⌘V pair — but that means it was invisible to the
-                // real keyboard here, which only ever watched pressedKeys.
-                // The physical V key never highlighted during a hold.
+
                 let pressedRealIDs: Set<String> = {
                     guard lab.syncRealKeyboard else { return [] }
                     var ids = Set(lab.pressedKeys.flatMap { $0.kbKeyIDs })
