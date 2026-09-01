@@ -4,13 +4,6 @@ import SwiftUI
 
 extension ClipboardManager {
 
-    /// The one piece of math every shift-reverses-cycling feature shares
-    /// (main ring, category filter, transform tools, share services,
-    /// similar items): step an index by ±1 with wraparound. Each feature
-    /// still wires its own key/hold-timer trigger (they differ: the main
-    /// ring's V key, category's plain keydown, transform/share's
-    /// hold-and-release), but the actual "shift = backward" arithmetic is
-    /// this single function everywhere instead of five separate copies.
     static func cyclicIndex(_ index: Int, count: Int, backward: Bool) -> Int {
         guard count > 0 else { return 0 }
         return backward ? (index - 1 + count) % count : (index + 1) % count
@@ -80,9 +73,6 @@ extension ClipboardManager {
     func enterTransformStage() {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
 
-        // Nothing to transform: this entry's only text is its own label,
-        // and the content it stands for lives on the system pasteboard
-        // where no tool here can reach it.
         if displayItems[selectedIndex].isUncaptured {
             flashStatus(String(localized: "Clipen never received this copy, so it can't be transformed."))
             return
@@ -973,15 +963,6 @@ extension ClipboardManager {
         }
     }
 
-    /// Taps of V faster than this land as instant, unanimated selection
-    /// changes instead of retargeting the (0.35s response) spring that
-    /// drives the image-elevation, row-highlight, and scroll-to effects.
-    /// Below this interval the spring never gets close to converging
-    /// before the next tap arrives — it's perpetually redirected mid-flight,
-    /// which reads as stutter. Since an unanimated update fully resolves
-    /// immediately, there's no "unfinished" state left over once a fast
-    /// burst ends — the view is already exactly where it should be.
-    /// Deliberate, slower taps still animate normally.
     private static let selectionAnimationCooldown: TimeInterval = 0.15
 
     @discardableResult
@@ -1000,6 +981,7 @@ extension ClipboardManager {
     func cycleNext() {
         let display = displayItems
         guard !display.isEmpty else { return }
+        lastNoStageAction = .mainList
         let wasVisible = previewWindow.isVisible
 
         let shouldContinue = withRateLimitedSelectionAnimation { () -> Bool in
@@ -1049,6 +1031,7 @@ extension ClipboardManager {
     func cyclePrevious() {
         let display = displayItems
         guard !display.isEmpty else { return }
+        lastNoStageAction = .mainList
         let wasVisible = previewWindow.isVisible
         AuthManager.shared.registerActionUsage(actionID: "action.prev")
 
@@ -1069,6 +1052,14 @@ extension ClipboardManager {
         selectionDidChange()
     }
 
+    func performSmartBack() {
+        switch lastNoStageAction {
+        case .mainList: cyclePrevious()
+        case .category: cycleCategoryBackward()
+        case .pinned:   cyclePinnedItemsBackward()
+        }
+    }
+
     func cyclePinnedItems() {
         guard previewWindow.isVisible, !displayItems.isEmpty else { return }
         let pinnedIndices = displayItems.indices.filter { displayItems[$0].isPinned }
@@ -1076,6 +1067,7 @@ extension ClipboardManager {
             flashStatus("No pinned items yet.")
             return
         }
+        lastNoStageAction = .pinned
         if let currentPos = pinnedIndices.firstIndex(of: selectedIndex) {
             selectedIndex = pinnedIndices[(currentPos + 1) % pinnedIndices.count]
         } else {
@@ -1083,6 +1075,24 @@ extension ClipboardManager {
         }
         resetAutoDismissTimer()
         AuthManager.shared.registerActionUsage(actionID: "action.cycle_pinned")
+        selectionDidChange()
+    }
+
+    func cyclePinnedItemsBackward() {
+        guard previewWindow.isVisible, !displayItems.isEmpty else { return }
+        let pinnedIndices = displayItems.indices.filter { displayItems[$0].isPinned }
+        guard !pinnedIndices.isEmpty else {
+            flashStatus("No pinned items yet.")
+            return
+        }
+        lastNoStageAction = .pinned
+        if let currentPos = pinnedIndices.firstIndex(of: selectedIndex) {
+            selectedIndex = pinnedIndices[(currentPos - 1 + pinnedIndices.count) % pinnedIndices.count]
+        } else {
+            selectedIndex = pinnedIndices[pinnedIndices.count - 1]
+        }
+        resetAutoDismissTimer()
+        AuthManager.shared.registerActionUsage(actionID: "action.cycle_pinned_backward")
         selectionDidChange()
     }
 
@@ -1108,6 +1118,7 @@ extension ClipboardManager {
     func cycleCategoryForward() {
         let total = 1 + availableTags.count
         guard total > 1 else { return }
+        lastNoStageAction = .category
         let current: Int
         if let filter = popupTagFilter,
            let pos = availableTags.firstIndex(where: { $0 == filter }) {
@@ -1127,6 +1138,7 @@ extension ClipboardManager {
     func cycleCategoryBackward() {
         let total = 1 + availableTags.count
         guard total > 1 else { return }
+        lastNoStageAction = .category
         let current: Int
         if let filter = popupTagFilter,
            let pos = availableTags.firstIndex(where: { $0 == filter }) {
@@ -1175,10 +1187,7 @@ extension ClipboardManager {
     }
 
     func openPopupNow() {
-        // Opening the popup means a copy or paste is imminent — treated the
-        // same as an actually-detected pasteboard change for the poll
-        // timer's idle backoff (see startPolling), so this doesn't sit at
-        // the slow 500ms interval right when it matters most.
+
         lastPollActivityAt = Date()
         popupTagFilter = nil
         let withinRememberWindow: Bool = {
@@ -1534,11 +1543,7 @@ extension ClipboardManager {
 
     @discardableResult
     func toggleMark(id: UUID) -> Bool {
-        // An uncaptured placeholder holds no content — only a label. Marking
-        // it would feed that label into multi-paste, transforms or share as
-        // if it were real text, pasting the words "Not captured…" into the
-        // user's document. It can only ever be pasted alone, straight from
-        // the system pasteboard, so it is never markable.
+
         if let item = items.first(where: { $0.id == id }), item.isUncaptured {
             flashStatus(String(localized: "This one can only be pasted on its own."))
             return false
@@ -1584,9 +1589,6 @@ extension ClipboardManager {
         unifiedMarkOrder().items[id]
     }
 
-    /// One continuous numbering across marked ITEMS and marked Details
-    /// FIELDS, ordered by when each was marked. Computed from the current
-    /// marks only, so anything cleared elsewhere simply drops out.
     func unifiedMarkOrder() -> (items: [UUID: Int], fields: [Int: Int]) {
         var entries: [(seq: Int, item: UUID?, field: Int?)] = []
         for id in markedItemIDs {
@@ -1613,16 +1615,7 @@ extension ClipboardManager {
                 AuthManager.shared.registerActionUsage(actionID: "action.collection-switch")
             }
             activeCollection = nil
-            // activeCollection's own didSet already resets selectedIndex to
-            // 0 on every assignment, including a same-value reassignment
-            // (re-pressing the number for the collection already active).
-            // What it can't do is move the *scroll position* back to the
-            // top when selectedIndex's value doesn't actually change (was
-            // already 0) — onChange(of: selectedIndex) only fires on a real
-            // transition. collectionSwitchGeneration drives a dedicated,
-            // animated scroll-to-top for exactly that case (a separate
-            // counter from popupOpenGeneration, whose own scroll snap stays
-            // instant since it also fires on ordinary popup-open).
+
             collectionSwitchGeneration += 1
             return
         }
