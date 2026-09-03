@@ -1535,6 +1535,10 @@ class ClipboardManager: ObservableObject {
                 object: nil, queue: .main
             ) { [weak self] _ in
                 self?.refreshAccessibilityStatusOnActivate()
+                // Coming back to Clipen usually precedes doing something
+                // with the clipboard; don't make that first copy wait out
+                // the backed-off poll interval.
+                self?.resumeActivePolling()
             }
         }
 

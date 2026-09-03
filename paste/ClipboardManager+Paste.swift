@@ -15,13 +15,22 @@ extension ClipboardManager {
 
     func shouldInjectCharacters(to app: NSRunningApplication?) -> Bool {
         if app == nil { return true }
-        if Self.focusedAppIsSpotlight() { return true }
-        guard let id = app?.bundleIdentifier else { return false }
-        return Self.injectionBundleIDs.contains(id)
+        // Bundle-ID first: it's a set lookup, while focusedAppIsSpotlight() is
+        // a synchronous cross-process Accessibility round trip. Same answer
+        // either way (the result is an OR), but Raycast/Alfred now skip the
+        // AX call entirely.
+        if let id = app?.bundleIdentifier, Self.injectionBundleIDs.contains(id) { return true }
+        return Self.focusedAppIsSpotlight()
     }
 
     static func focusedAppIsSpotlight() -> Bool {
         let systemWide = AXUIElementCreateSystemWide()
+        // Every paste of text waits on this. An unresponsive frontmost app
+        // makes AX calls hang for the default 6s timeout, which the user
+        // experiences as the paste itself being stuck. Nothing here is worth
+        // more than a fraction of a second; on timeout we fall through to
+        // "not Spotlight", which is the common answer anyway.
+        AXUIElementSetMessagingTimeout(systemWide, 0.25)
         var focusedAppRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef) == .success,
               let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID()
@@ -442,23 +451,44 @@ extension ClipboardManager {
 
         popupSessionPasted = true
         finalizePopupOutcome()
+
+        // PASTE-TIME: each stage of a paste is a separate suspect (pasteboard
+        // write for big payloads, app activation, the AX injection probe), and
+        // they're indistinguishable from the outside. Gated by
+        // clipenDebugLogging like the AI-TIME logs.
+        let tStart = Date()
+        func ms(_ from: Date) -> Int { max(0, Int(Date().timeIntervalSince(from) * 1000)) }
+
         recordPasteDestination(for: item.id, app: target)
+        let tWrite = Date()
         let pb = NSPasteboard.general
         pb.clearContents()
         write(item, to: pb, plainOnly: pastePlainTextByDefault)
         lastChangeCount = pb.changeCount
+        let writeMs = ms(tWrite)
 
         let token = beginPasteSimulation()
+        let tActivate = Date()
 
         activateAndWaitIfNeeded(target) { [weak self] ok in
             guard let self else { completion?(); return }
+            let activateMs = ms(tActivate)
             guard ok, self.isSafeToPaste(into: target) else {
+                DebugLog.write("PASTE-TIME aborted after \(ms(tStart))ms write=\(writeMs)ms activate=\(activateMs)ms ok=\(ok)")
                 self.abortPaste(token: token); completion?(); return
             }
-            if let text = self.extractTextForInjection(from: item),
-               text.count <= Self.maxInjectionLength,
-               self.shouldInjectCharacters(to: target) {
+            let tDecide = Date()
+            let injectText = self.extractTextForInjection(from: item)
+            let willInject = injectText.map {
+                $0.count <= Self.maxInjectionLength && self.shouldInjectCharacters(to: target)
+            } ?? false
+            let decideMs = ms(tDecide)
+            DebugLog.write("PASTE-TIME staged=\(ms(tStart))ms write=\(writeMs)ms activate=\(activateMs)ms injectProbe=\(decideMs)ms inject=\(willInject) app=\(target?.bundleIdentifier ?? "nil")")
+
+            if willInject, let text = injectText {
+                let tInject = Date()
                 self.injectCharacters(text) { [weak self] in
+                    DebugLog.write("PASTE-TIME done total=\(ms(tStart))ms inject=\(ms(tInject))ms chars=\(text.count)")
                     self?.endPasteSimulation(token: token)
                     completion?()
                 }
@@ -470,6 +500,7 @@ extension ClipboardManager {
                 Self.tagSynthetic(down); Self.tagSynthetic(up)
                 down?.post(tap: .cgAnnotatedSessionEventTap)
                 up?.post(tap: .cgAnnotatedSessionEventTap)
+                DebugLog.write("PASTE-TIME keystroke posted at \(ms(tStart))ms")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                     self?.endPasteSimulation(token: token)
                     completion?()

@@ -334,6 +334,16 @@ extension ClipboardManager {
         let opt   = flags.contains(.maskAlternate)
         let ctrl  = flags.contains(.maskControl)
 
+        // A ⌘C / ⌘X going past the tap means a copy is about to land on the
+        // pasteboard. Polling backs off to 0.5s after 60s without a
+        // clipboard change, so the first copy after any stretch of reading
+        // or writing sat unnoticed for up to half a second. Only when the
+        // popup is closed: with it open these are Clipen's own keys, not a
+        // system copy.
+        if cmd, !previewWindow.isVisible, key == 8 || key == 7 {
+            DispatchQueue.main.async { [weak self] in self?.resumeActivePolling() }
+        }
+
         if previewWindow.isVisible && !inPageRangeMode {
             resetAutoDismissTimer()
         }

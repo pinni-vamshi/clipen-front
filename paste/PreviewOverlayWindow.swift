@@ -830,11 +830,8 @@ struct ImageRunRow: View, Equatable {
             let analysisState = AIStructuringService.shared.state(for: selectedEntry.item)
             let analysing = analysisState == .running
             let hasAnalysis: Bool = { if case .done = analysisState { return true }; return false }()
-            Image(systemName: selectedEntry.item.primaryTag.icon)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(hasAnalysis ? .black.opacity(0.75) : .white)
-                .frame(width: 20, height: 20)
-                .background(hasAnalysis ? Color.white : Color.secondary.opacity(0.45), in: Circle())
+            AnalysisBadgeGlyph(iconName: selectedEntry.item.primaryTag.icon,
+                               hasAnalysis: hasAnalysis)
                 .overlay {
                     if analysing {
                         Circle()
@@ -864,6 +861,41 @@ struct ImageRunRow: View, Equatable {
                 .frame(width: 88, alignment: .center)
                 .rotationEffect(.degrees(-90))
         }
+    }
+}
+
+/// The selected item's rail badge. When the item has AI analysis it alternates
+/// between its own type icon and the AI glyph every 0.3s, so the analysed state
+/// reads at a glance without spending a second badge on it.
+///
+/// The tick is a TimelineView rather than a @State + Timer on the badge's
+/// parent: this way the twice-a-second invalidation stays inside this 20pt
+/// subtree instead of redrawing the whole row while the user is navigating.
+/// Shared by both the image-run rail and the normal row rail — same badge, so
+/// the same view.
+struct AnalysisBadgeGlyph: View {
+    let iconName: String
+    let hasAnalysis: Bool
+
+    private static let period: TimeInterval = 0.3
+
+    var body: some View {
+        if hasAnalysis {
+            TimelineView(.periodic(from: .now, by: Self.period)) { context in
+                let tick = Int(context.date.timeIntervalSinceReferenceDate / Self.period)
+                glyph(tick % 2 == 1 ? "sparkles" : iconName)
+            }
+        } else {
+            glyph(iconName)
+        }
+    }
+
+    private func glyph(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(hasAnalysis ? .black.opacity(0.75) : .white)
+            .frame(width: 20, height: 20)
+            .background(hasAnalysis ? Color.white : Color.secondary.opacity(0.45), in: Circle())
     }
 }
 
@@ -1198,12 +1230,7 @@ struct PopoverRow: View, Equatable {
             let analysisState = AIStructuringService.shared.state(for: item)
             let analysing = analysisState == .running
             let hasAnalysis: Bool = { if case .done = analysisState { return true }; return false }()
-            Image(systemName: item.primaryTag.icon)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(hasAnalysis ? .black.opacity(0.75) : .white)
-                .frame(width: 20, height: 20)
-                .background(hasAnalysis ? Color.white : Color.secondary.opacity(0.45), in: Circle())
-
+            AnalysisBadgeGlyph(iconName: item.primaryTag.icon, hasAnalysis: hasAnalysis)
                 .overlay {
                     if analysing {
                         Circle()

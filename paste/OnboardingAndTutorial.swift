@@ -420,6 +420,12 @@ struct TutorialSheet: View {
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
+                    // This button writes the pasteboard directly rather than
+                    // going through ⌘C, so nothing else would tell the
+                    // poller to come off its backed-off interval — and by
+                    // this point the user has usually been reading this page
+                    // for well over the 60s idle threshold.
+                    manager.resumeActivePolling()
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 12, weight: .semibold))

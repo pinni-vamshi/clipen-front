@@ -17,6 +17,23 @@ extension ClipboardManager {
         scheduleNextPoll()
     }
 
+    /// Put the poller back on its 10Hz cadence immediately.
+    ///
+    /// The cadence is chosen from `lastPollActivityAt`, which only advances
+    /// when the pasteboard itself changed — so after 60s of not copying,
+    /// polling is at 2Hz and the next copy isn't noticed for up to half a
+    /// second. Worse, just updating the timestamp isn't enough: a 0.5s timer
+    /// is already in flight and would still have to fire before the faster
+    /// cadence took effect. This resets the clock AND re-arms the timer, so
+    /// callers that know a copy is imminent (a ⌘C going past the event tap,
+    /// the app coming forward, the tutorial's own copy button) get the copy
+    /// picked up in ~100ms instead of ~500ms.
+    func resumeActivePolling() {
+        lastPollActivityAt = Date()
+        pollTimer?.invalidate()
+        scheduleNextPoll()
+    }
+
     private func scheduleNextPoll() {
         let idleFor = Date().timeIntervalSince(lastPollActivityAt)
         let interval = idleFor > Self.pollIdleThreshold ? Self.pollIntervalIdle : Self.pollIntervalActive
