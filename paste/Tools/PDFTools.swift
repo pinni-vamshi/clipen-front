@@ -69,7 +69,10 @@ enum PDFTools {
         )
     }
 
-    private static let inputCache = RecentItemCache<(pdf: PDFDocument, data: Data?)>(capacity: 5)
+    // See ImageCodec.inputCache's comment — same fix, same reasoning:
+    // capacity 5 against a ring of hundreds of items meant revisiting a 6th
+    // distinct PDF in one session forced a full re-parse.
+    private static let inputCache = RecentItemCache<(pdf: PDFDocument, data: Data?)>(capacity: 10)
 
     static func pdfInput(for item: ClipboardItem) -> (pdf: PDFDocument, data: Data?)? {
         if let cached = inputCache.value(for: item.id) { return cached }

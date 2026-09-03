@@ -80,9 +80,11 @@ extension ClipboardManager {
 
         if AXIsProcessTrusted() {
             DebugLog.write("AXIsProcessTrusted = true, creating event tap")
+            AuthManager.shared.registerActionUsage(actionID: "action.accessibility-granted")
             createEventTap()
         } else {
             DebugLog.write("AXIsProcessTrusted = false — Accessibility permission missing")
+            AuthManager.shared.registerActionUsage(actionID: "action.accessibility-not-granted")
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
             AXIsProcessTrustedWithOptions(opts as CFDictionary)
             scheduleNextPermissionRetry()
@@ -97,6 +99,7 @@ extension ClipboardManager {
                 self.permissionRetryTimer?.invalidate()
                 self.permissionRetryTimer = nil
                 self.permissionRetryBackoff = 1.0
+                AuthManager.shared.registerActionUsage(actionID: "action.accessibility-granted")
                 self.createEventTap()
             } else {
                 self.permissionRetryBackoff = min(self.permissionRetryBackoff * 2, 30.0)

@@ -1,18 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Shared machinery for every side panel anchored beside the ⌘V popup.
-///
-/// Extracted because Transform, Share, Similar, Details and ItemPreview each
-/// carried their own copy of it — verified byte-identical, not merely
-/// similar: all five `init()` bodies hashed the same, four of five `hide()`
-/// bodies hashed the same, and the 25-line positioning tail of `show()`
-/// hashed the same across four. That is ~200 lines of exact duplication, and
-/// it is why a fix to the wake-settle timing or the reuse-in-place path had
-/// to be made five times to actually take effect.
-///
-/// Subclasses supply only what genuinely differs: their content view and its
-/// size. Everything about windowing, placement and lifecycle lives here.
 class AnchoredPopoverPanel: NSObject, NSPopoverDelegate {
     let anchorPanel: NSPanel
     let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
@@ -60,11 +48,6 @@ class AnchoredPopoverPanel: NSObject, NSPopoverDelegate {
         }
     }
 
-    /// Places `content` beside `popupFrame`, preferring the right edge and
-    /// falling back to the left when the screen has no room. Reuses the
-    /// existing hosting controller and, when the anchor strip has not moved,
-    /// merely repositions instead of tearing the popover down — that reuse
-    /// is what keeps repeated key presses from flickering.
     func present<Content: View>(_ content: Content,
                                 size: NSSize,
                                 near popupFrame: NSRect,

@@ -8,6 +8,22 @@ import AVFoundation
 @preconcurrency import PDFKit
 
 class ClipboardManager: ObservableObject {
+
+    /// Bundle IDs alone aren't a useful tracked value — resolves each to
+    /// its actual app name (running app first, falling back to the
+    /// installed app's own display name) so a setting-changed event for
+    /// an app list actually says which apps, not just how many.
+    private static func appDisplayNames(for bundleIDs: Set<String>) -> String {
+        bundleIDs.sorted().map { bundleID -> String in
+            if let running = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleID }) {
+                return running.localizedName ?? bundleID
+            }
+            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                return FileManager.default.displayName(atPath: url.path)
+            }
+            return bundleID
+        }.joined(separator: ", ")
+    }
     static let shared = ClipboardManager()
 
     lazy var historyDir: URL = {
@@ -16,13 +32,25 @@ class ClipboardManager: ObservableObject {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
-    var imageBlobCache:   [UUID: (path: String, bytes: Int)] = [:]
+    // `fingerprint` is a cheap (bounded-size-sample) content check, not just
+    // byte count — see reuseOrWriteBlob's comment in
+    // ClipboardManager+Persistence.swift for why byte count alone wasn't
+    // actually proof of identical content.
+    var imageBlobCache:   [UUID: (path: String, bytes: Int, fingerprint: Int)] = [:]
     var payloadBlobCache: [UUID: String] = [:]
     var sidecarBlobCache: [UUID: String] = [:]
     var embeddingsDirty = false
     var aiEmbeddingsDirty = false
     var historyDirty = false
     var blobPurgeNeeded = true
+
+    // Memoized line/word splits used by the diff-badge computation
+    // (ClipboardManager+Capture.swift) — every new text capture re-scans up
+    // to 10 prior items against these, and without caching that meant
+    // re-splitting/re-trimming the same 10 items' text on every single
+    // capture rather than once per item.
+    var diffLineCache: [UUID: [String]] = [:]
+    var diffWordCache: [UUID: [String]] = [:]
 
     @Published var hasLoadedHistoryOnce: Bool = false
 
@@ -300,7 +328,7 @@ class ClipboardManager: ObservableObject {
         guard !unlimitedRingSize else { return }
         let clamped = min(max(size, 1), AuthManager.shared.ringLimit)
         if clamped != maxItems {
-            AuthManager.shared.registerActionUsage(actionID: "setting.ring_size")
+            AuthManager.shared.registerActionUsage(actionID: "setting.ring_size", value: clamped)
             AuthManager.shared.registerSettingValue(id: "ring_size", value: clamped)
         }
         maxItems = clamped
@@ -347,8 +375,7 @@ class ClipboardManager: ObservableObject {
         didSet {
             guard oldValue != autoTipsEnabled else { return }
             UserDefaults.standard.set(autoTipsEnabled, forKey: "autoTipsEnabled")
-            AuthManager.shared.registerActionUsage(
-                actionID: autoTipsEnabled ? "setting.auto_tips_on" : "setting.auto_tips_off")
+            AuthManager.shared.registerActionUsage(actionID: "setting.auto_tips", value: autoTipsEnabled)
         }
     }
 
@@ -379,7 +406,7 @@ class ClipboardManager: ObservableObject {
     @Published var captureRichText: Bool = UserDefaults.standard.object(forKey: "captureRichText") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(captureRichText, forKey: "captureRichText")
-            if oldValue != captureRichText { AuthManager.shared.registerActionUsage(actionID: "setting.capture_rich") }
+            if oldValue != captureRichText { AuthManager.shared.registerActionUsage(actionID: "setting.capture_rich", value: captureRichText) }
         }
     }
 
@@ -387,7 +414,7 @@ class ClipboardManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(pastePlainTextByDefault, forKey: "pastePlainTextByDefault")
             if oldValue != pastePlainTextByDefault {
-                AuthManager.shared.registerActionUsage(actionID: "setting.pure_paste")
+                AuthManager.shared.registerActionUsage(actionID: "setting.pure_paste", value: pastePlainTextByDefault)
 
                 lastTransformCacheItemID = nil
                 transformDisplaysCache = []
@@ -399,28 +426,43 @@ class ClipboardManager: ObservableObject {
     @Published var captureFiles: Bool = UserDefaults.standard.object(forKey: "captureFiles") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(captureFiles, forKey: "captureFiles")
-            if oldValue != captureFiles { AuthManager.shared.registerActionUsage(actionID: "setting.capture_files") }
+            if oldValue != captureFiles { AuthManager.shared.registerActionUsage(actionID: "setting.capture_files", value: captureFiles) }
         }
     }
 
     @Published var fetchURLTitles: Bool = UserDefaults.standard.object(forKey: "fetchURLTitles") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(fetchURLTitles, forKey: "fetchURLTitles") }
+        didSet {
+            UserDefaults.standard.set(fetchURLTitles, forKey: "fetchURLTitles")
+            if oldValue != fetchURLTitles { AuthManager.shared.registerActionUsage(actionID: "setting.fetch_url_titles", value: fetchURLTitles) }
+        }
     }
 
     @Published var showColorSwatches: Bool = UserDefaults.standard.object(forKey: "showColorSwatches") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showColorSwatches, forKey: "showColorSwatches") }
+        didSet {
+            UserDefaults.standard.set(showColorSwatches, forKey: "showColorSwatches")
+            if oldValue != showColorSwatches { AuthManager.shared.registerActionUsage(actionID: "setting.show_color_swatches", value: showColorSwatches) }
+        }
     }
 
     @Published var appLanguageCode: String = UserDefaults.standard.string(forKey: "appLanguageCode") ?? "" {
-        didSet { UserDefaults.standard.set(appLanguageCode, forKey: "appLanguageCode") }
+        didSet {
+            UserDefaults.standard.set(appLanguageCode, forKey: "appLanguageCode")
+            if oldValue != appLanguageCode { AuthManager.shared.registerActionUsage(actionID: "setting.app_language", value: appLanguageCode) }
+        }
     }
 
     @Published var showPopupInteractionHints: Bool = UserDefaults.standard.object(forKey: "showPopupInteractionHints") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showPopupInteractionHints, forKey: "showPopupInteractionHints") }
+        didSet {
+            UserDefaults.standard.set(showPopupInteractionHints, forKey: "showPopupInteractionHints")
+            if oldValue != showPopupInteractionHints { AuthManager.shared.registerActionUsage(actionID: "setting.show_popup_hints", value: showPopupInteractionHints) }
+        }
     }
 
     @Published var interactionSoundsEnabled: Bool = UserDefaults.standard.object(forKey: "interactionSoundsEnabled") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(interactionSoundsEnabled, forKey: "interactionSoundsEnabled") }
+        didSet {
+            UserDefaults.standard.set(interactionSoundsEnabled, forKey: "interactionSoundsEnabled")
+            if oldValue != interactionSoundsEnabled { AuthManager.shared.registerActionUsage(actionID: "setting.interaction_sounds", value: interactionSoundsEnabled) }
+        }
     }
 
     enum InteractionSound {
@@ -628,7 +670,7 @@ class ClipboardManager: ObservableObject {
     @Published var reverseCycleUsesB: Bool = UserDefaults.standard.bool(forKey: "reverseCycleUsesB") {
         didSet {
             UserDefaults.standard.set(reverseCycleUsesB, forKey: "reverseCycleUsesB")
-            if oldValue != reverseCycleUsesB { AuthManager.shared.registerActionUsage(actionID: "setting.reverse_key") }
+            if oldValue != reverseCycleUsesB { AuthManager.shared.registerActionUsage(actionID: "setting.reverse_key", value: reverseCycleUsesB) }
         }
     }
 
@@ -675,6 +717,7 @@ class ClipboardManager: ObservableObject {
         get { launchAtLoginEnabled }
         set {
             launchAtLoginEnabled = newValue
+            AuthManager.shared.registerActionUsage(actionID: "setting.launch_at_login", value: newValue)
             do {
                 if newValue { try SMAppService.mainApp.register() }
                 else        { try SMAppService.mainApp.unregister() }
@@ -696,14 +739,14 @@ class ClipboardManager: ObservableObject {
                 return
             }
             UserDefaults.standard.set(clamped, forKey: "firstOpenDelay")
-            if oldValue != firstOpenDelay { AuthManager.shared.registerActionUsage(actionID: "setting.open_delay") }
+            if oldValue != firstOpenDelay { AuthManager.shared.registerActionUsage(actionID: "setting.open_delay", value: firstOpenDelay) }
         }
     }
 
     @Published var autoDismissEnabled: Bool = UserDefaults.standard.object(forKey: "autoDismissEnabled") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(autoDismissEnabled, forKey: "autoDismissEnabled")
-            if oldValue != autoDismissEnabled { AuthManager.shared.registerActionUsage(actionID: "setting.auto_dismiss") }
+            if oldValue != autoDismissEnabled { AuthManager.shared.registerActionUsage(actionID: "setting.auto_dismiss", value: autoDismissEnabled) }
         }
     }
     @Published var autoDismissSeconds: Double = {
@@ -717,13 +760,16 @@ class ClipboardManager: ObservableObject {
                 return
             }
             UserDefaults.standard.set(clamped, forKey: "autoDismissSeconds")
-            if oldValue != autoDismissSeconds { AuthManager.shared.registerActionUsage(actionID: "setting.auto_dismiss_s") }
+            if oldValue != autoDismissSeconds { AuthManager.shared.registerActionUsage(actionID: "setting.auto_dismiss_s", value: autoDismissSeconds) }
         }
     }
     var autoDismissTimer: Timer?
 
     @Published var referenceAppAffinityEnabled: Bool = UserDefaults.standard.object(forKey: "referenceAppAffinityEnabled") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(referenceAppAffinityEnabled, forKey: "referenceAppAffinityEnabled") }
+        didSet {
+            UserDefaults.standard.set(referenceAppAffinityEnabled, forKey: "referenceAppAffinityEnabled")
+            if oldValue != referenceAppAffinityEnabled { AuthManager.shared.registerActionUsage(actionID: "setting.reference_app_affinity", value: referenceAppAffinityEnabled) }
+        }
     }
     // Apple Intelligence / on-device structuring toggle.
     @Published var aiStructuringEnabled: Bool = UserDefaults.standard.object(forKey: "aiStructuringEnabled") as? Bool ?? true {
@@ -744,25 +790,16 @@ class ClipboardManager: ObservableObject {
             }
         }
     }
-    /// Key is versioned because the prompt used to be only half the story —
-    /// a second block was appended in code behind the user's back. Now that
-    /// everything lives in this one editable string, a prompt saved under
-    /// the old key would be missing the description/keywords/data-boundary
-    /// instructions that search depends on, so the v2 key lets the complete
-    /// default take over once.
-    @Published var aiStructuringPrompt: String = UserDefaults.standard.string(forKey: "aiStructuringPrompt.v4") ?? aiStructuringDefaultPrompt {
-        didSet { UserDefaults.standard.set(aiStructuringPrompt, forKey: "aiStructuringPrompt.v4") }
-    }
     @Published var advanceAfterMark: Bool = UserDefaults.standard.object(forKey: "advanceAfterMark") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(advanceAfterMark, forKey: "advanceAfterMark")
-            if oldValue != advanceAfterMark { AuthManager.shared.registerActionUsage(actionID: "setting.advance_after_mark") }
+            if oldValue != advanceAfterMark { AuthManager.shared.registerActionUsage(actionID: "setting.advance_after_mark", value: advanceAfterMark) }
         }
     }
     @Published var openOnSecondTap: Bool = UserDefaults.standard.object(forKey: "openOnSecondTap") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(openOnSecondTap, forKey: "openOnSecondTap")
-            if oldValue != openOnSecondTap { AuthManager.shared.registerActionUsage(actionID: "setting.second_tap") }
+            if oldValue != openOnSecondTap { AuthManager.shared.registerActionUsage(actionID: "setting.second_tap", value: openOnSecondTap) }
         }
     }
     static let maxPinnedItems = 5
@@ -770,13 +807,16 @@ class ClipboardManager: ObservableObject {
         min(max(1, UserDefaults.standard.object(forKey: "pinStartPosition") as? Int ?? 1), ClipboardManager.maxPinnedItems) {
         didSet {
             UserDefaults.standard.set(pinStartPosition, forKey: "pinStartPosition")
-            if oldValue != pinStartPosition { AuthManager.shared.registerActionUsage(actionID: "setting.pin_position") }
+            if oldValue != pinStartPosition { AuthManager.shared.registerActionUsage(actionID: "setting.pin_position", value: pinStartPosition) }
         }
     }
     @Published var autoPreviewTypes: Set<AutoPreviewContentType> = AutoPreviewContentType.loadSaved() {
         didSet {
             AutoPreviewContentType.save(autoPreviewTypes)
-            if oldValue != autoPreviewTypes { AuthManager.shared.registerActionUsage(actionID: "setting.always_preview") }
+            if oldValue != autoPreviewTypes {
+                let names = autoPreviewTypes.map(\.rawValue).sorted().joined(separator: ", ")
+                AuthManager.shared.registerActionUsage(actionID: "setting.always_preview", value: names)
+            }
             applyAlwaysShowItemPreviewPolicy()
         }
     }
@@ -785,7 +825,9 @@ class ClipboardManager: ObservableObject {
         Set(UserDefaults.standard.stringArray(forKey: "excludedCaptureBundleIDs") ?? []) {
         didSet {
             UserDefaults.standard.set(Array(excludedCaptureBundleIDs), forKey: "excludedCaptureBundleIDs")
-            if oldValue != excludedCaptureBundleIDs { AuthManager.shared.registerActionUsage(actionID: "setting.excluded_apps") }
+            if oldValue != excludedCaptureBundleIDs {
+                AuthManager.shared.registerActionUsage(actionID: "setting.excluded_apps", value: Self.appDisplayNames(for: excludedCaptureBundleIDs))
+            }
         }
     }
 
@@ -801,7 +843,9 @@ class ClipboardManager: ObservableObject {
         Set(UserDefaults.standard.stringArray(forKey: "pasteBlockedBundleIDs") ?? []) {
         didSet {
             UserDefaults.standard.set(Array(pasteBlockedBundleIDs), forKey: "pasteBlockedBundleIDs")
-            if oldValue != pasteBlockedBundleIDs { AuthManager.shared.registerActionUsage(actionID: "setting.paste_blocked_apps") }
+            if oldValue != pasteBlockedBundleIDs {
+                AuthManager.shared.registerActionUsage(actionID: "setting.paste_blocked_apps", value: Self.appDisplayNames(for: pasteBlockedBundleIDs))
+            }
         }
     }
 
@@ -818,7 +862,7 @@ class ClipboardManager: ObservableObject {
     @Published var rememberLastSelection: Bool = UserDefaults.standard.object(forKey: "rememberLastSelection") as? Bool ?? false {
         didSet {
             UserDefaults.standard.set(rememberLastSelection, forKey: "rememberLastSelection")
-            if oldValue != rememberLastSelection { AuthManager.shared.registerActionUsage(actionID: "setting.remember_last") }
+            if oldValue != rememberLastSelection { AuthManager.shared.registerActionUsage(actionID: "setting.remember_last", value: rememberLastSelection) }
         }
     }
     var rememberedIndex: Int = 0
@@ -829,7 +873,7 @@ class ClipboardManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(rememberLastPositionTimeoutMinutes, forKey: "rememberLastPositionTimeoutMinutes")
             if oldValue != rememberLastPositionTimeoutMinutes {
-                AuthManager.shared.registerActionUsage(actionID: "setting.remember_last_timeout")
+                AuthManager.shared.registerActionUsage(actionID: "setting.remember_last_timeout", value: rememberLastPositionTimeoutMinutes)
             }
         }
     }
@@ -842,7 +886,7 @@ class ClipboardManager: ObservableObject {
         GestureSpeed(rawValue: UserDefaults.standard.string(forKey: "markHoldSpeed") ?? "") ?? .medium {
         didSet {
             UserDefaults.standard.set(markHoldSpeed.rawValue, forKey: "markHoldSpeed")
-            if oldValue != markHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.mark_hold_speed") }
+            if oldValue != markHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.mark_hold_speed", value: markHoldSpeed.rawValue) }
         }
     }
     var vHoldThreshold: TimeInterval { markHoldSpeed.holdSeconds }
@@ -851,7 +895,7 @@ class ClipboardManager: ObservableObject {
         GestureSpeed(rawValue: UserDefaults.standard.string(forKey: "pinHoldSpeed") ?? "") ?? .medium {
         didSet {
             UserDefaults.standard.set(pinHoldSpeed.rawValue, forKey: "pinHoldSpeed")
-            if oldValue != pinHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.pin_hold_speed") }
+            if oldValue != pinHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.pin_hold_speed", value: pinHoldSpeed.rawValue) }
         }
     }
     var pinHoldThreshold: TimeInterval { pinHoldSpeed.holdSeconds }
@@ -860,7 +904,7 @@ class ClipboardManager: ObservableObject {
         GestureSpeed(rawValue: UserDefaults.standard.string(forKey: "spaceDoubleTapSpeed") ?? "") ?? .medium {
         didSet {
             UserDefaults.standard.set(spaceDoubleTapSpeed.rawValue, forKey: "spaceDoubleTapSpeed")
-            if oldValue != spaceDoubleTapSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.space_doubletap_speed") }
+            if oldValue != spaceDoubleTapSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.space_doubletap_speed", value: spaceDoubleTapSpeed.rawValue) }
         }
     }
     var spaceDoubleTapWindow: TimeInterval { spaceDoubleTapSpeed.doubleTapSeconds }
@@ -869,7 +913,7 @@ class ClipboardManager: ObservableObject {
         GestureSpeed(rawValue: UserDefaults.standard.string(forKey: "pinnedOpenHoldSpeed") ?? "") ?? .medium {
         didSet {
             UserDefaults.standard.set(pinnedOpenHoldSpeed.rawValue, forKey: "pinnedOpenHoldSpeed")
-            if oldValue != pinnedOpenHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.pinned_open_hold_speed") }
+            if oldValue != pinnedOpenHoldSpeed { AuthManager.shared.registerActionUsage(actionID: "setting.pinned_open_hold_speed", value: pinnedOpenHoldSpeed.rawValue) }
         }
     }
     var pinnedOpenHoldThreshold: TimeInterval { pinnedOpenHoldSpeed.holdSeconds }
@@ -1195,10 +1239,21 @@ class ClipboardManager: ObservableObject {
 
         // Backup for changes with no click involved at all — keyboard-only
         // tab/window switching inside an app that's already frontmost.
+        // Deliberately NOT forced past the same-app throttle below: this
+        // used to pass forceIfSameApp: true, which made every 2s tick run a
+        // full AppleScript window/tab enumeration unconditionally for the
+        // entire time any reference panel was open, even when a click or
+        // app-activation notification had already refreshed moments ago.
+        // The throttle window (1.5s) is shorter than this timer's interval
+        // (2.0s), so in the common case — nothing else has refreshed
+        // recently — this still fires a real recheck on essentially every
+        // tick; it only skips when a more immediate signal already did the
+        // work, which is exactly the redundant work this backup shouldn't
+        // repeat.
         if referenceSurfacePollTimer == nil {
             let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
                 guard let self, !self.quickClipPanels.isEmpty else { return }
-                self.recheckReferenceSurfaceIfNeeded(forceIfSameApp: true)
+                self.recheckReferenceSurfaceIfNeeded()
             }
             RunLoop.main.add(timer, forMode: .common)
             referenceSurfacePollTimer = timer
@@ -1375,7 +1430,7 @@ struct ClipboardItem: Identifiable {
     /// passes) can be matched on that alone, without OCR/notes/title text
     /// diluting the comparison the way they do in the general item vector.
     var aiEmbedding: [Float]? = nil
-    var urlTitle:  String?  = nil { didSet { rebuildSearchHaystacks() } }
+    var urlTitle:  String?  = nil { didSet { rebuildTextForEmbeddingAndEmbedHaystack() } }
     var diffBadge: String?  = nil
 
     /// A copy macOS refused to hand over (a password manager's concealed
@@ -1396,10 +1451,10 @@ struct ClipboardItem: Identifiable {
     var uncapturedChangeCount: Int? = nil
 
     var collections: Set<String> = []
-    var sourceAppName: String? = nil { didSet { rebuildSearchHaystacks() } }
+    var sourceAppName: String? = nil { didSet { rebuildTextForEmbeddingAndEmbedHaystack() } }
     var sourceBundleID: String? = nil
-    var userNote: String? = nil { didSet { rebuildSearchHaystacks() } }
-    var ocrText: String? = nil { didSet { rebuildSearchHaystacks() } }
+    var userNote: String? = nil { didSet { rebuildEmbedHaystackSuffixes() } }
+    var ocrText: String? = nil { didSet { rebuildOCRHaystack(); rebuildEmbedHaystackSuffixes() } }
 
     /// The validated JSON produced by AIStructuringService, plus whatever
     /// `description` the model gave for what this item actually IS.
@@ -1412,7 +1467,7 @@ struct ClipboardItem: Identifiable {
     /// "university" could never find it. An LLM reading that same text can
     /// say "university course timetable" — which is exactly the bridge
     /// between what a user types and what the content is.
-    var aiStructuredText: String? = nil { didSet { rebuildSearchHaystacks() } }
+    var aiStructuredText: String? = nil { didSet { rebuildAIHaystack() } }
      var sidecarTypes: [String: Data]? = nil
 
     var originalFileURL: URL? = nil
@@ -1455,16 +1510,44 @@ struct ClipboardItem: Identifiable {
 
     static let maxSearchNormLength = 100_000
 
+    /// Full rebuild of every search haystack — only ever needed once, at
+    /// init, since `content` (what `metadataSummary`/`searchPreviewNorm`/
+    /// `searchMetaNorm` depend on exclusively) is immutable afterward. Every
+    /// other mutable field below (urlTitle, sourceAppName, userNote,
+    /// ocrText, aiStructuredText) has its own didSet calling one of the
+    /// narrower rebuilds beneath this instead of this whole function — this
+    /// used to run unconditionally on all five of those didSets, redoing
+    /// `computeMetadataSummary` (real disk I/O for a `.file`/`.files` item —
+    /// `FileManager.attributesOfItem`, decoding an `NSImage`, or parsing a
+    /// `PDFDocument` just for a page count) and `previewText` every single
+    /// time, even though neither one depends on any of those five fields.
     mutating func rebuildSearchHaystacks() {
         metadataSummary  = Self.computeMetadataSummary(for: content)
+        searchPreviewNorm = Self.normalize(previewText)
+        searchMetaNorm    = Self.normalize(String((metadataSummary ?? "").prefix(Self.maxSearchNormLength)))
+        rebuildTextForEmbeddingAndEmbedHaystack()
+        rebuildOCRHaystack()
+        rebuildAIHaystack()
+    }
+
+    /// `textForEmbedding` depends on content + urlTitle + sourceAppName —
+    /// recomputed when either of the latter two changes (content itself
+    /// never changes after init). `searchEmbedNorm`'s base text is derived
+    /// from it, so that has to be rebuilt too whenever this runs.
+    private mutating func rebuildTextForEmbeddingAndEmbedHaystack() {
         textForEmbedding = Self.computeTextForEmbedding(content: content,
                                                        urlTitle: urlTitle,
                                                        sourceAppName: sourceAppName)
-        searchPreviewNorm = Self.normalize(previewText)
-        searchEmbedNorm   = Self.normalize(String((textForEmbedding ?? "").prefix(Self.maxSearchNormLength)))
-        searchMetaNorm    = Self.normalize(String((metadataSummary ?? "").prefix(Self.maxSearchNormLength)))
-        searchOCRNorm     = Self.normalize(String((ocrText ?? "").prefix(Self.maxSearchNormLength)))
-        searchAINorm      = Self.normalize(String((aiStructuredText ?? "").prefix(Self.maxSearchNormLength)))
+        rebuildEmbedHaystackSuffixes()
+    }
+
+    /// Rebuilds just `searchEmbedNorm` from the current `textForEmbedding`
+    /// plus the OCR/note additive suffixes — the one field whose value spans
+    /// three different mutable inputs (textForEmbedding, ocrText, userNote),
+    /// so any of their didSets needs to redo this same small rebuild rather
+    /// than the other, unrelated haystacks.
+    private mutating func rebuildEmbedHaystackSuffixes() {
+        searchEmbedNorm = Self.normalize(String((textForEmbedding ?? "").prefix(Self.maxSearchNormLength)))
         // Kept in the embed haystack too, so nothing that used to be
         // findable via this field silently stops being findable — the
         // dedicated haystacks above are additive, not a replacement.
@@ -1474,6 +1557,14 @@ struct ClipboardItem: Identifiable {
         if let note = userNote, !note.isEmpty {
             searchEmbedNorm += " " + Self.normalize(String(note.prefix(Self.maxSearchNormLength)))
         }
+    }
+
+    private mutating func rebuildOCRHaystack() {
+        searchOCRNorm = Self.normalize(String((ocrText ?? "").prefix(Self.maxSearchNormLength)))
+    }
+
+    private mutating func rebuildAIHaystack() {
+        searchAINorm = Self.normalize(String((aiStructuredText ?? "").prefix(Self.maxSearchNormLength)))
     }
 
     static func normalize(_ s: String) -> String {

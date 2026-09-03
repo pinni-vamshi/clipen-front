@@ -600,6 +600,7 @@ private struct ItemDetailView: View {
     let item: ClipboardItem
 
     @ObservedObject private var aiService = AIStructuringService.shared
+    @ObservedObject private var localLLM = LocalLLMManager.shared
     @State private var noteText: String
     @State private var lastCommittedNote: String
     @State private var noteCommitTask: Task<Void, Never>? = nil
@@ -875,37 +876,120 @@ private struct ItemDetailView: View {
         return breakdown.decision ? "Yes \u{00B7} \(scoreStr)" : "No \u{00B7} \(scoreStr)"
     }
 
+    /// Which engine is about to run (or already ran), always visible above
+    /// the analysis state — so "why is this stuck / not doing anything"
+    /// has an answer right here instead of requiring a trip to Settings to
+    /// discover the selected model is mid-download, or never finished one.
+    @ViewBuilder
+    private var modelStatusLine: some View {
+        switch localLLM.selectedEngine {
+        case .apple:
+            Text("Model: Apple Intelligence")
+                .font(.system(size: 10)).foregroundColor(.textDim)
+
+        case .local(let tier):
+            if localLLM.downloadingTiers.contains(tier) {
+                let pct = Int((localLLM.downloadProgress[tier] ?? 0) * 100)
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("Downloading \(tier.displayName)\u{2026} \(pct)% \u{2014} please wait")
+                        .font(.system(size: 10)).foregroundColor(.textDim)
+                }
+            } else if localLLM.downloadedTiers.contains(tier) {
+                Text("Model: \(tier.displayName)")
+                    .font(.system(size: 10)).foregroundColor(.textDim)
+            } else {
+                // Reachable right after a crash/force-quit mid-download,
+                // before LocalLLMManager's own launch-time auto-resume (see
+                // its init) has had a chance to pick it back up — or if
+                // that resume itself can't proceed (e.g. no network right
+                // now). Either way, analysis cannot run yet, so say so
+                // here rather than let a stalled "Analyzing…" imply it's
+                // just slow.
+                Text("\(tier.displayName) hasn't downloaded yet \u{2014} start it in Settings \u{2192} AI Structuring.")
+                    .font(.system(size: 10)).foregroundColor(.orange)
+            }
+        }
+    }
+
     @ViewBuilder
     private var aiAnalysisCard: some View {
         let state = aiService.state(for: item.id)
         if state != .idle {
             VStack(alignment: .leading, spacing: 8) {
                 Text("AI ANALYSIS").font(.system(size: 9, weight: .semibold)).foregroundColor(.textDim).tracking(1.8)
+                modelStatusLine
                 Group {
                     switch state {
                     case .idle:
                         EmptyView()
                     case .running:
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("Analyzing\u{2026}").font(.system(size: 12)).foregroundColor(.textDim)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text("Analyzing\u{2026} (attempt \(aiService.attempt(for: item.id)) of \(AIStructuringService.maxAttempts))")
+                                    .font(.system(size: 12)).foregroundColor(.textDim)
+                            }
+                            // Earlier attempts that were rejected, with the
+                            // reason each one failed — otherwise a retry
+                            // looks identical to a slow first try.
+                            ForEach(aiService.failures(for: item.id), id: \.self) { line in
+                                Text("\u{2717} \(line)")
+                                    .font(.system(size: 11)).foregroundColor(.orange)
+                            }
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     case .done(let json):
-                        JSONTreeView(json: json)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 6) {
+                            let priorFailures = aiService.failures(for: item.id)
+                            if !priorFailures.isEmpty {
+                                Text("Succeeded on attempt \(aiService.attempt(for: item.id)) after \(priorFailures.count) failed \(priorFailures.count == 1 ? "try" : "tries")")
+                                    .font(.system(size: 11)).foregroundColor(.orange)
+                                    .padding(.horizontal, 12).padding(.top, 8)
+                            }
+                            JSONTreeView(json: json)
+                            rawOutputDisclosure(for: item.id, label: "Raw model output")
+                                .padding(.horizontal, 12).padding(.bottom, 8)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     case .failed(let reason):
-                        Text(reason)
-                            .font(.system(size: 12))
-                            .foregroundColor(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(reason)
+                                .font(.system(size: 12))
+                                .foregroundColor(.red)
+                            ForEach(aiService.failures(for: item.id), id: \.self) { line in
+                                Text("\u{2717} \(line)")
+                                    .font(.system(size: 11)).foregroundColor(.textDim)
+                            }
+                            // The whole point: on a failure, seeing what the
+                            // model actually said is what separates "the
+                            // model gave nothing" from "the model answered
+                            // fine and the format was rejected".
+                            rawOutputDisclosure(for: item.id,
+                                                label: "Raw model output (what the AI actually returned)",
+                                                expandedByDefault: true)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
                     }
                 }
                 .background(Color.surfaceHi.opacity(0.6), in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.border, lineWidth: 1))
             }
+        }
+    }
+
+    /// Shows the model's unmodified answer beside the parsed result, with a
+    /// one-line verdict on whether it was valid JSON. Collapsed on success
+    /// (the tree is what you want there), open by default on failure (the
+    /// raw text is the only thing that explains the failure).
+    @ViewBuilder
+    private func rawOutputDisclosure(for id: UUID,
+                                     label: String,
+                                     expandedByDefault: Bool = false) -> some View {
+        if let raw = aiService.rawOutput(for: id), !raw.isEmpty {
+            RawModelOutputView(raw: raw, label: label, expandedByDefault: expandedByDefault)
         }
     }
 
@@ -1365,6 +1449,83 @@ struct FlowLayout: Layout {
             sub.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
             x += size.width + spacing
             rowH = max(rowH, size.height)
+        }
+    }
+}
+
+/// The model's unmodified answer, shown beside the parsed result.
+///
+/// Exists because "the AI returned nothing useful" and "the AI returned the
+/// right data in the wrong shape" are indistinguishable once validation has
+/// rejected a result — and they need opposite fixes (better prompt vs.
+/// better parsing). The verdict line says which one you are looking at.
+private struct RawModelOutputView: View {
+    let raw: String
+    let label: String
+    let expandedByDefault: Bool
+
+    @State private var isExpanded: Bool
+
+    init(raw: String, label: String, expandedByDefault: Bool) {
+        self.raw = raw
+        self.label = label
+        self.expandedByDefault = expandedByDefault
+        _isExpanded = State(initialValue: expandedByDefault)
+    }
+
+    private var trimmed: String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Whether the raw text is valid JSON on its own, judged the same way
+    /// the validator judges it (fences stripped first).
+    private var parsesAsJSON: Bool {
+        let stripped = trimmed
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = stripped.data(using: .utf8) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) != nil
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(parsesAsJSON ? Color.green : Color.orange)
+                        .frame(width: 6, height: 6)
+                    Text(parsesAsJSON
+                         ? "Valid JSON \u{2014} the model's format was fine"
+                         : "Not valid JSON on its own \u{2014} a formatting problem, not an empty answer")
+                        .font(.system(size: 10))
+                        .foregroundColor(.textDim)
+                }
+                ScrollView {
+                    Text(trimmed)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 160)
+                HStack(spacing: 8) {
+                    Text("\(trimmed.count) characters")
+                    Button("Copy") {
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(trimmed, forType: .string)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.accent)
+                }
+                .font(.system(size: 9))
+                .foregroundColor(.textDim)
+            }
+            .padding(.top, 4)
+        } label: {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.textDim)
         }
     }
 }

@@ -7,36 +7,12 @@ import Accelerate
 extension ClipboardManager {
 
     func recomputeEmbeddingsInBackground() {
-
-        let snapshot = items.filter { $0.embedding == nil }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard ClipenEmbedder.shared.isAvailable else { return }
-            guard !snapshot.isEmpty else { return }
-            var computed: [(id: UUID, vector: [Float])] = []
-            computed.reserveCapacity(snapshot.count)
-            for item in snapshot {
-                guard self != nil else { return }
-                guard let str = item.richEmbeddingText,
-                      let vector = ClipenEmbedder.shared.vector(for: str) else { continue }
-                computed.append((item.id, vector))
-            }
-            guard !computed.isEmpty else { return }
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                var byID: [UUID: [Float]] = Dictionary(computed.map { ($0.id, $0.vector) }, uniquingKeysWith: { _, last in last })
-                var updated = self.items
-                var applied = 0
-                for idx in updated.indices where updated[idx].embedding == nil {
-                    guard let floats = byID.removeValue(forKey: updated[idx].id) else { continue }
-                    updated[idx].embedding = floats
-                    applied += 1
-                }
-                guard applied > 0 else { return }
-                self.items = updated
-                self.embeddedItemCount += applied
-                self.saveQueue.async { self.embeddingsDirty = true }
-            }
-        }
+        recomputeEmbeddings(
+            embeddingKeyPath: \.embedding,
+            textKeyPath: \.richEmbeddingText,
+            onApplied: { manager, applied in manager.embeddedItemCount += applied },
+            markDirty: { manager in manager.saveQueue.async { manager.embeddingsDirty = true } }
+        )
         recomputeAIEmbeddingsInBackground()
     }
 
@@ -45,7 +21,28 @@ extension ClipboardManager {
     /// and don't yet have `aiEmbedding` are picked up, so this is a no-op
     /// pass on every call for items with no analysis at all.
     func recomputeAIEmbeddingsInBackground() {
-        let snapshot = items.filter { $0.aiEmbedding == nil && $0.aiStructuredText != nil }
+        recomputeEmbeddings(
+            embeddingKeyPath: \.aiEmbedding,
+            textKeyPath: \.aiEmbeddingText,
+            extraFilter: { $0.aiStructuredText != nil },
+            markDirty: { manager in manager.saveQueue.async { manager.aiEmbeddingsDirty = true } }
+        )
+    }
+
+    /// Shared shape behind both embedding passes above — they used to be
+    /// two independently-maintained ~35-line copies differing only in which
+    /// vector/text keypath they touch, which dirty flag they set, and
+    /// whether a count needs bumping; they'd already started drifting (only
+    /// the AI variant filtered on `aiStructuredText != nil`). Parameterized
+    /// on keypaths instead so there's exactly one place to get this right.
+    private func recomputeEmbeddings(
+        embeddingKeyPath: WritableKeyPath<ClipboardItem, [Float]?>,
+        textKeyPath: KeyPath<ClipboardItem, String?>,
+        extraFilter: @escaping (ClipboardItem) -> Bool = { _ in true },
+        onApplied: ((ClipboardManager, Int) -> Void)? = nil,
+        markDirty: @escaping (ClipboardManager) -> Void
+    ) {
+        let snapshot = items.filter { $0[keyPath: embeddingKeyPath] == nil && extraFilter($0) }
         guard !snapshot.isEmpty else { return }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard ClipenEmbedder.shared.isAvailable else { return }
@@ -53,7 +50,7 @@ extension ClipboardManager {
             computed.reserveCapacity(snapshot.count)
             for item in snapshot {
                 guard self != nil else { return }
-                guard let str = item.aiEmbeddingText,
+                guard let str = item[keyPath: textKeyPath],
                       let vector = ClipenEmbedder.shared.vector(for: str) else { continue }
                 computed.append((item.id, vector))
             }
@@ -63,14 +60,15 @@ extension ClipboardManager {
                 var byID: [UUID: [Float]] = Dictionary(computed.map { ($0.id, $0.vector) }, uniquingKeysWith: { _, last in last })
                 var updated = self.items
                 var applied = 0
-                for idx in updated.indices where updated[idx].aiEmbedding == nil {
+                for idx in updated.indices where updated[idx][keyPath: embeddingKeyPath] == nil {
                     guard let floats = byID.removeValue(forKey: updated[idx].id) else { continue }
-                    updated[idx].aiEmbedding = floats
+                    updated[idx][keyPath: embeddingKeyPath] = floats
                     applied += 1
                 }
                 guard applied > 0 else { return }
                 self.items = updated
-                self.saveQueue.async { self.aiEmbeddingsDirty = true }
+                onApplied?(self, applied)
+                markDirty(self)
             }
         }
     }
@@ -219,7 +217,7 @@ extension ClipboardManager {
         guard aiStructuringEnabled else { return }
         guard AIStructuringService.shared.state(for: item.id) != .running else { return }
         detailsAwaitingAnalysisItemID = item.id
-        AIStructuringService.shared.refresh(item: item)
+        AIStructuringService.shared.refresh(item: item, trigger: "details_missing")
     }
 
     /// Combine sink target for `AIStructuringService.$states`. Only acts
@@ -229,15 +227,34 @@ extension ClipboardManager {
     /// All) is a no-op here, same as if this subscription didn't exist.
     func handleDetailsAwaitingAnalysisUpdate() {
         guard let waitingID = detailsAwaitingAnalysisItemID else { return }
-        switch AIStructuringService.shared.state(for: waitingID) {
+        let finalState = AIStructuringService.shared.state(for: waitingID)
+        switch finalState {
         case .idle, .running:
             return
         case .done, .failed:
             detailsAwaitingAnalysisItemID = nil
         }
-        // Still on the same item, and still in the Details flow — a failed
-        // run or a navigate-away in the meantime just leaves things as they
-        // are, no further shake/flash needed on top of what already fired.
+        // A failed run still gets ONE more message, distinct from the
+        // generic "No analysis for this item." that already fired: this is
+        // the one place that ever finds out WHY it failed, since that
+        // reason only exists once the async retrigger actually returns. The
+        // reason string always names "Apple Intelligence" for the two
+        // structural failures this app can hit — hardware/OS setting off,
+        // or the OS too old for it to exist at all — and in both cases the
+        // fix is the same: pick a local model from Settings instead. Any
+        // other failure reason (a transient model hiccup, a bad response)
+        // says nothing about Settings, since there is nothing to configure
+        // there for it.
+        if case .failed(let reason) = finalState, reason.localizedCaseInsensitiveContains("Apple Intelligence"),
+           previewWindow.isVisible,
+           !displayItems.isEmpty, selectedIndex < displayItems.count,
+           displayItems[selectedIndex].id == waitingID {
+            flashStatus("\(reason) Pick a local model instead in Settings \u{2192} AI Structuring.", duration: 4.5)
+        }
+
+        // Still on the same item, and still in the Details flow — a
+        // navigate-away in the meantime just leaves things as they are, no
+        // further action needed on top of whatever just fired above.
         guard previewWindow.isVisible,
               !displayItems.isEmpty, selectedIndex < displayItems.count,
               displayItems[selectedIndex].id == waitingID else { return }

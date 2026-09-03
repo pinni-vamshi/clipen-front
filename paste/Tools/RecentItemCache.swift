@@ -1,12 +1,5 @@
 import Foundation
 
-/// A small, fixed-capacity, thread-safe LRU cache keyed by item id.
-///
-/// Several tool-input caches (ImageService, PDFTools, ToolRegistry) used to
-/// hold exactly one entry, so navigating back and forth between two or more
-/// recently-viewed items — A → B → A — missed the cache on every single
-/// step instead of just the first look at each item. This keeps the last
-/// few distinct items warm instead of just the very last one.
 final class RecentItemCache<Value> {
     private let lock = NSLock()
     private var order: [UUID] = []

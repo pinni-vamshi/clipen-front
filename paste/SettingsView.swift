@@ -24,6 +24,7 @@ struct ClipenSettingsView: View {
     @ObservedObject private var auth    = AuthManager.shared
     @ObservedObject private var proGate = ProGate.shared
     @ObservedObject private var localLLM = LocalLLMManager.shared
+    @ObservedObject private var aiStructuring = AIStructuringService.shared
 
     @Binding var showResetConfirm: Bool
 
@@ -1277,6 +1278,7 @@ struct ClipenSettingsView: View {
                         set: { value in
                             AppDelegate.shared?.automaticallyChecksForUpdates = value
                             if !value { AppDelegate.shared?.automaticallyDownloadsUpdates = false }
+                            AuthManager.shared.registerActionUsage(actionID: "setting.auto_update_check", value: value)
                         }))
                         .toggleStyle(.switch).controlSize(.mini).tint(.accent)
                 }
@@ -1418,19 +1420,40 @@ struct ClipenSettingsView: View {
             HStack(spacing: 8) {
                 sectionHeader("04", "APPLE INTELLIGENCE")
                 Spacer()
-                Button {
-                    AIStructuringService.shared.regenerateAll(items: manager.items)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold))
-                        Text("Regenerate All").font(.system(size: 9, weight: .semibold))
+                if let progress = aiStructuring.regenerateAllProgress {
+                    HStack(spacing: 6) {
+                        Text("\(progress.completed) of \(progress.total)")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.textDim)
+                        Button {
+                            AIStructuringService.shared.cancelRegenerateAll()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                                Text("Cancel").font(.system(size: 9, weight: .semibold))
+                            }
+                            .foregroundColor(.red)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.red.opacity(0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .foregroundColor(.accent)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.accentDim, in: Capsule())
+                } else {
+                    Button {
+                        AuthManager.shared.registerActionUsage(actionID: "action.regenerate-all")
+                        AIStructuringService.shared.regenerateAll(items: manager.items)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold))
+                            Text("Regenerate All").font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundColor(.accent)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Color.accentDim, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete every stored AI analysis, then rebuild them all from scratch")
                 }
-                .buttonStyle(.plain)
-                .help("Delete every stored AI analysis, then rebuild them all from scratch")
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -1973,6 +1996,8 @@ struct ClipenSettingsView: View {
                                                 activeKeyID = nil
                                             } else {
                                                 let id = key.id
+                                                AuthManager.shared.registerActionUsage(
+                                                    actionID: "action.keyboard-demo-\(id.lowercased())")
                                                 WakeGuard.afterWakeSettle { activeKeyID = id }
                                             }
                                         }
@@ -1990,6 +2015,10 @@ struct ClipenSettingsView: View {
                                                        dimmed: lab.isPlaying && !segment.contains(where: { involvedRealIDs.contains($0.id) }),
                                                        unitWidth: unitW, keyHeight: keyHeight,
                                                        onTapKey: { tapped in
+                                                           if !groupActive {
+                                                               AuthManager.shared.registerActionUsage(
+                                                                   actionID: "action.keyboard-demo-\(tapped.id.lowercased())")
+                                                           }
                                                            activeKeyID = groupActive ? nil : tapped.id
                                                        })
                                         .equatable()

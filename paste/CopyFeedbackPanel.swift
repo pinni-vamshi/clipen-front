@@ -1,19 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// Tiny, non-activating badge shown right at the cursor for ~1.5s when a
-/// copy produced nothing Clipen could meaningfully capture — an app-private,
-/// undecodable pasteboard write (see basicItem(from:) in
-/// ClipboardManager+Capture.swift). Exists so that case never has to show up
-/// as a "Private" row in history at all: the user gets told in the moment
-/// instead, at the point of the failed copy, without Clipen's own window
-/// needing to be open.
 final class CopyFeedbackPanel: NSPanel {
     static let shared = CopyFeedbackPanel()
 
     private var dismissWorkItem: DispatchWorkItem?
     private var followTimer: Timer?
     private var trackedOrigin: NSPoint?
+    private var idleTickCount = 0
 
     private init() {
         super.init(
@@ -32,13 +26,6 @@ final class CopyFeedbackPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
     }
 
-    /// Reflects the fallback toggle at the moment each failure fires, not a
-    /// fixed string: when the toggle is on, this failure is about to become
-    /// a pasteable, flagged ring entry a moment later (see
-    /// addUncapturedPlaceholder in ClipboardManager+Capture.swift), so
-    /// telling the user it simply "can't" copy would be wrong. When it's
-    /// off, that placeholder never gets created, so the plain failure
-    /// message is the accurate one.
     static func defaultMessage() -> String {
         ClipboardManager.shared.uncapturedFallbackEnabled
             ? String(localized: "Can't copy — pastes with system default")
@@ -50,12 +37,7 @@ final class CopyFeedbackPanel: NSPanel {
         followTimer?.invalidate()
 
         let hosting = NSHostingView(rootView: CopyFeedbackView(message: message))
-        // fittingSize is unreliable read immediately after assigning
-        // contentView — SwiftUI hasn't had a layout pass yet the first time
-        // this runs, so the very first badge could come back sized near
-        // zero and get clipped by setContentSize below. sizingOptions keeps
-        // AppKit's own tracked size in sync going forward; layoutSubtreeIfNeeded
-        // forces that first pass to happen before we read it back.
+
         hosting.sizingOptions = [.standardBounds, .intrinsicContentSize]
         contentView = hosting
         hosting.layoutSubtreeIfNeeded()
@@ -69,10 +51,7 @@ final class CopyFeedbackPanel: NSPanel {
 
         orderFrontRegardless()
 
-        // A real tooltip trails the cursor instead of sitting frozen where
-        // it first appeared — exponential smoothing toward the live mouse
-        // location each tick reads as a soft, lagging follow rather than a
-        // rigid teleport snapped to the raw position every frame.
+        idleTickCount = 0
         followTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             self?.followCursor()
         }
@@ -90,9 +69,24 @@ final class CopyFeedbackPanel: NSPanel {
     private func followCursor() {
         guard let current = trackedOrigin else { return }
         let target = Self.clampedOrigin(anchoredTo: NSEvent.mouseLocation, size: frame.size)
+        let dx = target.x - current.x, dy = target.y - current.y
+
+        guard abs(dx) > 0.1 || abs(dy) > 0.1 else {
+            // The cursor has settled — stop ticking at 60Hz for the rest of
+            // the toast's 1.5s lifetime. A few consecutive idle ticks
+            // (rather than the very first) avoids stopping on a momentary
+            // pause mid-movement; show() restarts this timer fresh on the
+            // next toast regardless.
+            idleTickCount += 1
+            if idleTickCount >= 6 {
+                followTimer?.invalidate()
+                followTimer = nil
+            }
+            return
+        }
+        idleTickCount = 0
         let smoothing: CGFloat = 0.25
-        let next = NSPoint(x: current.x + (target.x - current.x) * smoothing,
-                            y: current.y + (target.y - current.y) * smoothing)
+        let next = NSPoint(x: current.x + dx * smoothing, y: current.y + dy * smoothing)
         trackedOrigin = next
         setFrameOrigin(next)
     }

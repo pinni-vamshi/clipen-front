@@ -1,21 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// One row per unit of the selected item's AI-structured JSON, with its
-/// own cursor driven by repeated D presses — the same shape as the
-/// Transform and Similar panels.
-///
-/// A unit is either a single leaf value, or — when a nested object's
-/// direct children are all scalars (an address, a name, an amount+currency
-/// pair) — a whole GROUP shown together, so the user navigates by
-/// hierarchy rather than being forced through every sub-field one at a
-/// time. Arrays of repeated objects (line items, steps) still flatten to
-/// individual leaves, since those genuinely read better one at a time.
-///
-/// The point is granular pasting: releasing Command pastes just the
-/// highlighted unit's value ("9032930998", or a whole address as one
-/// readable block) instead of the whole captured item or the whole JSON
-/// blob.
 class DetailsPanel: AnchoredPopoverPanel {
     func show(units: [DetailUnit],
               selectedIndex: Int,
@@ -26,19 +11,10 @@ class DetailsPanel: AnchoredPopoverPanel {
         let content = DetailsPanelView(units: units, selectedIndex: selectedIndex,
                                        markOrders: markOrders)
 
-        // Narrower and shorter than the Similar box: this is a list of short
-        // key/value rows, not a full content preview. Height is dynamic
-        // between a floor and a ceiling — never so short a single field
-        // looks cramped against the header, never so tall a long list
-        // overruns the screen (it scrolls past the ceiling instead, same
-        // as it already did before this had bounds at all).
         let w: CGFloat = 400
         let minHeight: CGFloat = 160
         let maxHeight: CGFloat = 480
-        // ~46 for the fixed header + list padding, ~64 per single-field row,
-        // groups add ~22 per extra sub-field on top of their own base row —
-        // measured against this view's own padding/spacing constants below,
-        // not guessed.
+
         let contentHeight: CGFloat = 46 + units.reduce(0) { partial, unit in
             switch unit.kind {
             case .single: return partial + 64
@@ -51,24 +27,19 @@ class DetailsPanel: AnchoredPopoverPanel {
     }
 }
 
-/// A single flattened key/value pair from the item's AI JSON.
 struct DetailField: Equatable, Identifiable {
     let key: String
     let value: String
     var id: String { key + "\u{1}" + value }
 }
 
-/// One navigable stop in the Details panel — either a lone value, or a
-/// whole flat cluster of a nested object's scalar children shown together.
 struct DetailUnit: Equatable, Identifiable {
     enum Kind: Equatable {
         case single(DetailField)
         case group(key: String, fields: [DetailField])
     }
     let kind: Kind
-    /// Which item this came from, shown only when several marked items'
-    /// details are combined into one panel — nil in the ordinary
-    /// single-item case, where it would just be redundant chrome.
+
     let sourceLabel: String?
 
     init(_ kind: Kind, sourceLabel: String? = nil) {
@@ -92,9 +63,6 @@ struct DetailUnit: Equatable, Identifiable {
         }
     }
 
-    /// What gets pasted — a single field's own value, or a group's fields
-    /// joined as readable "Key: Value" lines, so pasting an address (say)
-    /// produces the whole thing as one block, not just its first field.
     var pasteText: String {
         switch kind {
         case .single(let f): return f.value
@@ -108,17 +76,8 @@ struct DetailsPanelView: View {
     let selectedIndex: Int
     let markOrders: [Int: Int]
 
-    /// The popup's own selection namespace type — using the shared
-    /// `.selectionHighlight` modifier means this panel gets the identical
-    /// blue fill, corner radius, scale and spring as every other row in the
-    /// app, rather than a lookalike that drifts out of sync when the shared
-    /// style is tuned.
     @Namespace private var selectionNamespace
-    /// The app-wide row inset, not a local guess. `.row` insets by this and
-    /// THEN scales 1.12, so too small an inset makes the scaled box overrun
-    /// the panel's edges and clip its own corners — which is exactly what a
-    /// hand-picked 6 did here. Using the shared constant keeps this panel
-    /// geometrically identical to the popup rows.
+
     private static let horizontalInset: CGFloat = 16
 
     private var combinedMode: Bool { units.contains { $0.sourceLabel != nil } }
@@ -195,10 +154,7 @@ struct DetailsPanelView: View {
                 }
 
             case .group(let key, let fields):
-                // The whole group is ONE navigable stop — the cursor lands
-                // on the group, not on any one sub-field — but every
-                // sub-field's key AND value are visible together, which is
-                // the entire point: an address (say) reads as one thing.
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text(key.uppercased())
                         .font(.system(size: 9, weight: .bold)).tracking(0.7)

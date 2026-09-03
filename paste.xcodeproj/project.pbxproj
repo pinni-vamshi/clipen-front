@@ -81,6 +81,9 @@
 		CE0000000000000000000017 /* Hub in Frameworks */ = {isa = PBXBuildFile; productRef = CE0000000000000000000016 /* Hub */; };
 		CE321F93354F4AAA1295 /* DetailsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC89148C5193E388EB5 /* DetailsPanel.swift */; };
 		CE452D1008B4741D309F /* AIStructuring.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE66922BDFF5EE9AB679 /* AIStructuring.swift */; };
+		CE8DE55A4549259B7BDE /* PostHogTracking.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE4FE8BDE9BA0149013D /* PostHogTracking.swift */; };
+		A8E8FCB7FB0F065C62D8 /* DeterministicStructuring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37F6B0C4B260071A0A11 /* DeterministicStructuring.swift */; };
+		C4252ACAC3E061B401FC /* PostHogRemoteConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9781B59A34E9F635DD5 /* PostHogRemoteConfig.swift */; };
 		CE734E646DCFB2BFBD0F /* AIImportanceScoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE01FEF6DD930A65A69A /* AIImportanceScoring.swift */; };
 		CE6AA69F0687F4FE11DD /* AnchoredPopoverPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */; };
 		CE82134593D0ACE71719 /* LocalLLMManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */; };
@@ -162,6 +165,9 @@
 		CE0000000000000000000004 /* paste-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "paste-Bridging-Header.h"; sourceTree = "<group>"; };
 		CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalLLMManager.swift; sourceTree = "<group>"; };
 		CE66922BDFF5EE9AB679 /* AIStructuring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIStructuring.swift; sourceTree = "<group>"; };
+		CE4FE8BDE9BA0149013D /* PostHogTracking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostHogTracking.swift; sourceTree = "<group>"; };
+		37F6B0C4B260071A0A11 /* DeterministicStructuring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeterministicStructuring.swift; sourceTree = "<group>"; };
+		C9781B59A34E9F635DD5 /* PostHogRemoteConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostHogRemoteConfig.swift; sourceTree = "<group>"; };
 		CE01FEF6DD930A65A69A /* AIImportanceScoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIImportanceScoring.swift; sourceTree = "<group>"; };
 		CE8072D411B45CEC7409 /* AnchoredPopoverPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchoredPopoverPanel.swift; sourceTree = "<group>"; };
 		CEC89148C5193E388EB5 /* DetailsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailsPanel.swift; sourceTree = "<group>"; };
@@ -257,6 +263,9 @@
 				A10000000000000000000025 /* DeviceIdentity.swift */,
 				A10000000000000000000002 /* ClipboardManager.swift */,
 				CE66922BDFF5EE9AB679 /* AIStructuring.swift */,
+				CE4FE8BDE9BA0149013D /* PostHogTracking.swift */,
+				37F6B0C4B260071A0A11 /* DeterministicStructuring.swift */,
+				C9781B59A34E9F635DD5 /* PostHogRemoteConfig.swift */,
 				CE01FEF6DD930A65A69A /* AIImportanceScoring.swift */,
 				CE09D92CB1DC0E39BD9A /* LocalLLMManager.swift */,
 				CEE471C29A9564E468FA /* AIChips.swift */,
@@ -423,6 +432,9 @@
 				B10000000000000000000025 /* DeviceIdentity.swift in Sources */,
 				B10000000000000000000002 /* ClipboardManager.swift in Sources */,
 				CE452D1008B4741D309F /* AIStructuring.swift in Sources */,
+				CE8DE55A4549259B7BDE /* PostHogTracking.swift in Sources */,
+				A8E8FCB7FB0F065C62D8 /* DeterministicStructuring.swift in Sources */,
+				C4252ACAC3E061B401FC /* PostHogRemoteConfig.swift in Sources */,
 				CE734E646DCFB2BFBD0F /* AIImportanceScoring.swift in Sources */,
 				CE82134593D0ACE71719 /* LocalLLMManager.swift in Sources */,
 				CEC9F5CA2F04ACC71E0D /* AIChips.swift in Sources */,
@@ -630,7 +642,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 574;
+				CURRENT_PROJECT_VERSION = 579;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -649,7 +661,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.6.19;
+				MARKETING_VERSION = 1.6.24;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;
@@ -671,7 +683,7 @@
 				CODE_SIGN_ENTITLEMENTS = paste/paste.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 574;
+				CURRENT_PROJECT_VERSION = 579;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = VPGVF647K2;
 				ENABLE_APP_SANDBOX = NO;
@@ -690,7 +702,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.6.19;
+				MARKETING_VERSION = 1.6.24;
 				PRODUCT_BUNDLE_IDENTIFIER = com.clipen.app;
 				PRODUCT_NAME = Clipen;
 				REGISTER_APP_GROUPS = YES;

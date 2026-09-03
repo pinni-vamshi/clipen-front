@@ -62,6 +62,26 @@ GEN="$(find ~/Library/Developer/Xcode/DerivedData -path '*SourcePackages/artifac
 
 4. Upload **`dist/appcast.xml`** to `https://clipen.app/appcast.xml` and the DMG to the URL prefix you used.
 
+## The website's download link — do not skip this
+
+The clipen-website download button (`public/clipen.html`) is hardcoded to:
+`https://github.com/pinni-vamshi/clipen-releases/releases/latest/download/Clipen.dmg`
+
+That filename is **plain and unversioned on purpose**, so the site's link text never has to change between releases. GitHub's `/latest/download/<name>` only works if the *latest* (non-prerelease, non-draft) release actually has an asset with that **exact** name — `dist/release.sh` also produces this automatically now (`dist/Clipen.dmg`, byte-identical to the versioned DMG).
+
+**Every stable release's GitHub Release must include BOTH files:**
+- `Clipen-<version>.<build>.dmg` — versioned, what the appcast's `<enclosure url=...>` must point to.
+- `Clipen.dmg` — plain, what the website needs. Same bytes, different name.
+
+Skipping the plain one breaks the website's download button with a silent 404 — no error shows anywhere, so it can go unnoticed. This exact thing happened for ~10 days (2026-08-22 to 2026-09-01) before anyone caught it from a collapse in download counts. After every stable release, verify the button actually works:
+
+```bash
+curl -sIL "https://github.com/pinni-vamshi/clipen-releases/releases/latest/download/Clipen.dmg" | head -1
+# must be: HTTP/2 200
+```
+
+A beta/prerelease is automatically excluded from `/latest/` by GitHub, so it never needs the plain filename — only stable releases do.
+
 ## In the app
 
 - **Main window** footer: **Check for updates** → Sparkle UI.

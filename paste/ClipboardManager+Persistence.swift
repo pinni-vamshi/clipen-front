@@ -18,19 +18,6 @@ private enum HistoryCrypto {
         FileManager.default.fileExists(atPath: ClipboardManager.shared.historyFileURL.path)
     }
 
-    /// Two independent sources, checked in order, before ever generating a
-    /// replacement key: the file, then Keychain (previously write/delete
-    /// only — `get` never existed, so Keychain provided zero real backup
-    /// despite the field's own name implying one).
-    ///
-    /// The file is written with `.completeFileProtection`, which macOS
-    /// makes unreadable until the Mac has been unlocked once since boot.
-    /// Launch at Login can start Clipen in that exact window right after a
-    /// macOS update forces a restart — so a failed read here does NOT
-    /// reliably mean "no key was ever created"; a few retries with a short
-    /// pause survive that specific race without any user-visible delay in
-    /// the overwhelmingly common case where the file is simply readable
-    /// immediately, and only actually pause on the rare boot-race path.
     static let cachedKey: SymmetricKey = {
         for attempt in 0..<3 {
             if let data = try? Data(contentsOf: keyFileURL), data.count == 32 {
@@ -40,22 +27,11 @@ private enum HistoryCrypto {
         }
 
         if let data = Keychain.get(keychainKey), data.count == 32 {
-            // File was unreadable but Keychain still has it — self-heal the
-            // file from Keychain rather than silently generating a new key
-            // (which would permanently orphan any existing encrypted
-            // history, still sitting on disk, that only the OLD key can
-            // open).
+
             writeKeyFile(data)
             return SymmetricKey(data: data)
         }
 
-        // Neither source has anything usable. Genuinely a first-ever launch
-        // for most installs — but if encrypted history already exists on
-        // disk, generating a fresh key here does not recover it; it makes
-        // that data permanently unreadable, forever, the moment this key
-        // gets written over the one that could have opened it. Logged
-        // loudly specifically for that case, since it is the one situation
-        // this fallback chain cannot actually fix.
         if historyFileExists {
             NSLog("[Clipen] HistoryCrypto: no readable key (file or Keychain) but encrypted history exists — generating a new key means that history is now unrecoverable. This should not happen; if it does, the file read is failing for a reason retries did not cover.")
         }
@@ -87,11 +63,6 @@ private enum HistoryCrypto {
 
 extension ClipboardManager {
 
-    /// Lands a completed, validated AI analysis onto the item so it becomes
-    /// a real search signal — mirrors updateUserNote's shape exactly:
-    /// clearing `embedding` forces the vector to be rebuilt from text that
-    /// now includes the AI description, and dropping the cached query makes
-    /// the next search recompute instead of serving a stale result set.
     func updateAIStructuredText(id: UUID, json: String?) {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         guard items[idx].aiStructuredText != json else { return }
@@ -100,14 +71,16 @@ extension ClipboardManager {
         items[idx].aiEmbedding = nil
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
+        // No current tool preview reads aiStructuredText, so this is
+        // dormant today — but ToolRegistry/transformDisplaysCache are keyed
+        // only by item id + collection signature, with nothing here to
+        // invalidate them when analysis completes on an item whose
+        // Transform panel was already opened before analysis finished. The
+        // next tool that DOES read aiStructuredText in its preview would
+        // otherwise silently show a stale list/preview for that item.
+        invalidateCachesAfterContentEdit()
     }
 
-    /// Strips the stored AI analysis from every item, so a regenerate
-    /// starts from genuinely nothing rather than overwriting entries
-    /// one-by-one and leaving any that fail still holding old data.
-    /// Embeddings go too — they were built from text that included the
-    /// analysis, so keeping them would leave the search index describing
-    /// content that no longer exists.
     func clearAllAIStructuredText() {
         var updated = items
         var changed = false
@@ -360,26 +333,35 @@ extension ClipboardManager {
         case .files(let us): urls = us
         default:             return
         }
-
         if let original = item.originalFileURL { urls.append(original) }
-        let appSupport = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let snapshotBase = appSupport.appendingPathComponent("Clipen/FileCopies").path
-        let dirs = Set(urls
-            .filter { $0.path.hasPrefix(snapshotBase) }
-            .map    { $0.deletingLastPathComponent() })
-        for dir in dirs {
-            try? FileManager.default.removeItem(at: dir)
-        }
-        for generatedBase in ["Clipen/Optimized", "Clipen/Converted"] {
-            let basePath = appSupport.appendingPathComponent(generatedBase).path
-            for url in urls where url.path.hasPrefix(basePath) {
-                try? FileManager.default.removeItem(at: url)
-                let parent = url.deletingLastPathComponent()
-                if parent.path != basePath,
-                   let contents = try? FileManager.default.contentsOfDirectory(atPath: parent.path),
-                   contents.isEmpty {
-                    try? FileManager.default.removeItem(at: parent)
+
+        // Pure filesystem cleanup with no downstream dependency on
+        // completion — every call site here is a fire-and-forget ring-trim
+        // eviction. This used to run synchronously on whichever thread
+        // called it, including the main thread during ring trim (addItem,
+        // the maxItems didSet) — a real recursive-delete on a slow or
+        // networked Application Support volume could stall the main run
+        // loop the CGEventTap lives on.
+        DispatchQueue.global(qos: .utility).async {
+            let appSupport = FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            let snapshotBase = appSupport.appendingPathComponent("Clipen/FileCopies").path
+            let dirs = Set(urls
+                .filter { $0.path.hasPrefix(snapshotBase) }
+                .map    { $0.deletingLastPathComponent() })
+            for dir in dirs {
+                try? FileManager.default.removeItem(at: dir)
+            }
+            for generatedBase in ["Clipen/Optimized", "Clipen/Converted"] {
+                let basePath = appSupport.appendingPathComponent(generatedBase).path
+                for url in urls where url.path.hasPrefix(basePath) {
+                    try? FileManager.default.removeItem(at: url)
+                    let parent = url.deletingLastPathComponent()
+                    if parent.path != basePath,
+                       let contents = try? FileManager.default.contentsOfDirectory(atPath: parent.path),
+                       contents.isEmpty {
+                        try? FileManager.default.removeItem(at: parent)
+                    }
                 }
             }
         }
@@ -434,19 +416,19 @@ extension ClipboardManager {
         EmbeddedImageExtractor.invalidate(itemID: id)
 
         inlineEditOriginals.removeValue(forKey: id)
+        diffLineCache.removeValue(forKey: id)
+        diffWordCache.removeValue(forKey: id)
+
+        // Every caller here is removing the item from the ring entirely, so
+        // its blob-cache entries (imageBlobCache/payloadBlobCache/sidecarBlobCache)
+        // should go too — otherwise they accumulate for the rest of the app's
+        // run, keyed by every item ever captured this session rather than
+        // just what's currently in the ring.
+        invalidateBlobCaches(for: id)
     }
 
-    /// Assigns `maxItems` synchronously — the sole caller (`AuthManager.init`)
-    /// is already on the main thread, and queuing this through another
-    /// `DispatchQueue.main.async` used to let `maxItems` stay at its
-    /// compile-time default until after that later block ran, so the very
-    /// first analytics flush of the session sent the wrong `ring_length`.
     func applyPlanLimits(ringLimit cap: Int) {
-        // unlimitedRingSize's own trim guard makes this a no-op for
-        // eviction purposes regardless, but without this check maxItems
-        // would still get force-clamped back down to `cap` here on every
-        // launch — harmless to trimming, but wrong for what the Settings
-        // slider displays until the user touches it again.
+
         let effectiveCap = unlimitedRingSize ? Int.max : cap
         let preferred = UserDefaults.standard.object(forKey: "preferredRingSize") as? Int
         let target = max(1, preferred.map { min($0, effectiveCap) } ?? 20)
@@ -489,9 +471,6 @@ extension ClipboardManager {
 
         var originalFilePath: String? = nil
 
-        /// Explicit memberwise init — needed because providing a custom
-        /// init(from:) below (for decode-tolerance) suppresses Swift's
-        /// synthesized memberwise initializer, which `make(from:...)` relies on.
         init(id: UUID, timestamp: Date, isPinned: Bool, urlTitle: String?, type: String,
              text: String?, imageData: Data?, imageBlob: String?, imageType: String?,
              rtfData: Data?, plainText: String?, filePath: String?, filePaths: [String]?,
@@ -519,39 +498,18 @@ extension ClipboardManager {
             self.originalFilePath = originalFilePath
         }
 
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            id = try c.decode(UUID.self, forKey: .id)
-            timestamp = try c.decode(Date.self, forKey: .timestamp)
-            isPinned = try c.decode(Bool.self, forKey: .isPinned)
-            urlTitle = try c.decodeIfPresent(String.self, forKey: .urlTitle)
-            type = try c.decode(String.self, forKey: .type)
-            text = try c.decodeIfPresent(String.self, forKey: .text)
-            imageData = try c.decodeIfPresent(Data.self, forKey: .imageData)
-            imageBlob = try c.decodeIfPresent(String.self, forKey: .imageBlob)
-            imageType = try c.decodeIfPresent(String.self, forKey: .imageType)
-            rtfData = try c.decodeIfPresent(Data.self, forKey: .rtfData)
-            plainText = try c.decodeIfPresent(String.self, forKey: .plainText)
-            filePath = try c.decodeIfPresent(String.self, forKey: .filePath)
-            filePaths = try c.decodeIfPresent([String].self, forKey: .filePaths)
-            html = try c.decodeIfPresent(String.self, forKey: .html)
-            sourceAppName = try c.decodeIfPresent(String.self, forKey: .sourceAppName)
-            sourceBundleID = try c.decodeIfPresent(String.self, forKey: .sourceBundleID)
-            embedding = try c.decodeIfPresent([Float].self, forKey: .embedding)
-            pastedToAppName = try c.decodeIfPresent(String.self, forKey: .pastedToAppName)
-            pastedToBundleID = try c.decodeIfPresent(String.self, forKey: .pastedToBundleID)
-            lastPastedAt = try c.decodeIfPresent(Date.self, forKey: .lastPastedAt)
-            pasteCount = try c.decodeIfPresent(Int.self, forKey: .pasteCount)
-            pasteCountByApp = try c.decodeIfPresent([String: Int].self, forKey: .pasteCountByApp)
-            pastedToAppNames = try c.decodeIfPresent([String: String].self, forKey: .pastedToAppNames)
-            userNote = try c.decodeIfPresent(String.self, forKey: .userNote)
-            ocrText = try c.decodeIfPresent(String.self, forKey: .ocrText)
-            aiStructuredText = try c.decodeIfPresent(String.self, forKey: .aiStructuredText)
-            sidecarBlob = try c.decodeIfPresent(String.self, forKey: .sidecarBlob)
-            groupChildren = try c.decodeIfPresent([PersistedItem].self, forKey: .groupChildren)
-            collections = try c.decodeIfPresent([String].self, forKey: .collections)
-            originalFilePath = try c.decodeIfPresent(String.self, forKey: .originalFilePath)
-        }
+        // No custom init(from decoder:) here — this struct has no custom
+        // CodingKeys (relies entirely on Swift's auto-synthesized keys, one
+        // per stored property), and every non-optional field above is
+        // required while every optional one has a default, which is
+        // exactly what the compiler's own synthesized Decodable
+        // conformance already does for free. A hand-written version used to
+        // sit here duplicating that behavior line-for-line — 32 lines that
+        // added no behavior, and a real duplication risk: this struct's
+        // field list is now also declared in the memberwise init above and
+        // `make(from:)` below, so a future field added to only one or two
+        // of those three places would silently fail to round-trip through
+        // persistence. Removing this one at least cuts that to two.
 
         static func make(from item: ClipboardItem,
                          type: String,
@@ -664,10 +622,29 @@ extension ClipboardManager {
         historyDir.appendingPathComponent("blobs", isDirectory: true)
     }
 
-    func reuseOrWriteBlob(cached: (path: String, bytes: Int)?,
+    /// A cheap, bounded-size-sample fingerprint (never more than 8KB
+    /// hashed, regardless of the actual data size) — not a full-content
+    /// cryptographic hash, which would cost as much as just re-writing a
+    /// large image/blob on every save and defeat the point of caching.
+    /// Good enough to catch "same id, same byte count, different bytes"
+    /// (an image edit that happens to land on the same file size), which
+    /// byte count alone can't tell apart.
+    static func blobFingerprint(_ data: Data) -> Int {
+        let sampleSize = 4096
+        var hasher = Hasher()
+        hasher.combine(data.count)
+        hasher.combine(data.prefix(sampleSize))
+        if data.count > sampleSize {
+            hasher.combine(data.suffix(sampleSize))
+        }
+        return hasher.finalize()
+    }
+
+    func reuseOrWriteBlob(cached: (path: String, bytes: Int, fingerprint: Int)?,
                                   data: Data,
                                   primaryTag: ClipboardTag) -> String? {
         if let cached, cached.bytes == data.count,
+           cached.fingerprint == Self.blobFingerprint(data),
            FileManager.default.fileExists(atPath: blobsDir.appendingPathComponent(cached.path).path) {
             return cached.path
         }
@@ -731,25 +708,12 @@ extension ClipboardManager {
     func saveHistory(snapshot: [ClipboardItem]? = nil) {
 
         guard snapshot != nil || isHistoryFullyLoaded else { return }
-        // items's own didSet marks this dirty on every mutation — every
-        // call site here (the debounced $items sink, plus the direct
-        // calls after a collection rename/delete/move/share) is always
-        // preceded by a genuine items change, so this only skips work
-        // when nothing new actually needs persisting, e.g. the debounce
-        // settling twice for a change a direct call already saved.
-        // Without this, the entire history was re-encoded, re-encrypted,
-        // and rewritten to disk on every save regardless of whether
-        // anything changed since the last one.
+
         guard historyDirty else { return }
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         var referencedBlobs: Set<String> = []
 
-        // Uncaptured placeholders are session-only by design. They hold no
-        // content of their own — they are a pointer at the live system
-        // pasteboard — and after a relaunch that pasteboard has almost
-        // certainly moved on, so a restored one could only ever paste the
-        // wrong thing. Drop them here rather than persisting a trap.
         let itemsToSave = (snapshot ?? items).filter { !$0.isUncaptured }
         let persisted: [PersistedItem] = itemsToSave.compactMap { item in
             var p = persistedBase(for: item, referencedBlobs: &referencedBlobs)
@@ -846,7 +810,7 @@ extension ClipboardManager {
                 if let rel = reuseOrWriteBlob(cached: imageBlobCache[item.id],
                                               data: rawData,
                                               primaryTag: item.primaryTag) {
-                    imageBlobCache[item.id] = (rel, rawData.count)
+                    imageBlobCache[item.id] = (rel, rawData.count, Self.blobFingerprint(rawData))
                     referencedBlobs.insert(rel)
                     return .make(from: item, type: "image", imageBlob: rel, imageType: dataType.rawValue)
                 }
@@ -982,7 +946,7 @@ extension ClipboardManager {
 
     private struct HistoryDecodedBatch {
         let items: [ClipboardItem]
-        let seedImage:   [UUID: (path: String, bytes: Int)]
+        let seedImage:   [UUID: (path: String, bytes: Int, fingerprint: Int)]
         let seedPayload: [UUID: String]
         let seedSidecar: [UUID: String]
         let migratedInlineEmbedding: Bool
@@ -990,8 +954,9 @@ extension ClipboardManager {
 
     private func decodeHistoryBatch(_ batch: [PersistedItem],
                                     loadedEmbeddings: [String: [Float]],
-                                    loadedAIEmbeddings: [String: [Float]] = [:]) -> HistoryDecodedBatch {
-        var seedImage:   [UUID: (path: String, bytes: Int)] = [:]
+                                    loadedAIEmbeddings: [String: [Float]] = [:],
+                                    schemaIsCurrent: Bool) -> HistoryDecodedBatch {
+        var seedImage:   [UUID: (path: String, bytes: Int, fingerprint: Int)] = [:]
         var seedPayload: [UUID: String] = [:]
         var seedSidecar: [UUID: String] = [:]
         var migratedInlineEmbedding = false
@@ -1011,7 +976,7 @@ extension ClipboardManager {
                           rawData: raw, dataType: .init(p.imageType ?? "public.png"),
                           fallback: NSImage(data: raw))
                 else { return nil }
-                if let rel = p.imageBlob { seedImage[p.id] = (rel, raw.count) }
+                if let rel = p.imageBlob { seedImage[p.id] = (rel, raw.count, Self.blobFingerprint(raw)) }
                 content = imageContent
             case "richText":
                 guard let rtf = p.rtfData,
@@ -1064,7 +1029,7 @@ extension ClipboardManager {
             } else if let bid = p.pastedToBundleID, let name = p.pastedToAppName {
                 item.pastedToAppNames = [bid: name]
             }
-            if Self.persistedEmbeddingSchemaIsCurrent {
+            if schemaIsCurrent {
                 if let fromDict = loadedEmbeddings[p.id.uuidString] {
                     item.embedding = fromDict
                 } else if let inline = p.embedding {
@@ -1099,12 +1064,20 @@ extension ClipboardManager {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
 
+        // Captured once, up front: whether embeddings-on-disk match the live
+        // schema/dimension. This whole load (head, priority slice, every
+        // deferred chunk) must agree on one answer — reading the live static
+        // var independently in each of those decodes would race against
+        // markEmbeddingSchemaCurrent() below flipping it mid-load, letting
+        // later chunks silently load stale-dimension vectors as if current.
+        let schemaIsCurrent = Self.persistedEmbeddingSchemaIsCurrent
+
         let loadedEmbeddings = readEmbeddingsFile()
         let loadedAIEmbeddings = readAIEmbeddingsFile()
 
         var shownHeadIDs = Set<UUID>()
         if let headPersisted = readManifest(at: historyHeadURL, dec: dec), !headPersisted.isEmpty {
-            let headBatch = decodeHistoryBatch(headPersisted, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings)
+            let headBatch = decodeHistoryBatch(headPersisted, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings, schemaIsCurrent: schemaIsCurrent)
             if !headBatch.items.isEmpty {
                 mergeHistoryBlobCaches(headBatch)
                 shownHeadIDs = Set(headBatch.items.map(\.id))
@@ -1177,10 +1150,13 @@ extension ClipboardManager {
         let priorityPersisted  = Self.historyPrioritySlice(persisted)
         let deferredPersisted  = Array(unpinnedPersisted.dropFirst(Self.historyPriorityUnpinnedCount))
 
-        let firstBatch = decodeHistoryBatch(priorityPersisted, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings)
+        let firstBatch = decodeHistoryBatch(priorityPersisted, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings, schemaIsCurrent: schemaIsCurrent)
         mergeHistoryBlobCaches(firstBatch)
         let publish = firstBatch.items.filter(\.isPinned) + firstBatch.items.filter { !$0.isPinned }
         let publishIDs = Set(publish.map(\.id))
+
+        var knownIDs: Set<UUID> = []
+        var knownEmbeddedCount = 0
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -1192,6 +1168,8 @@ extension ClipboardManager {
             self.items = liveCaptures + publish
             self.purgeLegacyDefaultCollection()
             self.embeddedItemCount = self.items.reduce(0) { $1.embedding == nil ? $0 : $0 + 1 }
+            knownIDs = Set(self.items.map(\.id))
+            knownEmbeddedCount = self.embeddedItemCount
             self.hasLoadedHistoryOnce = true
             Self.markEmbeddingSchemaCurrent()
             if deferredPersisted.isEmpty {
@@ -1209,15 +1187,18 @@ extension ClipboardManager {
         while start < deferredPersisted.count {
             let end = min(start + deferredChunkSize, deferredPersisted.count)
             let chunk = Array(deferredPersisted[start..<end])
-            let batch = decodeHistoryBatch(chunk, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings)
+            let batch = decodeHistoryBatch(chunk, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings, schemaIsCurrent: schemaIsCurrent)
             mergeHistoryBlobCaches(batch)
             let isLastChunk = end >= deferredPersisted.count
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                let existingIDs = Set(self.items.map(\.id))
-                let newOnes = batch.items.filter { !existingIDs.contains($0.id) }
+                let newOnes = batch.items.filter { !knownIDs.contains($0.id) }
                 self.items.append(contentsOf: newOnes)
-                self.embeddedItemCount = self.items.reduce(0) { $1.embedding == nil ? $0 : $0 + 1 }
+                for item in newOnes {
+                    knownIDs.insert(item.id)
+                    if item.embedding != nil { knownEmbeddedCount += 1 }
+                }
+                self.embeddedItemCount = knownEmbeddedCount
                 if isLastChunk {
 
                     self.isHistoryFullyLoaded = true

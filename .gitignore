@@ -12,3 +12,4 @@ dist/old_updates/
 
 # graphify generated knowledge graph
 graphify-out/
+dist/*.delta

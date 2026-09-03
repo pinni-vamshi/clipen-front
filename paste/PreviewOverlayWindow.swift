@@ -6,11 +6,6 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
 
     var onHide: (() -> Void)?
 
-    /// Timestamp of the last `hide()` call, so `popoverDidClose` can tell
-    /// an app-initiated close (its animated performClose completing some
-    /// time after hide() already returned) from one AppKit performed
-    /// entirely on its own. A plain bool reset synchronously inside hide()
-    /// missed the animation window and mislabeled legitimate closes.
     private var hideCalledAt: Date?
     private static let hideAttributionWindow: TimeInterval = 1.0
 
@@ -23,20 +18,11 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         }
     }
 
-    /// Without this, an AppKit-initiated close (anchor window ordered out,
-    /// Space/fullscreen transition, positioning view leaving the hierarchy)
-    /// left `wantsVisible` stuck true while `popover.isShown` went false —
-    /// so `isVisible` reported false forever after, and because
-    /// `commitPaste()` is gated on `isVisible`, releasing ⌘ silently pasted
-    /// nothing. Nothing in the app ever ran on that path, which is why the
-    /// popup could vanish with no call to `hide()` and no crash.
     func popoverDidClose(_ notification: Notification) {
         if let hideCalledAt, Date().timeIntervalSince(hideCalledAt) < Self.hideAttributionWindow {
             return
         }
-        // Resync: the popover is gone, so the app's own notion of "shown"
-        // has to follow, and the normal teardown has to run — otherwise
-        // the next open races against stale state.
+
         let wasVisible = wantsVisible
         wantsVisible = false
         anchorPanel.orderOut(nil)
@@ -83,9 +69,7 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
     private let hintOverlay = PopupHintOverlay()
 
     func show() {
-        // Cleared here, not just left to the 1s window in hide(), so a
-        // genuine spontaneous close after this NEW open is never
-        // misattributed to a hide() call from a previous open/close cycle.
+
         hideCalledAt = nil
         wantsVisible = true
         showAnchored(to: NSEvent.mouseLocation)
@@ -96,13 +80,7 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         let wasVisible = wantsVisible
         hideCalledAt = Date()
         wantsVisible = false
-        // anchorPanel.orderOut below is immediate, but popover.animates
-        // defaults to true, so performClose used to fade out over as long
-        // as ~2s (measured directly) while its anchor had already vanished
-        // — visible as the popup appearing "stuck" for a moment before
-        // actually going away. showAnchored already disables animation for
-        // the same reason on open; matching it here on close makes both
-        // instant.
+
         if popover.isShown {
             popover.animates = false
             popover.performClose(nil)
@@ -208,17 +186,6 @@ struct PopoverPreviewView: View {
     private var items: [ClipboardItem] { manager.displayItems }
     private var selectedIndex: Int     { manager.selectedIndex }
 
-    /// `displayItems` folded into display segments: runs of 2+ consecutive
-    /// `.image` items and image-typed `.file` items (HEIC etc. captured as
-    /// a file reference rather than inline bytes) become one `ImageRunRow`
-    /// together; everything else stays its
-    /// own `PopoverRow`, unchanged. Recomputed on every render — there is
-    /// no stored grouping to go stale — so a run splits or reforms for
-    /// free whenever pinning, search, or a tag filter reorders
-    /// `displayItems` out from under it. `selectedIndex` still means
-    /// exactly what it always has: an index into `displayItems`. Nothing
-    /// about marking, pinning, delete, or paste changes — they all key off
-    /// item identity, which this never touches.
     private enum RowSegment: Identifiable {
         case single(item: ClipboardItem, index: Int)
         case imageRun([(item: ClipboardItem, index: Int)])
@@ -234,19 +201,35 @@ struct PopoverPreviewView: View {
     private var rowSegments: [RowSegment] {
         var result: [RowSegment] = []
         var run: [(item: ClipboardItem, index: Int)] = []
-        // Capped at ImageRunRow.maxPerLine *here*, not left to ImageRunRow to
-        // wrap internally — a run of, say, 10 images used to become ONE row
-        // with 3 lines stacked inside it, and cycling selection across those
-        // internal lines needed a "coarse scroll then refine" two-step that
-        // was the actual source of visible jitter. Splitting into separate
-        // row elements up front means every row is exactly one line, always,
-        // and that whole refine step no longer has anything to do.
+
         func flushRun() {
             guard !run.isEmpty else { return }
-            var remaining = run[...]
-            while !remaining.isEmpty {
-                let chunk = Array(remaining.prefix(ImageRunRow.maxPerLine))
-                remaining = remaining.dropFirst(chunk.count)
+            // Chunk from the OLD end of the run forward, not the new end.
+            // New captures are always prepended to `items` (index 0), so a
+            // run's tail-relative position never moves — only its
+            // front-relative position does. Slicing front-first here used to
+            // mean every chunk boundary after the first re-shifted on every
+            // new image capture, changing `.imageRun` chunk identity (keyed
+            // on each chunk's first member) for chunks whose actual members
+            // barely changed — SwiftUI then tore down and rebuilt those rows
+            // instead of diffing them, which is what read as jerky/jumpy
+            // whenever several images were copied back to back. Anchoring
+            // chunk boundaries to the tail means only the newest (leading,
+            // still-growing) chunk's identity changes; every older chunk's
+            // membership — and therefore its id — is invariant to further
+            // insertions at the front.
+            let n = run.count
+            let remainder = n % ImageRunRow.maxPerLine
+            var chunks: [[(item: ClipboardItem, index: Int)]] = []
+            if remainder > 0 {
+                chunks.append(Array(run[0..<remainder]))
+            }
+            var i = remainder
+            while i < n {
+                chunks.append(Array(run[i..<(i + ImageRunRow.maxPerLine)]))
+                i += ImageRunRow.maxPerLine
+            }
+            for chunk in chunks {
                 if chunk.count >= 2 {
                     result.append(.imageRun(chunk))
                 } else {
@@ -267,28 +250,10 @@ struct PopoverPreviewView: View {
         return result
     }
 
-    /// The id to `scrollTo` first for a given item index. For a `.single`
-    /// row this is just the item's own id (already a direct, ForEach-level
-    /// anchor). For an item inside an `.imageRun`, the item's id lives three
-    /// views deep inside `ImageRunCell` and has no anchor at all until that
-    /// row has actually been rendered once — so off-screen it must be
-    /// found from scratch, and scrolling straight to it silently does
-    /// nothing. The row's own id (now tagged via `.id(segment.id)`) is a
-    /// direct ForEach-level anchor same as a `.single` row, so it always has
-    /// something to jump to, even sight unseen.
     private func coarseScrollTarget(for idx: Int) -> AnyHashable {
         scrollTarget(for: idx).coarse
     }
 
-    /// `needsRefine` is only true for a run that wraps to a second line —
-    /// there the coarse (row-level) anchor centers the run's whole bounding
-    /// box, which isn't the same vertical position as a cell on its second
-    /// line. A single-line run has every cell at the row's own vertical
-    /// center already, so re-centering on the individual cell after the
-    /// coarse scroll is a redundant second animated scroll to (near enough)
-    /// the same offset — that extra correction is what read as the
-    /// selection jiggling up and down while stepping between images in one
-    /// line.
     private func scrollTarget(for idx: Int) -> (coarse: AnyHashable, needsRefine: Bool) {
         guard items.indices.contains(idx) else {
             let fallback = items.first.map { AnyHashable($0.id) } ?? AnyHashable("")
@@ -335,11 +300,7 @@ struct PopoverPreviewView: View {
                 footer
             }
             .onPreferenceChange(SelectedRowFramePreferenceKey.self) { frame in
-                // A few points of sub-pixel/layout noise between two
-                // measurements that represent the same real row shouldn't
-                // twitch the anchored panel — only reposition once the
-                // measured row has moved by more than a small, real
-                // threshold (or appeared/disappeared outright).
+
                 let previous = manager.selectedRowMeasuredFrame
                 let movedMeaningfully: Bool
                 if let previous, let frame {
@@ -456,13 +417,6 @@ struct PopoverPreviewView: View {
         .background(Color.primary.opacity(0.02))
     }
 
-    /// Facts pulled from the AI-structured JSON of the current results,
-    /// ranked against the query — the specific key/value that explains why
-    /// something matched, rather than only the item as a whole.
-    ///
-    /// Collapses to nothing when there is no query or no fact clears the
-    /// relevance floor. That matters in a popup whose entire value is speed
-    /// and density: a permanently reserved empty band would cost real rows.
     @ViewBuilder
     private var aiFactStrip: some View {
         let chips = manager.popupFactChips
@@ -471,8 +425,7 @@ struct PopoverPreviewView: View {
                 HStack(spacing: 8) {
                     ForEach(chips) { chip in
                         AIFactChipView(chip: chip) {
-                            // Selecting the parent item makes the strip
-                            // navigation rather than decoration.
+
                             if let idx = manager.displayItems.firstIndex(where: { $0.id == chip.itemID }) {
                                 manager.selectedIndex = idx
                                 manager.selectionDidChange()
@@ -487,12 +440,6 @@ struct PopoverPreviewView: View {
         }
     }
 
-    /// Shown when Sparkle has found a STABLE release newer than this build.
-    ///
-    /// No dismiss count and no persistence: this is not a nudge that should
-    /// fade away, and it clears itself the moment the update is installed
-    /// because `availableUpdateVersion` is only ever set by a live update
-    /// check.
     @ViewBuilder
     private var updateAvailableBanner: some View {
         if let version = manager.availableUpdateVersion {
@@ -519,17 +466,8 @@ struct PopoverPreviewView: View {
         }
     }
 
-    /// Fixed rather than semantic because the background is always pure
-    /// white here — a dynamic label colour would go white-on-white in dark
-    /// mode.
     private static let bannerBlue = Color(red: 0.04, green: 0.36, blue: 0.94)
 
-
-    /// Shown once the paywall is switched on for this user but before their
-    /// grace period runs out — a heads-up, not a block. `pro.isUnlocked`
-    /// (via SubscribeGateView, above) stays true the whole time this is
-    /// visible; only once `trialDaysRemaining` reaches 0 does the gate
-    /// actually close.
     @ViewBuilder
     private var trialBanner: some View {
         if pro.paywallApplies, !pro.isPro, pro.trialDaysRemaining > 0 {
@@ -562,12 +500,6 @@ struct PopoverPreviewView: View {
         return days == 1 ? "1 day left in your free trial" : "\(days) days left in your free trial"
     }
 
-    /// Discovery nudge for Remember Forever, shown only while viewing a
-    /// specific collection (there's nothing to enable it for on "All"),
-    /// only if that collection isn't already remembered, and only for the
-    /// popup's next 5 opens total (manager.rememberForeverBannerOpensRemaining,
-    /// decremented once per open in openPopupNow — not per collection, not
-    /// reset by switching collections).
     @ViewBuilder
     private var rememberForeverBanner: some View {
         if let name = manager.activeCollection,
@@ -578,11 +510,7 @@ struct PopoverPreviewView: View {
                     .font(.system(size: 11, weight: .medium))
                 HStack(spacing: 4) {
                     Text("“\(name)”").font(.system(size: 11, weight: .semibold))
-                    // The same toggle disc used on the chips — shows the
-                    // real current state (always off here, since the
-                    // banner only shows for collections not yet
-                    // remembered) right next to the name it applies to,
-                    // instead of a separate unlabeled infinity glyph.
+
                     RememberForeverToggle(isOn: manager.rememberForeverCollections.contains(name)) {
                         manager.toggleRememberForever(name)
                     }
@@ -617,10 +545,7 @@ struct PopoverPreviewView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
                 Spacer()
-                // On the opposite edge from the tip icon, same "close this
-                // hint" affordance as every other dismissible banner in the
-                // app — lets someone who's already seen enough drop it
-                // without needing to hit D five times first.
+
                 Button {
                     manager.dismissDetailsHint()
                 } label: {
@@ -666,19 +591,7 @@ struct PopoverPreviewView: View {
         Group {
             if items.isEmpty {
                 if !manager.isHistoryFullyLoaded {
-                    // Right after launch, manager.items only holds the
-                    // priority slice (pinned + the 40 most recent unpinned)
-                    // — the rest loads in background chunks (see
-                    // performHistoryLoadOffMain in
-                    // ClipboardManager+Persistence.swift). A collection or
-                    // tag filter can land entirely inside a chunk that
-                    // hasn't arrived yet, making displayItems empty even
-                    // though the collection genuinely has items — items's
-                    // own didSet invalidates the displayItems cache on
-                    // every chunk append, so this self-corrects the
-                    // instant the data lands. Showing "loading" here
-                    // instead of "no items" avoids lying about a
-                    // collection being empty during that window.
+
                     ProgressView()
                         .controlSize(.small)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -738,14 +651,7 @@ struct PopoverPreviewView: View {
                                                 markedItemIDs: manager.markedItemIDs,
                                                 editDeniedShake: manager.editDeniedShake)
                                         .equatable()
-                                        // Without this, scrollTo(item.id) has no
-                                        // anchor to estimate against for an
-                                        // off-screen run — the id is buried
-                                        // inside ImageRunCell, three levels
-                                        // below anything ForEach or LazyVStack
-                                        // can position ahead of render. Tagging
-                                        // the row itself gives scrollTo a real
-                                        // target to jump to first.
+
                                         .id(segment.id)
                                 }
                                 if segIdx < segments.count - 1 {
@@ -754,13 +660,6 @@ struct PopoverPreviewView: View {
                             }
                         }
 
-                        // A selected row scales up 12% (SelectionHighlightStyle.scale)
-                        // plus a shadow on top of that — for the very first row,
-                        // with nothing above it to share the extra space, that
-                        // pushed its elevated top edge up past the divider/
-                        // category strip and got visibly clipped. 6pt wasn't
-                        // enough headroom; this comfortably covers the scale
-                        // and shadow radius combined.
                         .padding(.top, 14)
                         .padding(.bottom, 10)
                     }
@@ -769,17 +668,6 @@ struct PopoverPreviewView: View {
                         let targetID = items[newIdx].id
                         let (coarseID, needsRefine) = scrollTarget(for: newIdx)
 
-                        // Jump to the row-level anchor — for an .imageRun
-                        // this is the ONLY anchor that exists before the row
-                        // has ever been rendered (see `coarseScrollTarget`);
-                        // scrolling straight to a nested, never-rendered
-                        // item id is a silent no-op, which is why "back"
-                        // into an image run used to do nothing. For every
-                        // other row it IS the item's own id, so this single
-                        // animated scroll is already exact. It shares the
-                        // highlight's own spring so the content glides in
-                        // step with the selection box instead of snapping
-                        // underneath it.
                         withAnimation(SelectionHighlightStyle.spring) {
                             proxy.scrollTo(coarseID, anchor: .center)
                         }
@@ -812,13 +700,7 @@ struct PopoverPreviewView: View {
                             proxy.scrollTo(targetID, anchor: .center)
                         }
                     }
-                    // Fires on every collection switch, including
-                    // re-selecting the collection already active — unlike
-                    // onChange(of: selectedIndex), which only fires when
-                    // selectedIndex's value actually transitions and would
-                    // stay silent when it was already 0. Animated (unlike
-                    // popupOpenGeneration's snap) since this always follows
-                    // a visible user action, not a popup materializing.
+
                     .onChange(of: manager.collectionSwitchGeneration) { _, _ in
                         guard items.indices.contains(selectedIndex) else { return }
                         let idx = selectedIndex
@@ -853,18 +735,6 @@ struct PopoverPreviewView: View {
     }
 }
 
-/// A run of 2+ consecutive `.image` items rendered as ONE shared row: the
-/// same leading rail/divider a normal row has, once — then the images
-/// themselves, each still its own full `ClipboardItem` with its own id,
-/// laid left-to-right with a thin divider between each, wrapping onto a
-/// new line inside this same row once the current line is full.
-///
-/// Deliberately NOT measured via a body-level `GeometryReader` — that
-/// expands to fill all available height inside a `VStack`/`LazyVStack`
-/// (a standing SwiftUI quirk), which would blow up this row's height
-/// rather than shrink-wrap it. Popup width is fixed at 420pt (see
-/// `showAnchored`), so how many images fit per line is computed from that
-/// same fixed width instead, exactly as `PopoverRow.horizontalInset` is.
 struct ImageRunRow: View, Equatable {
     let run: [(item: ClipboardItem, index: Int)]
     let selectedIndex: Int
@@ -897,31 +767,13 @@ struct ImageRunRow: View, Equatable {
     static let cellSize:  CGFloat = 51
     private static let cellGap:   CGFloat = 16
     private static let railWidth: CGFloat = 22
-    /// Fixed at 4 regardless of available width — a straightforward "N
-    /// per line" read, rather than however many the popup's 420pt happens
-    /// to fit.
+
     static let maxPerLine = 4
-    /// 420 (popup width) − 46 (rowInset, 23 each side) − 18 (row's own
-    /// .horizontal padding, 9 each side) − 22 (rail) − 8 (rail↔divider
-    /// spacing) − 1 (divider) − 8 (divider↔first image spacing).
-    ///
-    /// Two separate insets, both mandatory: rowRailSpacing is the gap
-    /// *inside* the row (rail↔divider↔content), rowInset is what the whole
-    /// row sits behind so it lines up with every other row type. Neither is
-    /// cellGap — reusing that for the inner gap is what knocked the divider
-    /// out of alignment once already. Enforced as a hard `.frame` width
-    /// below, not just used to size things: a math mistake clips a cell
-    /// rather than letting the row push past the popup's fixed width, which
-    /// is exactly what the selected-row scale effect would otherwise do.
+
     private static let lineWidth: CGFloat = 420
         - SelectionHighlightStyle.rowInset * 2
         - 18 - railWidth - SelectionHighlightStyle.rowRailSpacing - 1 - SelectionHighlightStyle.rowRailSpacing
 
-    /// True while any image in this run is the current selection — drives
-    /// a light background tint on the whole row, kept separate from the
-    /// per-cell border/scale/shadow highlight in ImageRunCell (that one
-    /// stays exactly as it is; this just gives the row the same "selected
-    /// row has a background" language every other row type already has).
     private var isAnySelected: Bool { run.contains(where: { $0.index == selectedIndex }) }
 
     var body: some View {
@@ -935,9 +787,7 @@ struct ImageRunRow: View, Equatable {
                 .fill(Color.secondary.opacity(0.25))
                 .frame(width: 1)
                 .frame(maxHeight: .infinity)
-            // A single line, always — rowSegments caps every run at
-            // maxPerLine images before it ever reaches this view, so there's
-            // no wrapping left to do here.
+
             HStack(spacing: 0) {
                 ForEach(Array(run.enumerated()), id: \.element.item.id) { cellIdx, entry in
                     if cellIdx > 0 {
@@ -954,37 +804,18 @@ struct ImageRunRow: View, Equatable {
                                      ? editDeniedShake?.generation ?? 0 : 0)
                 }
             }
-            // Hard clamp — see the `lineWidth` comment above. Nothing here
-            // can ever be wider than the popup itself.
+
             .frame(width: Self.lineWidth, alignment: .leading)
-            // Same guard PopoverRow puts on its own rowContent. The
-            // LazyVStack carries an .animation(spring, value: selectedIndex),
-            // so without this every selection change anywhere in the popup
-            // implicitly animates this run's layout — image cells sliding and
-            // resizing under a scroll that is already animating. The
-            // selection highlight keeps its own animation; only the content
-            // underneath opts out.
+
             .transaction { $0.animation = nil }
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
-        // Goes through the same modifier every other row type uses, in the
-        // same position in the chain — so this row gets the identical outer
-        // inset, scale and spring as a text row's blue highlight, just with
-        // a transparent surface. Applied *after* the padding (as PopoverRow
-        // does) so the raised surface extends past the divider rather than
-        // hugging it exactly.
+
         .selectionHighlight(isSelected: isAnySelected,
                             namespace: selectionNamespace,
                             inset: SelectionHighlightStyle.rowInset,
                             appearance: .rowSurface)
-        // Report the WHOLE run's frame here, once, rather than letting each
-        // ImageRunCell report its own — a cell's own frame shifts slightly
-        // depending on which image in the run is selected (the selection
-        // scale/elevation effect changes its measured bounds), which made
-        // the anchored side panel jitter up and down even while staying
-        // inside the same visual row. One frame per run, unaffected by
-        // which image within it is selected, matches how every other row
-        // type already reports exactly one frame for itself.
+
         .background(
             GeometryReader { geo in
                 Color.clear.preference(
@@ -994,8 +825,6 @@ struct ImageRunRow: View, Equatable {
         )
     }
 
-    /// Same tag-label formatting as `PopoverRow.tagLabelText`, for whichever
-    /// item this run's rail badge is currently representing.
     private func tagLabelText(for item: ClipboardItem) -> String {
         let visible = item.tags.prefix(4)
         let labels = visible.map { String(localized: String.LocalizationValue($0.label)) }
@@ -1007,14 +836,6 @@ struct ImageRunRow: View, Equatable {
         item.sourceAppName ?? tagLabelText(for: item)
     }
 
-    // A run can be several photos shot back-to-back in different apps
-    // (Preview, Photos, a browser) landing as one grouped row. Showing
-    // whichever app the first photo happened to come from would be
-    // actively misleading for the rest of the group, so: one shared app
-    // across every item in the run shows that app; more than one shows how
-    // many, the same ", +N" counting convention tagLabelText already uses
-    // for overflow tags; no app known for any of them falls back to the
-    // tag label, same as the single-item case.
     private func sourceAppLabelText(for run: [(item: ClipboardItem, index: Int)]) -> String {
         let appNames = run.map { $0.item.sourceAppName }
         let known = appNames.compactMap { $0 }
@@ -1030,25 +851,13 @@ struct ImageRunRow: View, Equatable {
 
     @State private var analysisRingWidth: CGFloat = 1
 
-    private func startOrStopRingAnimation(running: Bool) {
-        guard running else {
-            withAnimation(.easeOut(duration: 0.2)) { analysisRingWidth = 1 }
-            return
-        }
-        analysisRingWidth = 1
-        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-            analysisRingWidth = 2.6
-        }
+    private func startOrStopRingAnimation(running: Bool, resumeMidCycle: Bool = false) {
+        startOrStopAnalysisPulse($analysisRingWidth, active: running,
+                                 restValue: 1, activeValue: 2.6,
+                                 activeDuration: 0.6, restDuration: 0.2,
+                                 resumeMidCycle: resumeMidCycle)
     }
 
-    /// Mirrors `PopoverRow.railBadge`'s default/selected split exactly:
-    /// the rotated tag-label TEXT at rest, the tag ICON only once
-    /// something in this run is actually selected — never a generic
-    /// "this is a group of photos" icon. The pink analysis ring was added
-    /// to PopoverRow (single-item rows) but never mirrored here, so a
-    /// run/group row never showed it at all, pulsing or otherwise — not a
-    /// timing or overlap issue, the drawing code simply didn't exist on
-    /// this side.
     @ViewBuilder
     private var railBadge: some View {
         if let selectedEntry = run.first(where: { $0.index == selectedIndex }) {
@@ -1075,10 +884,10 @@ struct ImageRunRow: View, Equatable {
                     startOrStopRingAnimation(running: running)
                 }
                 .onChange(of: selectedEntry.item.id) { _, _ in
-                    startOrStopRingAnimation(running: analysing)
+                    startOrStopRingAnimation(running: analysing, resumeMidCycle: true)
                 }
                 .onAppear {
-                    startOrStopRingAnimation(running: analysing)
+                    startOrStopRingAnimation(running: analysing, resumeMidCycle: true)
                 }
         } else {
             Text(sourceAppLabelText(for: run))
@@ -1092,14 +901,6 @@ struct ImageRunRow: View, Equatable {
     }
 }
 
-/// Draws an item's image without ever decoding on the main thread while a
-/// scroll is running. `ItemThumbnailCache.thumbnail(forData:key:)` decodes
-/// synchronously on a cache miss, and a `LazyVStack` materialises rows *during*
-/// the scroll animation — so a run of four images meant up to four full
-/// CGImageSource decodes inside a single frame, every time you scrolled onto
-/// it for the first time. That is the hitch felt specifically when moving into
-/// image rows. Here a miss draws the already-in-memory original for a frame or
-/// two while the real thumbnail is decoded off-main.
 struct CachedThumbnail: View {
     let original: NSImage
     let data: Data
@@ -1118,12 +919,7 @@ struct CachedThumbnail: View {
             .task(id: key) {
                 guard decoded == nil,
                       ItemThumbnailCache.shared.cachedDataThumbnail(key: key) == nil else { return }
-                // Prewarm normally beats this to the punch (it runs the
-                // moment the item is captured, off-main); this only fires
-                // for items that predate prewarm's introduction or slipped
-                // through some other path. Resize the already-decoded
-                // `original` rather than re-run ImageIO on raw bytes — same
-                // reasoning as prewarmPreviewCaches.
+
                 let source = original
                 let thumbKey = key
                 let img = await Task.detached(priority: .userInitiated) {
@@ -1136,9 +932,6 @@ struct CachedThumbnail: View {
     }
 }
 
-/// One image inside an `ImageRunRow` — still a full `ClipboardItem`, so
-/// marking/pinning/delete/paste all key off its own id exactly as they do
-/// for a normal row; only how it's DRAWN differs.
 private struct ImageRunCell: View {
     let item: ClipboardItem
     let index: Int
@@ -1151,15 +944,7 @@ private struct ImageRunCell: View {
 
     @State private var shakeOffsetX: CGFloat = 0
 
-    private func runShake() {
-        let step: TimeInterval = 0.045
-        let amounts: [CGFloat] = [8, -8, 6, -6, 3, -3, 0]
-        for (i, amount) in amounts.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(i)) {
-                withAnimation(.easeInOut(duration: step)) { shakeOffsetX = amount }
-            }
-        }
-    }
+    private func runShake() { runDeniedShake($shakeOffsetX) }
 
     var body: some View {
         Group {
@@ -1178,9 +963,7 @@ private struct ImageRunCell: View {
         .clipShape(RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous))
         .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
                              inset: 0, appearance: .cell)
-        // The mark number lives on THIS image's own corner — marks are
-        // per-item, same as everywhere else in the popup, just drawn
-        // small here instead of on a shared rail.
+
         .overlay(alignment: .topTrailing) {
             if let order = markOrder {
                 Text("\(order)")
@@ -1341,26 +1124,13 @@ struct PopoverRow: View, Equatable {
 
     @State private var shakeOffsetX: CGFloat = 0
 
-    private func runShake() {
-        let step: TimeInterval = 0.045
-        let amounts: [CGFloat] = [8, -8, 6, -6, 3, -3, 0]
-        for (i, amount) in amounts.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + step * Double(i)) {
-                withAnimation(.easeInOut(duration: step)) { shakeOffsetX = amount }
-            }
-        }
-    }
+    private func runShake() { runDeniedShake($shakeOffsetX) }
 
     private static let minRowHeight: CGFloat = 56
     private static let maxRowHeight: CGFloat = 104
 
     private static let horizontalInset: CGFloat = SelectionHighlightStyle.rowInset
 
-    /// Both were originally derived from `ImageRunRow.cellSize`, back when
-    /// they happened to want the same number. Pinned to their own values
-    /// now: image cells are sized for image *content*, these are sized for
-    /// icons, so a change to one shouldn't silently resize the other —
-    /// exactly how cellGap once knocked the row divider out of alignment.
     private static let fileIconSize: CGFloat = 48
     private static let folderIconSize: CGFloat = 60
 
@@ -1414,15 +1184,11 @@ struct PopoverRow: View, Equatable {
     private static let markedTint = Color(red: 0.20, green: 0.78, blue: 0.35)
     @State private var analysisRingWidth: CGFloat = 1
 
-    private func startOrStopRingAnimation(running: Bool) {
-        guard running else {
-            withAnimation(.easeOut(duration: 0.2)) { analysisRingWidth = 1 }
-            return
-        }
-        analysisRingWidth = 1
-        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-            analysisRingWidth = 2.6
-        }
+    private func startOrStopRingAnimation(running: Bool, resumeMidCycle: Bool = false) {
+        startOrStopAnalysisPulse($analysisRingWidth, active: running,
+                                 restValue: 1, activeValue: 2.6,
+                                 activeDuration: 0.6, restDuration: 0.2,
+                                 resumeMidCycle: resumeMidCycle)
     }
 
     @ViewBuilder
@@ -1450,14 +1216,7 @@ struct PopoverRow: View, Equatable {
                 .foregroundColor(.white)
                 .frame(width: 20, height: 20)
                 .background(Color.secondary.opacity(0.45), in: Circle())
-                // While this item is being analysed the badge keeps its own
-                // icon and gains a pink ring whose thickness breathes. No
-                // extra glyph and no layout change, so the row does not
-                // shift when analysis starts or finishes. Once analysis is
-                // done the ring stays, but goes static (thin, non-breathing)
-                // — a persistent "this item has analysis" cue rather than
-                // an in-progress one. No ring at all when there's nothing
-                // to show (idle, or a failed run with no result).
+
                 .overlay {
                     if analysing {
                         Circle()
@@ -1469,21 +1228,15 @@ struct PopoverRow: View, Equatable {
                             .frame(width: 20, height: 20)
                     }
                 }
-                // Restarts on the RUNNING flag AND on which item is
-                // selected. Flag-only was the bug: moving selection from
-                // one analysing item straight to another analysing item
-                // never flips true->false->true, so neither trigger fired
-                // and the ring froze at whatever width it last had — a
-                // static thin line rather than a visible pulse, easy to
-                // mistake for a plain, non-pulsing colour.
+
                 .onChange(of: analysing) { _, running in
                     startOrStopRingAnimation(running: running)
                 }
                 .onChange(of: item.id) { _, _ in
-                    startOrStopRingAnimation(running: analysing)
+                    startOrStopRingAnimation(running: analysing, resumeMidCycle: true)
                 }
                 .onAppear {
-                    startOrStopRingAnimation(running: analysing)
+                    startOrStopRingAnimation(running: analysing, resumeMidCycle: true)
                 }
         } else if item.isPinned {
             Image(systemName: "pin.fill")
@@ -1510,13 +1263,6 @@ struct PopoverRow: View, Equatable {
         return labels.joined(separator: ", ") + suffix
     }
 
-    // Which app the copy actually came from, e.g. "Safari" or "Notes" —
-    // shown here instead of the content-type tag name ("LINK", "CODE", …)
-    // now that the selected state already covers content type via
-    // primaryTag.icon just below in railBadge. sourceAppName is nil only
-    // for the small set of items that never had a capturing app resolved
-    // (very old persisted items from before the field existed); tagLabelText
-    // is kept as the fallback there rather than showing nothing.
     private var sourceAppLabelText: String {
         item.sourceAppName ?? tagLabelText
     }
@@ -1572,13 +1318,7 @@ struct PopoverRow: View, Equatable {
                         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    // A genuine data table (isDataTable) gets the structured
-                    // mini-table instead of the flat text line — showing both
-                    // duplicated the same row twice, since the text preview
-                    // and the table cells come from the same content. A
-                    // layout table (basically every HTML email) isn't a data
-                    // table, so it keeps the plain text and never shows the
-                    // spurious cell grid.
+
                     if let cells = TableCellExtractor.cells(for: item),
                        TableCellExtractor.isDataTable(cells) {
                         MiniTablePreview(cells: cells)
@@ -1624,15 +1364,7 @@ struct PopoverRow: View, Equatable {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         case .files(let urls):
-            // No separate summary icon here — the rail badge (before the
-            // divider) already shows this row's category icon, so a second
-            // one in the body would just repeat it. Individual per-file
-            // type icons carry more information anyway. Capped to match
-            // ImageRunRow's per-line count, but sized 20% smaller than its
-            // cells — full cellSize read as too big for a row that's just
-            // showing file-type icons, not actual image content. The
-            // count is pushed to the row's trailing edge via Spacer
-            // instead of trailing whichever icon happens to be last.
+
             HStack(spacing: 4) {
                 ForEach(Array(urls.prefix(ImageRunRow.maxPerLine).enumerated()), id: \.offset) { _, url in
                     fileThumbnail(url, size: Self.fileIconSize)
@@ -1685,30 +1417,13 @@ struct PopoverRow: View, Equatable {
     }
 }
 
-/// A folder row's contents, summarised by file *type* rather than listed
-/// file by file — one icon per distinct kind found at a level, with how
-/// many of that kind live there underneath it. Listing every file is
-/// unreadable past a handful; "3 PDFs, 12 images" says more in the same
-/// width.
-///
-/// Subfolders recurse into their own level, drawn progressively smaller
-/// so nesting depth reads visually without needing indentation the row
-/// has no vertical room for. Bounded on depth and on groups-per-level
-/// because the popup row is a fixed 420pt wide — a deep tree renders as
-/// far as it fits and stops, rather than overflowing.
-///
-/// The directory walk runs off-main (slow on network/cloud-synced
-/// volumes) and is cached per item id so re-scrolling past the same row
-/// doesn't re-read the tree. Only URLs cross the thread boundary — the
-/// AppKit icon lookup stays on main, same as every other row type.
 private struct FolderContentsPreview: View {
     let url: URL
     let itemID: UUID
 
     struct Group: Identifiable {
         let id = UUID()
-        /// Any one file of this kind — used purely to ask the system for
-        /// that kind's icon.
+
         let representative: URL
         let count: Int
     }
@@ -1723,7 +1438,6 @@ private struct FolderContentsPreview: View {
     private nonisolated static let maxGroupsPerLevel = 4
     private nonisolated static let maxLevels = 4
 
-    /// Shrinks per level so depth is legible at a glance: 26 → 20 → 15 → 12.
     private static func iconSize(forDepth depth: Int) -> CGFloat {
         max(12, 26 - CGFloat(depth) * 5.5)
     }
@@ -1763,9 +1477,6 @@ private struct FolderContentsPreview: View {
         }
     }
 
-    /// Breadth-first so the shallowest levels — the ones most likely to
-    /// fit in the row — are always the ones that survive the maxLevels
-    /// cap, rather than one deep branch eating the whole budget.
     nonisolated private static func scan(_ root: URL) -> [Level] {
         let fm = FileManager.default
         var out: [Level] = []
@@ -1784,9 +1495,7 @@ private struct FolderContentsPreview: View {
                 for entry in entries {
                     let isDir = FileKindDetector.isDirectory(entry)
                     if isDir { nextFrontier.append(entry) }
-                    // Folders collapse into one "folder" group; files group
-                    // by extension, so 12 PNGs read as one icon with 12
-                    // under it rather than 12 identical icons.
+
                     let kind = isDir ? "\u{1}dir" : entry.pathExtension.lowercased()
                     if let existing = byKind[kind] {
                         byKind[kind] = (existing.representative, existing.count + 1)
@@ -1858,10 +1567,6 @@ private struct PopoverMiniTable: View {
     }
 }
 
-/// Small clickable disc — green filled when the collection is set to be
-/// remembered forever, black when not. Click toggles directly; no menu, no
-/// confirmation, since the effect (exempt from ring trimming) is itself
-/// reversible any time.
 struct RememberForeverToggle: View {
     let isOn: Bool
     let action: () -> Void
@@ -1899,10 +1604,7 @@ struct CollectionChip: View {
                 RememberForeverToggle(isOn: manager.rememberForeverCollections.contains(name)) {
                     manager.toggleRememberForever(name)
                 }
-                // The disc is round and the pill is a capsule, so flush
-                // against the curved edge (no trailing gap) reads as
-                // sitting right on the border instead of floating inside
-                // it — the leading side keeps its normal padding.
+
                 .padding(.trailing, 1)
             }
         }

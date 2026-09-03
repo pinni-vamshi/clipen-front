@@ -10,6 +10,21 @@
 	<true/>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
+	<!-- DO NOT SET THESE TWO KEYS TO true YET. Prepared in advance so that if
+	     the Sparkle EdDSA private key is ever lost again (as happened once
+	     already, after a factory reset), already-installed old copies of
+	     Clipen have a way to eventually accept a new key instead of being
+	     stuck forever. Enabling SURequireSignedFeed with no actually-signed
+	     feed will make Sparkle reject EVERY future appcast fetch for anyone
+	     who gets a build with this flag on — do not flip this to true until
+	     the release pipeline is updated to run `generate_appcast` (which
+	     signs the appcast/release-note files) against the FULL archives
+	     directory, not the hand-spliced appcast.xml this project currently
+	     maintains. Once that's true, both keys below need to be true. -->
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<false/>
+	<key>SURequireSignedFeed</key>
+	<false/>
 	<!-- Screenshot to Clipboard watches the folder macOS saves screenshots
 	     to (Desktop unless the user changed it). macOS gates that folder
 	     behind Files-and-Folders TCC even for non-sandboxed apps, and a

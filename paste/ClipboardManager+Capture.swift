@@ -254,9 +254,10 @@ extension ClipboardManager {
                         self.addCaptured(retryItem, sidecar: sidecarSnapshot)
                     }
                 } else {
+                    let typesPresent = pb.types?.map(\.rawValue).joined(separator: ",") ?? "none"
                     DispatchQueue.main.async {
                         CopyFeedbackPanel.shared.show()
-                        AuthManager.shared.registerActionUsage(actionID: "fail.capture")
+                        AuthManager.shared.registerActionUsage(actionID: "fail.capture", value: typesPresent)
                     }
                 }
             }
@@ -287,10 +288,22 @@ extension ClipboardManager {
             return allStable
         }
 
-        for t in types {
-            if let data = pb.data(forType: t), !data.isEmpty { return true }
-        }
-        return false
+        // Ordinary (non-remote-clipboard) copy: don't fetch every advertised
+        // type's full data just to prove SOME type is non-empty.
+        // pb.data(forType:) materializes the entire representation over IPC
+        // to the pasteboard server — for a source app that advertises a
+        // full-size image or a large RTFD blob as its richest type, that
+        // used to run unconditionally on the MAIN thread (the same run loop
+        // the CGEventTap lives on) on every single capture, discarding the
+        // result immediately after. In practice a source app that just
+        // bumped changeCount and advertised types always has real data
+        // behind at least one of them; the rare genuine-empty-pasteboard
+        // case is still caught one poll tick later by
+        // processCapturedPasteboard's own classification and last-resort
+        // retry — this check only ever needed to matter for the
+        // remote-clipboard-file case handled above, which uses a cheap
+        // filesystem stat instead of a pasteboard data fetch.
+        return true
     }
 
     static let concealedPasteboardTypes: Set<String> = [
@@ -319,6 +332,9 @@ extension ClipboardManager {
         var enriched = item
         enriched.sidecarTypes = Self.prunedSidecar(sidecar, for: item.content)
         AuthManager.shared.registerActionUsage(actionID: "capture.\(item.primaryTag.folderName)")
+        if let sourceApp = item.sourceAppName ?? NSWorkspace.shared.frontmostApplication?.localizedName {
+            AuthManager.shared.registerActionUsage(actionID: "action.copy-from-app", value: sourceApp)
+        }
         addItem(enriched)
     }
 
@@ -889,15 +905,34 @@ extension ClipboardManager {
         return wordDiffBadge(newText: newText, against: existing)
     }
 
+    /// Cached line split for one item's `textForEmbedding` — the same up to
+    /// 10 antecedent items get compared against on every single new text
+    /// capture, and without this their text was re-split/re-trimmed from
+    /// scratch on the main thread every time even though it never changes
+    /// between captures.
+    private func cachedDiffLines(for item: ClipboardItem) -> [String] {
+        if let cached = diffLineCache[item.id] { return cached }
+        let lines = (item.textForEmbedding ?? "").components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        diffLineCache[item.id] = lines
+        return lines
+    }
+
+    private func cachedDiffWords(for item: ClipboardItem) -> [String] {
+        if let cached = diffWordCache[item.id] { return cached }
+        let words = (item.textForEmbedding ?? "").split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        diffWordCache[item.id] = words
+        return words
+    }
+
     private func lineDiffBadge(newLines: [String], against existing: [ClipboardItem]) -> String? {
         let newSet = Set(newLines)
 
         for (i, item) in existing.prefix(10).enumerated() {
             guard let existText = item.textForEmbedding,
                   existText.count <= Self.maxDiffBadgeTextLength else { continue }
-            let existLines = existText.components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
+            let existLines = cachedDiffLines(for: item)
             guard existLines.count >= 2 else { continue }
             let existSet = Set(existLines)
 
@@ -928,11 +963,9 @@ extension ClipboardManager {
         for (i, item) in existing.prefix(10).enumerated() {
             guard let existText = item.textForEmbedding,
                   existText.count <= Self.maxDiffBadgeTextLength else { continue }
-            let existLines = existText.components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
+            let existLines = cachedDiffLines(for: item)
             guard existLines.count < 2 else { continue }
-            let existWords = existText.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+            let existWords = cachedDiffWords(for: item)
             guard existWords.count >= 2 else { continue }
             let existSet = Set(existWords.map { $0.lowercased() })
 

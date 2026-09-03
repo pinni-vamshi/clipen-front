@@ -9,16 +9,11 @@ final class TrackingService {
 
     static let schemaVersion = 3
     static let retentionDays = 150
-    // How many full calendar days a day's usage sits on-device before it's
-    // eligible to send. 1 (the old, hardcoded behavior) means "yesterday
-    // and older only" — today's data always waits for the date to roll
-    // over, a ~1 day lag before anything reaches the backend. 0 means
-    // today's own data becomes eligible too, so it goes out on the next
-    // 30-min flush timer tick (see flushTimer below) instead of waiting
-    // for tomorrow. 2+ widens the buffer instead. Change this single
-    // number to retune it — no other code here needs to change.
-    static let flushDelayDays = 1
-    private static let baseURL = URL(string: "https://clipen-backend.onrender.com")!
+
+    static let flushDelayDays = 0
+    // Internal, not private: ProGate.swift's /clipen/entitlement call shares
+    // this same backend host — previously a second copy-pasted URL literal.
+    static let baseURL = URL(string: "https://clipen-backend.onrender.com")!
 
     struct DayData: Codable {
         var cmdVPastes = 0
@@ -116,14 +111,33 @@ final class TrackingService {
         persistSoon()
     }
 
-    func recordCmdV() {
+    func recordCmdV(position: Int? = nil, markedCount: Int? = nil, markedPositions: [Int]? = nil) {
         mutateToday { day in
             day.cmdVPastes += 1
             day.hours["\(Calendar.current.component(.hour, from: Date()))", default: 0] += 1
+            if let position, position >= 0 {
+                day.positions["\(position)", default: 0] += 1
+            }
         }
         lock.lock(); store.totalPastes += 1; let total = store.totalPastes; lock.unlock()
         maybeTriggerUpdateCheck(totalPastes: total)
-        Analytics.logEvent("paste", parameters: ["count": 1])
+
+        var firebaseProps: [String: Any] = ["count": 1]
+        var postHogProps: [String: Any] = ["count": 1]
+        if let position, position >= 0 {
+            firebaseProps["position"] = position
+            postHogProps["position"] = position
+        }
+        if let markedCount, markedCount > 0 {
+            firebaseProps["marked_count"] = markedCount
+            postHogProps["marked_count"] = markedCount
+        }
+        if let markedPositions, !markedPositions.isEmpty {
+            firebaseProps["marked_positions"] = markedPositions.map(String.init).joined(separator: ",")
+            postHogProps["marked_positions"] = markedPositions
+        }
+        Analytics.logEvent("paste", parameters: firebaseProps)
+        PostHogTracking.capture("paste", properties: postHogProps)
         persistSoon()
     }
 
@@ -131,6 +145,7 @@ final class TrackingService {
         mutateToday { $0.fastPastes += 1 }
         lock.lock(); store.totalFastPastes += 1; lock.unlock()
         Analytics.logEvent("fast_paste", parameters: ["count": 1])
+        PostHogTracking.capture("fast_paste", properties: ["count": 1])
         persistSoon()
     }
 
@@ -150,10 +165,11 @@ final class TrackingService {
         guard !outcome.isEmpty else { return }
         mutateToday { $0.popupOutcomes[outcome, default: 0] += 1 }
         Analytics.logEvent("popup_outcome", parameters: ["outcome": outcome, "count": 1])
+        PostHogTracking.capture("popup_outcome", properties: ["outcome": outcome, "count": 1])
         persistSoon()
     }
 
-    func recordToolUse(id: String, count: Int = 1) {
+    func recordToolUse(id: String, count: Int = 1, via: String? = nil) {
         guard !id.isEmpty, count > 0 else { return }
         let now = Date()
         let bucket = Self.timeBucket(for: now)
@@ -164,7 +180,10 @@ final class TrackingService {
         store.toolBuckets["\(id)|\(bucket)", default: 0] += count
         store.globalBuckets[bucket, default: 0] += count
         lock.unlock()
-        Analytics.logEvent("tool_used", parameters: ["tool_id": id, "count": count])
+        var props: [String: Any] = ["tool_id": id, "count": count]
+        if let via { props["via"] = via }
+        Analytics.logEvent("tool_used", parameters: props)
+        PostHogTracking.capture("tool_used", properties: props)
         persistSoon()
     }
 
@@ -173,6 +192,7 @@ final class TrackingService {
         mutateToday { $0.toolUses[id, default: 0] += 1 }
 
         Analytics.logEvent("tool_used", parameters: ["tool_id": id, "count": 1])
+        PostHogTracking.capture("tool_used", properties: ["tool_id": id, "count": 1])
         persistSoon()
     }
 
@@ -180,6 +200,7 @@ final class TrackingService {
         guard !id.isEmpty, size > 0 else { return }
         mutateToday { $0.markedBatches[id, default: []].append(size) }
         Analytics.logEvent("marked_batch", parameters: ["id": id, "size": size])
+        PostHogTracking.capture("marked_batch", properties: ["id": id, "size": size])
         persistSoon()
     }
 
@@ -187,62 +208,72 @@ final class TrackingService {
         guard !id.isEmpty else { return }
         mutateToday { $0.settingValues[id, default: []].append(value) }
         Analytics.logEvent("setting_value_changed", parameters: ["setting": id, "last_value": value])
+        PostHogTracking.capture("setting_value_changed", properties: ["setting": id, "last_value": value])
         persistSoon()
     }
 
-    func recordEvent(id: String, count: Int = 1) {
+    func recordEvent(id: String, count: Int = 1, value: CustomStringConvertible? = nil) {
         guard !id.isEmpty, count > 0 else { return }
         mutateToday { Self.route(id: id, count: count, into: &$0) }
-        Self.logToFirebaseAnalytics(id: id, count: count)
+        Self.logToFirebaseAnalytics(id: id, count: count, value: value)
         persistSoon()
     }
 
-    private static func logToFirebaseAnalytics(id: String, count: Int) {
+    /// Single source of truth for both analytics destinations — computes
+    /// the (event name, properties) once, then fires Firebase and PostHog
+    /// from the same result, so the two can never drift out of sync with
+    /// each other the way two separately-maintained switch statements
+    /// eventually would.
+    private static func logToFirebaseAnalytics(id: String, count: Int, value: CustomStringConvertible? = nil) {
+        guard var (event, properties) = analyticsEvent(for: id, count: count) else { return }
+        if let value { properties["value"] = value.description }
+        Analytics.logEvent(event, parameters: properties)
+        PostHogTracking.capture(event, properties: properties)
+    }
+
+    private static func analyticsEvent(for id: String, count: Int) -> (String, [String: Any])? {
         func suffix(_ prefix: String) -> String {
             String(id.dropFirst(prefix.count)).replacingOccurrences(of: "-", with: "_")
         }
         switch true {
         case id == "popup.open":
-            Analytics.logEvent("popup_opened", parameters: ["count": count])
+            return ("popup_opened", ["count": count])
         case id == "popup.abandon", id == "popup.nav":
-            return
+            return nil
         case id == "action.popup-search":
-            Analytics.logEvent("popup_search", parameters: ["count": count])
+            return ("popup_search", ["count": count])
         case id == "action.mark":
-            Analytics.logEvent("action", parameters: ["action": "marked", "count": count])
+            return ("action", ["action": "marked", "count": count])
         case id == "action.delete":
-            Analytics.logEvent("action", parameters: ["action": "deleted", "count": count])
+            return ("action", ["action": "deleted", "count": count])
         case id == "action.pin":
-            Analytics.logEvent("action", parameters: ["action": "pinned", "count": count])
+            return ("action", ["action": "pinned", "count": count])
         case id == "action.preview":
-            Analytics.logEvent("action", parameters: ["action": "previews", "count": count])
+            return ("action", ["action": "previews", "count": count])
         case id == "action.share":
-            Analytics.logEvent("action", parameters: ["action": "shares", "count": count])
+            return ("action", ["action": "shares", "count": count])
         case id == "action.front":
-            Analytics.logEvent("action", parameters: ["action": "move_front", "count": count])
+            return ("action", ["action": "move_front", "count": count])
         case id == "action.reference-pin":
-            Analytics.logEvent("action", parameters: ["action": "quickclip_pins", "count": count])
+            return ("action", ["action": "quickclip_pins", "count": count])
         case id.hasPrefix("action."):
-            Analytics.logEvent("action", parameters: ["action": suffix("action."), "count": count])
+            return ("action", ["action": suffix("action."), "count": count])
         case id.hasPrefix("ref."):
-            Analytics.logEvent("action", parameters: ["action": "quickclip_" + suffix("ref."), "count": count])
+            return ("action", ["action": "quickclip_" + suffix("ref."), "count": count])
         case id == "session.open":
-            Analytics.logEvent("action", parameters: ["action": "session_opens", "count": count])
+            return ("action", ["action": "session_opens", "count": count])
         case id.hasPrefix("capture."):
-            Analytics.logEvent("capture", parameters: ["content_type": suffix("capture."), "count": count])
+            return ("capture", ["content_type": suffix("capture."), "count": count])
         case id.hasPrefix("setting."):
-            Analytics.logEvent("setting_changed", parameters: ["setting": suffix("setting."), "count": count])
+            return ("setting_changed", ["setting": suffix("setting."), "count": count])
         case id.hasPrefix("fail."):
             let kind = suffix("fail.")
-
-            guard kind != "sparkle_check" else { return }
-            Analytics.logEvent("failure", parameters: ["kind": kind, "count": count])
+            guard kind != "sparkle_check" else { return nil }
+            return ("failure", ["kind": kind, "count": count])
         case id.hasPrefix("pidx."), id.hasPrefix("page."):
-            return
+            return nil
         default:
-            Analytics.logEvent("action", parameters: [
-                "action": id.replacingOccurrences(of: ".", with: "_"), "count": count,
-            ])
+            return ("action", ["action": id.replacingOccurrences(of: ".", with: "_"), "count": count])
         }
     }
 
@@ -299,6 +330,18 @@ final class TrackingService {
         return store.totalPastes
     }
 
+    var firstSeen: String {
+        lock.lock(); defer { lock.unlock() }
+        return store.firstSeen
+    }
+
+    /// Every version this device has ever run, keyed to the date it was
+    /// first seen — the full update history, not just the current version.
+    var versionHistory: [String: String] {
+        lock.lock(); defer { lock.unlock() }
+        return store.versions
+    }
+
     private func mutateToday(_ change: (inout DayData) -> Void) {
         let today = Self.dateKey(Date())
         lock.lock()
@@ -330,11 +373,19 @@ final class TrackingService {
     }
 
     private func persistSoon() {
-        guard !persistScheduled else { return }
+        // Callers include background-queue call sites (e.g. tool-use tracking
+        // fired from Tools/*.swift's off-main closures), so this flag needs
+        // the same lock guarding `store` — it was previously a plain Bool
+        // read/written from multiple threads with no synchronization.
+        lock.lock()
+        guard !persistScheduled else { lock.unlock(); return }
         persistScheduled = true
+        lock.unlock()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
+            self.lock.lock()
             self.persistScheduled = false
+            self.lock.unlock()
             DispatchQueue.global(qos: .utility).async { self.persistNow() }
         }
     }
@@ -343,10 +394,7 @@ final class TrackingService {
         guard !sendInFlight else { return }
         pruneOldDays()
         let today = Self.dateKey(Date())
-        // "Eligible" cutoff: today minus the configured buffer. flushDelayDays=1
-        // reproduces the old `$0.key < today` check exactly (cutoff = yesterday,
-        // `<=` yesterday means the same set as `<` today); flushDelayDays=0
-        // moves the cutoff to today itself, so today's own bucket qualifies too.
+
         let cutoff = Self.dateKey(Date().addingTimeInterval(-Double(Self.flushDelayDays) * 86_400))
 
         lock.lock()
@@ -391,9 +439,7 @@ final class TrackingService {
 
             "lifetime": Self.stateSnapshot(),
             "days": daysJSON,
-            // The client's own clock, right now, at send time — the backend
-            // has nothing else to derive last_seen/updated_at/created_at
-            // from, since it no longer stamps its own time anywhere.
+
             "client_today": Self.dateKey(Date()),
         ]
         lock.unlock()
@@ -534,6 +580,9 @@ final class TrackingService {
         URLSession.shared.dataTask(with: request) { data, response, error in
             let ok = error == nil
                 && (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } == true
+            if ok {
+                PostHogTracking.capture("feedback_sent", properties: ["message": trimmed])
+            }
             DispatchQueue.main.async { completion(ok) }
         }.resume()
     }
@@ -608,9 +657,6 @@ final class TrackingService {
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    /// Same local calendar/timezone as `dateKey`, HH:MM:SS instead of the
-    /// date — the backend no longer stamps its own time anywhere; every
-    /// timestamp it stores is one of these two, sent by the client.
     static func timeKey(_ date: Date) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone.current
@@ -661,6 +707,8 @@ final class AuthManager: ObservableObject {
         Analytics.setUserProperty(
             Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String, forName: "app_version")
         Analytics.setUserProperty(ProcessInfo.processInfo.operatingSystemVersionString, forName: "os_version")
+
+        DispatchQueue.main.async { AuthManager.shared.syncPersonPropertiesToPostHog(setFirstSeen: true) }
         flushTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { _ in
             DispatchQueue.main.async {
                 TrackingService.shared.flushToBackend()
@@ -685,20 +733,47 @@ final class AuthManager: ObservableObject {
         return !alreadyStamped && !isUpgradeInstall
     }()
 
-    func registerCommandVAction() {
-        TrackingService.shared.recordCmdV()
+    func registerCommandVAction(position: Int? = nil, markedCount: Int? = nil, markedPositions: [Int]? = nil) {
+        TrackingService.shared.recordCmdV(position: position, markedCount: markedCount, markedPositions: markedPositions)
     }
 
     func registerFastPasteAction() {
         TrackingService.shared.recordFastPaste()
     }
 
-    func registerActionUsage(actionID: String, count: Int = 1) {
-        TrackingService.shared.recordEvent(id: actionID, count: count)
+    func registerActionUsage(actionID: String, count: Int = 1, value: CustomStringConvertible? = nil) {
+        TrackingService.shared.recordEvent(id: actionID, count: count, value: value)
     }
 
-    func registerToolUsage(toolID: String, count: Int = 1) {
-        TrackingService.shared.recordToolUse(id: toolID, count: count)
+    /// Re-sends the current-state person properties (item/pin/group/
+    /// collection counts, version, plan) to PostHog. Called once at
+    /// launch, and again whenever an action actually changes one of these
+    /// counts (group/ungroup, collection create/delete).
+    func syncPersonPropertiesToPostHog(setFirstSeen: Bool = false) {
+        let m = ClipboardManager.shared
+        let groupCount = m.items.filter {
+            if case .group = $0.content { return true }
+            return false
+        }.count
+        PostHogTracking.setPersonProperties(
+            [
+                "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
+                "app_build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "",
+                "os_version": ProcessInfo.processInfo.operatingSystemVersionString,
+                "locale": Bundle.main.preferredLocalizations.first ?? Locale.current.identifier,
+                "plan": ProGate.shared.isPro ? "pro" : "free",
+                "history_size": m.items.count,
+                "pinned_now": m.items.filter(\.isPinned).count,
+                "groups_now": groupCount,
+                "collections_count": m.collections.count,
+                "app_version_history": TrackingService.shared.versionHistory,
+            ],
+            setOnce: setFirstSeen ? ["first_seen": TrackingService.shared.firstSeen] : [:]
+        )
+    }
+
+    func registerToolUsage(toolID: String, count: Int = 1, via: String? = nil) {
+        TrackingService.shared.recordToolUse(id: toolID, count: count, via: via)
     }
 
     func registerSettingValue(id: String, value: Int) {

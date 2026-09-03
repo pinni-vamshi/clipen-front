@@ -105,25 +105,11 @@ final class ItemThumbnailCache {
         return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
     }
 
-    /// Shrinks an already-decoded image by drawing, never by re-invoking
-    /// ImageIO on compressed bytes. Use this whenever a smaller size is
-    /// needed from an image the app already has in memory — it is the
-    /// difference between a sub-millisecond CGContext draw and, measured
-    /// directly against a screenshot-sized RGBA PNG (the ⌘⇧4-then-Space
-    /// window capture, with its soft drop-shadow alpha), a ~220ms ImageIO
-    /// thumbnail decode. Capture used to pay that decode twice — once to
-    /// build the 1024px row/preview image, again moments later in
-    /// prewarmPreviewCaches to build the 360px cache entry, both from the
-    /// same source bytes — which is exactly the redundant CPU spike that
-    /// showed up as a jerky selection-highlight animation on screenshots
-    /// specifically (their alpha channel makes the ImageIO decode far
-    /// slower than an opaque JPEG/PNG of the same pixel size) and not on
-    /// ordinary images.
     nonisolated static func resizedThumbnail(from image: NSImage, maxPixel: CGFloat) -> NSImage? {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let w = CGFloat(cg.width), h = CGFloat(cg.height)
         guard w > 0, h > 0 else { return nil }
-        guard max(w, h) > maxPixel else { return image }   // already small enough
+        guard max(w, h) > maxPixel else { return image }
         let scale = maxPixel / max(w, h)
         let outW = max(1, Int(w * scale)), outH = max(1, Int(h * scale))
         guard let ctx = CGContext(data: nil, width: outW, height: outH,

@@ -4,22 +4,10 @@ import FirebaseAnalytics
 import Foundation
 import SwiftUI
 
-/// One message the user sent via the in-app feedback box, as the server
-/// sees it — identified by (date, index), matching clipen_backend's
-/// `feedback_by_date` shape rather than a synthetic id, since messages
-/// don't have their own id server-side. `/clipen/entitlement` now returns
-/// every message for this device, not just ones with a reply attached (see
-/// the endpoint's comment in main.py for why), so reply_text/reply_sent_at
-/// are nil for a message that hasn't been answered yet — decoding this as
-/// non-optional would fail the WHOLE response the first time any unreplied
-/// entry came back, which given the change above is now the common case,
-/// not an edge case.
 struct FeedbackReply: Codable, Identifiable, Equatable {
     let date: String
     let index: Int
-    /// HH:MM:SS on the sender's own local clock at the moment they hit
-    /// Send (see AuthManager.timeKey / client_time) — nil only for entries
-    /// sent before the server started recording this.
+
     let time: String?
     let message: String
     let reply_text: String?
@@ -28,15 +16,6 @@ struct FeedbackReply: Codable, Identifiable, Equatable {
     var id: String { "\(date)|\(index)" }
 }
 
-/// One message the user sent via the in-app feedback box, recorded locally
-/// the moment it's successfully POSTed. Needed because /clipen/entitlement
-/// only ever returns entries that already have a developer reply attached
-/// (see FeedbackReply above and clipen_backend's admin_feedback_reply) — a
-/// message that hasn't been answered yet, or a second message sent the same
-/// day, never comes back from the server at all. Without this, the feedback
-/// panel could only ever show messages the developer had already answered,
-/// which is backwards from how a real chat works: your own message should
-/// appear the instant you send it, not only once someone replies.
 struct SentFeedback: Codable, Identifiable, Equatable {
     let date: String
     let message: String
@@ -50,26 +29,14 @@ final class ProGate: ObservableObject {
 
     @Published private(set) var isUnlocked: Bool = true
 
-    /// Days left in the free trial — server-computed (see clipen_backend's
-    /// `_trial_days_remaining`), cached here, never re-derived locally.
-    /// Counts down once `paywallApplies` is true; the gate (`isUnlocked`)
-    /// only closes once this hits 0, not the instant the paywall is
-    /// switched on.
     @Published private(set) var trialDaysRemaining: Int = 0
 
     @Published private(set) var paywallApplies: Bool = false
 
     @Published private(set) var isPro: Bool = false
 
-    /// Developer replies to feedback the user sent via the in-app feedback
-    /// box — server-computed (see clipen_backend's `/clipen/entitlement`),
-    /// cached here so they survive relaunch even before the next refresh.
     @Published private(set) var feedbackReplies: [FeedbackReply] = []
 
-    /// Every feedback message this device has sent, oldest first — see
-    /// SentFeedback's doc comment for why this can't just come from the
-    /// server. Recorded by recordSentFeedback(_:date:) at the moment a send
-    /// succeeds; never trimmed, since feedback volume per device is tiny.
     @Published private(set) var sentFeedback: [SentFeedback] = []
 
     private static let forceProKey = "clipen.pro.forcePro"
@@ -85,11 +52,10 @@ final class ProGate: ObservableObject {
     }
 
     private static let defaultTrialDays = 7
-    private static let baseURL = URL(string: "https://clipen-backend.onrender.com")!
+    // Shared with TrackingService (AuthManager.swift) — same backend host,
+    // previously a second copy-pasted URL literal.
+    private static let baseURL = TrackingService.baseURL
 
-    /// `object(forKey:) != nil` (not just `integer(forKey:) > 0`) so that a
-    /// genuine, real "0 days left" from the server stays 0 across relaunch —
-    /// collapsing it back to the default would silently re-open the gate.
     private var cachedTrialDaysRemaining: Int {
         let d = UserDefaults.standard
         return d.object(forKey: Key.trialDaysRemaining) != nil
@@ -109,9 +75,6 @@ final class ProGate: ObservableObject {
         evaluate()
     }
 
-    /// Call the moment a feedback POST to /clipen/feedback succeeds — `date`
-    /// must be the exact same client_today value sent in that request, so
-    /// this entry lines up with the (date, index) the server files it under.
     func recordSentFeedback(_ message: String, date: String) {
         let entry = SentFeedback(date: date, message: message, sentAt: Date())
         sentFeedback.append(entry)
@@ -146,11 +109,6 @@ final class ProGate: ObservableObject {
         let feedback_replies: [FeedbackReply]?
     }
 
-    /// Below this, a second refresh() call is a no-op — protects against
-    /// rapidly flipping between Dashboard/Settings (each Settings-tab visit
-    /// now triggers one, see MainWindowView's toolbarSwitcher) or opening
-    /// several popups in quick succession from hammering the endpoint with
-    /// duplicate requests for data that hasn't had time to change anyway.
     private static let minRefreshInterval: TimeInterval = 15
     private var lastRefreshAt: Date?
 
@@ -188,10 +146,17 @@ final class ProGate: ObservableObject {
                 d.set(repliesData, forKey: Key.feedbackReplies)
             }
 
+            // Mirrored to PostHog alongside the existing Firebase event —
+            // previously Firebase-only, which meant these two,
+            // business-critical, paywall-conversion-funnel events never
+            // showed up in PostHog's dashboards at all. Firing condition
+            // deliberately left exactly as Firebase's already was here.
             if result.pro {
                 Analytics.logEvent("pro_unlocked", parameters: nil)
+                PostHogTracking.capture("pro_unlocked")
             } else if result.paywall {
                 Analytics.logEvent("paywall_gated", parameters: nil)
+                PostHogTracking.capture("paywall_gated")
             }
 
             Analytics.setUserProperty(result.pro ? "pro" : "free", forName: "plan")

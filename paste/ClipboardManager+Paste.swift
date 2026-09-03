@@ -88,6 +88,9 @@ extension ClipboardManager {
         recordPaste(itemID: itemID,
                     appName: dest.localizedName,
                     bundleID: dest.bundleIdentifier)
+        if let destName = dest.localizedName ?? dest.bundleIdentifier {
+            AuthManager.shared.registerActionUsage(actionID: "action.paste-to-app", value: destName)
+        }
     }
 
     func recordPaste(itemID: UUID, appName: String?, bundleID: String?) {
@@ -113,28 +116,10 @@ extension ClipboardManager {
         return capturedPasteTarget ?? NSWorkspace.shared.frontmostApplication
     }
 
-    /// Calls `completion(true)` only when `target` is genuinely frontmost and
-    /// it is therefore safe to post keystrokes at it. `completion(false)`
-    /// means activation could not be confirmed and the caller must NOT
-    /// paste.
-    ///
-    /// The previous version took no argument and fired unconditionally on
-    /// timeout, which turned a *slow* activation into a paste delivered to
-    /// whatever window happened to be frontmost instead. That is the
-    /// multi-monitor "pasted into the wrong window" report: activating an
-    /// app on another display can trigger a Space switch that comfortably
-    /// exceeds the old 350ms budget. A paste that doesn't happen is
-    /// recoverable — one into the wrong app is not, and can spill clipboard
-    /// contents somewhere the user never intended.
     func activateAndWaitIfNeeded(_ target: NSRunningApplication?, completion: @escaping (Bool) -> Void) {
-        // No specific target means "paste wherever we already are", which is
-        // the caller's intent rather than a failure.
+
         guard let target else { completion(true); return }
-        // A dead target can never come frontmost: activate() no-ops, the
-        // notification never arrives, and we would sit out the whole timeout
-        // before pasting somewhere wrong. capturedPasteTarget is set once
-        // when the popup opens and never cleared, so this is reachable
-        // whenever the source app quit mid-session.
+
         guard !target.isTerminated else { completion(false); return }
         guard NSWorkspace.shared.frontmostApplication != target else { completion(true); return }
 
@@ -155,11 +140,7 @@ extension ClipboardManager {
                   app.processIdentifier == target.processIdentifier else { return }
             finish(true)
         }
-        // 700ms, not 350ms: a cross-display activation that also switches
-        // Spaces regularly needs more than a third of a second, and the old
-        // budget was expiring during exactly the scenario being reported.
-        // On expiry, check the real state rather than assuming — the
-        // notification can be missed even when activation did land.
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
             finish(NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier)
         }
@@ -167,17 +148,11 @@ extension ClipboardManager {
         target.activate(options: [])
     }
 
-    /// Last line of defence, read immediately before any synthetic keystroke
-    /// is posted. Activation can be confirmed and then lost in the gap before
-    /// the keys go out (the user clicks elsewhere, another app steals focus),
-    /// so the check that matters is the one taken at the moment of posting.
     func isSafeToPaste(into target: NSRunningApplication?) -> Bool {
         guard let target else { return true }
         return NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
     }
 
-    /// Shared bail-out so every paste path reports the same thing and always
-    /// releases its simulation token.
     func abortPaste(token: Int, reason: String = "") {
         endPasteSimulation(token: token)
         flashStatus(String(localized: "Paste cancelled — the target window wasn't ready."))
@@ -205,14 +180,6 @@ extension ClipboardManager {
         AuthManager.shared.registerCommandVAction()
     }
 
-    /// `countsAsFastPaste`, when true, means the caller (fastPasteFront)
-    /// already recorded its own registerFastPasteAction() signal for this
-    /// exact paste — every registerCommandVAction() this call would
-    /// otherwise trigger downstream is suppressed so the same physical
-    /// paste doesn't increment both `fast_paste` and `paste` at once. Found
-    /// by tracing the call chain: fastPasteFront -> commitPaste ->
-    /// simulatePaste unconditionally called registerCommandVAction() with
-    /// no awareness that fastPasteFront had already counted the action.
     func commitPaste(countsAsFastPaste: Bool = false) {
         if inShareStage {
             commitShare()
@@ -248,9 +215,6 @@ extension ClipboardManager {
         }
         captureRememberedSelection()
 
-        // Paste ONLY the highlighted field's value. Routed through the
-        // same result path Transform uses for derived text, so restoring
-        // the original clipboard afterwards behaves identically.
         if inDetailsStage {
             guard displayItems.indices.contains(selectedIndex),
                   detailUnits.indices.contains(detailsIndex) else {
@@ -259,13 +223,6 @@ extension ClipboardManager {
             let source = displayItems[selectedIndex]
             let order  = unifiedMarkOrder()
 
-            // Anything marked — rows in the main list AND units here —
-            // pastes together in one go, in the order it was marked. Unit
-            // values become plain-text items so the existing multi-paste
-            // path handles the mix, rather than this panel growing a second,
-            // parallel paste implementation. A marked GROUP contributes its
-            // `pasteText` — every sub-field joined as readable lines — as
-            // one single item, not one item per sub-field.
             if !order.items.isEmpty || !order.fields.isEmpty {
                 var ranked: [(rank: Int, item: ClipboardItem)] = []
                 let byID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
@@ -288,12 +245,6 @@ extension ClipboardManager {
                 return
             }
 
-            // Nothing marked anywhere — paste the unit under the cursor.
-            // Re-checked here, redundantly with the guard above: this
-            // crashed once in production (index out of range on this exact
-            // subscript) despite that guard, and re-deriving the unit
-            // fresh removes any possible doubt rather than trusting state
-            // captured several lines earlier hasn't shifted underneath it.
             guard detailUnits.indices.contains(detailsIndex) else {
                 setSidePanelStage(.none)
                 previewWindow.hide()
@@ -325,15 +276,7 @@ extension ClipboardManager {
                 }
                 await MainActor.run {
                     self.updateTransformPanelProcessing(false)
-                    // If the popup was dismissed (or moved past this stage)
-                    // while the transform was still running, `capturedPasteTarget`
-                    // — set once when the popup opened and never cleared — may now
-                    // be stale or may have been silently overwritten by a newer,
-                    // unrelated popup session the user opened in the meantime.
-                    // Pasting at this point would land in whatever app that stale
-                    // target now resolves to, not the one this transform was
-                    // actually meant for. Same guard the single-item async
-                    // transform path already uses correctly.
+
                     guard self.previewWindow.isVisible, self.inTransformStage, self.transformingMarkedSet else {
                         return
                     }
@@ -431,10 +374,16 @@ extension ClipboardManager {
                 return
             }
             let pasteTarget = resolvedPasteTarget()
+            let markedPositions = orderedItems.compactMap { displayOrder[$0.id] }
             previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
             commitMultiPaste(orderedItems, target: pasteTarget,
                               nudgeKind: orderedItems.count > 1 ? .multiMarked : .single)
-            if !countsAsFastPaste { AuthManager.shared.registerCommandVAction() }
+            if !countsAsFastPaste {
+                AuthManager.shared.registerCommandVAction(
+                    position: markedPositions.first,
+                    markedCount: orderedItems.count > 1 ? orderedItems.count : nil,
+                    markedPositions: orderedItems.count > 1 ? markedPositions : nil)
+            }
             return
         }
 
@@ -448,63 +397,42 @@ extension ClipboardManager {
             return
         }
         pendingPasteItemID = nil
-        recordPasteAnalytics(item: item,
-                             displayIndex: displayItems.firstIndex(where: { $0.id == item.id }))
+        let position = displayItems.firstIndex(where: { $0.id == item.id })
+        recordPasteAnalytics(item: item, displayIndex: position)
         let pasteTarget = resolvedPasteTarget()
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
 
         if case .group(let children) = item.content {
             commitMultiPaste(children, target: pasteTarget, nudgeKind: .group)
-            if !countsAsFastPaste { AuthManager.shared.registerCommandVAction() }
+            if !countsAsFastPaste { AuthManager.shared.registerCommandVAction(position: position) }
             selectedIndex = 0; cycleCount = 0
             return
         }
 
         recordNudgePaste(kind: .single)
-        simulatePaste(item, target: pasteTarget, countsAsRegularPaste: !countsAsFastPaste) { [weak self] in
+        simulatePaste(item, target: pasteTarget, countsAsRegularPaste: !countsAsFastPaste, position: position) { [weak self] in
             self?.selectedIndex = 0
             self?.cycleCount    = 0
         }
     }
 
-    func recordPasteAnalytics(item: ClipboardItem, displayIndex: Int?) {
-        if let idx = displayIndex, idx >= 0 {
-            TrackingService.shared.recordPastePosition(idx)
-        }
-    }
+    /// Retained as a call-site marker for "an item was pasted from this
+    /// display position" — the position itself now travels with the actual
+    /// "paste" event (see `registerCommandVAction(position:)`/`simulatePaste`)
+    /// so it lands on the SAME PostHog event rather than a second, silent one.
+    func recordPasteAnalytics(item: ClipboardItem, displayIndex: Int?) {}
 
-    /// `countsAsRegularPaste`, when false, means the caller already recorded
-    /// its own usage signal for this exact paste (see commitPaste's
-    /// countsAsFastPaste) — skips both registerCommandVAction() sites below
-    /// so the same physical paste is never counted twice under two
-    /// different metric names.
     func simulatePaste(_ item: ClipboardItem, target: NSRunningApplication?,
                               countsAsRegularPaste: Bool = true,
+                              position: Int? = nil,
                               completion: (() -> Void)? = nil) {
 
         guard ProGate.shared.isUnlocked else { completion?(); return }
 
-        // A copy macOS never let us read. We hold no bytes for it, so there
-        // is nothing to write — the only copy that ever existed is the one
-        // still sitting on the system pasteboard. Leave that pasteboard
-        // completely untouched and let a plain Cmd+V deliver it.
-        //
-        // Only valid while that content is still the live pasteboard
-        // content: once anything else has been copied (or Clipen itself has
-        // pasted, which rewrites the pasteboard and bumps the same counter),
-        // the original is gone and a system paste would silently deliver
-        // whatever replaced it — the wrong data, into whatever app is
-        // focused, with no indication anything went wrong. Refuse instead.
         if item.isUncaptured {
             guard let stamped = item.uncapturedChangeCount,
                   stamped == NSPasteboard.general.changeCount else {
-                // flashStatus renders inside the big Dashboard/Settings
-                // window (MainWindowView), which is almost never what's
-                // focused right after a paste — the user is looking at
-                // whatever app they just pasted into. CopyFeedbackPanel is
-                // the floating badge built for exactly this moment (already
-                // used for "excluded from copying"), visible regardless of
-                // which app is frontmost.
+
                 CopyFeedbackPanel.shared.show(message: String(localized: "That copy is no longer on the clipboard"))
                 completion?()
                 return
@@ -517,9 +445,7 @@ extension ClipboardManager {
                 guard ok, self.isSafeToPaste(into: target) else {
                     self.abortPaste(token: token); completion?(); return
                 }
-                // Always the keystroke path, never injectCharacters: there is
-                // no stored text to type, and the whole point is to let the
-                // system's own paste read the pasteboard we didn't touch.
+
                 let src  = CGEventSource(stateID: .combinedSessionState)
                 let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
                 let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
@@ -572,15 +498,15 @@ extension ClipboardManager {
                 }
             }
         }
-        if countsAsRegularPaste { AuthManager.shared.registerCommandVAction() }
+        if countsAsRegularPaste { AuthManager.shared.registerCommandVAction(position: position) }
     }
 
     func pasteItemKeepingPopupOpen(id: UUID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
-        recordPasteAnalytics(item: item,
-                             displayIndex: displayItems.firstIndex(where: { $0.id == id }))
+        let position = displayItems.firstIndex(where: { $0.id == id })
+        recordPasteAnalytics(item: item, displayIndex: position)
         recordNudgePaste(kind: .single)
-        simulatePaste(item, target: resolvedPasteTarget())
+        simulatePaste(item, target: resolvedPasteTarget(), position: position)
     }
 
     func commitMultiPaste(_ itemList: [ClipboardItem], target: NSRunningApplication?,
@@ -601,12 +527,7 @@ extension ClipboardManager {
         popupSessionPasted = true
         finalizePopupOutcome()
         recordPasteAnalytics(item: itemList[0], displayIndex: nil)
-        // How many marked items landed in one paste — previously invisible:
-        // this whole path only ever bumped the same flat cmd_v counter a
-        // single-item paste does, so a 5-item multi-paste and five separate
-        // pastes were indistinguishable in the data. `itemList.count == 1`
-        // (a single marked item pasted through this path rather than the
-        // plain paste path) isn't a "multi" paste, so it's excluded here.
+
         if itemList.count > 1 {
             TrackingService.shared.recordMarkedBatch(id: "multi_paste", size: itemList.count)
         }
@@ -622,9 +543,7 @@ extension ClipboardManager {
 
         activateAndWaitIfNeeded(target) { [weak self] ok in
             guard let self else { return }
-            // Aborting here also drops `remaining`, which is deliberate: a
-            // multi-paste that continued into the wrong window would spill
-            // every remaining item there, not just one.
+
             guard ok, self.isSafeToPaste(into: target) else { self.abortPaste(token: token); return }
             if let text = self.extractTextForInjection(from: item),
                text.count <= Self.maxInjectionLength,
@@ -682,9 +601,7 @@ extension ClipboardManager {
         if plainOnly {
             switch item.content {
             case .richText, .rtfd, .html:
-                // Only `.string`, and no sidecar — any other representation
-                // left on the pasteboard is one the target app can prefer
-                // over the plain text, which defeats the whole toggle.
+
                 let pitem = NSPasteboardItem()
                 let text = TableCellExtractor.pureText(for: item)
                     ?? item.content.plainText
@@ -839,10 +756,10 @@ extension ClipboardManager {
     func pasteItem(at itemsIndex: Int) {
         guard items.indices.contains(itemsIndex) else { return }
         let item = items[itemsIndex]
-        recordPasteAnalytics(item: item,
-                             displayIndex: displayItems.firstIndex(where: { $0.id == item.id }))
+        let position = displayItems.firstIndex(where: { $0.id == item.id })
+        recordPasteAnalytics(item: item, displayIndex: position)
         recordNudgePaste(kind: .single)
-        simulatePaste(item, target: resolvedPasteTarget())
+        simulatePaste(item, target: resolvedPasteTarget(), position: position)
     }
 
 }

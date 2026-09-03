@@ -1,17 +1,10 @@
 import SwiftUI
 
-/// A parsed JSON value that keeps object key order — `JSONSerialization`
-/// returns `[String: Any]` for objects, and `Dictionary` has no defined
-/// iteration order, so going through it would visually scramble the
-/// structure the AI prompt deliberately ordered (see AIStructuring.swift's
-/// "DESIGN THE JSON STRUCTURE ON PURPOSE" section). A small hand-rolled
-/// parser is simpler than fighting JSONSerialization for something it was
-/// never designed to preserve.
 indirect enum JSONValue {
     case object([(key: String, value: JSONValue)])
     case array([JSONValue])
     case string(String)
-    case number(String)   // kept as raw source text — reformatting through Double would mangle large IDs/precision
+    case number(String)
     case bool(Bool)
     case null
 
@@ -65,7 +58,7 @@ private struct JSONTreeParser {
     }
 
     private mutating func parseObject() -> JSONValue? {
-        i += 1 // {
+        i += 1
         var pairs: [(String, JSONValue)] = []
         skipWhitespace()
         if peek() == "}" { i += 1; return .object(pairs) }
@@ -86,7 +79,7 @@ private struct JSONTreeParser {
     }
 
     private mutating func parseArray() -> JSONValue? {
-        i += 1 // [
+        i += 1
         var items: [JSONValue] = []
         skipWhitespace()
         if peek() == "]" { i += 1; return .array(items) }
@@ -141,10 +134,6 @@ private struct JSONTreeParser {
     }
 }
 
-/// Renders a parsed JSON value as an indented tree — the visual counterpart
-/// to `AIFactIndex.groupedFlatten`'s hierarchy for the Details popup, but
-/// full-depth and un-collapsed since this card has real room to show it,
-/// unlike the fixed-size popup.
 struct JSONTreeView: View {
     let json: String
 
@@ -155,9 +144,7 @@ struct JSONTreeView: View {
             }
             .padding(12)
         } else {
-            // Malformed JSON should never reach here in practice (the
-            // prompt requires valid output), but a raw fallback beats a
-            // blank card if it ever does.
+
             Text(json)
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.textPri)
@@ -201,9 +188,7 @@ private struct JSONNodeView: View {
                 if let key {
                     keyLabel(key)
                 }
-                // A scalar array reads as one line ("a, b, c") — matches
-                // how the Details popup and fact chips already treat these,
-                // so the same data looks the same everywhere in the app.
+
                 if let joined = Self.scalarArrayJoined(items) {
                     Text(joined)
                         .font(.system(size: 12))
@@ -263,10 +248,6 @@ private struct JSONNodeView: View {
         }
     }
 
-    /// "andia_de_das_plot_no" -> "andia de das plot no", array indices
-    /// ("#3") pass through untouched — matches the same underscore-to-space
-    /// convention `AIFactIndex.flatten` already uses, so a value reads the
-    /// same whether you're seeing it here or in the Details popup.
     private static func displayKey(_ key: String) -> String {
         key.hasPrefix("#") ? key : key.replacingOccurrences(of: "_", with: " ").uppercased()
     }

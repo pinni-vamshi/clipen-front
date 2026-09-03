@@ -284,6 +284,21 @@ enum ExtractableEntityDetector {
 enum ChunkSplitter {
     static let targetSize = 200
 
+    // Overlapping windows, not disjoint ones. Several detector patterns
+    // (a labeled field, a money amount, a date, an address) span several
+    // whitespace-separated words — only single-token splits were ever
+    // protected here. A disjoint 200-char cut could still land in the
+    // middle of one of these multi-word spans, tearing it across two
+    // chunks; since scoring takes each chunk's regex/detector matches
+    // independently and a torn span matches in neither half, that signal
+    // was silently worth zero regardless of how important it was. A
+    // 50%-overlap stride guarantees any span up to `stride` characters is
+    // fully contained within at least one window. Because scoring only
+    // ever takes the single best chunk (never sums across chunks), the
+    // extra overlapping windows can only help the score find its true max,
+    // never inflate it.
+    static let stride = targetSize / 2
+
     static func chunks(of text: String, targetSize: Int = Self.targetSize) -> [Substring] {
         guard text.count > targetSize else { return [Substring(text)] }
         var result: [Substring] = []
@@ -294,7 +309,10 @@ enum ChunkSplitter {
                 end = text.index(after: end)
             }
             result.append(text[start..<end])
-            start = end
+            if end == text.endIndex { break }
+            guard let nextStart = text.index(start, offsetBy: Self.stride, limitedBy: text.endIndex),
+                  nextStart > start else { break }
+            start = nextStart
         }
         return result
     }

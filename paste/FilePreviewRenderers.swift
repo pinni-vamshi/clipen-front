@@ -407,34 +407,6 @@ struct Model3DPreview: NSViewRepresentable {
     }
 }
 
-struct AnimatedImageView: NSViewRepresentable {
-    let data: Data
-
-    func makeNSView(context: Context) -> NSImageView {
-        let view = NSImageView()
-        view.image = NSImage(data: data)
-        view.animates = true
-        view.imageScaling = .scaleProportionallyUpOrDown
-        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        context.coordinator.lastDataCount = data.count
-        return view
-    }
-
-    func updateNSView(_ view: NSImageView, context: Context) {
-        guard context.coordinator.lastDataCount != data.count else { return }
-        context.coordinator.lastDataCount = data.count
-        view.image = NSImage(data: data)
-        view.animates = true
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    final class Coordinator {
-        var lastDataCount: Int = -1
-    }
-}
-
 private struct HTMLFilePreview: NSViewRepresentable {
     let url: URL
 
@@ -457,11 +429,6 @@ private struct HTMLFilePreview: NSViewRepresentable {
         }
     }
 
-    // Unlike WebsitePreview's WKWebView, this one is a fresh instance per
-    // preview (not pooled), but nothing was stopping a video/audio embed
-    // inside the loaded file/webarchive from continuing to play once the
-    // preview was dismissed — same bug class, just on local content instead
-    // of a live YouTube link.
     static func dismantleNSView(_ view: WKWebView, coordinator: ()) {
         view.pauseAllMediaPlayback(completionHandler: nil)
     }
@@ -685,12 +652,7 @@ struct HTMLStringPreview: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
-        // One WKWebView per preview instance, not a single shared/"pooled"
-        // one — a single instance can only ever be attached to one preview
-        // at a time, so any second simultaneously-visible HTML item (a very
-        // normal thing to hit scrolling a history full of web copies) came
-        // up blank, having been silently detached out from under it by the
-        // next preview's makeNSView call.
+
         let view = WKWebView()
         view.setValue(false, forKey: "drawsBackground")
         view.allowsMagnification = true
@@ -706,13 +668,7 @@ struct HTMLStringPreview: NSViewRepresentable {
     }
 
     private func loadHTML(_ view: WKWebView) {
-        // Borders and width:100% on every cell are right for a data table and
-        // catastrophic for anything else. Every HTML email is built out of
-        // deeply nested layout tables, so applying them unconditionally drew
-        // a box around every structural cell and stretched each nested table
-        // to full width — turning a designed email into a wireframe of empty
-        // boxes that looked nothing like the source. Only style tables that
-        // are actually tabular data.
+
         let tableCSS = TableCellExtractor.htmlIsDataTable(html) ? """
             table {
                 border-collapse: collapse;
@@ -738,19 +694,6 @@ struct HTMLStringPreview: NSViewRepresentable {
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             :root {
-                // Deliberately `only light`, not `light dark`: this preview
-                // renders arbitrary third-party HTML the user copied (emails,
-                // web content), not UI Clipen designed itself. `light dark`
-                // lets WebKit substitute its own default text/background
-                // colors depending on the *app's* current appearance for any
-                // element the source HTML left unstyled — but the source's
-                // OWN explicit colors (e.g. a background the email set) never
-                // change with it. When Clipen is in dark mode those two land
-                // on opposite sides: WebKit's substituted default text turns
-                // white while an explicitly-set white background stays white,
-                // producing invisible white-on-white text. Pinning to light
-                // keeps every fallback color matched to what the content's
-                // own explicit colors were almost certainly authored against.
                 color-scheme: only light;
             }
             body {
@@ -771,10 +714,6 @@ struct HTMLStringPreview: NSViewRepresentable {
         view.loadHTMLString(styledHTML, baseURL: nil)
     }
 
-    // Same reasoning as HTMLFilePreview/WebsitePreview: HTML clipboard
-    // content (a copied webpage fragment, an email with an embedded
-    // iframe/video) can contain playing media, and nothing was stopping it
-    // when this preview was dismissed.
     static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
         view.pauseAllMediaPlayback(completionHandler: nil)
     }

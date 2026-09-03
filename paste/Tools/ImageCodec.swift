@@ -25,7 +25,14 @@ enum ImageService {
         let label: String
     }
 
-    private static let inputCache = RecentItemCache<ImageInput>(capacity: 5)
+    // Capacity 5 against a ring that can hold hundreds of items meant
+    // previewing a Transform-panel tool on a 6th distinct image in one
+    // browsing session already evicted the 1st, forcing a full re-decode of
+    // its bytes on return — silent, invisible re-work with no correctness
+    // impact, just wasted CPU. Kept modest (not bumped as high as
+    // ToolRegistry's cache) since each entry holds full image bytes + a
+    // decoded NSImage, not just small metadata.
+    private static let inputCache = RecentItemCache<ImageInput>(capacity: 10)
 
     static func imageInput(for item: ClipboardItem) -> ImageInput? {
         if let cached = inputCache.value(for: item.id) { return cached }
@@ -157,11 +164,23 @@ enum ImageService {
                     best = ImageCandidate(data: data, image: image, dataType: targetType, label: label)
                 }
 
+                // Rasterize the source image into a CGImage ONCE per format
+                // family, not once per quality level tried — encodeJPEG/
+                // encodeWebP/encodeHEIC each used to redraw the full source
+                // image into a fresh CGContext on every call, so a 3-level
+                // JPEG ladder redrew the same source image three times
+                // before compressing it three times. The rasterization
+                // result is identical across quality levels (only the
+                // compression pass differs), so it only needs computing once
+                // per format here and reusing across the ladder.
+                let (sourcePW, sourcePH) = pixelDimensions(of: input.image)
+                let sharedSourceCG = rgbaCGImage(from: input.image, pixelWidth: sourcePW, pixelHeight: sourcePH)
+
                 switch kind {
                 case .jpeg:
                     for (q, label) in [(CGFloat(0.82), "JPEG 82%"), (CGFloat(0.70), "JPEG 70%"), (CGFloat(0.58), "JPEG 58%")] {
                         autoreleasepool {
-                            if let (data, img) = encodeJPEG(image: input.image, quality: q) {
+                            if let (data, img) = encodeJPEG(image: input.image, quality: q, precomputedCG: sharedSourceCG) {
                                 consider(data, image: img, label: label)
                             }
                         }
@@ -174,7 +193,7 @@ enum ImageService {
                     let encoder = WebPEncoder()
                     for (q, label) in [(Float(80), "WebP 80%"), (Float(70), "WebP 70%"), (Float(60), "WebP 60%")] {
                         autoreleasepool {
-                            if let data = encodeWebP(image: input.image, quality: q, encoder: encoder),
+                            if let data = encodeWebP(image: input.image, quality: q, encoder: encoder, precomputedCG: sharedSourceCG),
                                let img = decodeWebP(data: data) {
                                 consider(data, image: img, label: label)
                             }
@@ -183,7 +202,7 @@ enum ImageService {
                 case .heic:
                     for (q, label) in [(CGFloat(0.85), "HEIC 85%"), (CGFloat(0.70), "HEIC 70%")] {
                         autoreleasepool {
-                            if let (data, img) = encodeHEIC(image: input.image, quality: q) {
+                            if let (data, img) = encodeHEIC(image: input.image, quality: q, precomputedCG: sharedSourceCG) {
                                 consider(data, image: img, label: label)
                             }
                         }
@@ -373,10 +392,17 @@ enum ImageService {
         quality: Float,
         encoder: WebPEncoder,
         width: Int = 0,
-        height: Int = 0
+        height: Int = 0,
+        precomputedCG: CGImage? = nil
     ) -> Data? {
-        let (pixelWidth, pixelHeight) = pixelDimensions(of: image)
-        guard let cgImage = rgbaCGImage(from: image, pixelWidth: pixelWidth, pixelHeight: pixelHeight) else {
+        let cgImage: CGImage?
+        if let precomputedCG {
+            cgImage = precomputedCG
+        } else {
+            let (pixelWidth, pixelHeight) = pixelDimensions(of: image)
+            cgImage = rgbaCGImage(from: image, pixelWidth: pixelWidth, pixelHeight: pixelHeight)
+        }
+        guard let cgImage else {
             return nil
         }
         return try? encoder.encode(
@@ -395,9 +421,15 @@ enum ImageService {
         return (data, out)
     }
 
-    private static func encodeJPEG(image: NSImage, quality: CGFloat) -> (Data, NSImage)? {
-        let (pw, ph) = pixelDimensions(of: image)
-        guard let cg = rgbaCGImage(from: image, pixelWidth: pw, pixelHeight: ph),
+    private static func encodeJPEG(image: NSImage, quality: CGFloat, precomputedCG: CGImage? = nil) -> (Data, NSImage)? {
+        let cg: CGImage?
+        if let precomputedCG {
+            cg = precomputedCG
+        } else {
+            let (pw, ph) = pixelDimensions(of: image)
+            cg = rgbaCGImage(from: image, pixelWidth: pw, pixelHeight: ph)
+        }
+        guard let cg,
               let data = jpegData(from: cg, quality: quality),
               let out = NSImage(data: data) else { return nil }
         return (data, out)
@@ -415,9 +447,15 @@ enum ImageService {
         )
     }
 
-    private static func encodeHEIC(image: NSImage, quality: CGFloat) -> (Data, NSImage)? {
-        let (pw, ph) = pixelDimensions(of: image)
-        guard let cg = rgbaCGImage(from: image, pixelWidth: pw, pixelHeight: ph),
+    private static func encodeHEIC(image: NSImage, quality: CGFloat, precomputedCG: CGImage? = nil) -> (Data, NSImage)? {
+        let cg: CGImage?
+        if let precomputedCG {
+            cg = precomputedCG
+        } else {
+            let (pw, ph) = pixelDimensions(of: image)
+            cg = rgbaCGImage(from: image, pixelWidth: pw, pixelHeight: ph)
+        }
+        guard let cg,
               let data = heicData(from: cg, quality: quality),
               let out = NSImage(data: data) else { return nil }
         return (data, out)

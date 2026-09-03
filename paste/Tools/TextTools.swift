@@ -180,53 +180,17 @@ enum TextTools {
         }
     }
 
-    // Checked against a real rendering — an actually-parsed NSAttributedString
-    // — rather than guessed from source markup, so this one function serves
-    // both .richText/.rtfd (already real NSAttributedString) and .html (parsed
-    // into one below) with identical, reliable logic. Broadened past
-    // bold/italic/underline/strikethrough/link/attachment/backgroundColor to
-    // also catch foregroundColor (colored, non-default text was previously
-    // invisible to this check entirely), paragraph-level formatting (
-    // alignment, indentation, line spacing — e.g. a centered or indented
-    // quote), kerning, baseline offset (super/subscript), a text shadow, and
-    // stroke width (outlined text). Errs toward over-detecting rather than
-    // under: offering "Paste as Plain Text" when it turns out not to matter
-    // costs nothing, while silently withholding it on real formatting is
-    // exactly the reported bug.
     private static func hasRealFormatting(_ attr: NSAttributedString) -> Bool {
         guard attr.length > 0 else { return false }
         var found = false
-        // Distinct (family, rounded point size) combinations seen across the
-        // run. A single uniform font/size never gets flagged by this alone —
-        // that would be far too aggressive (most plain pastes land in one
-        // consistent font) — but MULTIPLE combinations in one paste (a
-        // heading sized differently from its body, an inline term in a
-        // different family) is a reliable, low-false-positive signal that
-        // the old checks (which only ever looked at bold/italic traits, not
-        // family or size at all) completely missed.
+
         var fontSignatures = Set<String>()
         attr.enumerateAttributes(in: NSRange(location: 0, length: attr.length)) { attrs, _, stop in
             if let font = attrs[.font] as? NSFont {
                 let traits = font.fontDescriptor.symbolicTraits
                 if traits.contains(.bold) || traits.contains(.italic)
                     || traits.contains(.condensed) || traits.contains(.expanded) { found = true }
-                // A whole paste sitting in ONE deliberately-chosen font
-                // (Georgia, a brand/body face, Comic Sans) with no
-                // bold/italic/color anywhere used to slip through entirely
-                // — fontSignatures.count > 1 only ever caught MULTIPLE
-                // fonts in one paste, never "the source app locked this to
-                // a specific typeface throughout." Excluded here, in
-                // addition to the system UI font, are the two fonts
-                // AppKit/RTF fall back to when NO font was ever explicitly
-                // chosen: Times (the default for unstyled imported HTML,
-                // confirmed directly — a <p> with zero CSS parses to
-                // Times-Roman 12pt) and Helvetica (the default plain-text
-                // font in TextEdit/Mail/Notes compose fields). Without this
-                // exclusion, Pure Paste would appear on nearly every
-                // rich-text/HTML capture regardless of whether it carries
-                // any real styling, since those two are what "nothing was
-                // ever set" looks like in practice — not a deliberate
-                // choice by whoever wrote the source content.
+
                 let genuinelyDefaultFamilies: Set<String> = [".AppleSystemUIFont", "Times", "Helvetica"]
                 if !genuinelyDefaultFamilies.contains(font.familyName ?? "") { found = true }
                 fontSignatures.insert("\(font.familyName ?? font.fontName)@\(Int(font.pointSize.rounded()))")
@@ -248,14 +212,9 @@ enum TextTools {
                 if paragraph.alignment != .natural && paragraph.alignment != .left { found = true }
                 if paragraph.firstLineHeadIndent != 0 || paragraph.headIndent != 0 { found = true }
                 if paragraph.lineSpacing != 0 || paragraph.paragraphSpacing != 0 { found = true }
-                // paragraphSpacing (space AFTER) was already checked above;
-                // paragraphSpacingBefore is a distinct NSParagraphStyle field
-                // for space BEFORE a paragraph and was silently uncovered.
+
                 if paragraph.paragraphSpacingBefore != 0 { found = true }
-                // Line-height variants: a document that varies only these
-                // (common from DTP-style apps) had nothing above that would
-                // ever catch it — alignment/indent/spacing/lists/tabs all
-                // stay at their defaults in that case.
+
                 if paragraph.lineHeightMultiple != 0 { found = true }
                 if paragraph.minimumLineHeight != 0 || paragraph.maximumLineHeight != 0 { found = true }
                 if !paragraph.textLists.isEmpty { found = true }
@@ -266,17 +225,6 @@ enum TextTools {
         return found || fontSignatures.count > 1
     }
 
-    // Two independent signals, either one sufficient: a widened marker list
-    // (a fast, cheap first pass — now covering far more of what real web/app
-    // HTML actually uses, not just the handful of tags the original list
-    // had) OR-ed with actually parsing the markup into an NSAttributedString
-    // and running the exact same real-attribute check the rich-text and RTFD
-    // paths already use. The marker list alone previously missed anything
-    // styled only through font-family, font-size, alignment, indentation,
-    // letter-spacing, or CSS classes resolved via a <style> block — all
-    // common on ordinary websites — which is what made this option
-    // disappear unpredictably. The parse-and-inspect signal closes that gap
-    // structurally instead of chasing more substrings one at a time.
     private static func htmlHasRealFormatting(_ html: String) -> Bool {
         let lower = html.lowercased()
         let markers = [
@@ -290,10 +238,7 @@ enum TextTools {
             "letter-spacing", "line-height", "vertical-align",
             "color:", "background-color", "background:", "border",
             "padding", "margin", " style=",
-            // AppKit's HTML importer doesn't reliably translate text-shadow
-            // into an NSShadow attribute, so the second signal (parse into
-            // NSAttributedString, inspect real attributes) can't be trusted
-            // to catch it — this marker is the only backstop for it.
+
             "text-shadow",
         ]
         if markers.contains(where: { lower.contains($0) }) { return true }
@@ -325,8 +270,7 @@ enum TextTools {
     }
 
     private static func plainOutput(for item: ClipboardItem) -> TransformOutput? {
-        // Returns `.text`, never `.item(.html(...))` — this tool used to hand
-        // back a rebuilt HTML table, so "Paste as Plain Text" pasted markup.
+
         guard let plain = TableCellExtractor.pureText(for: item)
                 ?? pastePlainEligibleText(for: item) else { return nil }
         return .text(plain)

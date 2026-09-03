@@ -111,13 +111,6 @@ enum AppContextService {
         raw.components(separatedBy: "\u{1E}").filter { !$0.isEmpty }
     }
 
-    /// Combined form of `currentContext(for:)` + `allTabTexts(for:)` for
-    /// callers that need both — one AppleScript round-trip to the target
-    /// app instead of two. Each Apple Event to Safari/Chrome/Finder costs
-    /// real IPC time that scales with window/tab count, and the front tab
-    /// context is already contained within the full tab list, so issuing
-    /// both scripts back-to-back on every app switch was paying that cost
-    /// twice for data the second call already had.
     private static let combinedJoinScript = "set AppleScript's text item delimiters to (ASCII character 30)\n"
         + "set joined to out as text\n"
         + "return front & (ASCII character 31) & joined"

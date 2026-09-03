@@ -15,14 +15,6 @@ private final class DragHandleNSView: NSView {
     }
 }
 
-/// Like `WindowDragHandle`, but tracks the drag manually instead of handing
-/// it to `performDrag` — that call blocks until mouseUp with no way to hook
-/// a "drag ended" moment, which is exactly what's needed to snap the
-/// collapsed badge back to its nearest edge on release. Also resolves
-/// click-vs-drag itself (via `onClick`) rather than pairing this NSView with
-/// a sibling SwiftUI `.onTapGesture` — a SwiftUI gesture recognizer on the
-/// same view consumes mouseDown before it ever reaches this view's own
-/// mouseDown/mouseDragged tracking, which silently breaks dragging entirely.
 private struct SnappingDragHandle: NSViewRepresentable {
     let onDragEnd: () -> Void
     let onClick: () -> Void
@@ -94,11 +86,6 @@ final class ReferenceCarousel: ObservableObject {
     private var dismissedTags: Set<TagKey> = []
     private struct TagKey: Hashable { let pageID: UUID; let label: String }
 
-    // Apps the user explicitly unlinked via the tag's X button — kept apart
-    // from ownership/ tags so automatic re-matching (app-affinity surface,
-    // async context attach) can never silently relink them. Only the
-    // explicit "link this app" action (the collapsed badge's named button,
-    // via `linkCurrentPage`) is allowed to clear an entry here.
     private(set) var dismissedOwnerBundleIDs: [UUID: Set<String>] = [:]
 
     func isDismissed(bundleID: String, pageID: UUID) -> Bool {
@@ -140,11 +127,6 @@ final class ReferenceCarousel: ObservableObject {
         pageTags[pageID] = tags
         dismissedTags.insert(TagKey(pageID: pageID, label: removed.label))
 
-        // Removing an app tag doesn't just hide the chip — it actually
-        // unlinks the app, so this reference stops auto-surfacing for it,
-        // and blocks any automatic path (app-affinity match, async context
-        // attach) from silently relinking it. Only the explicit "link this
-        // app" button click clears the block.
         if removed.kind == .app, let bundleID = removed.bundleID {
             pageOwnerBundleIDs[pageID]?.remove(bundleID)
             dismissedOwnerBundleIDs[pageID, default: []].insert(bundleID)
@@ -212,8 +194,7 @@ final class ReferenceCarousel: ObservableObject {
     }
 
     func linkCurrentPage(toApp bundleID: String, context: String? = nil) {
-        // The one explicit "user manually added it back" path — clears any
-        // block a prior tag removal left behind, so the app can be relinked.
+
         dismissedOwnerBundleIDs[current.id]?.remove(bundleID)
         dismissedTags.remove(TagKey(pageID: current.id, label: Self.appDisplayName(for: bundleID)))
         pageOwnerBundleIDs[current.id, default: []].insert(bundleID)
@@ -221,13 +202,6 @@ final class ReferenceCarousel: ObservableObject {
         autoTag(pageID: current.id, bundleID: bundleID, context: context)
     }
 
-    /// Attaches a context fetched asynchronously (see
-    /// `ClipboardManager+Search.swift`'s `openQuickClipPanel`, which no
-    /// longer blocks the main thread on the AppleScript/AX round-trip
-    /// before creating the panel) to a specific page by id, rather than
-    /// `linkCurrentPage`'s "whatever is current right now" — the async
-    /// fetch can resolve after the user has already navigated to a
-    /// different page.
     func attachContext(_ context: String, toPage pageID: UUID, bundleID: String) {
         guard pages.contains(where: { $0.id == pageID }) else { return }
         guard !isDismissed(bundleID: bundleID, pageID: pageID) else { return }
@@ -378,15 +352,6 @@ class QuickClipPanel: NSPanel {
         shrinkToCornerBadge()
     }
 
-    /// Set when the user explicitly minimizes a panel that's linked to
-    /// whatever app is currently frontmost — without this, the very next
-    /// auto-surface re-check (fired by the click monitor on the click that
-    /// did the minimizing, or the poll timer) sees "app X is active, this
-    /// panel is owned by X" and immediately expands it right back, so a
-    /// manual minimize looked like it did nothing. Cleared the moment a
-    /// DIFFERENT app becomes frontmost — the "user's intent has genuinely
-    /// moved on" signal — so coming back to the same app later resurfaces
-    /// it normally again; see ClipboardManager.applyReferenceSurface.
     var manualCollapseBundleID: String?
 
     func minimize() {
@@ -403,9 +368,6 @@ class QuickClipPanel: NSPanel {
         }
     }
 
-    /// Shared by the auto-collapse path and the drag-release snap — both
-    /// need "which corner of this screen is closest to this point right
-    /// now," just starting from a different current frame.
     private func nearestCornerOrigin(for center: NSPoint, size: NSSize, screen: NSRect) -> NSPoint {
         let margin = Self.collapsedMargin
         let nearLeft   = center.x - screen.minX <= screen.maxX - center.x
@@ -430,10 +392,6 @@ class QuickClipPanel: NSPanel {
         animatedSetFrame(NSRect(origin: origin, size: size))
     }
 
-    /// Called on mouseUp after an actual drag of the collapsed badge (see
-    /// SnappingDragHandle) — glides it the rest of the way to whichever
-    /// corner of its current screen it ended up closest to, instead of
-    /// leaving it wherever the user's mouse happened to let go.
     func snapCollapsedToNearestEdge() {
         guard carousel.isCollapsed else { return }
         let screen = NSScreen.screens.first(where: { $0.frame.intersects(frame) })?.visibleFrame
@@ -443,22 +401,8 @@ class QuickClipPanel: NSPanel {
         animatedSetFrame(NSRect(origin: origin, size: size))
     }
 
-    /// Set when the user opens a collapsed badge by clicking its body (not
-    /// the named-app button) — an unlinked, "just let me peek" open. The
-    /// click monitor added for app-agnostic auto-surface re-checks fires on
-    /// EVERY click, including this one, and since the panel was never
-    /// linked to whatever app is frontmost, the very next re-check would
-    /// otherwise decide it doesn't belong here and collapse it right back —
-    /// the badge would open and instantly snap shut on its own click. This
-    /// keeps it open through same-app rechecks until the frontmost app
-    /// actually changes to something else; see the read/clear sites in
-    /// ClipboardManager.applyReferenceSurface.
     var manualExpandBundleID: String?
 
-    /// Opens the collapsed badge WITHOUT linking it to whatever app
-    /// triggered the collapse — clicking the badge's body (as opposed to
-    /// its named-app button) should just reopen the panel, not silently
-    /// attach it to an app the user never asked to link.
     func expand() {
         guard carousel.isCollapsed else { return }
         AuthManager.shared.registerActionUsage(actionID: "ref.badge_click")
@@ -804,16 +748,6 @@ private struct ReferencePageContentView: View {
         ClipboardManager.shared.updateUserNote(id: item.id, note: value)
     }
 
-    /// Rich content renders; it is never poured into an editor.
-    ///
-    /// Both editing surfaces below are lossy: the table grid keeps only cell
-    /// text and the text editor keeps only characters. Formatted content
-    /// routed into either came out looking nothing like it does in the popup
-    /// preview or the main window — an email showed up as a wall of bare
-    /// text with every image, style and link gone — and the panel's copy
-    /// button then pasted that stripped version back out. Anything with real
-    /// formatting therefore falls through to the same renderer the other two
-    /// panels use.
     private var isRichContent: Bool {
         switch item.content {
         case .html, .richText, .rtfd: return true
@@ -822,9 +756,7 @@ private struct ReferencePageContentView: View {
     }
 
     private var isEditableTable: Bool {
-        // Genuine tabular data only. Every HTML email is built out of nested
-        // layout tables, and treating those as a spreadsheet turned a
-        // designed email into a grid of scattered cell fragments.
+
         guard let cells = TableCellExtractor.cells(for: item) else { return false }
         return TableCellExtractor.isDataTable(cells)
     }

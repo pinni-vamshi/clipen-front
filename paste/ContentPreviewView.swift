@@ -292,26 +292,6 @@ enum TableCellExtractor {
         return result.isEmpty ? nil : result
     }
 
-    /// The text "paste as plain text" actually puts on the pasteboard.
-    ///
-    /// Two things this deliberately does NOT do, both of which were bugs:
-    ///
-    /// 1. It never emits HTML. The old version wrote a rebuilt `<table>` to
-    ///    `public.html`, so "plain text" pasted a *table* — and since every
-    ///    HTML email is one giant nested layout table, pasting a newsletter
-    ///    plainly produced a grid of empty boxes in Notes instead of text.
-    ///    Plain means plain: one `.string`, nothing else.
-    ///
-    /// 2. It doesn't feed everything through the table-cell grid. That grid
-    ///    only ever contained text found inside `<td>`/`<th>`, so any text
-    ///    outside a cell was silently dropped — which is why most of the
-    ///    content went missing. Real content text comes from the full-document
-    ///    plain text instead, and the grid is used only for genuine data
-    ///    tables, where tab-separated output is what spreadsheets want.
-    /// Whether an HTML string is a real data table rather than the nested
-    /// layout tables every HTML email is built out of. The preview uses this
-    /// to decide whether drawing cell borders would help or would just
-    /// wireframe the entire email.
     static func htmlIsDataTable(_ html: String) -> Bool {
         guard let rows = cells(fromHTML: html) else { return false }
         return isDataTable(rows)
@@ -337,9 +317,6 @@ enum TableCellExtractor {
         }
     }
 
-    /// A real grid of data (spreadsheet, comparison table) as opposed to an
-    /// HTML-email layout table. Only the former should keep its tab columns —
-    /// for the latter the tabs are pure noise from empty spacer cells.
     static func isDataTable(_ rows: [[String]]) -> Bool {
         guard rows.count >= 2 else { return false }
         let widths = Set(rows.map(\.count))
@@ -348,9 +325,6 @@ enum TableCellExtractor {
         return Double(filled) / Double(rows.count * cols) >= 0.6
     }
 
-    /// Layout tables leave behind runs of tabs and blank lines where the
-    /// spacer/image cells were. Without this the "plain" text is mostly
-    /// invisible whitespace with a few words scattered through it.
     static func cleanedPlainText(_ s: String) -> String {
         let raw = s.replacingOccurrences(of: "\r\n", with: "\n")
         var out: [String] = []
@@ -358,9 +332,7 @@ enum TableCellExtractor {
             let collapsed = line
                 .replacingOccurrences(of: "[ \\t]*\\t[ \\t]*", with: "\t",
                                       options: .regularExpression)
-                // Stripping an inline tag leaves a space behind, so a link at
-                // the end of a sentence came out as "click here ." — close
-                // that gap back up.
+
                 .replacingOccurrences(of: " +([.,])", with: "$1",
                                       options: .regularExpression)
                 .trimmingCharacters(in: CharacterSet(charactersIn: " \t"))
@@ -431,8 +403,7 @@ enum TableCellExtractor {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 cells.append(text)
             }
-            // Image-only <td>/<th> cells strip down to "" — drop rows where
-            // every cell went empty instead of rendering them as blank bars.
+
             if cells.contains(where: { !$0.isEmpty }) { rows.append(cells) }
         }
         return rows.isEmpty ? nil : rows
@@ -746,18 +717,6 @@ struct WebsitePreview: NSViewRepresentable {
         }
     }
 
-    /// Unlike AVPlayerView/QLPreviewView below, this web view is POOLED
-    /// (WebsitePreviewPool) and reused across previews, so dismantle must
-    /// NOT tear it down or nil anything out — that would break reuse for
-    /// the next time this same URL is previewed. It only needs to stop
-    /// whatever's currently playing inside it. Previously nothing called
-    /// this at all: switching away (e.g. to Settings) hid the container
-    /// but left an embedded YouTube video (audio included) running in the
-    /// pooled web view underneath, since `stopLoading()` was only ever
-    /// reached via the pool's own LRU eviction, not on dismissal.
-    /// `pauseAllMediaPlayback` is WKWebView's native way to reach into
-    /// video playing inside an iframe (which is exactly how YouTube embeds
-    /// work) without hand-rolling JS that pierces the iframe boundary.
     static func dismantleNSView(_ container: NSView, coordinator: Coordinator) {
         guard let webView = container.subviews.first(where: { $0 is WKWebView }) as? WKWebView else { return }
         webView.pauseAllMediaPlayback(completionHandler: nil)

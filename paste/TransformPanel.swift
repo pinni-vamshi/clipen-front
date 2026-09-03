@@ -1,53 +1,9 @@
 import AppKit
 import SwiftUI
 
-class TransformPanel: NSObject, NSPopoverDelegate {
-    private let anchorPanel: NSPanel
-    private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
-    private let popover = NSPopover()
+class TransformPanel: AnchoredPopoverPanel {
     private var cachedPanelHeight: CGFloat = 460
-
     private var cachedHeightSignature: Int? = nil
-    private var wantsVisible = false
-
-    func popoverDidShow(_ notification: Notification) {
-        popover.contentViewController?.view.window?.sharingType = .none
-        if !wantsVisible {
-            popover.performClose(nil)
-            anchorPanel.orderOut(nil)
-        }
-    }
-    private var shownStrip: NSRect? = nil
-
-    var isVisible: Bool { wantsVisible && popover.isShown }
-    var frame: NSRect {
-        if let view = popover.contentViewController?.view, let win = view.window {
-            return win.convertToScreen(view.convert(view.bounds, to: nil))
-        }
-        return anchorPanel.frame
-    }
-
-    override init() {
-        anchorPanel = NSPanel(
-            contentRect: .zero,
-            styleMask: [.nonactivatingPanel, .borderless],
-            backing: .buffered,
-            defer: false
-        )
-        anchorPanel.isOpaque = false
-        anchorPanel.backgroundColor = .clear
-        anchorPanel.hasShadow = false
-        anchorPanel.ignoresMouseEvents = true
-        anchorPanel.level = .popUpMenu
-        anchorPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        anchorPanel.contentView = anchorView
-
-        super.init()
-
-        popover.behavior = .applicationDefined
-        popover.animates = true
-        popover.delegate = self
-    }
 
     func show(for item: ClipboardItem,
               near popupFrame: NSRect,
@@ -83,12 +39,6 @@ class TransformPanel: NSObject, NSPopoverDelegate {
         )
 
         let bubbleW: CGFloat = 290
-        let screen = NSScreen.main?.visibleFrame ?? .zero
-
-        let preferredRightX = popupFrame.maxX + 8
-        let rightFits = preferredRightX + bubbleW <= screen.maxX
-        let leftFits = popupFrame.minX - bubbleW - 8 >= screen.minX + 8
-        let placeRight = rightFits || !leftFits
 
         let heightSignature = displays.count
         let h: CGFloat
@@ -103,49 +53,8 @@ class TransformPanel: NSObject, NSPopoverDelegate {
             cachedHeightSignature = heightSignature
         }
 
-        popover.contentSize = NSSize(width: bubbleW, height: h)
-        if let hostingController = popover.contentViewController as? NSHostingController<TransformView> {
-            hostingController.rootView = content
-        } else {
-            popover.contentViewController = NSHostingController(rootView: content)
-        }
-
-        let anchorY = anchorPoint?.y ?? popupFrame.midY
-        let stripHeight = max(1, popupFrame.height)
-        let desiredStrip = NSRect(x: placeRight ? popupFrame.maxX : popupFrame.minX,
-                                  y: popupFrame.minY, width: 1, height: stripHeight)
-        let localY = max(0, min(stripHeight - 1, anchorY - desiredStrip.minY))
-        let rowRect = NSRect(x: 0, y: localY, width: 1, height: 1)
-
-        wantsVisible = true
-        if popover.isShown, shownStrip == desiredStrip {
-            popover.positioningRect = rowRect
-            return
-        }
-
-        if popover.isShown { popover.performClose(nil) }
-        anchorPanel.setFrame(desiredStrip, display: false)
-        if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
-        shownStrip = desiredStrip
-        let edge: NSRectEdge = placeRight ? .maxX : .minX
-        WakeGuard.afterWakeSettle { [popover, anchorView] in
-            popover.animates = false
-            popover.show(relativeTo: rowRect, of: anchorView, preferredEdge: edge)
-            popover.animates = true
-            popover.clipenAnimateIn()
-        }
-    }
-
-    func hide() {
-        wantsVisible = false
-        if popover.isShown {
-
-            popover.animates = false
-            popover.performClose(nil)
-            popover.animates = true
-        }
-        anchorPanel.orderOut(nil)
-        shownStrip = nil
+        present(content, size: NSSize(width: bubbleW, height: h),
+                near: popupFrame, anchorPoint: anchorPoint)
     }
 }
 
@@ -289,9 +198,7 @@ struct TransformView: View {
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 4)
                                     .transition(.opacity.combined(with: .move(edge: .top)))
-                                    // Scoped to just this picker, not the whole
-                                    // row list — see the note below on why that
-                                    // matters.
+
                                     .animation(.easeInOut(duration: 0.15), value: manager.inPageRangeMode)
                             }
 
@@ -302,19 +209,7 @@ struct TransformView: View {
                     }
                     .padding(.vertical, 6)
                     .padding(.horizontal, 8)
-                    // These two used to sit here, on the VStack holding every
-                    // row — meaning SwiftUI's implicit-animation system would
-                    // apply this 0.15s easeInOut to ANY animatable change
-                    // inside the whole list, not just the inline picker's own
-                    // reveal. That included the selected row's own
-                    // matchedGeometryEffect box gliding into place on
-                    // selection change, which is driven by its own explicit
-                    // withAnimation(SelectionHighlightStyle.spring) in
-                    // onChange below — two different curves fighting over the
-                    // same geometry read as stutter, not a clean spring. Share's
-                    // panel has no such modifier at this level and scrolls
-                    // smoothly; moved these down onto just the pickers that
-                    // actually need them.
+
                 }
                 .onChange(of: selectedTransformIndex) { _, newIdx in
                     guard displays.indices.contains(newIdx) else { return }
@@ -416,25 +311,5 @@ struct TransformRow: View, Equatable {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHovered)
-    }
-}
-
-struct ContentTypeBadge: View {
-    let type: ClipboardContentType
-
-    var body: some View {
-        if let label = type.badgeLabel {
-            HStack(spacing: 3) {
-                Image(systemName: type.sfIcon)
-                    .font(.system(size: 7, weight: .bold))
-                Text(label)
-                    .font(.system(size: 8, weight: .bold))
-            }
-            .foregroundColor(type.badgeColor)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(type.badgeColor.opacity(0.15),
-                        in: RoundedRectangle(cornerRadius: 4))
-        }
     }
 }

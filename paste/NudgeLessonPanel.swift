@@ -150,14 +150,6 @@ private struct NudgeCalloutView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                // No fixed width — was 300, missed in the same pass that
-                // fixed the other two InteractionLabStage call sites
-                // (SettingsView's KeyDemoPopup, TutorialSheet). LabMockPanel
-                // (190) plus LabSidePanel (120) plus their gap alone already
-                // exceeded 300 whenever a demo's side panel shows (Preview,
-                // Refer, Transform), before the ⌘+V pair added beside them
-                // made it worse. Sizes to its own content now, same as the
-                // other two.
                 InteractionLabStage(lab: lab)
             }
             .padding(.horizontal, 28)

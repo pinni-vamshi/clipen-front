@@ -192,19 +192,30 @@ struct AnimatedGestureDemo: View {
             ringFill = 0
         }
 
+        // Each step checks loopToken.active before mutating state — only the
+        // final re-scheduling closure below used to check it, so dismissing
+        // the panel mid-cycle left up to 4 already-scheduled closures free
+        // to still fire and mutate state on a torn-down view. SwiftUI no-ops
+        // those writes silently rather than crashing, so this was never
+        // unsafe, just untidy — matching the same guard the recursive call
+        // already used keeps the whole cycle consistent.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+            guard loopToken.active else { return }
             withAnimation { step = .cmdDown }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.85) {
+            guard loopToken.active else { return }
             withAnimation { step = .vDown }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.20) {
+            guard loopToken.active else { return }
             withAnimation { step = .vUp }
             withAnimation(.linear(duration: ringDuration)) {
                 ringFill = 1
             }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.20 + ringDuration + 0.05) {
+            guard loopToken.active else { return }
             withAnimation { step = .pickerShown }
         }
         let total = 1.20 + ringDuration + 0.05 + 1.25

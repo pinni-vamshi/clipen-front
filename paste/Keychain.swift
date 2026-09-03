@@ -4,9 +4,6 @@ import Security
 enum Keychain {
     private static let service = "com.clipen.app"
 
-    /// Overwrites any existing value for `key`, so callers never need a
-    /// separate delete-then-set — that would leave a real window with
-    /// nothing stored if the process were interrupted between the two.
     @discardableResult
     static func set(_ data: Data, for key: String) -> Bool {
         let query: [String: Any] = [

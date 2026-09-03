@@ -171,10 +171,7 @@ extension ClipboardManager {
     }
 
     private func evaluateNudges() {
-        // Off by default — only the explicit onboarding alert or the Tips
-        // heading toggle in Settings turns this on. presentTipManually
-        // (clicking a tip directly in Settings) bypasses this function
-        // entirely and is unaffected either way.
+
         guard autoTipsEnabled else { return }
         guard previewWindow.isVisible, !isInlineEditing, !inTransformStage,
               !popupPinnedOpen, !nudgeIsShowing else { return }

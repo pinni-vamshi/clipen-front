@@ -10,7 +10,12 @@ enum ToolRegistry {
         let collectionSignature: String
         let entries: [(tool: ClipboardTool, preview: String?)]
     }
-    private static let resolvedCache = RecentItemCache<ResolvedTools>(capacity: 5)
+    // Entries here are small (a tool list + short preview strings, not raw
+    // bytes), so unlike ImageCodec/PDFTools this can afford a roomier
+    // capacity — capacity 5 meant browsing the Transform panel across more
+    // than 5 distinct items in a session kept re-running every tool's
+    // `preview` closure from scratch on a return visit.
+    private static let resolvedCache = RecentItemCache<ResolvedTools>(capacity: 24)
 
     private static func collectionSignature(for item: ClipboardItem) -> String {
         let manager = ClipboardManager.shared

@@ -50,6 +50,7 @@ extension ClipboardManager {
         selectedIndex = displayItems.firstIndex(where: { $0.id == groupItem.id }) ?? 0
         selectionDidChange()
         AuthManager.shared.registerActionUsage(actionID: "action.group")
+        AuthManager.shared.syncPersonPropertiesToPostHog()
         markNudgeUsedNaturally(.groups)
     }
 
@@ -68,6 +69,7 @@ extension ClipboardManager {
         selectedIndex = min(idx, max(0, displayItems.count - 1))
         selectionDidChange()
         AuthManager.shared.registerActionUsage(actionID: "action.ungroup")
+        AuthManager.shared.syncPersonPropertiesToPostHog()
     }
 
     func enterTransformStage() {
@@ -89,6 +91,7 @@ extension ClipboardManager {
             transformingMarkedSet = true
             transformDisplaysCache = displays
             transformIndex = 0
+            AuthManager.shared.registerActionUsage(actionID: "action.transform-browse")
             updateTransformPanel()
             return
         }
@@ -100,6 +103,7 @@ extension ClipboardManager {
         }
         transformIndex   = 0
 
+        AuthManager.shared.registerActionUsage(actionID: "action.transform-browse")
         updateTransformPanel()
     }
 
@@ -110,6 +114,7 @@ extension ClipboardManager {
 
         guard !transformDisplaysCache.isEmpty else { return }
         transformIndex = Self.cyclicIndex(transformIndex, count: transformDisplaysCache.count, backward: false)
+        AuthManager.shared.registerActionUsage(actionID: "action.transform-browse")
         updateTransformPanel()
     }
 
@@ -120,6 +125,7 @@ extension ClipboardManager {
 
         guard !transformDisplaysCache.isEmpty else { return }
         transformIndex = Self.cyclicIndex(transformIndex, count: transformDisplaysCache.count, backward: true)
+        AuthManager.shared.registerActionUsage(actionID: "action.transform-browse")
         updateTransformPanel()
     }
 
@@ -200,6 +206,7 @@ extension ClipboardManager {
         shareTargetItems = targets
         shareServices = Self.rankedShareServices(services)
         shareIndex = 0
+        AuthManager.shared.registerActionUsage(actionID: "action.share-browse")
         updateSharePanel()
     }
 
@@ -223,6 +230,7 @@ extension ClipboardManager {
         guard inShareStage, !shareServices.isEmpty else { return }
         lastBackAction = .share
         shareIndex = Self.cyclicIndex(shareIndex, count: shareServices.count, backward: false)
+        AuthManager.shared.registerActionUsage(actionID: "action.share-browse")
         updateSharePanel()
     }
 
@@ -230,6 +238,7 @@ extension ClipboardManager {
         guard inShareStage, !shareServices.isEmpty else { return }
         lastBackAction = .share
         shareIndex = Self.cyclicIndex(shareIndex, count: shareServices.count, backward: true)
+        AuthManager.shared.registerActionUsage(actionID: "action.share-browse")
         updateSharePanel()
     }
 
@@ -500,16 +509,16 @@ extension ClipboardManager {
 
         showSelectedItemPreview()
         let toolID = kind == .uppercase ? "text.uppercase" : "text.lowercase"
-        AuthManager.shared.registerToolUsage(toolID: toolID)
+        AuthManager.shared.registerToolUsage(toolID: toolID, via: "shortcut")
     }
 
     func beginInlineEditForSelection() {
         guard previewWindow.isVisible, !isInlineEditing else { return }
         guard displayItems.indices.contains(selectedIndex) else { return }
-        beginInlineEdit(for: displayItems[selectedIndex])
+        beginInlineEdit(for: displayItems[selectedIndex], via: "shortcut")
     }
 
-    func beginInlineEdit(for item: ClipboardItem) {
+    func beginInlineEdit(for item: ClipboardItem, via: String = "panel") {
 
         if item.tags.contains(.markdown) {
             switch item.content {
@@ -523,17 +532,17 @@ extension ClipboardManager {
         setSidePanelStage(.none)
 
         if let segs = TableCellExtractor.segments(for: item) {
-            beginInlineMixedEdit(for: item, segments: segs)
+            beginInlineMixedEdit(for: item, segments: segs, via: via)
             return
         }
 
         if let rows = TableCellExtractor.cells(for: item) {
-            beginInlineTableEdit(for: item, rows: rows)
+            beginInlineTableEdit(for: item, rows: rows, via: via)
             return
         }
 
         if let attr = Self.editableAttributedString(for: item) {
-            beginInlineRichEdit(for: item, attributedString: attr)
+            beginInlineRichEdit(for: item, attributedString: attr, via: via)
             return
         }
         guard let plain = Self.editablePlainText(for: item) else {
@@ -558,7 +567,7 @@ extension ClipboardManager {
             onCancel: { [weak self] in
                 DispatchQueue.main.async { self?.cancelInlineEdit() }
             })
-        AuthManager.shared.registerToolUsage(toolID: "text.edit")
+        AuthManager.shared.registerToolUsage(toolID: "text.edit", via: via)
     }
 
     private func beginInlineEditPresentation(for item: ClipboardItem) {
@@ -570,7 +579,7 @@ extension ClipboardManager {
         userOpenedItemPreview = true
     }
 
-    private func beginInlineTableEdit(for item: ClipboardItem, rows: [[String]]) {
+    private func beginInlineTableEdit(for item: ClipboardItem, rows: [[String]], via: String = "panel") {
         beginInlineEditPresentation(for: item)
 
         let anchor = selectedRowAnchor()
@@ -587,10 +596,10 @@ extension ClipboardManager {
             onCancel: { [weak self] in
                 DispatchQueue.main.async { self?.cancelInlineEdit() }
             })
-        AuthManager.shared.registerToolUsage(toolID: "text.edit")
+        AuthManager.shared.registerToolUsage(toolID: "text.edit", via: via)
     }
 
-    private func beginInlineMixedEdit(for item: ClipboardItem, segments: [ContentSegment]) {
+    private func beginInlineMixedEdit(for item: ClipboardItem, segments: [ContentSegment], via: String = "panel") {
         beginInlineEditPresentation(for: item)
 
         let anchor = selectedRowAnchor()
@@ -607,7 +616,7 @@ extension ClipboardManager {
             onCancel: { [weak self] in
                 DispatchQueue.main.async { self?.cancelInlineEdit() }
             })
-        AuthManager.shared.registerToolUsage(toolID: "text.edit")
+        AuthManager.shared.registerToolUsage(toolID: "text.edit", via: via)
     }
 
     func commitInlineMixedEdit(with segments: [ContentSegment]) {
@@ -618,7 +627,7 @@ extension ClipboardManager {
         finishInlineEditCommit()
     }
 
-    private func beginInlineRichEdit(for item: ClipboardItem, attributedString: NSAttributedString) {
+    private func beginInlineRichEdit(for item: ClipboardItem, attributedString: NSAttributedString, via: String = "panel") {
         beginInlineEditPresentation(for: item)
 
         let anchor = selectedRowAnchor()
@@ -635,7 +644,7 @@ extension ClipboardManager {
             onCancel: { [weak self] in
                 DispatchQueue.main.async { self?.cancelInlineEdit() }
             })
-        AuthManager.shared.registerToolUsage(toolID: "text.edit")
+        AuthManager.shared.registerToolUsage(toolID: "text.edit", via: via)
     }
 
     func commitInlineRichEdit(with attributedString: NSAttributedString) {
@@ -682,11 +691,17 @@ extension ClipboardManager {
         commitInlineEditThenPaste { [self] in commitInlineTableEdit(with: rows) }
     }
 
-    private func invalidateCachesAfterContentEdit() {
+    func invalidateCachesAfterContentEdit() {
         _displayItems = nil
         lastTransformCacheItemID = nil
         transformDisplaysCache = []
         ToolRegistry.invalidateCache()
+        // No specific item id threaded through every call site here, and
+        // edits are rare (not a hot path) — clearing both small diff-badge
+        // caches outright is cheap and avoids the alternative risk of a
+        // stale line/word split surviving an edit.
+        diffLineCache.removeAll()
+        diffWordCache.removeAll()
     }
 
     private func finishInlineEditCommit() {
@@ -1658,6 +1673,7 @@ extension ClipboardManager {
         }
         collections.append(name)
         AuthManager.shared.registerActionUsage(actionID: "action.collection-create")
+        AuthManager.shared.syncPersonPropertiesToPostHog()
         return true
     }
 
@@ -1681,7 +1697,8 @@ extension ClipboardManager {
         if activeCollection == old { activeCollection = new }
         _displayItems = nil
         AuthManager.shared.registerActionUsage(actionID: "action.collection-rename")
-        saveHistory()
+        let snapshot = items
+        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot) }
     }
 
     func deleteCollection(_ name: String) {
@@ -1695,7 +1712,9 @@ extension ClipboardManager {
         markBlobPurgeNeeded()
         _displayItems = nil
         AuthManager.shared.registerActionUsage(actionID: "action.collection-delete")
-        saveHistory()
+        AuthManager.shared.syncPersonPropertiesToPostHog()
+        let snapshot = items
+        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot) }
     }
 
     func moveItem(_ id: UUID, toCollection target: String) {
@@ -1703,7 +1722,8 @@ extension ClipboardManager {
         if let activeCollection { items[idx].collections.remove(activeCollection) }
         items[idx].collections.insert(target)
         _displayItems = nil
-        saveHistory()
+        let snapshot = items
+        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot) }
         AuthManager.shared.registerActionUsage(actionID: "action.collection-move")
     }
 
@@ -1711,7 +1731,8 @@ extension ClipboardManager {
         guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
         items[idx].collections.insert(target)
         _displayItems = nil
-        saveHistory()
+        let snapshot = items
+        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot) }
         AuthManager.shared.registerActionUsage(actionID: "action.collection-share")
     }
 

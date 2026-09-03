@@ -443,7 +443,24 @@ enum MarkedToolService {
                             counter += 1
                         }
                         usedNames.insert(name)
-                        try FileManager.default.copyItem(at: url, to: stage.appendingPathComponent(name))
+                        let dest = stage.appendingPathComponent(name)
+                        // Hard-link into the staging directory instead of
+                        // copying bytes wherever possible — the byte copy is
+                        // only actually needed to solve filename collisions
+                        // (ditto has no source-renaming option), which is
+                        // the uncommon case. linkItem shares the same inode
+                        // rather than duplicating the file's full content, so
+                        // the common (non-colliding, same-volume) case avoids
+                        // a full extra read+write pass over every source
+                        // file before ditto even runs. Falls back to a real
+                        // copy for the cases a hard link can't cover
+                        // (crossing a volume boundary, or the source itself
+                        // being unlinkable for some other reason).
+                        do {
+                            try FileManager.default.linkItem(at: url, to: dest)
+                        } catch {
+                            try FileManager.default.copyItem(at: url, to: dest)
+                        }
                     }
                     let zipURL = try outputDir().appendingPathComponent("Archive-\(UUID().uuidString).zip")
                     let process = Process()

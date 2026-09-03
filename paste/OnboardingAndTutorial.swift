@@ -178,6 +178,7 @@ struct TutorialSheet: View {
         .onAppear {
             baselineIDs = Set(manager.items.map(\.id))
             selectDemoForCurrentPage()
+            AuthManager.shared.registerActionUsage(actionID: "action.onboarding-started")
         }
         .onDisappear { lab.stop() }
         .onChange(of: page) { _, _ in
@@ -200,7 +201,10 @@ struct TutorialSheet: View {
     }
 
     private var closeButton: some View {
-        Button { isPresented = false } label: {
+        Button {
+            AuthManager.shared.registerActionUsage(actionID: "action.onboarding-abandoned-page-\(page)")
+            isPresented = false
+        } label: {
             Image(systemName: "xmark.circle.fill").font(.system(size: 20)).foregroundColor(.textSec)
         }
         .buttonStyle(.plain).keyboardShortcut(.escape, modifiers: [])
@@ -255,20 +259,17 @@ struct TutorialSheet: View {
             }
         }
         .padding(.horizontal, 22).padding(.vertical, 14)
-        // One-time question, asked exactly here rather than as a separate
-        // onboarding page, since this button is the natural moment the user
-        // is already deciding "I want to go deeper" — either answer still
-        // proceeds to Settings via onSeeMore(); only whether auto-tips
-        // (evaluateNudges in ClipboardManager+Nudges.swift) turns on
-        // depends on the choice made here.
+
         .alert("Learn these interactions as you use the app?",
                isPresented: $showAutoTipsAlert) {
             Button("Yes, show me tips") {
                 manager.autoTipsEnabled = true
+                AuthManager.shared.registerActionUsage(actionID: "action.onboarding-completed-tips-on")
                 isPresented = false
                 onSeeMore()
             }
             Button("No thanks", role: .cancel) {
+                AuthManager.shared.registerActionUsage(actionID: "action.onboarding-completed-tips-off")
                 isPresented = false
                 onSeeMore()
             }
@@ -466,10 +467,6 @@ struct TutorialSheet: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // No fixed width — was 280, narrower than Settings' own copy
-            // of this same stage (380) for no reason tied to this layout;
-            // the leading column already absorbs the rest of the space via
-            // maxWidth: .infinity, so this side just takes what it needs.
             InteractionLabStage(lab: lab)
         }
         .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 14).frame(maxWidth: .infinity)
@@ -543,6 +540,15 @@ private enum PopupDemoGesture: String, CaseIterable, Identifiable {
     case holdV, space, x, del
     var id: String { rawValue }
 
+    var trackingID: String {
+        switch self {
+        case .holdV: return "hold-v"
+        case .space: return "space"
+        case .x:     return "x"
+        case .del:   return "del"
+        }
+    }
+
     var label: LocalizedStringKey {
         switch self {
         case .holdV: return "hold V"
@@ -569,15 +575,7 @@ private struct PopupGestureDemo: View {
     @State private var pulse = false
 
     var body: some View {
-        // Previously one HStack with uniform spacing, centered as a whole
-        // Three equal-width columns, each centering its own content — the
-        // key-buttons column's center this way always lands exactly on the
-        // panel's true horizontal center, regardless of how wide the ⌘V
-        // pair or the caption text happens to be. A Spacer-based layout
-        // (the previous approach) can't guarantee that: it centers the ⌘V
-        // pair in whatever leftover space is left AFTER the fixed-width
-        // key column and caption, which drifts the key column away from
-        // true center whenever either sibling's width changes.
+
         HStack(alignment: .center, spacing: 0) {
             VStack(spacing: 10) {
                 openPopupKeys
@@ -605,11 +603,6 @@ private struct PopupGestureDemo: View {
         }
     }
 
-    // The 4-item mock list this replaced implied you'd see the actual
-    // popup contents here — you don't, this whole page is just clickable
-    // key demos. A single ⌘V key-cap pair, styled like the other demo
-    // keys to its right, reads as "this is the shortcut" instead of "this
-    // is what the popup looks like."
     private var openPopupKeys: some View {
         HStack(spacing: 8) {
             keyCap("⌘")
@@ -620,10 +613,6 @@ private struct PopupGestureDemo: View {
         .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(Color.border, lineWidth: 1))
     }
 
-    // Filled solid blue, same look demoKey uses for its pressed/active
-    // state — this pair isn't interactive, but it's the shortcut you
-    // actually press to get here, so it should read with the same
-    // weight as an engaged button, not a plain idle key.
     private func keyCap(_ symbol: String) -> some View {
         Text(symbol)
             .font(.system(size: 20, weight: .bold, design: .monospaced))
@@ -651,6 +640,7 @@ private struct PopupGestureDemo: View {
                 if isActive {
                     activeGesture = nil
                 } else {
+                    AuthManager.shared.registerActionUsage(actionID: "action.onboarding-demo-\(gesture.trackingID)")
                     WakeGuard.afterWakeSettle { activeGesture = gesture }
                 }
             }

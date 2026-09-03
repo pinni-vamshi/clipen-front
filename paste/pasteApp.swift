@@ -47,6 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var pendingUpdateInstall: (() -> Void)?
     private var pendingUpdateTimer: Timer?
+    private var remoteConfigTimer: Timer?
 
     private static let pendingUpdateVersionKey = "clipen.sparkle.pendingUpdateVersion"
 
@@ -58,7 +59,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if running == expected {
             AuthManager.shared.registerActionUsage(actionID: "action.sparkle_update_confirmed")
         } else {
-            AuthManager.shared.registerActionUsage(actionID: "fail.sparkle_update_did_not_land")
+            AuthManager.shared.registerActionUsage(
+                actionID: "fail.sparkle_update_did_not_land",
+                value: "expected \(expected), still running \(running.isEmpty ? "unknown" : running)")
         }
     }
 
@@ -96,6 +99,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         AuthManager.shared.registerActionUsage(actionID: "session.open")
         Self.confirmPendingUpdateOutcome()
 
+        // Picks up any Settings toggle you've flipped remotely from the
+        // PostHog dashboard since this machine last checked. Once at
+        // launch, then again every 6 hours for installs left running for
+        // days — same cadence class as the Sparkle update check below.
+        PostHogRemoteConfig.refreshAndApply()
+        remoteConfigTimer = Timer.scheduledTimer(withTimeInterval: 6 * 60 * 60, repeats: true) { _ in
+            PostHogRemoteConfig.refreshAndApply()
+        }
+
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
             updaterDelegate: self,
@@ -123,12 +135,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             updaterController?.updater.automaticallyDownloadsUpdates = true
         }
 
-        // Launch at login: on by default, same one-time-bootstrap shape as
-        // the Sparkle auto-download default above. SMAppService.mainApp has
-        // no notion of "the user's chosen default" — its status is purely
-        // "registered or not" — so a separate stored flag is what makes
-        // this a one-time default rather than something that silently
-        // re-registers itself after a user has deliberately turned it off.
         if !UserDefaults.standard.bool(forKey: "hasBootstrappedLaunchAtLogin") {
             UserDefaults.standard.set(true, forKey: "hasBootstrappedLaunchAtLogin")
             if SMAppService.mainApp.status != .enabled {
@@ -171,16 +177,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         AuthManager.shared.flushPendingDailyUsage()
-        // History saves are debounced 1 second behind every `items` change
-        // (ClipboardManager's init: $items.debounce(for: .seconds(1), ...)).
-        // Quitting — or Sparkle relaunching the app to install an update —
-        // inside that window terminates the process before the debounced
-        // write ever fires, silently dropping whatever changed last: an AI
-        // analysis that just finished, a note, a pin, anything. saveHistory
-        // itself no-ops when historyDirty is already false, so calling it
-        // unconditionally here is free on a clean exit and closes the loss
-        // window on a dirty one.
-        ClipboardManager.shared.saveHistory()
+
+        // Must actually finish before the process exits, but still needs to run
+        // on saveQueue — the same queue every other save/blob-cache mutation
+        // uses — so it can't race a save already in flight there.
+        ClipboardManager.shared.saveQueue.sync {
+            ClipboardManager.shared.saveHistory()
+        }
         pendingUpdateInstall?()
         pendingUpdateInstall = nil
     }
@@ -216,14 +219,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func checkForUpdates() {
         NSApp.activate(ignoringOtherApps: true)
 
-        // SPUUpdater.checkForUpdates() silently no-ops (SULog only, no
-        // UI) if a session is already running — most commonly the
-        // launch-time automatic check this app fires 3s after launch
-        // (see checkForUpdatesInBackgroundIfAllowed below), or Sparkle's
-        // own periodic background check. Without this guard, clicking
-        // the button during that window does nothing visible at all —
-        // exactly the "sometimes it just does nothing" bug — with no
-        // way to tell whether the click even registered.
         if let updater = updaterController?.updater, updater.sessionInProgress {
             ClipboardManager.shared.flashStatus("Already checking for updates…")
             return
@@ -316,11 +311,7 @@ extension AppDelegate: SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         NSApp.activate(ignoringOtherApps: true)
-        // Surface a stable release in the popup banner. `channel` is nil for
-        // stable items and "beta" for the beta ones, so this deliberately
-        // ignores betas: a beta subscriber already gets Sparkle's own
-        // prompt, and betas ship often enough that a banner per release
-        // would just be noise.
+
         guard item.channel == nil else { return }
         let version = item.displayVersionString
         DispatchQueue.main.async {

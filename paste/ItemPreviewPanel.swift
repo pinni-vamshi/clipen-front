@@ -314,12 +314,7 @@ private struct ItemPreviewView: View {
     }
 
     private var content: some View {
-        // QuickClipPanel already wraps its own ContentPreviewView in exactly
-        // this frame — without it here too, HTML/RTFD content sizes itself
-        // to whatever the copied content's own narrowest element happens to
-        // be (e.g. a fixed-width widget inside a page) instead of filling
-        // the space actually available, leaving the rest of the panel
-        // blank.
+
         ContentPreviewView(item: item, chrome: .panel)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
