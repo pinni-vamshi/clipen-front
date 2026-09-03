@@ -243,58 +243,6 @@ struct MultiItemPreviewView: View {
 
     private var isGroupPreview: Bool { currentItemID == nil }
 
-    /// True when every item in the stack is an image (or an image file) —
-    /// the case where the per-item chrome (number, tag strip, metadata line,
-    /// dividers) is pure noise and the images themselves are the content.
-    private var isAllImages: Bool {
-        !items.isEmpty && items.allSatisfy { item in
-            switch item.content {
-            case .image: return true
-            case .file(let url): return FileKindDetector.isImageFile(url)
-            default: return false
-            }
-        }
-    }
-
-    /// Two flexible columns that simply flow downward and scroll — not a
-    /// fixed 2x2, so 4, 6 or 20 marked images all lay out the same way in
-    /// the same panel size.
-    private static let imageColumns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10),
-    ]
-
-    @ViewBuilder
-    private var imageGrid: some View {
-        ScrollView {
-            LazyVGrid(columns: Self.imageColumns, spacing: 10) {
-                ForEach(items, id: \.id) { item in
-                    Group {
-                        switch item.content {
-                        case .image(let img, let data, _):
-                            CachedThumbnail(original: img, data: data, key: item.id.uuidString,
-                                            size: 150, cornerRadius: 8)
-                        case .file(let url):
-                            CachedFileThumbnail(url: url, size: 150)
-                        default:
-                            EmptyView()
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 150)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay {
-                        if item.id == currentItemID {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Color.accentColor, lineWidth: 2)
-                        }
-                    }
-                }
-            }
-            .padding(12)
-        }
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             if showsHeader {
@@ -321,28 +269,20 @@ struct MultiItemPreviewView: View {
                 Divider()
             }
 
-            if isAllImages {
-                // Just the images, two columns, flowing down and scrolling.
-                // The numbered rows / tag strip / metadata line below each
-                // one are only useful for mixed or text content — for a
-                // stack of images they push the actual content off-screen.
-                imageGrid
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                            if idx > 0 { Divider() }
-                            HStack(spacing: 8) {
-                                Text("\(idx + 1)")
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.accentColor)
-                                    .frame(width: 18)
-                                ItemPreviewView(item: item, compact: true)
-                            }
-                            .padding(.horizontal, 12).padding(.vertical, 6)
-                        }
+            // Just the raw preview of each item, stacked one below another,
+            // scrolling — same treatment for every content type (image,
+            // text, mixed, whatever). No numbering, no tag strip, no
+            // metadata/filename line, no grid: those all used to sit as an
+            // extra bar of chrome on every item.
+            ScrollView {
+                VStack(spacing: 10) {
+                    ForEach(items, id: \.id) { item in
+                        ContentPreviewView(item: item, chrome: .panel)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 220)
                     }
                 }
+                .padding(12)
             }
         }
     }
@@ -350,60 +290,35 @@ struct MultiItemPreviewView: View {
 
 private struct ItemPreviewView: View {
     let item: ClipboardItem
-    var compact: Bool = false
 
     var body: some View {
-        if compact {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 8) {
-                    ItemTagStrip(tags: item.tags, maxVisible: 5, compact: true)
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ItemTagStrip(tags: item.tags, maxVisible: 5, compact: false)
                     if let metadata = item.metadataSummary {
                         Text(metadata)
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
                     }
-                    Spacer()
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
-
-                content
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 220)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 12)
-            }
-        } else {
-            VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ItemTagStrip(tags: item.tags, maxVisible: 5, compact: false)
-                        if let metadata = item.metadataSummary {
-                            Text(metadata)
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text("Space to close")
-                        Text("Double-tap Space to refer")
-                    }
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("Space to close")
+                    Text("Double-tap Space to refer")
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-
-                Divider()
-
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(14)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(14)
         }
     }
 
