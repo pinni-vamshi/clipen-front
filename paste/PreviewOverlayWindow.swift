@@ -876,7 +876,7 @@ struct ImageRunRow: View, Equatable {
                             .frame(width: 20, height: 20)
                     } else if hasAnalysis {
                         Circle()
-                            .strokeBorder(Color.pink, lineWidth: 1)
+                            .strokeBorder(Color.blue, lineWidth: 1)
                             .frame(width: 20, height: 20)
                     }
                 }
@@ -1224,7 +1224,7 @@ struct PopoverRow: View, Equatable {
                             .frame(width: 20, height: 20)
                     } else if hasAnalysis {
                         Circle()
-                            .strokeBorder(Color.pink, lineWidth: 1)
+                            .strokeBorder(Color.blue, lineWidth: 1)
                             .frame(width: 20, height: 20)
                     }
                 }

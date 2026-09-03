@@ -1292,7 +1292,7 @@ private struct CompactItemRow: View, Equatable {
                             .font(.system(size: 9, weight: .bold))
                             .foregroundColor(.white)
                             .frame(width: 20, height: 20)
-                            .background(Color.blue, in: Circle())
+                            .background(Color.green, in: Circle())
                             .opacity(isHovered ? 0 : 1)
                     }
                     HStack(spacing: 4) {
@@ -1301,7 +1301,7 @@ private struct CompactItemRow: View, Equatable {
                             .opacity(isHovered ? 1 : 0)
                             .allowsHitTesting(isHovered)
                         rowActionButton(icon: item.isPinned ? "pin.slash.fill" : "pin.fill",
-                                        background: .blue, action: onTogglePin)
+                                        background: .green, action: onTogglePin)
                             .help(item.isPinned ? "Unpin" : "Pin to top")
                             .opacity(isHovered ? 1 : 0)
                             .allowsHitTesting(isHovered)
@@ -1340,7 +1340,7 @@ private struct CompactItemRow: View, Equatable {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundColor(.white)
                 .frame(width: 20, height: 20)
-                .background(Color.purple, in: Circle())
+                .background(Color.green, in: Circle())
                 .rotationEffect(.degrees(isProcessing ? 360 : 0))
                 .animation(isProcessing
                            ? .linear(duration: 0.9).repeatForever(autoreverses: false)

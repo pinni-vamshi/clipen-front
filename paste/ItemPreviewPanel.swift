@@ -65,8 +65,17 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     }
 
     func show(for item: ClipboardItem, near popupFrame: NSRect, anchorPoint: NSPoint? = nil) {
+        // Keyed on more than just id: `content` itself is immutable once
+        // captured, but OCR/AI structuring/notes can complete or change
+        // while this exact item's preview is already open — the key needs
+        // to change then too, or the reposition-only fast path below would
+        // keep showing stale content indefinitely.
+        let key = AnyHashable([
+            item.id.uuidString, item.ocrText ?? "", item.aiStructuredText ?? "",
+            item.userNote ?? "", item.diffBadge ?? "",
+        ])
         present(AnyView(ItemPreviewView(item: item)), width: 520, height: 420,
-                near: popupFrame, anchorPoint: anchorPoint)
+                near: popupFrame, anchorPoint: anchorPoint, contentKey: key)
     }
 
     func showEditor(for item: ClipboardItem,
@@ -130,12 +139,19 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     func show(forItems items: [ClipboardItem], currentItemID: UUID? = nil,
               near popupFrame: NSRect, anchorPoint: NSPoint? = nil) {
         guard !items.isEmpty else { hide(); return }
+        let key = AnyHashable([currentItemID?.uuidString ?? ""] + items.map(\.id.uuidString))
         present(AnyView(MultiItemPreviewView(items: items, currentItemID: currentItemID)), width: 520, height: 520,
-                near: popupFrame, anchorPoint: anchorPoint)
+                near: popupFrame, anchorPoint: anchorPoint, contentKey: key)
     }
 
+    // Set only by the two call sites above (single-item / marked-stack
+    // preview) — the editor variants below intentionally pass no key, so
+    // they always rebuild.
+    private var lastShownContentKey: AnyHashable?
+
     private func present(_ view: AnyView, width w: CGFloat, height h: CGFloat,
-                         near popupFrame: NSRect, anchorPoint: NSPoint?) {
+                         near popupFrame: NSRect, anchorPoint: NSPoint?,
+                         contentKey: AnyHashable? = nil) {
         let screen = NSScreen.main?.visibleFrame ?? .zero
         let preferredRightX = popupFrame.maxX + 10
         let rightFits = preferredRightX + w <= screen.maxX
@@ -143,11 +159,28 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         let placeRight = rightFits || !leftFits
 
         popover.contentSize = NSSize(width: w, height: h)
-        if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
-            hostingController.rootView = view
-        } else {
-            popover.contentViewController = NSHostingController(rootView: view)
+        // Skip rebuilding the SwiftUI content entirely when we already have
+        // this exact content on screen and this is purely a reposition —
+        // repositionAnchoredSidePanelForMeasuredRow() re-calls show(for:)
+        // on every >3pt change in the selected row's measured frame, which
+        // fires many times over the course of a single spring-scroll
+        // animation (cycling through the ring, or a fresh capture shifting
+        // rows). Reassigning `rootView` to a freshly-constructed view value
+        // on every one of those ticks re-evaluates the preview's whole body
+        // — real work for a table (TableCellExtractor), code (Highlightr
+        // syntax highlighting), or image content — even though the actual
+        // item being previewed hasn't changed, only its on-screen position.
+        // That repeated rebuild during the scroll is what read as jerky
+        // navigation specifically while a preview was showing.
+        let contentUnchanged = contentKey != nil && popover.isShown && contentKey == lastShownContentKey
+        if !contentUnchanged {
+            if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
+                hostingController.rootView = view
+            } else {
+                popover.contentViewController = NSHostingController(rootView: view)
+            }
         }
+        lastShownContentKey = contentKey
 
         let anchorY = anchorPoint?.y ?? popupFrame.midY
         let stripHeight = max(1, popupFrame.height)
@@ -194,6 +227,7 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         }
         anchorPanel.orderOut(nil)
         shownStrip = nil
+        lastShownContentKey = nil
     }
 }
 
