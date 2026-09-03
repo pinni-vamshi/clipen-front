@@ -169,11 +169,31 @@ enum PreviewPrefetcher {
             prefetchFile(at: url)
 
         case .files(let urls):
-
-            for url in urls.prefix(3) { prefetchFile(at: url) }
+            // The stacked multi-file preview renders downsampled thumbnails,
+            // not full-resolution images, so prefetch exactly that. Warming
+            // FilePreviewCache's full-res NSImage here decoded several
+            // megapixels per file that nothing ever displayed, burning CPU
+            // while the user was mid-cycle.
+            for url in urls.prefix(3) { prefetchStackedFilePreview(at: url) }
 
         default:
             break
+        }
+    }
+
+    /// Warms exactly what the stacked multi-file preview shows: the shared,
+    /// downsampled, URL-keyed thumbnail (the same one the list row uses).
+    /// Non-image files still go through the full prefetch path, since those
+    /// previews really do render their own content.
+    private static func prefetchStackedFilePreview(at url: URL) {
+        guard FileKindDetector.isImageFile(url) else {
+            prefetchFile(at: url)
+            return
+        }
+        guard ItemThumbnailCache.shared.cachedFileThumbnail(for: url) == nil else { return }
+        Task.detached(priority: .utility) {
+            guard let decoded = ItemThumbnailCache.decodeFileThumbnail(url: url) else { return }
+            ItemThumbnailCache.shared.storeFileThumbnail(decoded, for: url)
         }
     }
 

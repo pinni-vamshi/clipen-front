@@ -158,28 +158,6 @@ extension ClipboardManager {
         flashStatus(String(localized: "Paste cancelled — the target window wasn't ready."))
     }
 
-    func pasteSingleFile(_ url: URL) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects([makeFilePasteboardItem(for: url)])
-        markPasteboardWriteAsOwn()
-        let target = resolvedPasteTarget()
-        let token = beginPasteSimulation()
-        activateAndWaitIfNeeded(target) { [weak self] ok in
-            guard let self else { return }
-            guard ok else { self.abortPaste(token: token); return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                guard let self else { return }
-                guard self.isSafeToPaste(into: target) else { self.abortPaste(token: token); return }
-                self.simulateCommandV()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    self?.endPasteSimulation(token: token)
-                }
-            }
-        }
-        AuthManager.shared.registerCommandVAction()
-    }
-
     func commitPaste(countsAsFastPaste: Bool = false) {
         if inShareStage {
             commitShare()

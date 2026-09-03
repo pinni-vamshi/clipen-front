@@ -19,7 +19,6 @@ struct ContentPreviewView: View {
     let chrome: Chrome
 
     private var plainFontSize: CGFloat { chrome == .panel ? 13 : 12 }
-    @State private var selectedFileForFullPreview: URL? = nil
 
     @ViewBuilder
     var body: some View {
@@ -120,142 +119,37 @@ struct ContentPreviewView: View {
     }
 
     @ViewBuilder
-    private func fileListPreview(_ urls: [URL]) -> some View {
-        switch chrome {
-        case .panel:
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(urls, id: \.path) { url in
-                        HStack(spacing: 10) {
-                            Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
-                                .resizable()
-                                .frame(width: 22, height: 22)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(url.lastPathComponent)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .lineLimit(1)
-                                Text(url.deletingLastPathComponent().path)
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                    }
-                }
-            }
-        case .reference:
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 4) {
-                    ForEach(urls, id: \.path) { url in
-                        HStack(spacing: 6) {
-                            Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
-                                .resizable()
-                                .frame(width: 16, height: 16)
-                            Text(url.lastPathComponent)
-                                .font(.system(size: 11, weight: .medium))
-                                .lineLimit(1)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
     private func filesPreview(_ urls: [URL]) -> some View {
-        ZStack {
-            VStack(spacing: 0) {
-                fileListPreview(urls)
-                let visualURLs = urls.filter { !FileKindDetector.isTextFile($0) }
-                if !visualURLs.isEmpty {
-                    Divider()
-                    elementThumbnailStrip(visualURLs)
-                }
-            }
-            if let selected = selectedFileForFullPreview {
-                singleElementOverlay(url: selected)
-            }
-        }
-    }
-
-    private func elementThumbnailStrip(_ urls: [URL]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+        // Every element that was copied, one below another, each showing its
+        // own real preview — nothing else. No filename/path list, and no
+        // bottom thumbnail bar.
+        //
+        // Image files deliberately do NOT go through FilePreviewContent
+        // here: that routes to AsyncImageFilePreview -> ZoomableImagePreview,
+        // an NSScrollView-backed magnifiable view holding a full-resolution
+        // NSImage. Stacking two or three of those (each rescaling several
+        // megapixels into a 220pt cell) is what made cycling onto a
+        // multi-file row stutter compared with every other row. A stacked
+        // cell can't be zoomed anyway, so it only needs the same
+        // downsampled, already-cached thumbnail the list row itself decoded.
+        ScrollView {
+            LazyVStack(spacing: 10) {
                 ForEach(urls, id: \.path) { url in
-                    Button {
-                        selectedFileForFullPreview = url
-                    } label: {
-                        elementThumbnail(url)
+                    Group {
+                        if FileKindDetector.isImageFile(url) {
+                            StackedImagePreviewCell(url: url)
+                        } else {
+                            FilePreviewContent(url: url)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help(url.lastPathComponent)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: chrome == .panel ? 220 : 140)
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .padding(chrome == .panel ? 12 : 6)
         }
-        .frame(height: 76)
     }
 
-    @ViewBuilder
-    private func elementThumbnail(_ url: URL) -> some View {
-        Group {
-            if FileKindDetector.isImageFile(url), let img = NSImage(contentsOf: url) {
-                Image(nsImage: img).resizable().aspectRatio(contentMode: .fill)
-            } else {
-                Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))
-                    .resizable().aspectRatio(contentMode: .fit).padding(14)
-            }
-        }
-        .frame(width: 60, height: 60)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 1))
-    }
-
-    private func singleElementOverlay(url: URL) -> some View {
-        ZStack {
-            Color.black.opacity(0.55)
-                .onTapGesture { selectedFileForFullPreview = nil }
-            VStack(spacing: 0) {
-                HStack {
-                    Text(url.lastPathComponent)
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                    Spacer()
-                    Button {
-                        selectedFileForFullPreview = nil
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Close")
-                }
-                .padding(10)
-                FilePreviewContent(url: url)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.horizontal, 10)
-                Button {
-                    ClipboardManager.shared.pasteSingleFile(url)
-                    selectedFileForFullPreview = nil
-                } label: {
-                    Text("Paste").font(.system(size: 12, weight: .semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.white)
-                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
-                .padding(10)
-            }
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .padding(20)
-        }
-    }
 
     static func validWebURL(_ text: String) -> URL? {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -800,6 +694,44 @@ extension NSAttributedString {
                 }
             }
             return mutable
+        }
+    }
+}
+
+/// One image in the stacked multi-file preview. Deliberately non-interactive
+/// and downsampled: it reuses the very same URL-keyed thumbnail the list row
+/// already decoded (`ItemThumbnailCache`), so landing on a multi-file row
+/// usually costs no decode at all, instead of spinning up a magnifiable
+/// scroll view per image around a full-resolution bitmap.
+private struct StackedImagePreviewCell: View {
+    let url: URL
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.primary.opacity(0.06))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .task(id: url) {
+            if let hit = ItemThumbnailCache.shared.cachedFileThumbnail(for: url) {
+                image = hit
+                return
+            }
+            let decoded = await Task.detached(priority: .userInitiated) {
+                ItemThumbnailCache.decodeFileThumbnail(url: url)
+            }.value
+            guard !Task.isCancelled, let decoded else { return }
+            ItemThumbnailCache.shared.storeFileThumbnail(decoded, for: url)
+            image = decoded
         }
     }
 }
