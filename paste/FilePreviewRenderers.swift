@@ -147,19 +147,25 @@ struct FilePreviewContent: View {
                 AsyncImageFilePreview(url: url)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-            } else if let image = NSImage(contentsOf: url) {
-                ZoomableImagePreview(image: image)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             } else if FileManager.default.fileExists(atPath: url.path) {
+                // Anything not matched above renders through QuickLook,
+                // which loads asynchronously and handles arbitrary types.
+                //
+                // Two branches used to sit here. The first was
+                // `else if let image = NSImage(contentsOf: url)` — a
+                // synchronous, full-resolution disk read and decode on the
+                // main thread, inside `body`, re-run on every evaluation,
+                // and *attempted* even for files it could never decode (an
+                // archive, a binary) before falling through to here anyway.
+                // Every other branch in this chain is async; that one was
+                // the outlier. QuickLook renders those same files.
+                //
+                // The second was a `readableDocumentText` branch that sat
+                // AFTER this `fileExists` check, so it was only reachable
+                // for files that don't exist — where it could only fail. If
+                // extracted document text is ever wanted in preference to
+                // QuickLook, it has to go ABOVE this branch to run at all.
                 QuickLookFilePreview(url: url)
-            } else if let docText = FileKindDetector.readableDocumentText(from: url) {
-                ScrollView {
-                    Text(docText)
-                        .font(.system(size: 13))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
             } else {
                 VStack(spacing: 12) {
                     Image(nsImage: ClipenIconCache.shared.fileIcon(for: url))

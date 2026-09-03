@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Combine
 import UniformTypeIdentifiers
+import ImageIO
 import NaturalLanguage
 import ServiceManagement
 import AVFoundation
@@ -96,6 +97,7 @@ class ClipboardManager: ObservableObject {
             historyDirty = true
             _displayItems = nil
             _availableTags = nil
+            _itemIndexByID = nil
             updatePendingPasteID()
             if !markedItemIDs.isEmpty {
                 let live = Set(items.map(\.id))
@@ -109,31 +111,122 @@ class ClipboardManager: ObservableObject {
             // (existing items reordering/pinning/etc. re-triggers this
             // didSet too, but autoAnalyzeIfNeeded's own once-ever guard
             // makes that a cheap no-op, not a re-run).
-            let oldIDs = Set(oldValue.map(\.id))
-            for item in items where !oldIDs.contains(item.id) {
-                AIStructuringService.shared.autoAnalyzeIfNeeded(item: item)
+            // Allocation-free fast path first. This didSet fires on EVERY
+            // mutation of `items`, including in-place single-field writes
+            // (`items[idx].pasteCount += 1`, storing an AI result, a pin
+            // toggle, a note edit). Going straight to `Set(oldValue.map(\.id))`
+            // meant two O(n) allocations — an array of n UUIDs plus a Set of
+            // them — followed by an n-element scan, every single time, purely
+            // to discover that nothing was inserted. Same count with the same
+            // ids in the same order means no insertion, which is the
+            // overwhelmingly common case and costs one comparison per item
+            // and no allocations.
+            var mayHaveNewItems = items.count != oldValue.count
+            if !mayHaveNewItems {
+                for (new, old) in zip(items, oldValue) where new.id != old.id {
+                    mayHaveNewItems = true
+                    break
+                }
+            }
+            if mayHaveNewItems {
+                let oldIDs = Set(oldValue.map(\.id))
+                for item in items where !oldIDs.contains(item.id) {
+                    AIStructuringService.shared.autoAnalyzeIfNeeded(item: item)
+                }
             }
         }
     }
-    @Published var selectedIndex: Int = 0 {
-        didSet { updatePendingPasteID() }
+    /// The popup's cursor position. Deliberately NOT `@Published` on this
+    /// object: the popup view observes ClipboardManager as a whole, so
+    /// publishing selection here re-evaluated the entire popup body — search
+    /// bar, category strip, banners, footer — every time the cursor moved a
+    /// single row. It lives on its own tiny observable instead, which only
+    /// the row list and the "N of M" counter subscribe to (see
+    /// `SelectionScope` in PreviewOverlayWindow.swift). Everything outside
+    /// the view layer keeps using `selectedIndex` exactly as before.
+    final class SelectionState: ObservableObject {
+        @Published var index: Int = 0
+    }
+    let selection = SelectionState()
+
+    var selectedIndex: Int {
+        get { selection.index }
+        set {
+            guard selection.index != newValue else { return }
+            selection.index = newValue
+            updatePendingPasteID()
+        }
     }
 
     @Published var popupOpenGeneration: Int = 0
     @Published var collectionSwitchGeneration: Int = 0
 
-    @Published var popupHintV = false
-    @Published var popupHintShiftV = false
-    @Published var popupHintVMark = false
-    @Published var popupHintX = false
-    @Published var popupHintShiftX = false
-    @Published var popupHintXHold = false
-    @Published var popupHintC = false
-    @Published var popupHintCategory = false
-    @Published var popupHintG = false
-    @Published var popupHintSpace = false
-    @Published var popupHintSpaceDoubleTap = false
-    @Published var popupHintCmd = false
+    /// Keycap-highlight flags for the hint bar, deliberately NOT `@Published`
+    /// on this object. They flip on every key down and up — pressing V once
+    /// mutates two or three of them — and the ONLY thing that reads them is
+    /// PopupHintOverlay, a separate floating panel. While they lived here,
+    /// each flip fired ClipboardManager's objectWillChange, so flashing a
+    /// keycap rebuilt the entire popup list: roughly four full body passes
+    /// per keystroke where one was needed, all landing inside the 350ms
+    /// scroll animation. Holding them on their own small observable object
+    /// (a `let`, so mutating its contents never touches this object's
+    /// publisher) keeps the highlight working while leaving the list alone.
+    ///
+    /// The properties below forward to it so no writer had to change.
+    let popupHints = PopupHintState()
+
+    /// Keycap-highlight flags for the popup's hint bar. See `popupHints`.
+    final class PopupHintState: ObservableObject {
+        @Published var popupHintV = false
+        @Published var popupHintShiftV = false
+        @Published var popupHintVMark = false
+        @Published var popupHintX = false
+        @Published var popupHintShiftX = false
+        @Published var popupHintXHold = false
+        @Published var popupHintC = false
+        @Published var popupHintCategory = false
+        @Published var popupHintG = false
+        @Published var popupHintSpace = false
+        @Published var popupHintSpaceDoubleTap = false
+        @Published var popupHintCmd = false
+    }
+
+    var popupHintV: Bool {
+        get { popupHints.popupHintV } set { popupHints.popupHintV = newValue }
+    }
+    var popupHintShiftV: Bool {
+        get { popupHints.popupHintShiftV } set { popupHints.popupHintShiftV = newValue }
+    }
+    var popupHintVMark: Bool {
+        get { popupHints.popupHintVMark } set { popupHints.popupHintVMark = newValue }
+    }
+    var popupHintX: Bool {
+        get { popupHints.popupHintX } set { popupHints.popupHintX = newValue }
+    }
+    var popupHintShiftX: Bool {
+        get { popupHints.popupHintShiftX } set { popupHints.popupHintShiftX = newValue }
+    }
+    var popupHintXHold: Bool {
+        get { popupHints.popupHintXHold } set { popupHints.popupHintXHold = newValue }
+    }
+    var popupHintC: Bool {
+        get { popupHints.popupHintC } set { popupHints.popupHintC = newValue }
+    }
+    var popupHintCategory: Bool {
+        get { popupHints.popupHintCategory } set { popupHints.popupHintCategory = newValue }
+    }
+    var popupHintG: Bool {
+        get { popupHints.popupHintG } set { popupHints.popupHintG = newValue }
+    }
+    var popupHintSpace: Bool {
+        get { popupHints.popupHintSpace } set { popupHints.popupHintSpace = newValue }
+    }
+    var popupHintSpaceDoubleTap: Bool {
+        get { popupHints.popupHintSpaceDoubleTap } set { popupHints.popupHintSpaceDoubleTap = newValue }
+    }
+    var popupHintCmd: Bool {
+        get { popupHints.popupHintCmd } set { popupHints.popupHintCmd = newValue }
+    }
 
     @Published var markedItemIDs: [UUID] = []
 
@@ -522,7 +615,60 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    var _displayItems: [ClipboardItem]? = nil
+    var _displayItems: [ClipboardItem]? = nil {
+        // Row segments are derived purely from displayItems, so tying the
+        // two caches together means every existing `_displayItems = nil`
+        // invalidation site drops the segments too — no second list of
+        // places to keep in sync.
+        didSet {
+            _rowSegments = nil
+            _displayIndexByID = nil
+        }
+    }
+    /// Backing store for `rowSegments` (see PreviewOverlayWindow.swift).
+    var _rowSegments: [PopupRowSegment]? = nil
+
+    // MARK: - O(1) id lookups
+    //
+    // Finding an item by id used to mean `items.first(where: { $0.id == ... })`
+    // — a linear scan of the whole ring — in ~45 places across the app
+    // (paste, panels, details, pinning, AI state, QuickClip, the main
+    // window). These two maps are derived from `items` / `displayItems` and
+    // invalidated by the exact same didSets that already invalidate every
+    // other derived cache, so there is no second set of invalidation sites
+    // anyone can forget.
+
+    var _itemIndexByID: [UUID: Int]? = nil
+    var _displayIndexByID: [UUID: Int]? = nil
+
+    var itemIndexByID: [UUID: Int] {
+        if let cached = _itemIndexByID { return cached }
+        var map = [UUID: Int](minimumCapacity: items.count)
+        for (idx, item) in items.enumerated() { map[item.id] = idx }
+        _itemIndexByID = map
+        return map
+    }
+
+    var displayIndexByID: [UUID: Int] {
+        if let cached = _displayIndexByID { return cached }
+        let list = displayItems
+        var map = [UUID: Int](minimumCapacity: list.count)
+        for (idx, item) in list.enumerated() { map[item.id] = idx }
+        _displayIndexByID = map
+        return map
+    }
+
+    /// Position of `id` in `items`, or nil if it isn't in the ring.
+    func indexOfItem(id: UUID) -> Int? { itemIndexByID[id] }
+
+    /// The item with `id`, or nil if it isn't in the ring.
+    func item(id: UUID) -> ClipboardItem? {
+        guard let idx = itemIndexByID[id], items.indices.contains(idx) else { return nil }
+        return items[idx]
+    }
+
+    /// Position of `id` in the currently filtered/visible list.
+    func indexInDisplayItems(id: UUID) -> Int? { displayIndexByID[id] }
     var displayItems: [ClipboardItem] {
         if let cached = _displayItems { return cached }
         var result = popupTagFilter.map { tag in items.filter { $0.tags.contains(tag) } } ?? items
@@ -624,6 +770,12 @@ class ClipboardManager: ObservableObject {
     /// recognise "this is the run the panel is waiting on" inside
     /// `handleDetailsAwaitingAnalysisUpdate`.
     var detailsAwaitingAnalysisItemID: UUID? = nil
+    /// Pending debounced auto-analysis for an item the Details panel landed
+    /// on with nothing to show. Cycling THROUGH a stretch of unanalyzed
+    /// items used to fire one forced (importance-gate-bypassing) model run
+    /// per item passed over, all serialized behind the single app-wide
+    /// inference gate; only the item actually settled on should get one.
+    var detailsRetriggerWork: DispatchWorkItem? = nil
     /// Marked FIELDS, by their position in `detailUnits`. Field-level,
     /// not item-level, so it is deliberately separate from markedItemIDs —
     /// and cleared whenever the field list is rebuilt, since an index into
@@ -1069,6 +1221,9 @@ class ClipboardManager: ObservableObject {
             fieldMarkSeq             = [:]
             dTapHoldTimer?.invalidate()
             dTapHoldTimer            = nil
+            // Leaving Details cancels any debounced auto-analysis that was
+            // queued for an item the panel happened to be sitting on.
+            cancelPendingDetailsAnalysisRetrigger()
         case .none:
             break
         }
@@ -1729,6 +1884,18 @@ struct ClipboardItem: Identifiable {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.uint64Value
     }
 
+    /// Pixel dimensions straight from the file's header, without decoding
+    /// it. This read the size off a fully-decoded `NSImage(contentsOf:)`
+    /// before — decoding every pixel of a possibly-24-megapixel photo to
+    /// print two integers in a metadata line.
+    static func imagePixelSize(at url: URL) -> (width: Int, height: Int)? {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any],
+              let w = props[kCGImagePropertyPixelWidth] as? Int,
+              let h = props[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        return (w, h)
+    }
+
     static func fileMetadataSummary(for url: URL) -> String? {
         var parts: [String] = []
         if let type = UTType(filenameExtension: url.pathExtension)?.localizedDescription {
@@ -1743,8 +1910,8 @@ struct ClipboardItem: Identifiable {
 
         let ext = url.pathExtension.lowercased()
         if ["png", "jpg", "jpeg", "heic", "gif", "tiff"].contains(ext),
-           let img = NSImage(contentsOf: url) {
-            parts.insert("\(Int(img.size.width))×\(Int(img.size.height))", at: 0)
+           let size = Self.imagePixelSize(at: url) {
+            parts.insert("\(size.width)×\(size.height)", at: 0)
         } else if ext == "pdf", let pdf = PDFDocument(url: url) {
             let pages = pdf.pageCount == 1 ? "1 page" : "\(pdf.pageCount) pages"
             parts.insert(pages, at: 0)

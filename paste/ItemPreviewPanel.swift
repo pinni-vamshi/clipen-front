@@ -272,18 +272,54 @@ struct MultiItemPreviewView: View {
             // Just the raw preview of each item, stacked one below another,
             // scrolling — same treatment for every content type (image,
             // text, mixed, whatever). No numbering, no tag strip, no
-            // metadata/filename line, no grid: those all used to sit as an
-            // extra bar of chrome on every item.
+            // metadata line, no grid: those all used to sit as an extra bar
+            // of chrome on every item.
             ScrollView {
                 VStack(spacing: 10) {
                     ForEach(items, id: \.id) { item in
-                        ContentPreviewView(item: item, chrome: .panel)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 220)
+                        HStack(spacing: 6) {
+                            // A plain, non-scrollable label — never a
+                            // ContentPreviewView, which for text/table/PDF/
+                            // HTML content hosts its own inner ScrollView.
+                            // Scrolling the stack by dragging over an item's
+                            // actual preview handed the gesture to that
+                            // inner scroll view instead of the outer list,
+                            // making it impossible to scroll past an item
+                            // with its own scrollable content. This strip
+                            // has nothing scrollable under it, so a drag
+                            // here always reaches the outer ScrollView —
+                            // and it doubles as the filename, oriented
+                            // vertically the same way the popup's image-run
+                            // rows already label a batch of images.
+                            Text(Self.displayLabel(for: item))
+                                .font(.system(size: 9, weight: .semibold))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundColor(.secondary)
+                                .frame(width: 190, alignment: .center)
+                                .rotationEffect(.degrees(-90))
+                                .frame(width: 20)
+
+                            ContentPreviewView(item: item, chrome: .panel)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .frame(height: 220)
                     }
                 }
                 .padding(12)
             }
+        }
+    }
+
+    private static func displayLabel(for item: ClipboardItem) -> String {
+        switch item.content {
+        case .file(let url):
+            return url.lastPathComponent
+        case .files(let urls):
+            return urls.count == 1 ? urls[0].lastPathComponent : "\(urls.count) files"
+        default:
+            let preview = item.previewText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return preview.isEmpty ? item.primaryTag.label : preview
         }
     }
 }

@@ -64,7 +64,7 @@ private enum HistoryCrypto {
 extension ClipboardManager {
 
     func updateAIStructuredText(id: UUID, json: String?) {
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfItem(id: id) else { return }
         guard items[idx].aiStructuredText != json else { return }
         items[idx].aiStructuredText = json
         items[idx].embedding = nil
@@ -98,7 +98,7 @@ extension ClipboardManager {
     }
 
     func updateUserNote(id: UUID, note: String) {
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfItem(id: id) else { return }
         if items[idx].userNote == nil && !note.isEmpty {
             AuthManager.shared.registerActionUsage(actionID: "ref.note_new")
         } else if items[idx].userNote != nil {
@@ -133,7 +133,7 @@ extension ClipboardManager {
     }
 
     func updateFileItemText(id: UUID, newText: String) {
-        guard let idx = items.firstIndex(where: { $0.id == id }),
+        guard let idx = indexOfItem(id: id),
               case .file(let url) = items[idx].content,
               FileKindDetector.isTextFile(url) else { return }
 
@@ -152,7 +152,7 @@ extension ClipboardManager {
                 return
             }
             replaceItemContent(id: id, newContent: .file(editedURL))
-            if let i = items.firstIndex(where: { $0.id == id }) {
+            if let i = indexOfItem(id: id) {
                 items[i].originalFileURL = original
             }
         } else {
@@ -171,14 +171,14 @@ extension ClipboardManager {
     }
 
     func revertFileEdit(id: UUID) {
-        guard let idx = items.firstIndex(where: { $0.id == id }),
+        guard let idx = indexOfItem(id: id),
               let original = items[idx].originalFileURL,
               case .file(let editedURL) = items[idx].content else { return }
         if editedURL != original {
             try? FileManager.default.removeItem(at: editedURL)
         }
         replaceItemContent(id: id, newContent: .file(original))
-        if let i = items.firstIndex(where: { $0.id == id }) {
+        if let i = indexOfItem(id: id) {
             items[i].originalFileURL = nil
         }
         ToolRegistry.invalidateCache()
@@ -186,7 +186,7 @@ extension ClipboardManager {
     }
 
     func updateItemText(id: UUID, newText: String) {
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfItem(id: id) else { return }
         let old = items[idx]
         guard Self.editablePlainText(for: old) != nil,
               Self.editablePlainText(for: old) != newText else { return }
@@ -248,7 +248,7 @@ extension ClipboardManager {
     }
 
     func updateItemRichText(id: UUID, editedAttributedString attr: NSAttributedString) {
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfItem(id: id) else { return }
         let plain = attr.string
         let newContent: ClipboardContent
         let range = NSRange(location: 0, length: attr.length)
@@ -297,7 +297,7 @@ extension ClipboardManager {
     }
 
     func replaceItemContent(id: UUID, newContent: ClipboardContent) {
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfItem(id: id) else { return }
         let old = items[idx]
         var updated = ClipboardItem(content: newContent, id: old.id,
                                     timestamp: old.timestamp,
@@ -368,7 +368,7 @@ extension ClipboardManager {
     }
 
     func togglePin(id: UUID) {
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfItem(id: id) else { return }
         if items[idx].isPinned {
             items[idx].isPinned = false
             return
@@ -418,6 +418,15 @@ extension ClipboardManager {
         inlineEditOriginals.removeValue(forKey: id)
         diffLineCache.removeValue(forKey: id)
         diffWordCache.removeValue(forKey: id)
+        // ImportanceScoringService caches one breakdown per item, and each
+        // holds that item's full source text — including the uncapped text
+        // of items too long to auto-analyze. Its `invalidate(_:)` existed
+        // but had no callers, so nothing dropped an entry when its item
+        // left the ring.
+        ImportanceScoringService.shared.invalidate(id)
+        // Only ever written, never removed: an item stayed in the mark-order
+        // map after being unmarked and after being deleted.
+        itemMarkSeq.removeValue(forKey: id)
 
         // Every caller here is removing the item from the ring entirely, so
         // its blob-cache entries (imageBlobCache/payloadBlobCache/sidecarBlobCache)

@@ -97,6 +97,21 @@ struct DetailsPanelView: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
             Divider().background(Color.border)
 
+            if units.isEmpty {
+                // Shown while browsing lands on an item with no analysis.
+                // The panel deliberately stays open in this state rather
+                // than collapsing, so navigating past a gap doesn't drop
+                // the user out of the Details flow.
+                VStack(spacing: 4) {
+                    Text("No analysis for this item yet")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.textDim)
+                    Text("Keep browsing, or wait a moment while it's analyzed")
+                        .font(.system(size: 9))
+                        .foregroundColor(.textDim.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 10) {
@@ -132,6 +147,7 @@ struct DetailsPanelView: View {
                 .onChange(of: selectedIndex) { _, new in
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(new, anchor: .center) }
                 }
+            }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

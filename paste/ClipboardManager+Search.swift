@@ -186,10 +186,21 @@ extension ClipboardManager {
 
         let units = detailUnits(for: item)
         guard !units.isEmpty else {
-            setSidePanelStage(.none)
-            signalEditDenied(for: item.id)
-            flashStatus("No analysis for this item.")
-            retriggerAnalysisForMissingDetails(item)
+            // Landing here by NAVIGATING is not a rejected action — the user
+            // is browsing, not asking this item for details — so it gets
+            // none of the denial feedback the explicit D-press path uses:
+            // no shake (signalEditDenied), no error toast, and the panel is
+            // NOT torn down. It stays open showing its empty state and keeps
+            // tracking the selection, the way the Transform and Similar
+            // panels do; collapsing it meant one unanalyzed item in the
+            // middle of a browse kicked you out of the Details flow.
+            detailUnits = []
+            detailsIndex = 0
+            markedDetailIndices = []
+            fieldMarkSeq = [:]
+            detailsSourceItemID = item.id
+            updateDetailsPanel()
+            scheduleDetailsAnalysisRetrigger(for: item)
             return
         }
         detailUnits = units
@@ -213,6 +224,35 @@ extension ClipboardManager {
     /// Combined mode (2+ marked items) is deliberately excluded by both
     /// call sites — there's no single item to retrigger for a "some of
     /// these have no analysis" result.
+    private static let detailsRetriggerDelay: TimeInterval = 0.4
+
+    /// Debounced form of `retriggerAnalysisForMissingDetails`, used by the
+    /// navigation path. Cycling through a run of unanalyzed items fired one
+    /// forced model run per item passed over — each bypassing the
+    /// importance gate and each occupying the app-wide single-slot
+    /// inference gate in turn. Only the item actually settled on should
+    /// cause a run, so every keystroke cancels the previous pending one and
+    /// the request is re-checked against the live selection before firing.
+    func scheduleDetailsAnalysisRetrigger(for item: ClipboardItem) {
+        detailsRetriggerWork?.cancel()
+        let itemID = item.id
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.detailsRetriggerWork = nil
+            guard self.inDetailsStage, self.previewWindow.isVisible,
+                  self.displayItems.indices.contains(self.selectedIndex),
+                  self.displayItems[self.selectedIndex].id == itemID else { return }
+            self.retriggerAnalysisForMissingDetails(self.displayItems[self.selectedIndex])
+        }
+        detailsRetriggerWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.detailsRetriggerDelay, execute: work)
+    }
+
+    func cancelPendingDetailsAnalysisRetrigger() {
+        detailsRetriggerWork?.cancel()
+        detailsRetriggerWork = nil
+    }
+
     func retriggerAnalysisForMissingDetails(_ item: ClipboardItem) {
         guard aiStructuringEnabled else { return }
         guard AIStructuringService.shared.state(for: item.id) != .running else { return }
@@ -418,7 +458,7 @@ extension ClipboardManager {
         }
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
         let target = displayItems[selectedIndex]
-        guard let realIndex = items.firstIndex(where: { $0.id == target.id }) else { return }
+        guard let realIndex = indexOfItem(id: target.id) else { return }
         AuthManager.shared.registerActionUsage(actionID: "action.delete")
         popupSessionDeleted = true
         items.remove(at: realIndex)
@@ -454,11 +494,11 @@ extension ClipboardManager {
         let nextID: UUID? = displayItems.indices.contains(selectedIndex + 1)
             ? displayItems[selectedIndex + 1].id
             : nil
-        guard let realIndex = items.firstIndex(where: { $0.id == target.id }) else { return }
+        guard let realIndex = indexOfItem(id: target.id) else { return }
         guard realIndex != 0 else { return }
         let moved = items.remove(at: realIndex)
         items.insert(moved, at: 0)
-        if let nextID, let idx = displayItems.firstIndex(where: { $0.id == nextID }) {
+        if let nextID, let idx = indexInDisplayItems(id: nextID) {
             selectedIndex = idx
         } else {
             clampSelectedIndexToDisplay()
@@ -473,7 +513,7 @@ extension ClipboardManager {
         let remaining = items.filter { !movedIDs.contains($0.id) }
         items = orderedItems + remaining
         if let firstID = orderedItems.first?.id,
-           let newIdx = displayItems.firstIndex(where: { $0.id == firstID }) {
+           let newIdx = indexInDisplayItems(id: firstID) {
             selectedIndex = newIdx
         } else {
             selectedIndex = 0

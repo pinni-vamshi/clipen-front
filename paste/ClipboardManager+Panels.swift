@@ -33,8 +33,9 @@ extension ClipboardManager {
 
         let markedSet = Set(markedItemIDs)
 
-        let insertAt = items.firstIndex(where: { $0.id == markedItemIDs.first }) ?? 0
-        let anchorPinned = items.first(where: { $0.id == markedItemIDs.first })?.isPinned ?? false
+        let anchorID = markedItemIDs.first
+        let insertAt = anchorID.flatMap { indexOfItem(id: $0) } ?? 0
+        let anchorPinned = anchorID.flatMap { item(id: $0) }?.isPinned ?? false
 
         var groupItem = ClipboardItem(content: .group(children))
         groupItem.isPinned = anchorPinned
@@ -47,7 +48,7 @@ extension ClipboardManager {
         markedItemIDs = []
         multiSelectAnchorIndex = nil
         markBlobPurgeNeeded()
-        selectedIndex = displayItems.firstIndex(where: { $0.id == groupItem.id }) ?? 0
+        selectedIndex = indexInDisplayItems(id: groupItem.id) ?? 0
         selectionDidChange()
         AuthManager.shared.registerActionUsage(actionID: "action.group")
         AuthManager.shared.syncPersonPropertiesToPostHog()
@@ -56,7 +57,7 @@ extension ClipboardManager {
 
     func ungroup(_ item: ClipboardItem) {
         guard case .group(let children) = item.content,
-              let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
+              let idx = indexOfItem(id: item.id) else { return }
         items.remove(at: idx)
         var insert = idx
         for child in children {
@@ -659,7 +660,7 @@ extension ClipboardManager {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
         saveInlineEditOriginal(for: id)
-        if let item = items.first(where: { $0.id == id }), case .file = item.content {
+        if let item = item(id: id), case .file = item.content {
             updateFileItemText(id: id, newText: newText)
         } else {
             updateItemText(id: id, newText: newText)
@@ -713,7 +714,7 @@ extension ClipboardManager {
         guard let id = inlineEditItemID else { return }
         commit()
         popupPinnedOpen = false
-        guard let idx = displayItems.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexInDisplayItems(id: id) else { return }
         selectedIndex = idx
         commitPaste()
     }
@@ -726,7 +727,7 @@ extension ClipboardManager {
 
     private func saveInlineEditOriginal(for id: UUID) {
         guard inlineEditOriginals[id] == nil,
-              let item = items.first(where: { $0.id == id }) else { return }
+              let item = item(id: id) else { return }
         inlineEditOriginals[id] = item.content
     }
 
@@ -1222,7 +1223,7 @@ extension ClipboardManager {
         }()
         if rememberLastSelection, withinRememberWindow, !displayItems.isEmpty {
             if let id = rememberedItemID,
-               let idx = displayItems.firstIndex(where: { $0.id == id }) {
+               let idx = indexInDisplayItems(id: id) {
                 selectedIndex = idx
             } else {
                 selectedIndex = min(max(0, rememberedIndex), displayItems.count - 1)
@@ -1569,7 +1570,7 @@ extension ClipboardManager {
     @discardableResult
     func toggleMark(id: UUID) -> Bool {
 
-        if let item = items.first(where: { $0.id == id }), item.isUncaptured {
+        if let item = item(id: id), item.isUncaptured {
             flashStatus(String(localized: "This one can only be pasted on its own."))
             return false
         }
@@ -1615,6 +1616,12 @@ extension ClipboardManager {
     }
 
     func unifiedMarkOrder() -> (items: [UUID: Int], fields: [Int: Int]) {
+        // Overwhelmingly the common case: nothing is marked at all. Bail
+        // before allocating an entries array, sorting it, and building two
+        // dictionaries — this runs on render paths.
+        if markedItemIDs.isEmpty, !inDetailsStage || markedDetailIndices.isEmpty {
+            return ([:], [:])
+        }
         var entries: [(seq: Int, item: UUID?, field: Int?)] = []
         for id in markedItemIDs {
             entries.append((itemMarkSeq[id] ?? Int.max, id, nil))
@@ -1718,7 +1725,7 @@ extension ClipboardManager {
     }
 
     func moveItem(_ id: UUID, toCollection target: String) {
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfItem(id: id) else { return }
         if let activeCollection { items[idx].collections.remove(activeCollection) }
         items[idx].collections.insert(target)
         _displayItems = nil
@@ -1728,7 +1735,7 @@ extension ClipboardManager {
     }
 
     func shareItem(_ id: UUID, toCollection target: String) {
-        guard let idx = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = indexOfItem(id: id) else { return }
         items[idx].collections.insert(target)
         _displayItems = nil
         let snapshot = items

@@ -867,7 +867,7 @@ private struct ReferencePageContentView: View {
                         ClipboardManager.shared.pasteTransformed(flattened, restoring: item)
                     } else if isEditableText {
                         ClipboardManager.shared.pasteTransformed(editedText, restoring: item)
-                    } else if let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == item.id }) {
+                    } else if let idx = ClipboardManager.shared.indexOfItem(id: item.id) {
                         ClipboardManager.shared.pasteItem(at: idx)
                     }
                 } label: {
@@ -1160,7 +1160,7 @@ private struct SimilarItemCard: View {
             Spacer(minLength: 0)
 
             Button {
-                if let idx = ClipboardManager.shared.items.firstIndex(where: { $0.id == similar.id }) {
+                if let idx = ClipboardManager.shared.indexOfItem(id: similar.id) {
                     ClipboardManager.shared.pasteItem(at: idx)
                 }
             } label: {

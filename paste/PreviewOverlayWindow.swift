@@ -189,71 +189,12 @@ struct PopoverPreviewView: View {
     @State private var lastScrolledTarget: AnyHashable?
 
     private var items: [ClipboardItem] { manager.displayItems }
-    private var selectedIndex: Int     { manager.selectedIndex }
 
-    private enum RowSegment: Identifiable {
-        case single(item: ClipboardItem, index: Int)
-        case imageRun([(item: ClipboardItem, index: Int)])
-
-        var id: String {
-            switch self {
-            case .single(let item, _): return item.id.uuidString
-            case .imageRun(let run):   return "run-" + (run.first?.item.id.uuidString ?? "")
-            }
-        }
-    }
-
-    private var rowSegments: [RowSegment] {
-        var result: [RowSegment] = []
-        var run: [(item: ClipboardItem, index: Int)] = []
-
-        func flushRun() {
-            guard !run.isEmpty else { return }
-            // Chunk from the OLD end of the run forward, not the new end.
-            // New captures are always prepended to `items` (index 0), so a
-            // run's tail-relative position never moves — only its
-            // front-relative position does. Slicing front-first here used to
-            // mean every chunk boundary after the first re-shifted on every
-            // new image capture, changing `.imageRun` chunk identity (keyed
-            // on each chunk's first member) for chunks whose actual members
-            // barely changed — SwiftUI then tore down and rebuilt those rows
-            // instead of diffing them, which is what read as jerky/jumpy
-            // whenever several images were copied back to back. Anchoring
-            // chunk boundaries to the tail means only the newest (leading,
-            // still-growing) chunk's identity changes; every older chunk's
-            // membership — and therefore its id — is invariant to further
-            // insertions at the front.
-            let n = run.count
-            let remainder = n % ImageRunRow.maxPerLine
-            var chunks: [[(item: ClipboardItem, index: Int)]] = []
-            if remainder > 0 {
-                chunks.append(Array(run[0..<remainder]))
-            }
-            var i = remainder
-            while i < n {
-                chunks.append(Array(run[i..<(i + ImageRunRow.maxPerLine)]))
-                i += ImageRunRow.maxPerLine
-            }
-            for chunk in chunks {
-                if chunk.count >= 2 {
-                    result.append(.imageRun(chunk))
-                } else {
-                    result.append(.single(item: chunk[0].item, index: chunk[0].index))
-                }
-            }
-            run = []
-        }
-        for (idx, item) in items.enumerated() {
-            if isImageRunEligible(item.content) {
-                run.append((item, idx))
-            } else {
-                flushRun()
-                result.append(.single(item: item, index: idx))
-            }
-        }
-        flushRun()
-        return result
-    }
+    /// Cached on the manager alongside `displayItems` — this used to be a
+    /// computed property here, re-chunking the entire list on every body
+    /// evaluation (and again inside `scrollTarget`), several times per
+    /// keystroke.
+    private var rowSegments: [PopupRowSegment] { manager.rowSegments }
 
     private func coarseScrollTarget(for idx: Int) -> AnyHashable {
         scrollTarget(for: idx).coarse
@@ -264,7 +205,7 @@ struct PopoverPreviewView: View {
             let fallback = items.first.map { AnyHashable($0.id) } ?? AnyHashable("")
             return (fallback, false)
         }
-        if isImageRunEligible(items[idx].content) {
+        if ClipboardManager.isImageRunEligible(items[idx].content) {
             for segment in rowSegments {
                 if case .imageRun(let run) = segment, run.contains(where: { $0.index == idx }) {
                     return (AnyHashable(segment.id), run.count > ImageRunRow.maxPerLine)
@@ -272,14 +213,6 @@ struct PopoverPreviewView: View {
             }
         }
         return (AnyHashable(items[idx].id), false)
-    }
-
-    private func isImageRunEligible(_ content: ClipboardContent) -> Bool {
-        switch content {
-        case .image: return true
-        case .file(let url): return FileKindDetector.isImageFile(url)
-        default: return false
-        }
     }
 
     private static let rowH: CGFloat = 72
@@ -300,9 +233,9 @@ struct PopoverPreviewView: View {
                 rememberForeverBanner
 
                 Divider().padding(.bottom, 4)
-                rowArea
+                SelectionScope(selection: manager.selection) { rowArea(selectedIndex: $0) }
                 Divider()
-                footer
+                SelectionScope(selection: manager.selection) { footer(selectedIndex: $0) }
             }
             .onPreferenceChange(SelectedRowFramePreferenceKey.self) { frame in
 
@@ -431,7 +364,7 @@ struct PopoverPreviewView: View {
                     ForEach(chips) { chip in
                         AIFactChipView(chip: chip) {
 
-                            if let idx = manager.displayItems.firstIndex(where: { $0.id == chip.itemID }) {
+                            if let idx = manager.indexInDisplayItems(id: chip.itemID) {
                                 manager.selectedIndex = idx
                                 manager.selectionDidChange()
                             }
@@ -587,12 +520,12 @@ struct PopoverPreviewView: View {
         }
     }
 
-    private var rowArea: some View {
-        normalRingArea
+    private func rowArea(selectedIndex: Int) -> some View {
+        normalRingArea(selectedIndex: selectedIndex)
             .frame(height: Self.rowH * CGFloat(visibleCount), alignment: .top)
     }
 
-    private var normalRingArea: some View {
+    private func normalRingArea(selectedIndex: Int) -> some View {
         Group {
             if items.isEmpty {
                 if !manager.isHistoryFullyLoaded {
@@ -612,12 +545,17 @@ struct PopoverPreviewView: View {
 
                         LazyVStack(spacing: 10) {
                             let segments = rowSegments
+                            // Computed once per pass, not once per row:
+                            // markOrder(for:) rebuilt and re-sorted the whole
+                            // mark order on every call, so a 5-row viewport
+                            // did that work five times per body evaluation.
+                            let markOrders = manager.unifiedMarkOrder().items
                             ForEach(Array(segments.enumerated()), id: \.element.id) { segIdx, segment in
                                 switch segment {
                                 case .single(let item, let idx):
                                     PopoverRow(item: item, index: idx,
                                                isSelected: idx == selectedIndex,
-                                               markOrder: manager.markOrder(for: item.id),
+                                               markOrder: markOrders[item.id],
                                                showColorSwatches: manager.showColorSwatches,
                                                selectionNamespace: selectionNamespace,
                                                shakeGeneration: manager.editDeniedShake?.itemID == item.id
@@ -743,7 +681,7 @@ struct PopoverPreviewView: View {
         }
     }
 
-    private var footer: some View {
+    private func footer(selectedIndex: Int) -> some View {
         Text(items.isEmpty
              ? "0 of 0"
              : "\(min(selectedIndex + 1, items.count)) of \(items.count)")
@@ -889,7 +827,7 @@ struct ImageRunRow: View, Equatable {
     @ViewBuilder
     private var railBadge: some View {
         if let selectedEntry = run.first(where: { $0.index == selectedIndex }) {
-            let analysisState = AIStructuringService.shared.state(for: selectedEntry.item.id)
+            let analysisState = AIStructuringService.shared.state(for: selectedEntry.item)
             let analysing = analysisState == .running
             let hasAnalysis: Bool = { if case .done = analysisState { return true }; return false }()
             Image(systemName: selectedEntry.item.primaryTag.icon)
@@ -1257,7 +1195,7 @@ struct PopoverRow: View, Equatable {
                 .background(Color.orange, in: Circle())
                 .help("macOS wouldn't let Clipen copy this — pasting uses the system clipboard instead")
         } else if isSelected {
-            let analysisState = AIStructuringService.shared.state(for: item.id)
+            let analysisState = AIStructuringService.shared.state(for: item)
             let analysing = analysisState == .running
             let hasAnalysis: Bool = { if case .done = analysisState { return true }; return false }()
             Image(systemName: item.primaryTag.icon)
@@ -1782,6 +1720,9 @@ final class PopupHintOverlay {
 
 private struct PopupHintRow: View {
     @ObservedObject private var manager = ClipboardManager.shared
+    /// The keycap flags live on their own observable object now, so that
+    /// flipping one re-renders this small bar and nothing else.
+    @ObservedObject private var hintState = ClipboardManager.shared.popupHints
     private let auth = AuthManager.shared
 
     private var hints: [DynamicHint] {
@@ -1832,13 +1773,13 @@ private struct PopupHintRow: View {
 
     private func isPressed(_ hint: DynamicHint) -> Bool {
         switch hint.id {
-        case "g-group":       return manager.popupHintG
+        case "g-group":       return hintState.popupHintG
         case "space2-pin",
              "space-close",
-             "space-preview": return manager.popupHintSpace || manager.popupHintSpaceDoubleTap
-        case "x-transform":   return manager.popupHintX || manager.popupHintXHold
-        case "holdv-mark":    return manager.popupHintVMark
-        case "v-next":        return manager.popupHintV
+             "space-preview": return hintState.popupHintSpace || hintState.popupHintSpaceDoubleTap
+        case "x-transform":   return hintState.popupHintX || hintState.popupHintXHold
+        case "holdv-mark":    return hintState.popupHintVMark
+        case "v-next":        return hintState.popupHintV
         default:              return false
         }
     }
@@ -1890,4 +1831,105 @@ extension NSPopover {
         group.timingFunction = CAMediaTimingFunction(name: .easeOut)
         layer.add(group, forKey: "clipenPopIn")
     }
+}
+
+/// One rendered row of the popup list: either a single item, or a run of
+/// consecutive images batched onto one line. Lives at file scope (and its
+/// construction on ClipboardManager) so it can be cached with
+/// `displayItems` rather than recomputed on every SwiftUI body pass.
+enum PopupRowSegment: Identifiable {
+    case single(item: ClipboardItem, index: Int)
+    case imageRun([(item: ClipboardItem, index: Int)])
+
+    var id: String {
+        switch self {
+        case .single(let item, _): return item.id.uuidString
+        case .imageRun(let run):   return "run-" + (run.first?.item.id.uuidString ?? "")
+        }
+    }
+}
+
+extension ClipboardManager {
+    static func isImageRunEligible(_ content: ClipboardContent) -> Bool {
+        switch content {
+        case .image: return true
+        case .file(let url): return FileKindDetector.isImageFile(url)
+        default: return false
+        }
+    }
+
+    var rowSegments: [PopupRowSegment] {
+        if let cached = _rowSegments { return cached }
+        let computed = Self.computeRowSegments(for: displayItems)
+        _rowSegments = computed
+        return computed
+    }
+
+    static func computeRowSegments(for items: [ClipboardItem]) -> [PopupRowSegment] {
+        var result: [PopupRowSegment] = []
+        var run: [(item: ClipboardItem, index: Int)] = []
+
+        func flushRun() {
+            guard !run.isEmpty else { return }
+            // Chunk from the OLD end of the run forward, not the new end.
+            // New captures are always prepended to `items` (index 0), so a
+            // run's tail-relative position never moves — only its
+            // front-relative position does. Slicing front-first here used to
+            // mean every chunk boundary after the first re-shifted on every
+            // new image capture, changing `.imageRun` chunk identity (keyed
+            // on each chunk's first member) for chunks whose actual members
+            // barely changed — SwiftUI then tore down and rebuilt those rows
+            // instead of diffing them, which is what read as jerky/jumpy
+            // whenever several images were copied back to back. Anchoring
+            // chunk boundaries to the tail means only the newest (leading,
+            // still-growing) chunk's identity changes; every older chunk's
+            // membership — and therefore its id — is invariant to further
+            // insertions at the front.
+            let n = run.count
+            let remainder = n % ImageRunRow.maxPerLine
+            var chunks: [[(item: ClipboardItem, index: Int)]] = []
+            if remainder > 0 {
+                chunks.append(Array(run[0..<remainder]))
+            }
+            var i = remainder
+            while i < n {
+                chunks.append(Array(run[i..<(i + ImageRunRow.maxPerLine)]))
+                i += ImageRunRow.maxPerLine
+            }
+            for chunk in chunks {
+                if chunk.count >= 2 {
+                    result.append(.imageRun(chunk))
+                } else {
+                    result.append(.single(item: chunk[0].item, index: chunk[0].index))
+                }
+            }
+            run = []
+        }
+        for (idx, item) in items.enumerated() {
+            if isImageRunEligible(item.content) {
+                run.append((item, idx))
+            } else {
+                flushRun()
+                result.append(.single(item: item, index: idx))
+            }
+        }
+        flushRun()
+        return result
+    }
+}
+
+/// Re-evaluates only its own content when the selection moves.
+///
+/// `selectedIndex` used to be `@Published` on ClipboardManager, which
+/// PopoverPreviewView observes wholesale — so moving the cursor one row
+/// re-evaluated the entire popup body: search bar, category strip, AI fact
+/// strip, every banner, the footer. Only the row list and the "N of M"
+/// counter actually care. Selection now lives on its own tiny observable,
+/// and only the scopes below subscribe to it, so navigating repaints two
+/// rows and a counter instead of the whole popup.
+private struct SelectionScope<Content: View>: View {
+    @ObservedObject var selection: ClipboardManager.SelectionState
+    @ViewBuilder let content: (Int) -> Content
+
+    var body: some View { content(selection.index) }
 }

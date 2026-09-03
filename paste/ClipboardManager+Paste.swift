@@ -94,7 +94,7 @@ extension ClipboardManager {
     }
 
     func recordPaste(itemID: UUID, appName: String?, bundleID: String?) {
-        guard let idx = items.firstIndex(where: { $0.id == itemID }) else { return }
+        guard let idx = indexOfItem(id: itemID) else { return }
         items[idx].pastedToAppName  = appName
         items[idx].pastedToBundleID = bundleID
         items[idx].lastPastedAt     = Date()
@@ -366,7 +366,7 @@ extension ClipboardManager {
         }
 
         let item: ClipboardItem
-        if let id = pendingPasteItemID, let found = items.first(where: { $0.id == id }) {
+        if let id = pendingPasteItemID, let found = self.item(id: id) {
             item = found
         } else if displayItems.indices.contains(selectedIndex) {
             item = displayItems[selectedIndex]
@@ -375,7 +375,7 @@ extension ClipboardManager {
             return
         }
         pendingPasteItemID = nil
-        let position = displayItems.firstIndex(where: { $0.id == item.id })
+        let position = indexInDisplayItems(id: item.id)
         recordPasteAnalytics(item: item, displayIndex: position)
         let pasteTarget = resolvedPasteTarget()
         previewWindow.hide(); transformPanel.hide(); itemPreviewPanel.hide()
@@ -480,8 +480,8 @@ extension ClipboardManager {
     }
 
     func pasteItemKeepingPopupOpen(id: UUID) {
-        guard let item = items.first(where: { $0.id == id }) else { return }
-        let position = displayItems.firstIndex(where: { $0.id == id })
+        guard let item = item(id: id) else { return }
+        let position = indexInDisplayItems(id: id)
         recordPasteAnalytics(item: item, displayIndex: position)
         recordNudgePaste(kind: .single)
         simulatePaste(item, target: resolvedPasteTarget(), position: position)
@@ -734,7 +734,7 @@ extension ClipboardManager {
     func pasteItem(at itemsIndex: Int) {
         guard items.indices.contains(itemsIndex) else { return }
         let item = items[itemsIndex]
-        let position = displayItems.firstIndex(where: { $0.id == item.id })
+        let position = indexInDisplayItems(id: item.id)
         recordPasteAnalytics(item: item, displayIndex: position)
         recordNudgePaste(kind: .single)
         simulatePaste(item, target: resolvedPasteTarget(), position: position)

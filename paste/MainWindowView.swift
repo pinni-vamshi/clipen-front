@@ -370,7 +370,7 @@ struct MainWindowView: View {
         .equatable()
         .onKeyPress(.return) {
             guard let id = mainSelectedID,
-                  let i = manager.items.firstIndex(where: { $0.id == id }) else { return .ignored }
+                  let i = manager.indexOfItem(id: id) else { return .ignored }
             manager.pasteItem(at: i)
             return .handled
         }
@@ -582,7 +582,7 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private var detailPane: some View {
-        if let id = mainSelectedID, let item = manager.items.first(where: { $0.id == id }) {
+        if let id = mainSelectedID, let item = manager.item(id: id) {
             ItemDetailView(item: item)
                 .id(item.id)
         } else {
@@ -995,7 +995,7 @@ private struct ItemDetailView: View {
 
     private func relatedItemLabel(for entityID: String) -> String {
         guard let id = UUID(uuidString: entityID),
-              let related = ClipboardManager.shared.items.first(where: { $0.id == id }) else { return "Item no longer in history" }
+              let related = ClipboardManager.shared.item(id: id) else { return "Item no longer in history" }
         if let text = related.content.plainText, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
         }
@@ -1192,7 +1192,7 @@ private struct HistoryListPane: View, Equatable {
                         ForEach(rows) { item in
                             CompactItemRow(item: item, isSelected: selectedID == item.id,
                                           onDelete: {
-                                              if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
+                                              if let i = manager.indexOfItem(id: item.id) {
                                                   manager.removeItem(at: i)
                                               }
                                           },
@@ -1206,14 +1206,14 @@ private struct HistoryListPane: View, Equatable {
                                 }
                                 .contextMenu {
                                     Button("Paste") {
-                                        if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
+                                        if let i = manager.indexOfItem(id: item.id) {
                                             manager.pasteItem(at: i)
                                         }
                                     }
                                     Divider()
                                     Button(item.isPinned ? "Unpin" : "Pin") { manager.togglePin(id: item.id) }
                                     Button("Remove", role: .destructive) {
-                                        if let i = manager.items.firstIndex(where: { $0.id == item.id }) {
+                                        if let i = manager.indexOfItem(id: item.id) {
                                             manager.removeItem(at: i)
                                         }
                                     }

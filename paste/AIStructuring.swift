@@ -238,10 +238,21 @@ final class AIStructuringService: ObservableObject {
 
     func state(for id: UUID) -> State {
         if let live = states[id] { return live }
-        if let stored = ClipboardManager.shared.items.first(where: { $0.id == id })?.aiStructuredText,
+        if let stored = ClipboardManager.shared.item(id: id)?.aiStructuredText,
            !stored.isEmpty {
             return .done(stored)
         }
+        return .idle
+    }
+
+    /// Same as `state(for id:)`, minus even the index lookup. Both forms are
+    /// O(1) now — the id-based one resolves through ClipboardManager's
+    /// `item(id:)` index — but row badges call this on every body evaluation
+    /// while already holding the item, so there is no reason to look it up
+    /// again. Prefer this overload wherever the item is in hand.
+    func state(for item: ClipboardItem) -> State {
+        if let live = states[item.id] { return live }
+        if let stored = item.aiStructuredText, !stored.isEmpty { return .done(stored) }
         return .idle
     }
 
@@ -274,6 +285,7 @@ final class AIStructuringService: ObservableObject {
         regenerateAllTask?.cancel()
         states.removeAll()
         autoAttempted = []
+        persistAutoAttemptedSoon()
         AIFactIndex.shared.reset()
         ClipboardManager.shared.clearAllAIStructuredText()
         DebugLog.write("AI: wiped all analyses, regenerating \(items.count) item(s)")
@@ -285,6 +297,7 @@ final class AIStructuringService: ObservableObject {
             guard breakdown.decision else { return nil }
             return item
         }
+        persistAutoAttemptedSoon()
         guard !eligible.isEmpty else {
             regenerateAllProgress = nil
             return
@@ -321,9 +334,39 @@ final class AIStructuringService: ObservableObject {
     }
 
     private static let autoAttemptedDefaultsKey = "AIStructuringService.autoAttempted"
-    private var autoAttempted: Set<UUID> {
-        get { Set((UserDefaults.standard.stringArray(forKey: Self.autoAttemptedDefaultsKey) ?? []).compactMap(UUID.init)) }
-        set { UserDefaults.standard.set(newValue.map(\.uuidString), forKey: Self.autoAttemptedDefaultsKey) }
+
+    /// Held in memory, not re-read from UserDefaults on every touch. This
+    /// was a computed property whose getter decoded the whole stored array
+    /// and parsed every UUID string, and whose setter re-serialised and
+    /// wrote the whole array back. A single `contains` check on capture
+    /// paid the full parse; a single `insert` paid parse + write; and
+    /// `regenerateAll` does one insert per item, so a full regenerate was
+    /// quadratic UUID parsing plus one plist write per item.
+    private lazy var autoAttempted: Set<UUID> = Set(
+        (UserDefaults.standard.stringArray(forKey: Self.autoAttemptedDefaultsKey) ?? [])
+            .compactMap(UUID.init))
+
+    private var autoAttemptedSaveWork: DispatchWorkItem?
+
+    /// Debounced persist. Also prunes to ids still in the ring — nothing
+    /// ever removed entries before, so every item ever captured stayed in
+    /// UserDefaults permanently and was re-parsed on every capture.
+    /// Deliberately skipped until history has fully loaded: pruning against
+    /// a partially-loaded ring would drop ids for items that exist but
+    /// aren't in `items` yet, and those would then get re-analyzed.
+    private func persistAutoAttemptedSoon() {
+        autoAttemptedSaveWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.autoAttemptedSaveWork = nil
+            if ClipboardManager.shared.isHistoryFullyLoaded {
+                self.autoAttempted.formIntersection(Set(ClipboardManager.shared.items.map(\.id)))
+            }
+            UserDefaults.standard.set(self.autoAttempted.map(\.uuidString),
+                                      forKey: Self.autoAttemptedDefaultsKey)
+        }
+        autoAttemptedSaveWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
     func autoAnalyzeIfNeeded(item: ClipboardItem) {
@@ -334,6 +377,7 @@ final class AIStructuringService: ObservableObject {
         let breakdown = ImportanceScoringService.shared.evaluate(item)
         guard !breakdown.isIndeterminate else { return }
         autoAttempted.insert(item.id)
+        persistAutoAttemptedSoon()
         guard breakdown.decision else { return }
         runAndValidate(item: item, trigger: "auto_capture")
     }
@@ -542,21 +586,22 @@ final class AIStructuringService: ObservableObject {
                     let why = reason?.rawValue ?? "unknown"
                     self.attemptFailures[item.id, default: []].append("attempt \(attempt): \(why)")
                     DebugLog.write("AI-RAW \(item.id.uuidString.prefix(4)): \(raw.replacingOccurrences(of: "\n", with: " ").prefix(400))")
-                    if let reason, !reason.isWorthRetrying {
-                        // Content-limited, not model-limited. Re-asking
-                        // cannot change the answer, and each attempt holds
-                        // the gate.
-                        self.states[item.id] = .failed("Nothing structured to extract from this item.")
-                        DebugLog.write("AI \(item.id.uuidString.prefix(4)): \(why) — not retrying")
-                        Self.trackAnalysisFinished(item: item, success: false, startedAt: startedAt, trigger: trigger)
-                    } else if attempt < Self.maxAttempts {
+                    // Each rejection reason carries how many attempts it's
+                    // worth (see RejectionReason.attemptCap) — a repair pass
+                    // is only useful where showing the model its own answer
+                    // could plausibly change it.
+                    let cap = min(reason?.attemptCap ?? Self.maxAttempts, Self.maxAttempts)
+                    if attempt < cap {
                         DebugLog.write("AI \(item.id.uuidString.prefix(4)): attempt \(attempt) rejected (\(why)), retrying with repair context")
                         self.runAndValidate(
                             item: item, attempt: attempt + 1, startedAt: startedAt, trigger: trigger,
                             priorAttempts: priorAttempts + [PriorAttempt(attempt: attempt, raw: raw, reason: reason)])
                     } else {
-                        self.states[item.id] = .failed("Failed after \(Self.maxAttempts) attempts (\(why)).")
-                        DebugLog.write("AI \(item.id.uuidString.prefix(4)): gave up after \(Self.maxAttempts) attempts (\(why))")
+                        let message = reason == .noExtractedData
+                            ? "Nothing structured to extract from this item."
+                            : "Failed after \(attempt) attempts (\(why))."
+                        self.states[item.id] = .failed(message)
+                        DebugLog.write("AI \(item.id.uuidString.prefix(4)): gave up after \(attempt) attempt(s) (\(why))")
                         Self.trackAnalysisFinished(item: item, success: false, startedAt: startedAt, trigger: trigger)
                     }
                 }
@@ -631,21 +676,32 @@ final class AIStructuringService: ObservableObject {
         /// Not JSON at all (prose, or a truncated object). Worth one retry.
         case notJSON
         /// Valid JSON, but only `description`/`keywords` — no extracted
-        /// fields. Usually means the content genuinely had no fields to
-        /// extract, which a retry cannot change.
+        /// fields.
         case noExtractedData
         /// Parsed and had data, but couldn't be re-serialised.
         case notSerialisable
 
-        /// `noExtractedData` is deliberately NOT retryable. Measured on real
-        /// captures: every item that hit it failed all attempts identically,
-        /// because the limitation is in the content, not in the model's
-        /// effort. Each pointless retry also occupies the app-wide analysis
-        /// gate, so it delays every other queued item as well.
-        var isWorthRetrying: Bool {
+        /// Total attempts this rejection is worth, first attempt included.
+        ///
+        /// `noExtractedData` used to be excluded from retrying outright.
+        /// That was measured back when a "retry" meant re-asking the model
+        /// the identical question — which failed identically every time,
+        /// because nothing about the request had changed. It no longer
+        /// describes what a retry does: `repairInstruction` now replays the
+        /// model's own rejected answer along with a correction written
+        /// specifically for this case ("it contained ONLY description and
+        /// keywords… turn every concrete thing it mentions into its own
+        /// named key"). That correction was unreachable dead text for as
+        /// long as this returned "never retry".
+        ///
+        /// It gets exactly ONE repair pass, not the full three: if showing
+        /// the model its own answer and naming the mistake doesn't produce
+        /// fields, the content really has none, and each further attempt
+        /// holds the app-wide inference gate against every queued item.
+        var attemptCap: Int {
             switch self {
-            case .copiedExample, .notJSON, .notSerialisable: return true
-            case .noExtractedData: return false
+            case .copiedExample, .notJSON, .notSerialisable: return AIStructuringService.maxAttempts
+            case .noExtractedData: return 2
             }
         }
     }

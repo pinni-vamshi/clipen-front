@@ -756,7 +756,7 @@ extension ClipboardManager {
             ? displayItems[selectedIndex].id : nil
         items.removeAll { $0.isUncaptured }
         if let wasSelectedID,
-           let idx = displayItems.firstIndex(where: { $0.id == wasSelectedID }) {
+           let idx = indexInDisplayItems(id: wasSelectedID) {
             selectedIndex = idx
         } else {
             selectedIndex = 0
@@ -795,12 +795,19 @@ extension ClipboardManager {
         let trimmable = items.indices.filter { !items[$0].isPinned && !isRememberProtected(items[$0]) }
         if trimmable.count > maxItems, let oldest = trimmable.last {
             evictFileSnapshots(for: items[oldest])
+            // This is the ring's most common removal path by far — one item
+            // ages out on every capture once the ring is full — and it was
+            // the only one of the three that skipped evictCaches, so every
+            // per-item cache (blobs, diff splits, table cells, importance
+            // breakdowns, mark order) kept its entry for an item that no
+            // longer exists.
+            evictCaches(for: items[oldest].id)
             items.remove(at: oldest)
             markBlobPurgeNeeded()
         }
 
         if let preservedSelectionID,
-           let newIdx = displayItems.firstIndex(where: { $0.id == preservedSelectionID }) {
+           let newIdx = indexInDisplayItems(id: preservedSelectionID) {
             selectedIndex = newIdx
         } else {
             selectedIndex = 0
@@ -839,7 +846,7 @@ extension ClipboardManager {
                 guard let ocrResult = extracted else { return }
                 DispatchQueue.main.async { [weak self] in
                     guard let self,
-                          let idx = self.items.firstIndex(where: { $0.id == itemID }),
+                          let idx = self.indexOfItem(id: itemID),
                           idx < self.items.count,
                           self.items[idx].ocrText == nil else { return }
                     self.items[idx].ocrText = ocrResult
@@ -905,7 +912,7 @@ extension ClipboardManager {
             guard !title.isEmpty else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self,
-                      let idx = self.items.firstIndex(where: { $0.id == itemID }),
+                      let idx = self.indexOfItem(id: itemID),
                       idx < self.items.count else { return }
                 self.items[idx].urlTitle = title
                 self.items[idx].embedding = nil
