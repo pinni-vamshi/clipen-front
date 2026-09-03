@@ -1340,7 +1340,7 @@ private struct CompactItemRow: View, Equatable {
                 .font(.system(size: 9, weight: .bold))
                 .foregroundColor(.white)
                 .frame(width: 20, height: 20)
-                .background(Color.green, in: Circle())
+                .background(Color.blue, in: Circle())
                 .rotationEffect(.degrees(isProcessing ? 360 : 0))
                 .animation(isProcessing
                            ? .linear(duration: 0.9).repeatForever(autoreverses: false)

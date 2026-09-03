@@ -58,13 +58,29 @@ struct SelectionHighlight: ViewModifier {
                 .scaleEffect(isSelected ? SelectionHighlightStyle.scale : 1.0)
                 .animation(SelectionHighlightStyle.spring, value: isSelected)
         case .cell:
+            // Deliberately NO matchedGeometryEffect here. The cells this is
+            // applied to live inside an HStack carrying
+            // `.transaction { $0.animation = nil }` (ImageRunRow), and a
+            // matched-geometry frame change animates with the *ambient*
+            // transaction — which that modifier had just set to nil. The
+            // result was the highlight box teleporting to the next image
+            // while the `.animation(_:value:)` below still sprang its scale
+            // and opacity over 0.35s: two halves of one effect on different
+            // clocks, which is what read as jerky when stepping through a
+            // row of images. Each cell now animates its own highlight in
+            // and out, which `.animation(_:value:)` drives correctly even
+            // under a nil ambient transaction.
+            //
+            // The stroke is also a solid colour rather than
+            // `.ultraThinMaterial`: a material is a live backdrop blur that
+            // has to be re-sampled and re-composited every frame, and two
+            // of them animated simultaneously (outgoing shrinking, incoming
+            // growing) on every keystroke.
             content
                 .overlay {
                     RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous)
-                        .stroke(.ultraThinMaterial, lineWidth: SelectionHighlightStyle.cellBorderWidth)
+                        .stroke(Color.white.opacity(0.85), lineWidth: SelectionHighlightStyle.cellBorderWidth)
                         .opacity(isSelected ? 1 : 0)
-
-                        .matchedGeometryEffect(id: "selectionBoxCell", in: namespace, isSource: isSelected)
                         .shadow(color: Color.black.opacity(isSelected ? 0.3 : 0),
                                 radius: isSelected ? 6 : 0, x: 0, y: isSelected ? 2 : 0)
                 }

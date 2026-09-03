@@ -243,6 +243,58 @@ struct MultiItemPreviewView: View {
 
     private var isGroupPreview: Bool { currentItemID == nil }
 
+    /// True when every item in the stack is an image (or an image file) —
+    /// the case where the per-item chrome (number, tag strip, metadata line,
+    /// dividers) is pure noise and the images themselves are the content.
+    private var isAllImages: Bool {
+        !items.isEmpty && items.allSatisfy { item in
+            switch item.content {
+            case .image: return true
+            case .file(let url): return FileKindDetector.isImageFile(url)
+            default: return false
+            }
+        }
+    }
+
+    /// Two flexible columns that simply flow downward and scroll — not a
+    /// fixed 2x2, so 4, 6 or 20 marked images all lay out the same way in
+    /// the same panel size.
+    private static let imageColumns = [
+        GridItem(.flexible(), spacing: 10),
+        GridItem(.flexible(), spacing: 10),
+    ]
+
+    @ViewBuilder
+    private var imageGrid: some View {
+        ScrollView {
+            LazyVGrid(columns: Self.imageColumns, spacing: 10) {
+                ForEach(items, id: \.id) { item in
+                    Group {
+                        switch item.content {
+                        case .image(let img, let data, _):
+                            CachedThumbnail(original: img, data: data, key: item.id.uuidString,
+                                            size: 150, cornerRadius: 8)
+                        case .file(let url):
+                            CachedFileThumbnail(url: url, size: 150)
+                        default:
+                            EmptyView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 150)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        if item.id == currentItemID {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.accentColor, lineWidth: 2)
+                        }
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if showsHeader {
@@ -269,18 +321,26 @@ struct MultiItemPreviewView: View {
                 Divider()
             }
 
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                        if idx > 0 { Divider() }
-                        HStack(spacing: 8) {
-                            Text("\(idx + 1)")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.accentColor)
-                                .frame(width: 18)
-                            ItemPreviewView(item: item, compact: true)
+            if isAllImages {
+                // Just the images, two columns, flowing down and scrolling.
+                // The numbered rows / tag strip / metadata line below each
+                // one are only useful for mixed or text content — for a
+                // stack of images they push the actual content off-screen.
+                imageGrid
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
+                            if idx > 0 { Divider() }
+                            HStack(spacing: 8) {
+                                Text("\(idx + 1)")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.accentColor)
+                                    .frame(width: 18)
+                                ItemPreviewView(item: item, compact: true)
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 6)
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 6)
                     }
                 }
             }

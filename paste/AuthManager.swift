@@ -212,10 +212,11 @@ final class TrackingService {
         persistSoon()
     }
 
-    func recordEvent(id: String, count: Int = 1, value: CustomStringConvertible? = nil) {
+    func recordEvent(id: String, count: Int = 1, value: CustomStringConvertible? = nil,
+                     extraProperties: [String: Any] = [:]) {
         guard !id.isEmpty, count > 0 else { return }
         mutateToday { Self.route(id: id, count: count, into: &$0) }
-        Self.logToFirebaseAnalytics(id: id, count: count, value: value)
+        Self.logToFirebaseAnalytics(id: id, count: count, value: value, extraProperties: extraProperties)
         persistSoon()
     }
 
@@ -224,9 +225,21 @@ final class TrackingService {
     /// from the same result, so the two can never drift out of sync with
     /// each other the way two separately-maintained switch statements
     /// eventually would.
-    private static func logToFirebaseAnalytics(id: String, count: Int, value: CustomStringConvertible? = nil) {
+    ///
+    /// app_version/os_version are stamped here, on every event this path
+    /// sends — previously only `syncPersonPropertiesToPostHog` set those,
+    /// as PERSON properties, meaning `person.properties.app_version` on an
+    /// event reflects whatever that person's version was at the time of
+    /// ingestion (a real but looser signal), while `properties.app_version`
+    /// on the event itself was always absent. Stamping directly on the
+    /// event lets PostHog filter/breakdown by version with no indirection.
+    private static func logToFirebaseAnalytics(id: String, count: Int, value: CustomStringConvertible? = nil,
+                                               extraProperties: [String: Any] = [:]) {
         guard var (event, properties) = analyticsEvent(for: id, count: count) else { return }
         if let value { properties["value"] = value.description }
+        for (k, v) in extraProperties { properties[k] = v }
+        properties["app_version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        properties["os_version"] = ProcessInfo.processInfo.operatingSystemVersionString
         Analytics.logEvent(event, parameters: properties)
         PostHogTracking.capture(event, properties: properties)
     }
@@ -741,8 +754,9 @@ final class AuthManager: ObservableObject {
         TrackingService.shared.recordFastPaste()
     }
 
-    func registerActionUsage(actionID: String, count: Int = 1, value: CustomStringConvertible? = nil) {
-        TrackingService.shared.recordEvent(id: actionID, count: count, value: value)
+    func registerActionUsage(actionID: String, count: Int = 1, value: CustomStringConvertible? = nil,
+                             extraProperties: [String: Any] = [:]) {
+        TrackingService.shared.recordEvent(id: actionID, count: count, value: value, extraProperties: extraProperties)
     }
 
     /// Re-sends the current-state person properties (item/pin/group/

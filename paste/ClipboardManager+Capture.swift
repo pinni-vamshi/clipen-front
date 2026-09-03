@@ -254,14 +254,37 @@ extension ClipboardManager {
                         self.addCaptured(retryItem, sidecar: sidecarSnapshot)
                     }
                 } else {
-                    let typesPresent = pb.types?.map(\.rawValue).joined(separator: ",") ?? "none"
+                    let typeList = pb.types?.map(\.rawValue) ?? []
+                    let typesPresent = typeList.isEmpty ? "none" : typeList.joined(separator: ",")
+                    let sourceKind = Self.captureFailureSourceKind(from: typeList)
                     DispatchQueue.main.async {
                         CopyFeedbackPanel.shared.show()
-                        AuthManager.shared.registerActionUsage(actionID: "fail.capture", value: typesPresent)
+                        let sourceApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"
+                        AuthManager.shared.registerActionUsage(
+                            actionID: "fail.capture", value: typesPresent,
+                            extraProperties: [
+                                "type_count": typeList.count,
+                                "source_kind": sourceKind,
+                                "source_app": sourceApp,
+                            ])
                     }
                 }
             }
         }
+    }
+
+    /// A cheap, client-side classification of a capture failure's pasteboard
+    /// types — turns "eyeball the raw comma-joined type string in `value`"
+    /// into an actual PostHog breakdown-by-property (source_kind), without
+    /// needing a server-side aggregation to see which browsers/apps are
+    /// producing unreadable copies.
+    static func captureFailureSourceKind(from types: [String]) -> String {
+        if types.contains(where: { $0.hasPrefix("org.chromium") }) { return "chromium" }
+        if types.contains(where: { $0.hasPrefix("com.apple.WebKit") }) { return "webkit" }
+        if types.contains(where: { $0.hasPrefix("com.apple.AnnotationKit") }) { return "annotation" }
+        if types.contains(where: { $0.hasPrefix("com.gingerlabs.Notability") }) { return "notability" }
+        if types.contains(remoteClipboardMarker.rawValue) { return "remote_clipboard" }
+        return "other"
     }
 
     static let remoteClipboardMarker = NSPasteboard.PasteboardType("com.apple.is-remote-clipboard")

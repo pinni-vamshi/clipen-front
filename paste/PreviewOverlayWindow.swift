@@ -183,6 +183,11 @@ struct PopoverPreviewView: View {
 
     @Namespace private var categoryNamespace
 
+    /// Last row the list was actually scrolled to, so a selection change
+    /// that stays inside the same row (stepping through a run of images)
+    /// doesn't re-issue an animated scroll to where it already is.
+    @State private var lastScrolledTarget: AnyHashable?
+
     private var items: [ClipboardItem] { manager.displayItems }
     private var selectedIndex: Int     { manager.selectedIndex }
 
@@ -668,8 +673,17 @@ struct PopoverPreviewView: View {
                         let targetID = items[newIdx].id
                         let (coarseID, needsRefine) = scrollTarget(for: newIdx)
 
-                        withAnimation(SelectionHighlightStyle.spring) {
-                            proxy.scrollTo(coarseID, anchor: .center)
+                        // Stepping between images inside one run keeps the
+                        // same target row, which is already centred — the
+                        // scroll had nothing to do, but still opened a
+                        // spring transaction over the whole ScrollView on
+                        // every keystroke, on top of the row's own
+                        // re-render.
+                        if coarseID != lastScrolledTarget {
+                            lastScrolledTarget = coarseID
+                            withAnimation(SelectionHighlightStyle.spring) {
+                                proxy.scrollTo(coarseID, anchor: .center)
+                            }
                         }
 
                         guard needsRefine, coarseID != AnyHashable(targetID) else { return }
@@ -683,7 +697,9 @@ struct PopoverPreviewView: View {
                     .onAppear {
                         guard items.indices.contains(selectedIndex) else { return }
                         let targetID = items[selectedIndex].id
-                        proxy.scrollTo(coarseScrollTarget(for: selectedIndex), anchor: .center)
+                        let coarse = coarseScrollTarget(for: selectedIndex)
+                        lastScrolledTarget = coarse
+                        proxy.scrollTo(coarse, anchor: .center)
                         DispatchQueue.main.async {
                             guard items.indices.contains(selectedIndex),
                                   items[selectedIndex].id == targetID else { return }
@@ -693,7 +709,9 @@ struct PopoverPreviewView: View {
                     .onChange(of: manager.popupOpenGeneration) { _, _ in
                         guard items.indices.contains(selectedIndex) else { return }
                         let targetID = items[selectedIndex].id
-                        proxy.scrollTo(coarseScrollTarget(for: selectedIndex), anchor: .center)
+                        let coarse = coarseScrollTarget(for: selectedIndex)
+                        lastScrolledTarget = coarse
+                        proxy.scrollTo(coarse, anchor: .center)
                         DispatchQueue.main.async {
                             guard items.indices.contains(selectedIndex),
                                   items[selectedIndex].id == targetID else { return }
@@ -707,6 +725,7 @@ struct PopoverPreviewView: View {
                         let targetID = items[idx].id
                         let (coarseID, needsRefine) = scrollTarget(for: idx)
 
+                        lastScrolledTarget = coarseID
                         withAnimation(SelectionHighlightStyle.spring) {
                             proxy.scrollTo(coarseID, anchor: .center)
                         }
@@ -802,6 +821,7 @@ struct ImageRunRow: View, Equatable {
                                  markOrder: markedItemIDs.firstIndex(of: entry.item.id).map { $0 + 1 },
                                  shakeGeneration: editDeniedShake?.itemID == entry.item.id
                                      ? editDeniedShake?.generation ?? 0 : 0)
+                        .equatable()
                 }
             }
 
@@ -852,6 +872,14 @@ struct ImageRunRow: View, Equatable {
     @State private var analysisRingWidth: CGFloat = 1
 
     private func startOrStopRingAnimation(running: Bool, resumeMidCycle: Bool = false) {
+        // Stepping between images in a run changes the badge's item, which
+        // fires the id-based .onChange on every keystroke. Re-running this
+        // each time meant re-installing a `.repeatForever` animation (a
+        // known stutter source) or kicking off a fresh easeOut plus a
+        // @State write that re-invalidated the row mid-flight. When nothing
+        // is analysing and the ring is already at rest, there is nothing to
+        // start or stop.
+        guard running || analysisRingWidth != 1 else { return }
         startOrStopAnalysisPulse($analysisRingWidth, active: running,
                                  restValue: 1, activeValue: 2.6,
                                  activeDuration: 0.6, restDuration: 0.2,
@@ -866,9 +894,9 @@ struct ImageRunRow: View, Equatable {
             let hasAnalysis: Bool = { if case .done = analysisState { return true }; return false }()
             Image(systemName: selectedEntry.item.primaryTag.icon)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(hasAnalysis ? .black.opacity(0.75) : .white)
                 .frame(width: 20, height: 20)
-                .background(Color.secondary.opacity(0.45), in: Circle())
+                .background(hasAnalysis ? Color.white : Color.secondary.opacity(0.45), in: Circle())
                 .overlay {
                     if analysing {
                         Circle()
@@ -932,13 +960,26 @@ struct CachedThumbnail: View {
     }
 }
 
-private struct ImageRunCell: View {
+private struct ImageRunCell: View, Equatable {
     let item: ClipboardItem
     let index: Int
     let isSelected: Bool
     let selectionNamespace: Namespace.ID
     let markOrder: Int?
     let shakeGeneration: Int
+
+    /// Without this (and the `.equatable()` at the call site) every step
+    /// through a row of images re-evaluated all four cells' bodies, because
+    /// the parent row legitimately has to re-render when `selectedIndex`
+    /// moves within the run. Only the two cells whose selection actually
+    /// changed need to rebuild.
+    static func == (l: ImageRunCell, r: ImageRunCell) -> Bool {
+        l.item.id == r.item.id
+            && l.index == r.index
+            && l.isSelected == r.isSelected
+            && l.markOrder == r.markOrder
+            && l.shakeGeneration == r.shakeGeneration
+    }
 
     private static let cellSize: CGFloat = ImageRunRow.cellSize
 
@@ -1185,6 +1226,14 @@ struct PopoverRow: View, Equatable {
     @State private var analysisRingWidth: CGFloat = 1
 
     private func startOrStopRingAnimation(running: Bool, resumeMidCycle: Bool = false) {
+        // Stepping between images in a run changes the badge's item, which
+        // fires the id-based .onChange on every keystroke. Re-running this
+        // each time meant re-installing a `.repeatForever` animation (a
+        // known stutter source) or kicking off a fresh easeOut plus a
+        // @State write that re-invalidated the row mid-flight. When nothing
+        // is analysing and the ring is already at rest, there is nothing to
+        // start or stop.
+        guard running || analysisRingWidth != 1 else { return }
         startOrStopAnalysisPulse($analysisRingWidth, active: running,
                                  restValue: 1, activeValue: 2.6,
                                  activeDuration: 0.6, restDuration: 0.2,
@@ -1213,9 +1262,9 @@ struct PopoverRow: View, Equatable {
             let hasAnalysis: Bool = { if case .done = analysisState { return true }; return false }()
             Image(systemName: item.primaryTag.icon)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(hasAnalysis ? .black.opacity(0.75) : .white)
                 .frame(width: 20, height: 20)
-                .background(Color.secondary.opacity(0.45), in: Circle())
+                .background(hasAnalysis ? Color.white : Color.secondary.opacity(0.45), in: Circle())
 
                 .overlay {
                     if analysing {
