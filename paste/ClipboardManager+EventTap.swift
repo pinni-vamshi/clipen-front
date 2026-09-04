@@ -163,6 +163,28 @@ extension ClipboardManager {
 
         if Self.isSynthetic(event) { return Unmanaged.passUnretained(event) }
 
+        // Who actually sent this Cmd-V? A real keypress reports pid 0; an
+        // event another app posted carries that app's pid. Logged HERE, above
+        // the filter below, so it still records what arrived even once the
+        // filter starts passing those events through.
+        if DebugLog.isEnabled, type == .keyDown,
+           event.getIntegerValueField(.keyboardEventKeycode) == 9,
+           event.flags.contains(.maskCommand) {
+            let pid = event.getIntegerValueField(.eventSourceUnixProcessID)
+            let state = event.getIntegerValueField(.eventSourceStateID)
+            let name = pid > 0
+                ? (NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier ?? "unknown")
+                : "hardware"
+            DebugLog.write("CMDV-ORIGIN pid=\(pid) state=\(state) source=\(name) filtered=\(Self.isForeignSynthetic(event))")
+        }
+
+        // Another app's synthesized keystroke is that app doing its job, not
+        // the user reaching for Clipen — pass it straight through untouched
+        // so it reaches whatever it was aimed at. Keyboard drivers and
+        // remappers (Karabiner and friends) present as real hardware and are
+        // unaffected; only CGEvent.post from another process is filtered.
+        if Self.isForeignSynthetic(event) { return Unmanaged.passUnretained(event) }
+
         if type == .flagsChanged { return handleFlagsChanged(event) }
         if type == .keyUp        { return handleKeyUp(event) }
         if type == .leftMouseDown || type == .rightMouseDown || type == .otherMouseDown {
@@ -193,12 +215,21 @@ extension ClipboardManager {
 
     func handleFlagsChanged(_ event: CGEvent) -> Unmanaged<CGEvent>? {
 
+        let hasCmd = event.flags.contains(.maskCommand)
+        // Tracked BEFORE the paste-blocking guard below, or the state
+        // desyncs: hold Command in a blocked app, switch away, and the
+        // release would be missed while `cmdWasDown` stayed true forever.
+        let cmdJustReleased = cmdWasDown && !hasCmd
+        cmdWasDown = hasCmd
+
         guard !pasteBlockingActiveForFrontmostApp else {
             return Unmanaged.passUnretained(event)
         }
-        let hasCmd = event.flags.contains(.maskCommand)
         notePopupHintModifiers(cmd: hasCmd, shift: event.flags.contains(.maskShift))
-        if !hasCmd {
+        // Only a genuine Command-up edge commits. `!hasCmd` alone was true
+        // for every press and every release of every other modifier — see
+        // `cmdWasDown`.
+        if cmdJustReleased {
             if inPageRangeMode && previewWindow.isVisible {
                 return Unmanaged.passUnretained(event)
             }
@@ -498,6 +529,15 @@ extension ClipboardManager {
 
             if shift && !opt {
 
+                // With reverse-cycle moved to B, Shift-Cmd-V does nothing
+                // here — so consuming it only stole the chord from whatever
+                // app is in front (it's Paste and Match Style / paste as
+                // plain text in plenty of them) to run no code at all. Only
+                // swallow it while the popup is up, where every key belongs
+                // to us; otherwise hand it back untouched.
+                if reverseCycleUsesB && !previewWindow.isVisible {
+                    return Unmanaged.passUnretained(event)
+                }
                 if isAutorepeat { return nil }
                 if !reverseCycleUsesB {
                     DispatchQueue.main.async { [weak self] in self?.cyclePrevious() }

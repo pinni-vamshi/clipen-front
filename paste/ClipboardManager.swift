@@ -1113,6 +1113,19 @@ class ClipboardManager: ObservableObject {
 
     var escapeWillDismiss = false
 
+    /// Whether Command was held as of the LAST flagsChanged event.
+    ///
+    /// `handleFlagsChanged` used to act on the mere absence of Command in
+    /// whatever modifier event just arrived, which is not the same thing as
+    /// "the user released Command". Every modifier produces a flagsChanged
+    /// on press AND on release — so tapping fn, or option, or ctrl, or
+    /// shift fired the release path twice, with Command never involved at
+    /// all. Any app with a hold-to-talk / hold-to-trigger key (Wispr Flow,
+    /// push-to-talk, macro tools) therefore drove Clipen's paste-on-release
+    /// on every single use, whatever key the user had bound. This makes the
+    /// check edge-triggered on Command specifically: down, then up.
+    var cmdWasDown = false
+
     var pollTimer: Timer?
     /// Bumped whenever pollClipboard() processes a real pasteboard change,
     /// or the popup opens (a strong signal the user is about to copy/paste
@@ -1121,6 +1134,11 @@ class ClipboardManager: ObservableObject {
     var permissionRetryTimer: Timer?
     var permissionRetryBackoff: TimeInterval = 1.0
     var lastTransformCacheItemID: UUID? = nil
+    /// How long a "waiting for the second tap" state may sit armed before
+    /// it disarms itself. Generous — a real second tap lands in well under
+    /// a second — but bounded, so the flag can never survive the gesture.
+    static let pendingFirstOpenMaxAge: TimeInterval = 5
+
     var pendingFirstOpenTimer: Timer?
     var pendingFirstOpen: Bool = false
     var lastChangeCount: Int = NSPasteboard.general.changeCount
@@ -1152,6 +1170,21 @@ class ClipboardManager: ObservableObject {
 
     static func isSynthetic(_ event: CGEvent) -> Bool {
         event.getIntegerValueField(.eventSourceUserData) == syntheticEventMarker
+    }
+
+    /// True when the event was posted by SOME OTHER process rather than
+    /// typed on the keyboard.
+    ///
+    /// A real keypress arrives with `eventSourceUnixProcessID` of 0; an
+    /// event another app posted via `CGEvent.post` carries that app's pid.
+    /// Clipen's hotkeys must only answer to the human: the tap consumes
+    /// Cmd-V (`return nil`), so a dictation, snippet, translation or macro
+    /// app that inserts text by synthesizing Cmd-V had its paste eaten and
+    /// got Clipen's popup instead of its own text. `isSynthetic` above only
+    /// recognises Clipen's OWN marker, which does nothing for anyone else's.
+    static func isForeignSynthetic(_ event: CGEvent) -> Bool {
+        let pid = event.getIntegerValueField(.eventSourceUnixProcessID)
+        return pid != 0 && pid != Int64(ProcessInfo.processInfo.processIdentifier)
     }
 
     private var pasteSimulationToken = 0

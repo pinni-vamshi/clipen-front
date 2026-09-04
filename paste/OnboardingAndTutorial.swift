@@ -543,33 +543,38 @@ struct TutorialSheet: View {
 }
 
 private enum PopupDemoGesture: String, CaseIterable, Identifiable {
-    case holdV, space, x, del
+    // Declaration order IS the on-screen order (the demo iterates allCases):
+    // the single-tap keys first, then the hold gesture, then Details.
+    case space, x, del, holdV, details
     var id: String { rawValue }
 
     var trackingID: String {
         switch self {
-        case .holdV: return "hold-v"
-        case .space: return "space"
-        case .x:     return "x"
-        case .del:   return "del"
+        case .space:   return "space"
+        case .x:       return "x"
+        case .del:     return "del"
+        case .holdV:   return "hold-v"
+        case .details: return "details"
         }
     }
 
     var label: LocalizedStringKey {
         switch self {
-        case .holdV: return "hold V"
-        case .space: return "space"
-        case .x:     return "X"
-        case .del:   return "del"
+        case .space:   return "space"
+        case .x:       return "X"
+        case .del:     return "del"
+        case .holdV:   return "hold V"
+        case .details: return "D"
         }
     }
 
     var kbKey: ClipenSettingsView.KBKey {
         switch self {
-        case .holdV: return .init(id: "onboarding.holdV", label: "hold V", demos: [.multiPaste])
-        case .space: return .init(id: "onboarding.space", label: "space", demos: [.spacePreview])
-        case .x:     return .init(id: "onboarding.x",     label: "X",     demos: [.transform])
-        case .del:   return .init(id: "onboarding.del",   label: "del",  demos: [.delete])
+        case .space:   return .init(id: "onboarding.space", label: "space", demos: [.spacePreview])
+        case .x:       return .init(id: "onboarding.x",     label: "X",     demos: [.transform])
+        case .del:     return .init(id: "onboarding.del",   label: "del",  demos: [.delete])
+        case .holdV:   return .init(id: "onboarding.holdV", label: "hold V", demos: [.multiPaste])
+        case .details: return .init(id: "onboarding.details", label: "D",   demos: [.details])
         }
     }
 }

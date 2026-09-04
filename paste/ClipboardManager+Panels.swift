@@ -1015,8 +1015,19 @@ extension ClipboardManager {
                 } else if openOnSecondTap {
                     selectedIndex = 0
                     pendingFirstOpen = true
+                    // Armed with no expiry, this flag outlived the gesture
+                    // that set it: any later modifier release fired
+                    // fastPasteFront() out of nowhere. It's normally cleared
+                    // when Command comes up, but that path returns early in
+                    // a paste-blocked app — tap Cmd-V once in one of those
+                    // and the flag stayed set for the rest of the session.
+                    // This only disarms; the popup never opens by itself.
                     pendingFirstOpenTimer?.invalidate()
-                    pendingFirstOpenTimer = nil
+                    let expiry = Timer(timeInterval: Self.pendingFirstOpenMaxAge, repeats: false) { [weak self] _ in
+                        DispatchQueue.main.async { self?.cancelPendingFirstOpen() }
+                    }
+                    RunLoop.main.add(expiry, forMode: .common)
+                    pendingFirstOpenTimer = expiry
                     return false
                 } else if firstOpenDelay > 0 {
                     selectedIndex = 0
