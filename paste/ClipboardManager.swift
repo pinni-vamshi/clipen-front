@@ -1177,14 +1177,44 @@ class ClipboardManager: ObservableObject {
     ///
     /// A real keypress arrives with `eventSourceUnixProcessID` of 0; an
     /// event another app posted via `CGEvent.post` carries that app's pid.
-    /// Clipen's hotkeys must only answer to the human: the tap consumes
-    /// Cmd-V (`return nil`), so a dictation, snippet, translation or macro
-    /// app that inserts text by synthesizing Cmd-V had its paste eaten and
-    /// got Clipen's popup instead of its own text. `isSynthetic` above only
-    /// recognises Clipen's OWN marker, which does nothing for anyone else's.
+    /// Verified against a real dictation run: Wispr Flow's paste logs as
+    /// pid=56864 state=0, every hardware press as pid=0 state=1.
+    ///
+    /// Being posted by another process is NOT on its own a reason to ignore
+    /// an event — see `pasteLooksLikeForeignTextInsertion`. Screen sharing,
+    /// remote desktop and Voice Control all relay the user's REAL intent
+    /// through the very same API, and dropping those would make Clipen
+    /// unreachable for anyone driving their Mac remotely or by voice.
     static func isForeignSynthetic(_ event: CGEvent) -> Bool {
         let pid = event.getIntegerValueField(.eventSourceUnixProcessID)
         return pid != 0 && pid != Int64(ProcessInfo.processInfo.processIdentifier)
+    }
+
+    /// When the pasteboard was last seen changing under us.
+    var lastPasteboardChangeAt: Date = .distantPast
+
+    /// How fresh a pasteboard write has to be for a foreign Cmd-V to read as
+    /// "an app is inserting its own text" rather than "a relayed keypress".
+    /// Insertion tools write and paste back to back; the gap is milliseconds.
+    static let foreignInsertionPasteboardWindow: TimeInterval = 1.5
+
+    /// Whether this Cmd-V is an app pasting text IT just put on the
+    /// clipboard, as opposed to a human's Cmd-V arriving by an indirect
+    /// route.
+    ///
+    /// Origin alone cannot tell those apart — Wispr Flow inserting a
+    /// transcript and a Screen Sharing session relaying your keystroke are
+    /// the same API call with the same pid stamp. What separates them is the
+    /// clipboard: an insertion tool writes the text immediately before
+    /// firing the paste, a relay writes nothing. So a foreign Cmd-V only
+    /// gets out of Clipen's way when a fresh pasteboard write sits right
+    /// behind it. `changeCount` is checked live as well as against the last
+    /// polled timestamp, because a tool that writes and pastes inside one
+    /// poll interval hasn't been observed changing anything yet.
+    func pasteLooksLikeForeignTextInsertion(_ event: CGEvent) -> Bool {
+        guard Self.isForeignSynthetic(event) else { return false }
+        if NSPasteboard.general.changeCount != lastChangeCount { return true }
+        return Date().timeIntervalSince(lastPasteboardChangeAt) < Self.foreignInsertionPasteboardWindow
     }
 
     private var pasteSimulationToken = 0

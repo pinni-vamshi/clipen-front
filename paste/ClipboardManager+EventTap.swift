@@ -163,27 +163,36 @@ extension ClipboardManager {
 
         if Self.isSynthetic(event) { return Unmanaged.passUnretained(event) }
 
-        // Who actually sent this Cmd-V? A real keypress reports pid 0; an
-        // event another app posted carries that app's pid. Logged HERE, above
-        // the filter below, so it still records what arrived even once the
-        // filter starts passing those events through.
-        if DebugLog.isEnabled, type == .keyDown,
+        // Only Cmd-V is ever handed back on the strength of who sent it, and
+        // only when it reads as an app inserting its own text. The filter
+        // used to sit here for EVERY event type, which quietly meant that
+        // anything relaying real input through CGEvent.post — screen
+        // sharing, remote desktop, Voice Control — lost not just Cmd-V but
+        // modifier tracking and click-outside-to-dismiss as well, i.e. all
+        // of Clipen. Nothing about that helped the dictation case, so the
+        // check is now scoped to the one event that needed it.
+        if type == .keyDown,
            event.getIntegerValueField(.keyboardEventKeycode) == 9,
            event.flags.contains(.maskCommand) {
-            let pid = event.getIntegerValueField(.eventSourceUnixProcessID)
-            let state = event.getIntegerValueField(.eventSourceStateID)
-            let name = pid > 0
-                ? (NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier ?? "unknown")
-                : "hardware"
-            DebugLog.write("CMDV-ORIGIN pid=\(pid) state=\(state) source=\(name) filtered=\(Self.isForeignSynthetic(event))")
+            let insertion = pasteLooksLikeForeignTextInsertion(event)
+            if DebugLog.isEnabled {
+                let pid = event.getIntegerValueField(.eventSourceUnixProcessID)
+                let state = event.getIntegerValueField(.eventSourceStateID)
+                let name = pid > 0
+                    ? (NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier ?? "unknown")
+                    : "hardware"
+                let sincePB = Date().timeIntervalSince(lastPasteboardChangeAt)
+                let pbDirty = NSPasteboard.general.changeCount != lastChangeCount
+                DebugLog.write(String(format: "CMDV-ORIGIN pid=%d state=%d source=%@ foreign=%@ pbDirty=%@ sincePasteboard=%.2fs passedThrough=%@",
+                                      pid, state, name,
+                                      Self.isForeignSynthetic(event) ? "yes" : "no",
+                                      pbDirty ? "yes" : "no",
+                                      min(sincePB, 999), insertion ? "yes" : "no"))
+            }
+            // That app is pasting what it just wrote — let it reach its
+            // target instead of turning into our popup.
+            if insertion { return Unmanaged.passUnretained(event) }
         }
-
-        // Another app's synthesized keystroke is that app doing its job, not
-        // the user reaching for Clipen — pass it straight through untouched
-        // so it reaches whatever it was aimed at. Keyboard drivers and
-        // remappers (Karabiner and friends) present as real hardware and are
-        // unaffected; only CGEvent.post from another process is filtered.
-        if Self.isForeignSynthetic(event) { return Unmanaged.passUnretained(event) }
 
         if type == .flagsChanged { return handleFlagsChanged(event) }
         if type == .keyUp        { return handleKeyUp(event) }

@@ -55,6 +55,10 @@ extension ClipboardManager {
         let pb = NSPasteboard.general
         guard pb.changeCount != lastChangeCount else { return }
         lastPollActivityAt = Date()
+        // Stamped for `pasteLooksLikeForeignTextInsertion`: a foreign Cmd-V
+        // riding just behind a real clipboard write is an app inserting its
+        // own text, not a relayed keypress.
+        lastPasteboardChangeAt = lastPollActivityAt
 
         if Self.pasteboardIsConcealed(pb) {
             lastChangeCount = pb.changeCount
