@@ -191,6 +191,15 @@ struct InteractionLabStage: View {
 
     var showKeyRow: Bool = true
 
+    /// "PRESS ONCE" / "PRESS TWICE" / "PRESS 3 TIMES" for the callout above V.
+    private var pressCountLabel: String {
+        switch lab.pasteTapTarget {
+        case 1:  return String(localized: "press once")
+        case 2:  return String(localized: "press twice")
+        default: return String(localized: "press \(lab.pasteTapTarget) times")
+        }
+    }
+
     private var openingVRole: String {
         lab.selectedDemo == .pinnedOpen ? "Hold" : "Tap"
     }
@@ -269,9 +278,28 @@ struct InteractionLabStage: View {
             if showKeyRow {
 
                 HStack(spacing: 14) {
-                    HStack(alignment: .top, spacing: 8) {
+                    HStack(alignment: .bottom, spacing: 8) {
                         LabKeyCapView(key: .cmd, pressed: lab.pressedKeys.contains(.cmd), size: 54, roleLabel: "Hold")
-                        LabKeyCapView(key: .v, pressed: lab.pressedKeys.contains(.v), size: 54, roleLabel: openingVRole)
+                        VStack(spacing: 0) {
+                            // How many presses this item needs, called out on
+                            // the key itself with a leader line. It used to
+                            // live as a row of dots at the bottom of the
+                            // stage, far from the key it described.
+                            if lab.pasteTapTarget > 0 {
+                                Text(pressCountLabel)
+                                    .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                                    .tracking(1.3)
+                                    .textCase(.uppercase)
+                                    .foregroundColor(.accent)
+                                    .fixedSize()
+                                Rectangle()
+                                    .fill(Color.accent.opacity(0.55))
+                                    .frame(width: 1, height: 18)
+                                    .padding(.top, 4)
+                                    .padding(.bottom, 3)
+                            }
+                            LabKeyCapView(key: .v, pressed: lab.pressedKeys.contains(.v), size: 54, roleLabel: openingVRole)
+                        }
                     }
                     popupRow
                 }
@@ -316,24 +344,6 @@ struct InteractionLabStage: View {
                         .frame(height: 58)
                     }
 
-                    ZStack {
-                        if lab.pasteTapTarget > 0 {
-                            HStack(spacing: 7) {
-                                Text("V").font(.system(size: 9, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.textDim)
-                                ForEach(0..<lab.pasteTapTarget, id: \.self) { i in
-                                    Circle()
-                                        .fill(i < lab.pasteTapDone ? Color.accent : Color.textDim.opacity(0.3))
-                                        .frame(width: 8, height: 8)
-                                        .scaleEffect(i == lab.pasteTapDone - 1 ? 1.4 : 1)
-                                        .animation(.spring(response: 0.25, dampingFraction: 0.5), value: lab.pasteTapDone)
-                                }
-                                Text("×\(lab.pasteTapTarget)").font(.system(size: 9, weight: .bold, design: .monospaced))
-                                    .foregroundColor(.accent)
-                            }
-                        }
-                    }
-                    .frame(height: 20)
                 }
                 .padding(.top, 14)
             }

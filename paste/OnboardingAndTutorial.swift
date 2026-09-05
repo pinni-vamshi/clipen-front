@@ -230,7 +230,7 @@ struct TutorialSheet: View {
                 default: spacePreviewFinalPage
                 }
             }
-            .frame(minHeight: 420)
+            .frame(minHeight: 520)
             .overlay(alignment: .topTrailing) { closeButton }
             Divider().background(Color.border)
             tutorialFooter
@@ -395,10 +395,14 @@ struct TutorialSheet: View {
 
             if introRevealed {
                 copyColumn
+                    // maxHeight so copyColumn actually receives the leftover
+                    // height to centre inside; without it the VStack sizes to
+                    // its content and topLeading pins everything up.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .padding(.horizontal, 30).padding(.vertical, 26)
+        .padding(.horizontal, 30).padding(.top, 26).padding(.bottom, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear { startIntroChoreography() }
         .onChange(of: canAdvance) { _, done in
@@ -440,11 +444,6 @@ struct TutorialSheet: View {
     private var copyColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
 
-            Text("Clipen isn't a list you scroll — it's a keyboard-first ring. Hold ⌘, tap V to cycle, release to paste. Let's feel it in three quick steps.")
-                .font(.system(size: 12)).foregroundColor(.textSec)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
             Divider().background(Color.border)
 
             HStack(alignment: .center, spacing: 28) {
@@ -479,8 +478,11 @@ struct TutorialSheet: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // Fill the space under the rule and centre in it, rather than
+            // hanging off the divider with all the slack at the bottom.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     private func copyTargetCard(index: Int, text: String, copied: Bool) -> some View {
@@ -614,9 +616,12 @@ struct TutorialSheet: View {
 
                 Rectangle().fill(Color.border).frame(width: 1)
 
-                InteractionLabStage(lab: lab)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.leading, 24)
+                VStack(spacing: 10) {
+                    InteractionLabStage(lab: lab)
+                    replayButton
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.leading, 24)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -646,26 +651,33 @@ struct TutorialSheet: View {
                 pasteField(currentPasteTarget)
             }
         }
-        .padding(.horizontal, 30).padding(.top, 26).padding(.bottom, 20)
+        // Page 1's 42pt heading is scaled to 0.66 from topLeading, which
+        // leaves a tall empty line box above it. A 28pt heading at the same
+        // 26pt padding sits much closer to the edge, so it needs more — and
+        // the bottom needs enough that the field never touches the footer
+        // rule.
+        .padding(.horizontal, 30).padding(.top, 40).padding(.bottom, 28)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .overlay(alignment: .topTrailing) { replayButton }
         .animation(.easeOut(duration: 0.25), value: stepMessage)
     }
 
+    /// Sits directly under the demo it replays. It used to be a dim 9pt
+    /// outline in the top-right corner, tucked beside the sheet's close
+    /// button, where nobody found it.
     private var replayButton: some View {
-        // Offset left of the sheet's own close button, which is an overlay on
-        // the same corner — they were drawing on top of each other.
         Button { lab.play() } label: {
-            Text("Replay")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .tracking(1.4).textCase(.uppercase)
-                .foregroundColor(.textDim)
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .overlay(Rectangle().stroke(Color.border, lineWidth: 1))
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 10, weight: .bold))
+                Text("Watch again")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundColor(.accent)
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .overlay(Rectangle().stroke(Color.accent.opacity(0.45), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .help("Play the gesture again")
-        .padding(.top, 24).padding(.trailing, 56)
     }
 
     private func historyRow(_ i: Int) -> some View {
@@ -733,7 +745,7 @@ struct TutorialSheet: View {
                 Text("There's a lot more behind the popup")
                     .font(.system(size: 22, weight: .medium)).tracking(-0.4)
                     .foregroundColor(.textPri)
-                Text("Five moves that live inside the ring. Hover one to see what it does.")
+                Text("Five moves that live inside the ring. Click one to watch it.")
                     .font(.system(size: 12)).foregroundColor(.textSec)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -800,77 +812,41 @@ private struct PopupGestureDemo: View {
     @StateObject private var lab = InteractionLabController()
     @State private var activeGesture: PopupDemoGesture? = nil
 
-    /// Which move the right-hand column is describing. Follows hover and
-    /// click, and starts on the first key so the column is never empty —
-    /// it used to hold a static "Click these buttons to see the
-    /// interactions", which spent a third of the panel on an instruction
-    /// the buttons already imply.
-    @State private var describedGesture: PopupDemoGesture = .space
+    /// Hover feedback only. It used to drive a third column describing the
+    /// move, which repeated the key and its name from the row you were
+    /// already pointing at; the click-through popover explains each one
+    /// properly. Optional now, so no row sits pre-lit for no reason.
+    @State private var hoveredGesture: PopupDemoGesture? = nil
 
     var body: some View {
 
-        HStack(alignment: .top, spacing: 0) {
+        // Two halves of equal width, so the rule lands on the panel's
+        // horizontal centre. The third column repeated what the row you were
+        // hovering already said — the key, then its name — for one paragraph
+        // of actual content.
+        HStack(alignment: .center, spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
-                // The column label stays on the same line as the other two;
-                // the keys below it centre in whatever height the tallest
-                // column (the move list) sets, instead of hanging at the top
-                // over a column of dead space.
-                MicroLabel(text: "Open the ring")
-                Spacer(minLength: 0)
-                VStack(alignment: .leading, spacing: 14) {
-                    openPopupKeys
-                    VStack(alignment: .leading, spacing: 3) {
-                        MicroLabel(text: "Hold ⌘", color: .textDim)
-                        MicroLabel(text: "Tap V to step", color: .textDim)
-                        MicroLabel(text: "Release to paste", color: .textDim)
-                    }
+                openPopupKeys
+                VStack(alignment: .leading, spacing: 3) {
+                    MicroLabel(text: "Hold ⌘", color: .textDim)
+                    MicroLabel(text: "Tap V to step", color: .textDim)
+                    MicroLabel(text: "Release to paste", color: .textDim)
                 }
-                Spacer(minLength: 0)
             }
-            .frame(width: 168, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.trailing, 24)
 
             Rectangle().fill(Color.border).frame(width: 1)
-                .padding(.horizontal, 22)
 
-            VStack(alignment: .leading, spacing: 14) {
-                MicroLabel(text: "While it's open")
-                VStack(spacing: 6) {
-                    ForEach(PopupDemoGesture.allCases) { gesture in
-                        demoKey(gesture)
-                    }
+            VStack(spacing: 6) {
+                ForEach(PopupDemoGesture.allCases) { gesture in
+                    demoKey(gesture)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Rectangle().fill(Color.border).frame(width: 1)
-                .padding(.horizontal, 22)
-
-            VStack(alignment: .leading, spacing: 11) {
-                MicroLabel(text: "What it does")
-                Text(describedGesture.kbKey.label)
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
-                    .tracking(1.2)
-                    .textCase(.uppercase)
-                    .foregroundColor(.accent)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Color.accentDim)
-                if let demo = describedGesture.kbKey.demos.first {
-                    Text(demo.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.textPri)
-                    Text(demo.caption)
-                        .font(.system(size: 11))
-                        .foregroundColor(.textSec)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(width: 208, alignment: .leading)
-            .animation(.easeOut(duration: 0.18), value: describedGesture)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .padding(.leading, 24)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var openPopupKeys: some View {
@@ -883,13 +859,13 @@ private struct PopupGestureDemo: View {
 
     private func demoKey(_ gesture: PopupDemoGesture) -> some View {
         let isActive = activeGesture == gesture
-        let isDescribed = describedGesture == gesture
+        let isHovered = hoveredGesture == gesture
         return HStack(spacing: 13) {
             ClipenKeyCap(label: gesture.plainLabel, width: 64, height: 36,
-                         fontSize: 11, pressed: isActive || isDescribed)
+                         fontSize: 11, pressed: isActive || isHovered)
             Text(gesture.kbKey.demos.first?.title ?? gesture.plainLabel)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(isDescribed ? .textPri : .textSec)
+                .foregroundColor(isHovered ? .textPri : .textSec)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
@@ -900,10 +876,9 @@ private struct PopupGestureDemo: View {
             // box just added a second, louder highlight on top of it.
             .contentShape(Rectangle())
             .onHover { inside in
-                if inside { describedGesture = gesture }
+                hoveredGesture = inside ? gesture : nil
             }
             .onTapGesture {
-                describedGesture = gesture
                 if isActive {
                     activeGesture = nil
                 } else {
