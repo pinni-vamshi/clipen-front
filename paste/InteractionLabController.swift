@@ -220,7 +220,11 @@ final class InteractionLabController: ObservableObject {
 
         await Self.nextRunLoopTurn()
         await Self.nextRunLoopTurn()
-        try await pause(750)
+        // 750ms measured from press(.cmd), but that call lands while the page
+        // is still sliding in (the page change is a 0.45s spring) and there is
+        // no popup on screen yet for Command to act against — so the visible
+        // gap was closer to 300ms and read as both keys going down together.
+        try await pause(1400)
         try await tap(.v)
         showPanel(true)
         hint("Tap V once")
@@ -244,7 +248,11 @@ final class InteractionLabController: ObservableObject {
 
         await Self.nextRunLoopTurn()
         await Self.nextRunLoopTurn()
-        try await pause(750)
+        // 750ms measured from press(.cmd), but that call lands while the page
+        // is still sliding in (the page change is a 0.45s spring) and there is
+        // no popup on screen yet for Command to act against — so the visible
+        // gap was closer to 300ms and read as both keys going down together.
+        try await pause(1400)
         try await tap(.v)
         showPanel(true)
         hint("Tap V twice")
@@ -272,7 +280,11 @@ final class InteractionLabController: ObservableObject {
 
         await Self.nextRunLoopTurn()
         await Self.nextRunLoopTurn()
-        try await pause(750)
+        // 750ms measured from press(.cmd), but that call lands while the page
+        // is still sliding in (the page change is a 0.45s spring) and there is
+        // no popup on screen yet for Command to act against — so the visible
+        // gap was closer to 300ms and read as both keys going down together.
+        try await pause(1400)
         try await tap(.v)
         showPanel(true)
         hint("Tap V three times")
@@ -301,7 +313,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         hint("Release ⌘ to paste")
@@ -325,7 +342,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         press(.v)
         showPanel(true)
         hint("Double tap to paste")
@@ -344,7 +366,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         hint("Release ⌘ to paste")
@@ -378,7 +405,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(400)
@@ -399,7 +431,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         hint("Tap V to open")
         try await tap(.v)
         showPanel(true)
@@ -431,7 +468,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(350)
@@ -454,7 +496,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(350)
@@ -476,7 +523,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         hint("Release ⌘ to paste")
@@ -509,7 +561,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         hint("Release ⌘ to paste")
@@ -540,7 +597,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(350)
@@ -564,7 +626,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(350)
@@ -588,7 +655,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(400)
@@ -615,7 +687,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         selectItem(0)
@@ -640,7 +717,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(350)
@@ -672,7 +754,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(300)
@@ -711,7 +798,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(400)
@@ -746,7 +838,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         try await pause(350)
@@ -777,7 +874,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         hint("Cycling the main list")
@@ -827,7 +929,12 @@ final class InteractionLabController: ObservableObject {
         press(.cmd)
 
         await Self.nextRunLoopTurn()
-        try await pause(400)
+        // Command needs to be visibly down on its own before the first key
+        // lands, or the two read as one chord. 400ms minus the 100ms press
+        // animation left ~300ms, not enough to register as an order. These
+        // play in Settings with the view already on screen, so they don't
+        // need the longer lead-in the onboarding paste demos use.
+        try await pause(900)
         try await tap(.v)
         showPanel(true)
         hint("V moves forward")
