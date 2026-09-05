@@ -19,8 +19,14 @@ enum DeviceIdentity {
         installKey == "7D6AAA64-A175-5865-939D-B9B519B5B399"
     }
 
+    /// The live site. Kept in one place because the onboarding shipped a
+    /// hand-typed "https://clipen.app" for users to copy — a domain that
+    /// resolves to nothing at all, so the tutorial was teaching people to
+    /// copy a dead link.
+    static let websiteURLString = "https://clipen.lovable.app"
+
     static var pricingURL: URL {
-        var comps = URLComponents(string: "https://clipen.lovable.app/pricing.html")!
+        var comps = URLComponents(string: "\(websiteURLString)/pricing.html")!
         comps.queryItems = [URLQueryItem(name: "hardware_uuid", value: installKey)]
         return comps.url!
     }

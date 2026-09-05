@@ -138,16 +138,215 @@ struct MicroLabel: View {
     }
 }
 
+/// Page 2: the ring, demonstrated end to end.
+///
+/// The page used to name the mechanism in prose and then ask the user to fill
+/// three boxes. What actually needs teaching is that you browse *while Command
+/// is held*, and that letting go is what commits — and no amount of "tap V
+/// twice" text lands that. So this shows one whole loop instead: Command goes
+/// down and stays down, V steps the selection, releasing Command sends the
+/// highlighted item into a destination field. The animation is the
+/// explanation; the closing line is the instruction.
+struct RingSimulation: View {
+    private static let entries = [
+        "Made with care on macOS",
+        DeviceIdentity.websiteURLString,
+        "Hello from Clipen",
+    ]
+
+    @State private var selected: Int? = nil     // 1...3
+    @State private var cmdHeld = false
+    @State private var cmdReleased = false
+    @State private var vTapNonce = 0
+    @State private var flying = false
+    @State private var dropped = false
+    @State private var beat = 0
+    @State private var beatKicker = ""
+    @State private var beatText = ""
+    @State private var finished = false
+    @State private var work: [DispatchWorkItem] = []
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 0) {
+            history
+                .frame(width: 292)
+                .padding(.trailing, 28)
+
+            Rectangle().fill(Color.border).frame(width: 1)
+
+            rightColumn
+                .padding(.leading, 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear(perform: play)
+        .onDisappear(perform: cancel)
+    }
+
+    private var history: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            MicroLabel(text: "Clipboard history")
+            VStack(spacing: -1) {
+                ForEach(1...3, id: \.self) { n in
+                    historyRow(n).zIndex(selected == n ? 2 : 1)
+                }
+            }
+            HStack(spacing: 5) {
+                ForEach(0..<4, id: \.self) { i in
+                    Rectangle()
+                        .fill(i < beat ? Color.okGreen : (i == beat ? Color.accent : Color.border))
+                        .frame(width: 26, height: 2)
+                        .animation(.easeOut(duration: 0.25), value: beat)
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func historyRow(_ n: Int) -> some View {
+        let isSel = selected == n
+        let isGone = flying && isSel
+        return HStack(spacing: 12) {
+            Text("\(n)")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(isSel ? .white : .textDim)
+                .frame(width: 22, height: 22)
+                .background(isSel ? Color.accent : Color.textDim.opacity(0.12))
+            Text(Self.entries[n - 1])
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(isSel ? .textPri : .textSec)
+                .lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 13).padding(.vertical, 12)
+        .background(isSel ? Color.accentDim : Color.clear)
+        .overlay(Rectangle().stroke(isSel ? Color.accent : Color.border, lineWidth: 1))
+        // Selection reads as position, not only colour — the row steps right.
+        .offset(x: isGone ? 26 : (isSel ? 7 : 0))
+        .opacity(isGone ? 0 : 1)
+        .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.32), value: selected)
+        .animation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.32), value: flying)
+    }
+
+    private var rightColumn: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 14) {
+                VStack(spacing: 7) {
+                    MicroLabel(text: cmdHeld ? "holding" : (cmdReleased ? "released" : "hold"),
+                               color: cmdHeld ? .accent : (cmdReleased ? .okGreen : .textDim))
+                        .frame(height: 11)
+                    ClipenKeyCap(label: "⌘", pressed: cmdHeld)
+                }
+                Text("+").font(.system(size: 13, design: .monospaced)).foregroundColor(.textDim)
+                VStack(spacing: 7) {
+                    MicroLabel(text: "tap", color: cmdHeld ? .accent : .textDim)
+                        .frame(height: 11)
+                    // A tap is a bounce, not a state: re-keying replays it.
+                    ClipenKeyCap(label: "V", pressed: false)
+                        .id(vTapNonce)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(beatKicker)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .tracking(1.4).textCase(.uppercase)
+                    .foregroundColor(finished ? .okGreen : .accent)
+                Text(beatText)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(.textPri)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(height: 46, alignment: .top)
+            .animation(.easeOut(duration: 0.2), value: beatText)
+
+            VStack(alignment: .leading, spacing: 8) {
+                MicroLabel(text: "Wherever you're typing")
+                HStack(spacing: 0) {
+                    Text(dropped ? Self.entries[1] : String(localized: "Type something here…"))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(dropped ? .textPri : .textDim)
+                        .lineLimit(1).truncationMode(.middle)
+                    if !dropped {
+                        Rectangle().fill(Color.accent)
+                            .frame(width: 7, height: 15).padding(.leading, 2)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 15).padding(.vertical, 14)
+                .frame(minHeight: 48, alignment: .leading)
+                .background(dropped ? Color.okGreenDim : Color.clear)
+                .overlay(Rectangle().stroke(dropped ? Color.okGreen.opacity(0.5) : Color.border,
+                                            lineWidth: 1))
+                .animation(.easeOut(duration: 0.28), value: dropped)
+            }
+        }
+    }
+
+    // MARK: timeline
+
+    private func step(_ delay: Double, _ body: @escaping () -> Void) {
+        let item = DispatchWorkItem(block: body)
+        work.append(item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    private func cancel() {
+        work.forEach { $0.cancel() }
+        work.removeAll()
+    }
+
+    private func play() {
+        cancel()
+        selected = nil; cmdHeld = false; cmdReleased = false
+        flying = false; dropped = false; finished = false; beat = 0
+        beatKicker = String(localized: "Step 1")
+        beatText   = String(localized: "Hold ⌘ — the ring opens.")
+
+        // 1. Command goes down and STAYS down for everything that follows.
+        step(0.7) { withAnimation(.spring(response: 0.24, dampingFraction: 0.7)) { cmdHeld = true } }
+
+        // 2. first tap lands on #1
+        step(1.5) {
+            withAnimation { vTapNonce += 1 }
+            selected = 1; beat = 1
+            beatKicker = String(localized: "Step 2")
+            beatText   = String(localized: "Tap V once → you're on #1.")
+        }
+
+        // 3. second tap — the selection travels; nothing resets
+        step(2.9) {
+            withAnimation { vTapNonce += 1 }
+            selected = 2; beat = 2
+            beatKicker = String(localized: "Step 3")
+            beatText   = String(localized: "Tap V again → the selection moves to #2.")
+        }
+
+        // 4. the release: the item leaves the ring and lands in the field
+        step(4.5) {
+            beat = 3
+            beatKicker = String(localized: "Step 4")
+            beatText   = String(localized: "Release ⌘ → #2 is pasted.")
+            withAnimation(.spring(response: 0.24, dampingFraction: 0.7)) {
+                cmdHeld = false; cmdReleased = true
+            }
+            flying = true
+        }
+        step(4.82) { dropped = true }
+        step(5.1) {
+            flying = false; selected = nil; finished = true; beat = 4
+            beatKicker = String(localized: "That's the loop")
+            beatText   = String(localized: "Hold · tap to move · release to paste.")
+        }
+    }
+}
+
 struct TutorialSheet: View {
     @Binding var isPresented: Bool
     var onSeeMore: () -> Void = {}
     @ObservedObject private var manager = ClipboardManager.shared
-    @StateObject private var lab = InteractionLabController()
-
     @State private var page: Int = 0
     @State private var baselineIDs: Set<UUID> = []
-    @State private var pasteBoxes: [String] = ["", "", ""]
-    @FocusState private var focusedPasteBox: Int?
     @State private var showAutoTipsAlert = false
 
     @State private var introRevealed = false
@@ -171,20 +370,18 @@ struct TutorialSheet: View {
 
     private static let totalPages = 3
 
-    private static let copyTargetKeys = [
-        "Hello from Clipen",
-        "https://clipen.app",
-        "Made with care on macOS",
-    ]
+    /// The three lines the copy gate asks for. The prose is localized; the
+    /// URL deliberately is NOT — it used to be mapped through
+    /// `String(localized:)` along with the other two, which would have let a
+    /// translator "translate" a web address. It was also pointing at
+    /// clipen.app, a domain that resolves to nothing.
     private var copyTargets: [String] {
-        Self.copyTargetKeys.map { String(localized: String.LocalizationValue($0)) }
+        [
+            String(localized: "Hello from Clipen"),
+            DeviceIdentity.websiteURLString,
+            String(localized: "Made with care on macOS"),
+        ]
     }
-
-    private var pasteTargets: [String] { copyTargets.reversed() }
-
-    private static let pasteBoxLabelKeys = ["Box 1 — tap V once",
-                                            "Box 2 — tap V twice",
-                                            "Box 3 — tap V three times"]
 
     private var newCopiedTexts: Set<String> {
         let newItems = manager.items.filter { !baselineIDs.contains($0.id) }
@@ -196,29 +393,6 @@ struct TutorialSheet: View {
     private func isCopied(_ t: String) -> Bool { newCopiedTexts.contains(t.trimmingCharacters(in: .whitespacesAndNewlines)) }
     private var copiedCount: Int { copyTargets.filter(isCopied).count }
     private var canAdvance: Bool { copiedCount == copyTargets.count }
-
-    private func isPasted(_ i: Int) -> Bool {
-        pasteBoxes[i].trimmingCharacters(in: .whitespacesAndNewlines)
-            == pasteTargets[i].trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var currentPasteTarget: Int {
-        for i in 0..<3 where !isPasted(i) { return i }
-        return 3
-    }
-    private var allPasted: Bool { currentPasteTarget == 3 }
-    private var pasteDemoForTarget: InteractionDemo {
-        switch currentPasteTarget {
-        case 0:  return .pasteOne
-        case 1:  return .pasteTwo
-        default: return .pasteThree
-        }
-    }
-
-    private func selectDemoForCurrentPage() {
-
-        if page == 1 { lab.select(pasteDemoForTarget) } else { lab.stop() }
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -237,26 +411,7 @@ struct TutorialSheet: View {
         .frame(width: 760).background(Color.surface)
         .onAppear {
             baselineIDs = Set(manager.items.map(\.id))
-            selectDemoForCurrentPage()
             AuthManager.shared.registerActionUsage(actionID: "action.onboarding-started")
-        }
-        .onDisappear { lab.stop() }
-        .onChange(of: page) { _, _ in
-            selectDemoForCurrentPage()
-            if page == 1 { focusedPasteBox = currentPasteTarget }
-        }
-        .onChange(of: currentPasteTarget) { _, newTarget in
-            guard page == 1 else { return }
-            selectDemoForCurrentPage()
-            if newTarget < 3 {
-                focusedPasteBox = newTarget
-            } else {
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                    guard page == 1, allPasted else { return }
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { page = 2 }
-                }
-            }
         }
     }
 
@@ -296,10 +451,20 @@ struct TutorialSheet: View {
                     .foregroundColor(.textDim)
                     .padding(.vertical, 9)
             case 1:
-                Text("Paste all three to continue")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.textDim)
-                    .padding(.vertical, 9)
+                // Page 2 no longer gates on three filled boxes — it's a
+                // demonstration now, so it needs an explicit way forward.
+                Button {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { page = 2 }
+                } label: {
+                    HStack(spacing: 7) {
+                        Text("Got it").font(.system(size: 13, weight: .semibold))
+                        Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 18).padding(.vertical, 9)
+                    .background(Color.accent)
+                }
+                .buttonStyle(.plain)
             default:
 
                 Button {
@@ -505,84 +670,38 @@ struct TutorialSheet: View {
         .animation(.spring(response: 0.3), value: copied)
     }
 
+    @State private var simNonce = 0
+
     private var pastePracticePage: some View {
-        HStack(alignment: .top, spacing: 26) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Now paste them back")
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Watch one paste, end to end")
                     .font(.system(size: 22, weight: .medium)).tracking(-0.4)
                     .foregroundColor(.textPri)
-                    .padding(.bottom, 10)
-
-                VStack(spacing: 18) {
-                    ForEach(0..<3, id: \.self) { i in
-                        VStack(alignment: .leading, spacing: 7) {
-                            MicroLabel(text: LocalizedStringKey(Self.pasteBoxLabelKeys[i]),
-                                       color: currentPasteTarget == i ? .accent : .textDim)
-                            pasteTargetRow(index: i)
-                            if i < 2 { Divider().padding(.top, 11) }
-                        }
-                    }
-                }
-
-                Text(allPasted
-                     ? "Perfect — taking you to the last step…"
-                     : "Filled \(pasteBoxesDone) of 3 — fills auto-continue once all three are done.")
-                    .font(.system(size: 11))
-                    .foregroundColor(allPasted ? .okGreen : .textDim)
-                    .frame(minHeight: 16)
-                    .animation(.easeInOut(duration: 0.2), value: allPasted)
-
-                Spacer(minLength: 0)
+                Text("Three things are on your clipboard. Here's what ⌘V actually does with them.")
+                    .font(.system(size: 12)).foregroundColor(.textSec)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            InteractionLabStage(lab: lab)
+            RingSimulation()
+                // Re-keyed so Replay rebuilds the view and restarts its
+                // timeline from onAppear, instead of needing a second path
+                // into the same animation.
+                .id(simNonce)
         }
-        .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 14).frame(maxWidth: .infinity)
-    }
-
-    private var pasteBoxesDone: Int { (0..<3).filter(isPasted).count }
-
-    private func pasteTargetRow(index: Int) -> some View {
-        let done = isPasted(index)
-        let isCurrent = currentPasteTarget == index
-        return HStack(spacing: 10) {
-
-            Image(systemName: "arrow.right")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.accent)
-                .opacity(isCurrent ? 1 : 0)
-                .offset(x: isCurrent ? 0 : -4)
-                .animation(.spring(response: 0.3), value: isCurrent)
-
-            Text("\(index + 1)").font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundColor(done ? .white : .textSec).frame(width: 24, height: 24)
-                .background(done ? Color.okGreen : Color.textDim.opacity(0.12))
-
-            ZStack(alignment: .leading) {
-                TextField("", text: $pasteBoxes[index])
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced)).foregroundColor(.textPri)
-                    .focused($focusedPasteBox, equals: index)
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                if pasteBoxes[index].isEmpty {
-                    Text("paste “\(pasteTargets[index])” here")
-                        .font(.system(size: 11)).foregroundColor(.textDim)
-                        .padding(.horizontal, 10).allowsHitTesting(false)
-                }
+        .padding(.horizontal, 22).padding(.vertical, 18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .overlay(alignment: .topTrailing) {
+            Button { simNonce += 1 } label: {
+                Text("Replay")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(1.4).textCase(.uppercase)
+                    .foregroundColor(.textDim)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .overlay(Rectangle().stroke(Color.border, lineWidth: 1))
             }
-            .background(done ? Color.okGreenDim : Color.clear)
-            .overlay(Rectangle()
-                .stroke(done ? Color.okGreen.opacity(0.4)
-                             : (isCurrent ? Color.accent : Color.border),
-                        lineWidth: isCurrent ? 1.5 : 1))
-
-            Text(done ? "done" : "\(index + 1)")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .tracking(1.2)
-                .foregroundColor(done ? .okGreen : .textDim)
-                .frame(width: 26)
-                .animation(.spring(response: 0.3), value: done)
+            .buttonStyle(.plain)
+            .padding(.top, 22).padding(.trailing, 56)
         }
     }
 

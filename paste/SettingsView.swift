@@ -2139,9 +2139,9 @@ struct ClipenSettingsView: View {
                     .font(.system(size: 11)).foregroundColor(.textDim)
             }
             Spacer()
-            footerLink("Website", "https://clipen.lovable.app")
-            footerLink("Privacy", "https://clipen.lovable.app/privacy.html")
-            footerLink("Support", "https://clipen.lovable.app/support.html")
+            footerLink("Website", DeviceIdentity.websiteURLString)
+            footerLink("Privacy", "\(DeviceIdentity.websiteURLString)/privacy.html")
+            footerLink("Support", "\(DeviceIdentity.websiteURLString)/support.html")
             Button {
                 showResetConfirm = true
             } label: {
