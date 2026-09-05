@@ -69,7 +69,11 @@ struct ClipenSettingsView: View {
         .onAppear { manager.refreshLaunchAtLoginStatus() }
     }
 
+    /// Scroll anchor for `ClipboardManager.SettingsRoute.aiStructuring`.
+    private static let aiSectionAnchor = "settings.section.aiStructuring"
+
     private var settingsScrollContent: some View {
+        ScrollViewReader { proxy in
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 44) {
                 proUpsellBanner
@@ -101,6 +105,20 @@ struct ClipenSettingsView: View {
             }
             .padding(.horizontal, 28)
             .padding(.vertical, 22)
+        }
+        // Routed here from outside the window (see
+        // ClipboardManager.openAIStructuringSettings). The scroll is deferred
+        // one beat: the tab has only just switched, so the section has no
+        // geometry to scroll to on the same frame the route arrives.
+        .onChange(of: manager.pendingSettingsRoute) { _, route in
+            guard route == .aiStructuring else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                withAnimation(.easeOut(duration: 0.45)) {
+                    proxy.scrollTo(Self.aiSectionAnchor, anchor: .center)
+                }
+                manager.pendingSettingsRoute = nil
+            }
+        }
         }
     }
 
@@ -1481,6 +1499,16 @@ struct ClipenSettingsView: View {
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
+        // Anchor for the scroll, plus a temporary outline so it's obvious
+        // which section the user was just sent to.
+        .id(Self.aiSectionAnchor)
+        .padding(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.accent,
+                        lineWidth: manager.highlightedSettingsRoute == .aiStructuring ? 2 : 0)
+        )
+        .animation(.easeOut(duration: 0.3), value: manager.highlightedSettingsRoute)
     }
 
     private func byteProgressText(_ tier: LocalModelTier) -> String {
@@ -1785,6 +1813,15 @@ struct ClipenSettingsView: View {
 
         @State private var showInnerButtons = true
         @ObservedObject private var manager = ClipboardManager.shared
+        @ObservedObject private var localLLM = LocalLLMManager.shared
+
+        /// Details is the one move here that needs a model behind it. The
+        /// banner appears only when nothing can run one — Apple Intelligence
+        /// unavailable AND no local model on disk — so the majority, for whom
+        /// Apple Intelligence just works with no download, never see it.
+        private var needsModelSetup: Bool {
+            selected == .details && !localLLM.canRunAnalysis
+        }
 
         init(key: KBKey, lab: InteractionLabController, showRealKeyboardToggle: Bool = true) {
             self.key = key
@@ -1795,6 +1832,37 @@ struct ClipenSettingsView: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 10) {
+                // One line above the demo. The animation below plays exactly
+                // as it always does — this only says the feature needs
+                // setting up first, and offers the way there.
+                if needsModelSetup {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.accent)
+                        Text("Details needs a model to run.")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.textPri)
+                        Spacer(minLength: 4)
+                        Button {
+                            ClipboardManager.shared.openAIStructuringSettings(
+                                reason: String(localized: "Pick a model to turn on Details."))
+                        } label: {
+                            Text("Set up")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .tracking(1.1)
+                                .textCase(.uppercase)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 9).padding(.vertical, 4)
+                                .background(Color.accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 9).padding(.vertical, 7)
+                    .background(Color.accentDim)
+                    .overlay(Rectangle().stroke(Color.accent.opacity(0.45), lineWidth: 1))
+                }
+
                 if key.demos.count > 1 {
                     HStack(spacing: 6) {
                         ForEach(key.demos, id: \.self) { demo in

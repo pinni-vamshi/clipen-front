@@ -599,6 +599,40 @@ class ClipboardManager: ObservableObject {
         playInteractionSoundIfEnabled(.denied)
     }
 
+    /// A place in Settings the app wants to put the user, set from somewhere
+    /// that cannot reach the window itself — the popup panel, for instance.
+    /// MainWindowView watches this, switches tabs and clears it; SettingsView
+    /// scrolls to the section and highlights it.
+    enum SettingsRoute: Equatable { case aiStructuring }
+
+    @Published var pendingSettingsRoute: SettingsRoute? = nil
+
+    /// Briefly outlines the routed-to section so it is obvious which control
+    /// the user was sent here for. Cleared on a timer.
+    @Published var highlightedSettingsRoute: SettingsRoute? = nil
+
+    /// Sends the user to Settings → Apple Intelligence, where both fixes for
+    /// "D produced nothing" live: the AI Structuring toggle, and the engine
+    /// picker whose local models download on selection.
+    ///
+    /// Dismisses the popup first — it is a non-activating panel sitting over
+    /// everything, and the user cannot use Settings underneath it.
+    func openAIStructuringSettings(reason: String) {
+        flashStatus(reason, duration: 4.5)
+        dismissPreview()
+        AuthManager.shared.registerActionUsage(actionID: "action.details-routed-to-ai-settings")
+        AppDelegate.shared?.openMainWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            self?.pendingSettingsRoute = .aiStructuring
+            self?.highlightedSettingsRoute = .aiStructuring
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { [weak self] in
+            if self?.highlightedSettingsRoute == .aiStructuring {
+                self?.highlightedSettingsRoute = nil
+            }
+        }
+    }
+
     @Published var highlightOpenDelaySlider: Bool = false
 
     func pulseOpenDelaySlider(duration: TimeInterval = 6.0) {
@@ -1611,6 +1645,11 @@ class ClipboardManager: ObservableObject {
                 // with the clipboard; don't make that first copy wait out
                 // the backed-off poll interval.
                 self?.resumeActivePolling()
+                // Apple Intelligence can be switched on in System Settings
+                // while Clipen is running. Read once at launch only meant the
+                // "Details needs a model" banner kept showing until relaunch,
+                // long after the user had fixed it.
+                LocalLLMManager.shared.refreshAppleAvailability()
             }
         }
 

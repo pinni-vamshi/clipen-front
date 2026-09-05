@@ -160,6 +160,14 @@ struct MainWindowView: View {
         .sheet(isPresented: $showTutorial) {
             TutorialSheet(isPresented: $showTutorial, onSeeMore: { mainTab = .settings })
         }
+        // Somewhere outside this window asked to put the user in Settings —
+        // pressing D with nothing able to analyse, for instance. Switch tabs
+        // here and leave the route set: SettingsView clears it once it has
+        // scrolled to the section.
+        .onChange(of: manager.pendingSettingsRoute) { _, route in
+            guard route != nil else { return }
+            mainTab = .settings
+        }
         .alert("Heads up",
                isPresented: Binding(get: { auth.lastError != nil },
                                     set: { if !$0 { auth.clearError() } })) {

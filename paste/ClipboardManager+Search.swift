@@ -187,19 +187,19 @@ extension ClipboardManager {
         let units = detailUnits(for: item)
         guard !units.isEmpty else {
             // Landing here by NAVIGATING is not a rejected action — the user
-            // is browsing, not asking this item for details — so it gets
-            // none of the denial feedback the explicit D-press path uses:
-            // no shake (signalEditDenied), no error toast, and the panel is
-            // NOT torn down. It stays open showing its empty state and keeps
-            // tracking the selection, the way the Transform and Similar
-            // panels do; collapsing it meant one unanalyzed item in the
-            // middle of a browse kicked you out of the Details flow.
+            // is browsing, not asking this item for details — so it still
+            // gets none of the denial feedback the explicit D-press path
+            // uses: no shake (signalEditDenied), no error toast. But an open
+            // panel with nothing in it is worse than no panel: it claims to
+            // be showing details for an item that has none. Close it, and
+            // still ask for the analysis in the background so the coverage
+            // fills in.
             detailUnits = []
             detailsIndex = 0
             markedDetailIndices = []
             fieldMarkSeq = [:]
-            detailsSourceItemID = item.id
-            updateDetailsPanel()
+            detailsSourceItemID = nil
+            setSidePanelStage(.none)
             scheduleDetailsAnalysisRetrigger(for: item)
             return
         }
@@ -254,7 +254,15 @@ extension ClipboardManager {
     }
 
     func retriggerAnalysisForMissingDetails(_ item: ClipboardItem) {
-        guard aiStructuringEnabled else { return }
+        // Analysis is switched off in Settings, so no run will ever happen
+        // and D can never show anything. This used to return silently: the
+        // user got a shake and "No analysis for this item." and was never
+        // told the feature was off, let alone where.
+        guard aiStructuringEnabled else {
+            openAIStructuringSettings(
+                reason: String(localized: "AI structuring is turned off, so there's nothing to show."))
+            return
+        }
         guard AIStructuringService.shared.state(for: item.id) != .running else { return }
         detailsAwaitingAnalysisItemID = item.id
         AIStructuringService.shared.refresh(item: item, trigger: "details_missing")
@@ -289,7 +297,19 @@ extension ClipboardManager {
            previewWindow.isVisible,
            !displayItems.isEmpty, selectedIndex < displayItems.count,
            displayItems[selectedIndex].id == waitingID {
-            flashStatus("\(reason) Pick a local model instead in Settings \u{2192} AI Structuring.", duration: 4.5)
+            // Apple Intelligence can't run here — wrong hardware, switched
+            // off, or the OS is too old. Nothing the user does in the popup
+            // fixes that, and a 4.5s flash naming a Settings section they
+            // then have to go find is a poor answer. Take them there.
+            //
+            // Both outcomes are the same destination: with no local model on
+            // disk they need to download one, and with one already there
+            // they only need to switch the engine to it. The picker for both
+            // is the control being scrolled to.
+            let hasLocalModel = !LocalLLMManager.shared.downloadedTiers.isEmpty
+            openAIStructuringSettings(reason: hasLocalModel
+                ? String(localized: "\(reason) Switch to a downloaded model below.")
+                : String(localized: "\(reason) Pick a model below to download one."))
         }
 
         // Still on the same item, and still in the Details flow — a
@@ -414,12 +434,29 @@ extension ClipboardManager {
                           anchorPoint: anchor)
     }
 
+    /// Follows the selection, like Transform and Share, rather than closing
+    /// on any move. It used to tear itself down the moment the selection
+    /// changed at all — even though the new item usually has matches of its
+    /// own — which made R a one-shot rather than something you could browse
+    /// with. Closes only when the new item genuinely has nothing to show,
+    /// the same rule Transform and Details use.
     func syncSimilarPanelWithSelection() {
         guard inSimilarStage, previewWindow.isVisible,
               !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
-        let currentID = displayItems[selectedIndex].id
-        guard currentID != similarPanelSourceItemID else { return }
-        setSidePanelStage(.none)
+        let current = displayItems[selectedIndex]
+        guard current.id != similarPanelSourceItemID else { return }
+
+        let results = similarItems(to: current)
+        guard !results.isEmpty else {
+            similarPanelItems = []
+            similarPanelSourceItemID = nil
+            setSidePanelStage(.none)
+            return
+        }
+        similarPanelItems = results
+        similarPanelIndex = 0
+        similarPanelSourceItemID = current.id
+        updateSimilarPanel()
     }
 
     func fastPasteFront() {

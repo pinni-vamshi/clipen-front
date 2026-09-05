@@ -1,5 +1,8 @@
 import Combine
 import Foundation
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 import Hub
 import MLX
 import MLXLLM
@@ -313,6 +316,35 @@ final class LocalLLMManager: ObservableObject {
         }
     }
 
+    /// Whether Apple Intelligence can actually run here — unsupported Mac,
+    /// switched off in System Settings, or an OS too old for it to exist all
+    /// land as false.
+    ///
+    /// Cached: `availability` is the framework asking the system about model
+    /// state, and this is read from view bodies. It is re-read by
+    /// `refreshAppleAvailability()` rather than on every access, since the
+    /// answer only changes when the user changes a System Setting.
+    @Published private(set) var appleIntelligenceAvailable: Bool = true
+
+    func refreshAppleAvailability() {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            let ok: Bool
+            if case .available = SystemLanguageModel.default.availability { ok = true } else { ok = false }
+            if appleIntelligenceAvailable != ok { appleIntelligenceAvailable = ok }
+            return
+        }
+        #endif
+        if appleIntelligenceAvailable { appleIntelligenceAvailable = false }
+    }
+
+    /// Is there anything at all that could run an analysis? False only when
+    /// Apple Intelligence cannot run AND no local model is on disk — the one
+    /// state where pressing D can never produce anything.
+    var canRunAnalysis: Bool {
+        appleIntelligenceAvailable || !downloadedTiers.isEmpty
+    }
+
     var effectiveEngine: AIEngineSelection {
         if case .local(let tier) = selectedEngine, downloadedTiers.contains(tier) {
             return .local(tier)
@@ -347,6 +379,7 @@ final class LocalLLMManager: ObservableObject {
     private init() {
         selectedEngine = AIEngineSelection(storageValue: UserDefaults.standard.string(forKey: Self.selectedEngineDefaultsKey))
         rescanDownloadedTiers()
+        refreshAppleAvailability()
 
         // A download in progress when the app was last killed (crash,
         // force-quit, macOS restart) leaves exactly this: `selectedEngine`

@@ -10,6 +10,91 @@ import SwiftUI
 import WebKit
 @preconcurrency import PDFKit
 
+/// How tall the single-item preview should be for a given item.
+///
+/// Deliberately computed from the CONTENT, not measured from the rendered
+/// SwiftUI. Self-sizing (`NSHostingController.sizingOptions`) cannot work
+/// here: `ItemPreviewView` puts `.frame(maxWidth: .infinity, maxHeight:
+/// .infinity)` on its content twice, `ContentPreviewView` adds four more
+/// `maxHeight: .infinity` and three ScrollViews, so SwiftUI's ideal height is
+/// either unbounded (the greedy frames) or near-zero (the ScrollViews). That
+/// is the feedback loop that broke this the last time it was attempted.
+///
+/// Width stays fixed. Only the height moves, which keeps text wrapping stable
+/// and avoids solving in two dimensions at once.
+enum PreviewSizing {
+    static let width: CGFloat = 520
+    /// The current fixed size is the ceiling — nothing gets bigger than the
+    /// panel does today.
+    static let maxHeight: CGFloat = 420
+    /// Below this the header alone dominates and the panel reads as broken.
+    static let minHeight: CGFloat = 190
+
+    /// Header (tags + metadata + the two hint lines) + divider + content
+    /// padding, from ItemPreviewView's own layout.
+    private static let chromeHeight: CGFloat = 73
+    private static let contentWidth: CGFloat = width - 28   // 14pt padding each side
+
+    /// Measuring the whole of a huge string is wasted work — anything past
+    /// this is already taller than `maxHeight` several times over.
+    private static let measuredTextLimit = 6_000
+
+    static func height(for item: ClipboardItem) -> CGFloat {
+        clamp(chromeHeight + naturalContentHeight(for: item))
+    }
+
+    private static func clamp(_ h: CGFloat) -> CGFloat {
+        min(maxHeight, max(minHeight, h.rounded()))
+    }
+
+    private static func naturalContentHeight(for item: ClipboardItem) -> CGFloat {
+        switch item.content {
+        case .text(let text):
+            // A web URL renders as a live WebsitePreview, which wants the
+            // full height and cannot be measured from the string.
+            if ContentPreviewView.validWebURL(text) != nil { return maxHeight }
+            return textHeight(text, size: 13, monospaced: false)
+
+        case .svg(let src):
+            return textHeight(src, size: 13, monospaced: true)
+
+        case .richText(_, let plain), .rtfd(_, let plain):
+            return textHeight(plain, size: 13, monospaced: false)
+
+        case .image(let image, _, _):
+            // Aspect ratio decides it: a wide banner needs far less height
+            // than a tall screenshot, and both used to get the same 420.
+            let size = image.size
+            guard size.width > 0, size.height > 0 else { return maxHeight }
+            return contentWidth * (size.height / size.width)
+
+        case .files(let urls):
+            // Stacked cells, one per file (see ContentPreviewView.filesPreview).
+            return CGFloat(urls.count) * 220 + CGFloat(max(0, urls.count - 1)) * 10
+
+        // Everything below renders through a web view, QuickLook, or another
+        // panel — all of which genuinely want the room and none of which can
+        // be measured cheaply. They keep exactly today's size.
+        case .html, .file, .blob, .group:
+            return maxHeight
+        }
+    }
+
+    private static func textHeight(_ text: String, size: CGFloat, monospaced: Bool) -> CGFloat {
+        guard !text.isEmpty else { return minHeight - chromeHeight }
+        let measured = String(text.prefix(measuredTextLimit))
+        let font: NSFont = monospaced
+            ? .monospacedSystemFont(ofSize: size, weight: .regular)
+            : .systemFont(ofSize: size)
+        let bounds = (measured as NSString).boundingRect(
+            with: NSSize(width: contentWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font])
+        // A little slack so the last line never sits flush against the edge.
+        return ceil(bounds.height) + 12
+    }
+}
+
 final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     private let anchorPanel: NSPanel
     private let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
@@ -74,7 +159,9 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
             item.id.uuidString, item.ocrText ?? "", item.aiStructuredText ?? "",
             item.userNote ?? "", item.diffBadge ?? "",
         ])
-        present(AnyView(ItemPreviewView(item: item)), width: 520, height: 420,
+        present(AnyView(ItemPreviewView(item: item)),
+                width: PreviewSizing.width,
+                height: PreviewSizing.height(for: item),
                 near: popupFrame, anchorPoint: anchorPoint, contentKey: key)
     }
 
