@@ -249,20 +249,37 @@ struct TutorialSheet: View {
             // The demo only runs on page 2, and it plays whichever of
             // pasteOne/Two/Three matches the item the user is on.
             if now == 1 {
-                lab.select(pasteDemoForTarget)
-                focusedPasteBox = currentPasteTarget
+                // Coming back from page 3 used to land on a dead page: all
+                // three boxes were still filled, so currentPasteTarget was
+                // past the end and no field was rendered at all. Going back
+                // starts the exercise over.
+                pasteBoxes = ["", "", ""]
+                stepMessage = nil
+                lab.select(.pasteOne)
+                focusedPasteBox = 0
             } else {
                 lab.stop()
             }
         }
-        .onChange(of: currentPasteTarget) { _, next in
+        .onChange(of: currentPasteTarget) { previous, next in
             guard page == 1 else { return }
+            guard next > previous else { return }
             if next < pasteTargets.count {
-                lab.select(pasteDemoForTarget)
-                focusedPasteBox = next
+                // Land the win before moving the goalposts: say which one
+                // they just got, then start the next demo. Switching
+                // instantly gave no signal that anything had been achieved.
+                lab.stop()
+                stepMessage = String(localized: "Got item \(previous + 1). Now item \(next + 1) — that's \(next + 1) taps.")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+                    guard page == 1, currentPasteTarget == next else { return }
+                    stepMessage = nil
+                    lab.select(pasteDemoForTarget)
+                    focusedPasteBox = next
+                }
             } else {
                 lab.stop()
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                stepMessage = String(localized: "That's all three — nice.")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
                     guard page == 1, allPasted else { return }
                     withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { page = 2 }
                 }
@@ -537,6 +554,10 @@ struct TutorialSheet: View {
     @State private var pasteBoxes: [String] = ["", "", ""]
     @FocusState private var focusedPasteBox: Int?
 
+    /// Shown between steps, so a completed item gets acknowledged before the
+    /// next one starts.
+    @State private var stepMessage: String? = nil
+
     /// Newest copy first — one tap of V reaches the most recent thing copied,
     /// which is the LAST line the copy gate asked for.
     private var pasteTargets: [String] { copyTargets.reversed() }
@@ -561,54 +582,74 @@ struct TutorialSheet: View {
     }
 
     private var pastePracticePage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Top half: the ring's contents on the left, the demo on the
-            // right, split by the hairline.
-            HStack(alignment: .top, spacing: 0) {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Now paste them back")
-                            .font(.system(size: 22, weight: .medium)).tracking(-0.4)
-                            .foregroundColor(.textPri)
-                        Text("Newest copy first — the top one is a single tap of V.")
-                            .font(.system(size: 12)).foregroundColor(.textSec)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+        VStack(alignment: .leading, spacing: 18) {
+            // Same skeleton as page 1: display heading, description, a
+            // full-width rule, then the split section. Page 2 had a small
+            // heading and no rule, which is what made the two read as
+            // different panels.
+            Text("Now paste them back")
+                .font(.system(size: 28, weight: .heavy)).tracking(-0.6)
+                .foregroundColor(.textPri)
 
-                    // Rows never move and never fill; the one being taught
-                    // right now simply gets a blue border.
-                    VStack(alignment: .leading, spacing: 9) {
-                        MicroLabel(text: "Clipboard history — newest first")
-                        VStack(spacing: -1) {
-                            ForEach(pasteTargets.indices, id: \.self) { i in
-                                historyRow(i).zIndex(currentPasteTarget == i ? 2 : 1)
-                            }
+            Text("Newest copy first — the top one is a single tap of V. Watch it once on the right, then paste it below.")
+                .font(.system(size: 12)).foregroundColor(.textSec)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Divider().background(Color.border)
+
+            // Half and half, both centred in the space they get: the list on
+            // the left, the demo on the right.
+            HStack(alignment: .center, spacing: 0) {
+                VStack(alignment: .leading, spacing: 9) {
+                    MicroLabel(text: "Clipboard history — newest first")
+                    VStack(spacing: -1) {
+                        ForEach(pasteTargets.indices, id: \.self) { i in
+                            historyRow(i).zIndex(currentPasteTarget == i ? 2 : 1)
                         }
                     }
-
-                    Spacer(minLength: 0)
                 }
-                .frame(width: 320)
-                .padding(.trailing, 22)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.trailing, 24)
 
                 Rectangle().fill(Color.border).frame(width: 1)
 
                 InteractionLabStage(lab: lab)
-                    .padding(.leading, 18)
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.leading, 24)
             }
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // The target runs the full width of the panel, under both
             // columns — it's the one thing the user has to act on, so it gets
             // the whole width rather than being squeezed into the left third.
-            if currentPasteTarget < pasteTargets.count {
+            // Between steps the field is replaced by the acknowledgement, so
+            // the two never compete for the same space.
+            if let stepMessage {
+                HStack(spacing: 11) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 22, height: 22)
+                        .background(Color.okGreen)
+                    Text(stepMessage)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.textPri)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 20)
+                .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                .background(Color.okGreenDim)
+                .overlay(Rectangle().stroke(Color.okGreen.opacity(0.5), lineWidth: 1.5))
+                .transition(.opacity)
+            } else if currentPasteTarget < pasteTargets.count {
                 pasteField(currentPasteTarget)
             }
         }
-        .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 18)
+        .padding(.horizontal, 30).padding(.top, 26).padding(.bottom, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay(alignment: .topTrailing) { replayButton }
+        .animation(.easeOut(duration: 0.25), value: stepMessage)
     }
 
     private var replayButton: some View {
@@ -770,15 +811,24 @@ private struct PopupGestureDemo: View {
 
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 14) {
+                // The column label stays on the same line as the other two;
+                // the keys below it centre in whatever height the tallest
+                // column (the move list) sets, instead of hanging at the top
+                // over a column of dead space.
                 MicroLabel(text: "Open the ring")
-                openPopupKeys
-                VStack(alignment: .leading, spacing: 3) {
-                    MicroLabel(text: "Hold ⌘", color: .textDim)
-                    MicroLabel(text: "Tap V to step", color: .textDim)
-                    MicroLabel(text: "Release to paste", color: .textDim)
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 14) {
+                    openPopupKeys
+                    VStack(alignment: .leading, spacing: 3) {
+                        MicroLabel(text: "Hold ⌘", color: .textDim)
+                        MicroLabel(text: "Tap V to step", color: .textDim)
+                        MicroLabel(text: "Release to paste", color: .textDim)
+                    }
                 }
+                Spacer(minLength: 0)
             }
             .frame(width: 168, alignment: .leading)
+            .frame(maxHeight: .infinity, alignment: .top)
 
             Rectangle().fill(Color.border).frame(width: 1)
                 .padding(.horizontal, 22)
@@ -845,8 +895,9 @@ private struct PopupGestureDemo: View {
         }
             .padding(.leading, 6).padding(.trailing, 9)
             .padding(.vertical, 6)
-            .background(isDescribed ? Color.accentDim : Color.clear)
-            .overlay(Rectangle().stroke(isDescribed ? Color.accent.opacity(0.34) : .clear, lineWidth: 1))
+            // No panel behind the row on hover — the keycap lighting up and
+            // the label brightening already say which one is active, and the
+            // box just added a second, louder highlight on top of it.
             .contentShape(Rectangle())
             .onHover { inside in
                 if inside { describedGesture = gesture }
