@@ -611,13 +611,34 @@ class ClipboardManager: ObservableObject {
     /// the user was sent here for. Cleared on a timer.
     @Published var highlightedSettingsRoute: SettingsRoute? = nil
 
+    /// Why Details can't run, shown as a banner inside the popup rather than
+    /// by throwing the user out of it. Nil when there's nothing to say.
+    ///
+    /// Closing the ring and jumping to Settings mid-flow is a big
+    /// interruption for something the user may not want to deal with right
+    /// now — they pressed D, they did not ask to be relocated. The banner
+    /// states the problem where they already are and offers the jump as a
+    /// choice.
+    @Published var aiSetupNotice: String? = nil
+
+    func showAISetupNotice(_ reason: String) {
+        aiSetupNotice = reason
+    }
+
+    func dismissAISetupNotice() {
+        aiSetupNotice = nil
+    }
+
     /// Sends the user to Settings → Apple Intelligence, where both fixes for
     /// "D produced nothing" live: the AI Structuring toggle, and the engine
     /// picker whose local models download on selection.
     ///
-    /// Dismisses the popup first — it is a non-activating panel sitting over
-    /// everything, and the user cannot use Settings underneath it.
+    /// Only called when the user actually asks for it — from the banner's
+    /// Set up button, or the onboarding demo's. Dismisses the popup first:
+    /// it is a non-activating panel sitting over everything, and Settings
+    /// cannot be used underneath it.
     func openAIStructuringSettings(reason: String) {
+        aiSetupNotice = nil
         flashStatus(reason, duration: 4.5)
         dismissPreview()
         AuthManager.shared.registerActionUsage(actionID: "action.details-routed-to-ai-settings")

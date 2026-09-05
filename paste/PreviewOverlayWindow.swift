@@ -228,6 +228,7 @@ struct PopoverPreviewView: View {
                 aiFactStrip
                 trialBanner
                 updateAvailableBanner
+                aiSetupBanner
                 firstCycleHint
                 detailsHint
                 rememberForeverBanner
@@ -400,6 +401,43 @@ struct PopoverPreviewView: View {
             .padding(.horizontal, 14).padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.white)
+            .transition(.opacity)
+        }
+    }
+
+    /// Details asked for, nothing able to run it. Says so where the user
+    /// already is instead of closing the ring and relocating them to
+    /// Settings — the jump is offered, not performed.
+    @ViewBuilder
+    private var aiSetupBanner: some View {
+        if let notice = manager.aiSetupNotice {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(notice)
+                    .font(.system(size: 11, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 8)
+                Button {
+                    manager.openAIStructuringSettings(
+                        reason: String(localized: "Pick a model to turn on Details."))
+                } label: {
+                    Text("Set up").font(.system(size: 11, weight: .bold)).underline()
+                }
+                .buttonStyle(.plain)
+                Button {
+                    manager.dismissAISetupNotice()
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .opacity(0.7)
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accent)
             .transition(.opacity)
         }
     }

@@ -1241,6 +1241,9 @@ extension ClipboardManager {
             }
         }
         capturedPasteTarget = NSWorkspace.shared.frontmostApplication
+        // Every open starts clean: a notice from a previous session would
+        // otherwise sit there over a ring the user never asked Details for.
+        aiSetupNotice = nil
         if rememberForeverBannerOpensRemaining > 0 {
             rememberForeverBannerOpensRemaining -= 1
         }

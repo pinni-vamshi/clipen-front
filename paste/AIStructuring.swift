@@ -680,6 +680,15 @@ final class AIStructuringService: ObservableObject {
                     self.states[item.id] = .failed("This item is too long for on-device analysis.")
                     DebugLog.write("AI \(item.id.uuidString.prefix(4)): context overflow — not retrying")
                     Self.trackAnalysisFinished(item: item, success: false, startedAt: startedAt, trigger: trigger)
+                } else if error is AIStructuringError {
+                    // Exactly as deterministic as an overflow, and it was
+                    // being retried three times: an engine that is absent,
+                    // switched off, or too old for this OS answers the same
+                    // way every time. Three doomed calls, each queueing on
+                    // the app-wide inference gate ahead of real work.
+                    self.states[item.id] = .failed(error.localizedDescription)
+                    DebugLog.write("AI \(item.id.uuidString.prefix(4)): engine unavailable — not retrying")
+                    Self.trackAnalysisFinished(item: item, success: false, startedAt: startedAt, trigger: trigger)
                 } else if attempt < Self.maxAttempts {
                     // A thrown error produced no output to repair, so the
                     // accumulated priors carry through unchanged rather than

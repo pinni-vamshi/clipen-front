@@ -259,8 +259,15 @@ extension ClipboardManager {
         // user got a shake and "No analysis for this item." and was never
         // told the feature was off, let alone where.
         guard aiStructuringEnabled else {
-            openAIStructuringSettings(
-                reason: String(localized: "AI structuring is turned off, so there's nothing to show."))
+            showAISetupNotice(String(localized: "Details is off — turn on AI structuring to use it."))
+            return
+        }
+        // Pre-flight, so a run that cannot possibly succeed is never started.
+        // Without this the analysis is dispatched, waits on the app-wide
+        // inference gate, throws "unavailable", and only then reports — for
+        // an answer that was knowable before it began.
+        guard LocalLLMManager.shared.canRunAnalysis else {
+            showAISetupNotice(String(localized: "Details needs a model — none is available yet."))
             return
         }
         guard AIStructuringService.shared.state(for: item.id) != .running else { return }
@@ -297,19 +304,14 @@ extension ClipboardManager {
            previewWindow.isVisible,
            !displayItems.isEmpty, selectedIndex < displayItems.count,
            displayItems[selectedIndex].id == waitingID {
-            // Apple Intelligence can't run here — wrong hardware, switched
-            // off, or the OS is too old. Nothing the user does in the popup
-            // fixes that, and a 4.5s flash naming a Settings section they
-            // then have to go find is a poor answer. Take them there.
-            //
-            // Both outcomes are the same destination: with no local model on
-            // disk they need to download one, and with one already there
-            // they only need to switch the engine to it. The picker for both
-            // is the control being scrolled to.
+            // The engine reported unavailable at call time even though the
+            // pre-flight check passed — it can be switched off between the
+            // two. Say so in the popup and offer the jump; don't perform it.
+            LocalLLMManager.shared.refreshAppleAvailability()
             let hasLocalModel = !LocalLLMManager.shared.downloadedTiers.isEmpty
-            openAIStructuringSettings(reason: hasLocalModel
-                ? String(localized: "\(reason) Switch to a downloaded model below.")
-                : String(localized: "\(reason) Pick a model below to download one."))
+            showAISetupNotice(hasLocalModel
+                ? String(localized: "Details couldn't run — switch to your downloaded model.")
+                : String(localized: "Details needs a model to run."))
         }
 
         // Still on the same item, and still in the Details flow — a
