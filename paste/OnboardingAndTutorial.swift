@@ -230,7 +230,10 @@ struct TutorialSheet: View {
                 default: spacePreviewFinalPage
                 }
             }
-            .frame(minHeight: 520)
+            // No shared height. Each page sets its own floor from what it
+            // actually holds — a single value was ~300pt of dead space on
+            // page 1 and only just cleared page 2, which is how the field
+            // ended up drawing across the footer rule.
             .overlay(alignment: .topTrailing) { closeButton }
             Divider().background(Color.border)
             tutorialFooter
@@ -403,7 +406,8 @@ struct TutorialSheet: View {
             }
         }
         .padding(.horizontal, 30).padding(.top, 26).padding(.bottom, 28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: Self.copyGateMinHeight,
+               maxHeight: .infinity, alignment: .topLeading)
         .onAppear { startIntroChoreography() }
         .onChange(of: canAdvance) { _, done in
 
@@ -484,6 +488,12 @@ struct TutorialSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
+
+    /// Floors, per page, from the content each one holds. Not fixed heights —
+    /// a page still grows if its content needs more.
+    private static let copyGateMinHeight: CGFloat = 400
+    private static let pastePracticeMinHeight: CGFloat = 600
+    private static let finalPageMinHeight: CGFloat = 440
 
     private func copyTargetCard(index: Int, text: String, copied: Bool) -> some View {
         // Three states, never more than one of them live: done, the line
@@ -589,13 +599,16 @@ struct TutorialSheet: View {
             // full-width rule, then the split section. Page 2 had a small
             // heading and no rule, which is what made the two read as
             // different panels.
+            // Built exactly like page 1's heading so the gap above it is
+            // identical: 42pt heavy scaled to 0.66 from topLeading, with the
+            // same -34 bottom pull. The scale keeps the un-scaled line box,
+            // and that box is where page 1's spacing comes from — a plain
+            // 28pt Text can never match it however the padding is tuned.
             Text("Now paste them back")
-                .font(.system(size: 28, weight: .heavy)).tracking(-0.6)
+                .font(.system(size: 42, weight: .heavy))
                 .foregroundColor(.textPri)
-
-            Text("Newest copy first — the top one is a single tap of V. Watch it once on the right, then paste it below.")
-                .font(.system(size: 12)).foregroundColor(.textSec)
-                .fixedSize(horizontal: false, vertical: true)
+                .scaleEffect(0.66, anchor: .topLeading)
+                .padding(.bottom, -34)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Divider().background(Color.border)
@@ -656,8 +669,9 @@ struct TutorialSheet: View {
         // 26pt padding sits much closer to the edge, so it needs more — and
         // the bottom needs enough that the field never touches the footer
         // rule.
-        .padding(.horizontal, 30).padding(.top, 40).padding(.bottom, 28)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, 30).padding(.top, 26).padding(.bottom, 28)
+        .frame(maxWidth: .infinity, minHeight: Self.pastePracticeMinHeight,
+               maxHeight: .infinity, alignment: .topLeading)
         .animation(.easeOut(duration: 0.25), value: stepMessage)
     }
 
@@ -741,20 +755,22 @@ struct TutorialSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 // Display sizing matched to the site's section heads:
-                // larger, lighter weight, tight tracking — not 17pt bold.
                 Text("There's a lot more behind the popup")
-                    .font(.system(size: 22, weight: .medium)).tracking(-0.4)
+                    .font(.system(size: 42, weight: .heavy))
                     .foregroundColor(.textPri)
-                Text("Five moves that live inside the ring. Click one to watch it.")
-                    .font(.system(size: 12)).foregroundColor(.textSec)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .scaleEffect(0.66, anchor: .topLeading)
+                    .padding(.bottom, -34)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            Divider().background(Color.border)
 
             PopupGestureDemo()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 30).padding(.top, 26).padding(.bottom, 28)
+        .frame(maxWidth: .infinity, minHeight: Self.finalPageMinHeight,
+               maxHeight: .infinity)
     }
 
 }
