@@ -9,6 +9,12 @@ extension Color {
     static let border    = Color(light: "#D9D9DE", dark: "#2C2C2C")
     static let accent    = Color(hex: "#4F8EF7")
     static let accentDim = Color(hex: "#4F8EF7").opacity(0.15)
+    /// Success green. Taken from the marketing site's palette rather than
+    /// SwiftUI's `.green` — system green is a much colder, more saturated
+    /// hue than anything else on screen, and read as borrowed from another
+    /// app every time it appeared next to the blue.
+    static let okGreen   = Color(hex: "#3FAE5C")
+    static let okGreenDim = Color(hex: "#3FAE5C").opacity(0.12)
     static let textPri   = Color(light: "#1A1A1A", dark: "#FFFFFF")
     static let textSec   = Color(light: "#6E6E73", dark: "#888888")
     static let textDim   = Color(light: "#9A9AA0", dark: "#707070")

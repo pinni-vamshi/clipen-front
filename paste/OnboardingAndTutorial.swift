@@ -78,6 +78,66 @@ struct OnboardingView: View {
         }
     }
 
+/// A physical keycap, ported from the marketing site's `.hka` component so the
+/// two surfaces read as one product: a 180° #242424→#1A1A1A face, a dark border
+/// with a lit top edge, and layered inset shadows. Pressing fills it blue and
+/// pushes it down rather than pulsing a stroke, which is what the site does and
+/// what a real key does.
+struct ClipenKeyCap: View {
+    let label: String
+    var width: CGFloat = 54
+    var height: CGFloat = 50
+    var fontSize: CGFloat = 19
+    var pressed: Bool = false
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: fontSize, weight: .bold, design: .monospaced))
+            .foregroundColor(pressed ? .white : .textSec)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(width: width, height: height)
+            .background {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(pressed
+                          ? AnyShapeStyle(Color.accent)
+                          : AnyShapeStyle(LinearGradient(colors: [.surfaceHi, .surface],
+                                                         startPoint: .top, endPoint: .bottom)))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(pressed ? Color.accent : Color.black.opacity(0.5), lineWidth: 1)
+            }
+            .overlay(alignment: .top) {
+                // The lit top edge — what sells it as a moulded key rather
+                // than a rectangle.
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .trim(from: 0.62, to: 0.88)
+                    .stroke(Color.white.opacity(pressed ? 0.22 : 0.16), lineWidth: 1)
+                    .frame(width: width, height: height)
+            }
+            .shadow(color: .black.opacity(pressed ? 0.35 : 0.55),
+                    radius: pressed ? 2 : 4, y: pressed ? 2 : 5)
+            .offset(y: pressed ? 4 : 0)
+            .animation(.spring(response: 0.22, dampingFraction: 0.7), value: pressed)
+    }
+}
+
+/// The site's micro-label: 9pt monospace, heavily tracked, uppercase, dim.
+/// Used everywhere the site uses `.htw-cap` / `.fc-n` / `.col-lbl`.
+struct MicroLabel: View {
+    let text: LocalizedStringKey
+    var color: Color = .textDim
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .tracking(1.8)
+            .textCase(.uppercase)
+            .foregroundColor(color)
+    }
+}
+
 struct TutorialSheet: View {
     @Binding var isPresented: Bool
     var onSeeMore: () -> Void = {}
@@ -286,12 +346,17 @@ struct TutorialSheet: View {
                     HStack(spacing: 11) {
                         ForEach(Array(line.enumerated()), id: \.offset) { wordIdx, word in
                             let g = globalWordIndex(line: lineIdx, word: wordIdx)
+                            // Mask-slide, matching the site's hero reveal
+                            // (.w{overflow:hidden} + translateY(110%→0)).
+                            // `.offset` is a render transform, so the layout
+                            // frame stays put and `.clipped()` masks to it —
+                            // the word rises out of a fixed slot instead of
+                            // fading in from a blur.
                             Text(word)
                                 .font(.system(size: 42, weight: .heavy))
                                 .foregroundColor(.textPri)
-                                .opacity(g < wordsShown ? 1 : 0)
-                                .offset(y: g < wordsShown ? 0 : 10)
-                                .blur(radius: g < wordsShown ? 0 : 4)
+                                .offset(y: g < wordsShown ? 0 : 52)
+                                .clipped()
                         }
                     }
                 }
@@ -330,7 +395,7 @@ struct TutorialSheet: View {
         let wordGap = 0.32
         for i in 1...philosophyWordCount {
             DispatchQueue.main.asyncAfter(deadline: .now() + wordGap * Double(i)) {
-                withAnimation(.easeOut(duration: 0.5)) { wordsShown = i }
+                withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.65)) { wordsShown = i }
             }
         }
 
@@ -358,20 +423,15 @@ struct TutorialSheet: View {
             HStack(alignment: .center, spacing: 28) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Copy these 3 lines")
-                        .font(.system(size: 16, weight: .bold)).foregroundColor(.textPri)
+                        .font(.system(size: 19, weight: .medium)).tracking(-0.3)
+                        .foregroundColor(.textPri)
                         .scaleEffect(promptPulse ? 1.035 : 1.0, anchor: .leading)
                     Text("Click into each box and press ⌘C. Clipen catches every copy automatically.")
                         .font(.system(size: 11)).foregroundColor(.textSec)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("copy each of these")
-                            .font(.system(size: 10, weight: .semibold))
-                    }
-                    .foregroundColor(.accent.opacity(0.85))
-                    .offset(x: promptPulse ? 3 : -1)
+                    MicroLabel(text: "↓ copy each of these", color: .accent)
+                        .offset(x: promptPulse ? 3 : -1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -386,7 +446,7 @@ struct TutorialSheet: View {
                          ? "Nice! Taking you to pasting them back…"
                          : "Copied \(copiedCount) of \(copyTargets.count).")
                         .font(.system(size: 11))
-                        .foregroundColor(canAdvance ? .green : .textDim)
+                        .foregroundColor(canAdvance ? .okGreen : .textDim)
                         .frame(minHeight: 16).animation(.easeInOut(duration: 0.2), value: canAdvance)
                         .padding(.top, 2)
                 }
@@ -397,24 +457,23 @@ struct TutorialSheet: View {
     }
 
     private func copyTargetCard(index: Int, text: String, copied: Bool) -> some View {
-        HStack(spacing: 12) {
-            Text("\(index + 1)").font(.system(size: 11, weight: .bold))
-                .foregroundColor(copied ? .white : .textSec).frame(width: 22, height: 22)
-                .background(copied ? Color.green : Color.textDim.opacity(0.18),
-                            in: RoundedRectangle(cornerRadius: 6))
+        HStack(spacing: 13) {
+            // Square numeral chip, not a rounded pill — the site numbers
+            // things with flat mono squares (.mpx-badge).
+            Text("\(index + 1)").font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(copied ? .white : .textSec).frame(width: 24, height: 24)
+                .background(copied ? Color.okGreen : Color.textDim.opacity(0.12))
 
-            Text(text).font(.system(size: 13, weight: .medium, design: .monospaced)).foregroundColor(.textPri)
+            Text(text).font(.system(size: 12, weight: .regular, design: .monospaced)).foregroundColor(.textPri)
                 .textSelection(.enabled).lineLimit(1).truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if copied {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Copied")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                }
-                .foregroundColor(.green)
+                Text("Copied")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .tracking(1.4)
+                    .textCase(.uppercase)
+                    .foregroundColor(.okGreen)
             } else {
 
                 Button {
@@ -427,34 +486,38 @@ struct TutorialSheet: View {
                     // for well over the 60s idle threshold.
                     manager.resumeActivePolling()
                 } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 12, weight: .semibold))
+                    Text("Copy")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .tracking(1.4)
+                        .textCase(.uppercase)
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.textDim)
                 .help("Copy")
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 11)
+        .padding(.horizontal, 14).padding(.vertical, 13)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.surfaceHi, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .stroke(copied ? Color.green.opacity(0.55) : Color.border, lineWidth: 1))
+        // Hairline rows on the page ground, the way the site's .feat-grid
+        // separates cells — no radius, no raised fill.
+        .background(copied ? Color.okGreenDim : Color.clear)
+        .overlay(Rectangle().stroke(copied ? Color.okGreen.opacity(0.4) : Color.border, lineWidth: 1))
         .animation(.spring(response: 0.3), value: copied)
     }
 
     private var pastePracticePage: some View {
         HStack(alignment: .top, spacing: 26) {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Now paste them back").font(.system(size: 17, weight: .bold)).foregroundColor(.textPri)
+                Text("Now paste them back")
+                    .font(.system(size: 22, weight: .medium)).tracking(-0.4)
+                    .foregroundColor(.textPri)
                     .padding(.bottom, 10)
 
                 VStack(spacing: 18) {
                     ForEach(0..<3, id: \.self) { i in
                         VStack(alignment: .leading, spacing: 7) {
-                            Text(LocalizedStringKey(Self.pasteBoxLabelKeys[i]))
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(currentPasteTarget == i ? .accent : .textDim)
+                            MicroLabel(text: LocalizedStringKey(Self.pasteBoxLabelKeys[i]),
+                                       color: currentPasteTarget == i ? .accent : .textDim)
                             pasteTargetRow(index: i)
                             if i < 2 { Divider().padding(.top, 11) }
                         }
@@ -465,7 +528,7 @@ struct TutorialSheet: View {
                      ? "Perfect — taking you to the last step…"
                      : "Filled \(pasteBoxesDone) of 3 — fills auto-continue once all three are done.")
                     .font(.system(size: 11))
-                    .foregroundColor(allPasted ? .green : .textDim)
+                    .foregroundColor(allPasted ? .okGreen : .textDim)
                     .frame(minHeight: 16)
                     .animation(.easeInOut(duration: 0.2), value: allPasted)
 
@@ -492,10 +555,9 @@ struct TutorialSheet: View {
                 .offset(x: isCurrent ? 0 : -4)
                 .animation(.spring(response: 0.3), value: isCurrent)
 
-            Text("\(index + 1)").font(.system(size: 11, weight: .bold))
-                .foregroundColor(done ? .white : .textSec).frame(width: 22, height: 22)
-                .background(done ? Color.green : Color.textDim.opacity(0.18),
-                            in: RoundedRectangle(cornerRadius: 6))
+            Text("\(index + 1)").font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(done ? .white : .textSec).frame(width: 24, height: 24)
+                .background(done ? Color.okGreen : Color.textDim.opacity(0.12))
 
             ZStack(alignment: .leading) {
                 TextField("", text: $pasteBoxes[index])
@@ -509,16 +571,17 @@ struct TutorialSheet: View {
                         .padding(.horizontal, 10).allowsHitTesting(false)
                 }
             }
-            .background(Color.surfaceHi, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8)
-                .stroke(done ? Color.green.opacity(0.5)
+            .background(done ? Color.okGreenDim : Color.clear)
+            .overlay(Rectangle()
+                .stroke(done ? Color.okGreen.opacity(0.4)
                              : (isCurrent ? Color.accent : Color.border),
                         lineWidth: isCurrent ? 1.5 : 1))
 
-            Image(systemName: done ? "checkmark.circle.fill" : "\(index + 1).circle")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(done ? .green : .textDim)
-                .frame(width: 22)
+            Text(done ? "done" : "\(index + 1)")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .tracking(1.2)
+                .foregroundColor(done ? .okGreen : .textDim)
+                .frame(width: 26)
                 .animation(.spring(response: 0.3), value: done)
         }
     }
@@ -526,9 +589,12 @@ struct TutorialSheet: View {
     private var spacePreviewFinalPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
+                // Display sizing matched to the site's section heads:
+                // larger, lighter weight, tight tracking — not 17pt bold.
                 Text("There's a lot more behind the popup")
-                    .font(.system(size: 17, weight: .bold)).foregroundColor(.textPri)
-                Text("A few of the most useful moves — click a key to see it happen.")
+                    .font(.system(size: 22, weight: .medium)).tracking(-0.4)
+                    .foregroundColor(.textPri)
+                Text("Five moves that live inside the ring. Hover one to see what it does.")
                     .font(.system(size: 12)).foregroundColor(.textSec)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -558,6 +624,18 @@ private enum PopupDemoGesture: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The keycap face. `label` is a LocalizedStringKey for SwiftUI text;
+    /// ClipenKeyCap needs the plain String to size and scale the glyph.
+    var plainLabel: String {
+        switch self {
+        case .space:   return "space"
+        case .x:       return "X"
+        case .del:     return "del"
+        case .holdV:   return "hold V"
+        case .details: return "D"
+        }
+    }
+
     var label: LocalizedStringKey {
         switch self {
         case .space:   return "space"
@@ -583,71 +661,100 @@ private struct PopupGestureDemo: View {
     @StateObject private var lab = InteractionLabController()
     @State private var activeGesture: PopupDemoGesture? = nil
 
-    @State private var pulse = false
+    /// Which move the right-hand column is describing. Follows hover and
+    /// click, and starts on the first key so the column is never empty —
+    /// it used to hold a static "Click these buttons to see the
+    /// interactions", which spent a third of the panel on an instruction
+    /// the buttons already imply.
+    @State private var describedGesture: PopupDemoGesture = .space
 
     var body: some View {
 
-        HStack(alignment: .center, spacing: 0) {
-            VStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                MicroLabel(text: "Open the ring")
                 openPopupKeys
-                Text("Open popup").font(.system(size: 10, weight: .semibold)).foregroundColor(.textDim)
-            }
-            .frame(maxWidth: .infinity)
-
-            VStack(spacing: 10) {
-                ForEach(PopupDemoGesture.allCases) { gesture in
-                    demoKey(gesture)
+                VStack(alignment: .leading, spacing: 3) {
+                    MicroLabel(text: "Hold ⌘", color: .textDim)
+                    MicroLabel(text: "Tap V to step", color: .textDim)
+                    MicroLabel(text: "Release to paste", color: .textDim)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(width: 168, alignment: .leading)
 
-            Text("Click these buttons to see the interactions.")
-                .font(.system(size: 11))
-                .foregroundColor(.textDim)
-                .multilineTextAlignment(.leading)
-                .frame(width: 150, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .center)
+            Rectangle().fill(Color.border).frame(width: 1)
+                .padding(.horizontal, 22)
+
+            VStack(alignment: .leading, spacing: 14) {
+                MicroLabel(text: "While it's open")
+                VStack(spacing: 6) {
+                    ForEach(PopupDemoGesture.allCases) { gesture in
+                        demoKey(gesture)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Rectangle().fill(Color.border).frame(width: 1)
+                .padding(.horizontal, 22)
+
+            VStack(alignment: .leading, spacing: 11) {
+                MicroLabel(text: "What it does")
+                Text(describedGesture.kbKey.label)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .tracking(1.2)
+                    .textCase(.uppercase)
+                    .foregroundColor(.accent)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color.accentDim)
+                if let demo = describedGesture.kbKey.demos.first {
+                    Text(demo.title)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.textPri)
+                    Text(demo.caption)
+                        .font(.system(size: 11))
+                        .foregroundColor(.textSec)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: 208, alignment: .leading)
+            .animation(.easeOut(duration: 0.18), value: describedGesture)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var openPopupKeys: some View {
-        HStack(spacing: 8) {
-            keyCap("⌘")
-            keyCap("V")
+        HStack(spacing: 9) {
+            ClipenKeyCap(label: "⌘")
+            Text("+").font(.system(size: 13, design: .monospaced)).foregroundColor(.textDim)
+            ClipenKeyCap(label: "V")
         }
-        .padding(10)
-        .background(Color.surfaceHi, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(Color.border, lineWidth: 1))
-    }
-
-    private func keyCap(_ symbol: String) -> some View {
-        Text(symbol)
-            .font(.system(size: 20, weight: .bold, design: .monospaced))
-            .foregroundColor(.white)
-            .frame(width: 46, height: 46)
-            .background(Color.accent, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.accent, lineWidth: 2))
     }
 
     private func demoKey(_ gesture: PopupDemoGesture) -> some View {
         let isActive = activeGesture == gesture
-        return Text(gesture.label)
-            .font(.system(size: 10, weight: .bold, design: .monospaced))
-            .foregroundColor(isActive ? .white : .textSec)
-            .frame(width: 54, height: 40)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isActive ? Color.accent : Color.surfaceHi))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .stroke(Color.accent.opacity(isActive ? 1 : (pulse ? 0.9 : 0.35)),
-                        lineWidth: isActive ? 2 : 1.4))
-            .scaleEffect(isActive ? 0.94 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: isActive)
-            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        let isDescribed = describedGesture == gesture
+        return HStack(spacing: 13) {
+            ClipenKeyCap(label: gesture.plainLabel, width: 64, height: 36,
+                         fontSize: 11, pressed: isActive || isDescribed)
+            Text(gesture.kbKey.demos.first?.title ?? gesture.plainLabel)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(isDescribed ? .textPri : .textSec)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+            .padding(.leading, 6).padding(.trailing, 9)
+            .padding(.vertical, 6)
+            .background(isDescribed ? Color.accentDim : Color.clear)
+            .overlay(Rectangle().stroke(isDescribed ? Color.accent.opacity(0.34) : .clear, lineWidth: 1))
+            .contentShape(Rectangle())
+            .onHover { inside in
+                if inside { describedGesture = gesture }
+            }
             .onTapGesture {
+                describedGesture = gesture
                 if isActive {
                     activeGesture = nil
                 } else {
