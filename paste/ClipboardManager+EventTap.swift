@@ -396,6 +396,15 @@ extension ClipboardManager {
             return handlePageRangeKeyDown(key: key, event: event)
         }
 
+        // Onboarding runs on the core loop alone. Cmd-V (cycle), Escape and
+        // Return still work; everything else is dropped before it can reach
+        // a stage the tutorial isn't teaching. Dropped rather than passed
+        // through, so a stray X or Space doesn't leak into the app behind.
+        if onboardingCoreLoopOnly, previewWindow.isVisible {
+            let isCoreKey = (key == 9 && cmd) || key == 53 || key == 36 || key == 76
+            if !isCoreKey { return nil }
+        }
+
         if key == 53 && previewWindow.isVisible {
             if popupSearchQuery.isEmpty && !isSearchActive {
                 escapeWillDismiss = true

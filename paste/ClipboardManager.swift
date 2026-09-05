@@ -1076,6 +1076,15 @@ class ClipboardManager: ObservableObject {
     @Published var inlineEditItemID: UUID? = nil
     var isInlineEditing: Bool { inlineEditItemID != nil }
 
+    /// True while the onboarding tutorial is on screen.
+    ///
+    /// The tutorial teaches exactly one thing — hold ⌘, tap V, release — and
+    /// every other gesture in the ring is noise against that. Space preview,
+    /// transform, details, delete, pin, mark, search and the rest are all
+    /// swallowed while this is set, so a stray key can't drop the learner
+    /// into a panel the tutorial never mentioned and can't explain.
+    @Published var onboardingCoreLoopOnly = false
+
     enum CaseTransformKind { case lowercase, uppercase }
     var caseTransformOriginals: [UUID: (text: String, kind: CaseTransformKind)] = [:]
     var inlineEditOriginals: [UUID: ClipboardContent] = [:]
