@@ -50,42 +50,141 @@ enum PreviewSizing {
     private static func naturalContentHeight(for item: ClipboardItem) -> CGFloat {
         switch item.content {
         case .text(let text):
-            // A web URL renders as a live WebsitePreview, which wants the
-            // full height and cannot be measured from the string.
-            if ContentPreviewView.validWebURL(text) != nil { return maxHeight }
-            return textHeight(text, size: 13, monospaced: false)
+            return textCaseHeight(text, detected: item.detectedType)
 
         case .svg(let src):
-            return textHeight(src, size: 13, monospaced: true)
+            // textPreview(_:monospaced: true) at plainFontSize (13).
+            return wrappedHeight(src, font: .monospacedSystemFont(ofSize: 13, weight: .regular))
 
-        case .richText(_, let plain), .rtfd(_, let plain):
-            return textHeight(plain, size: 13, monospaced: false)
+        case .richText(let attrStr, _):
+            return attributedHeight(attrStr)
 
-        case .image(let image, _, _):
-            // Aspect ratio decides it: a wide banner needs far less height
-            // than a tall screenshot, and both used to get the same 420.
+        case .rtfd(let data, let plain):
+            // Rendered by AttributedTextPreview with the document's OWN
+            // fonts, so the plain string at a flat 13pt says nothing useful.
+            if let attr = NSAttributedString(rtfd: data, documentAttributes: nil) {
+                return attributedHeight(attr)
+            }
+            return wrappedHeight(plain, font: .systemFont(ofSize: 13))
+
+        case .image(let image, let data, let dataType):
+            // A PDF's page aspect, not the NSImage's, decides the shape.
+            if dataType.rawValue.lowercased().contains("pdf"),
+               let page = PDFDocument(data: data)?.page(at: 0) {
+                let box = page.bounds(for: .mediaBox)
+                if box.width > 0, box.height > 0 {
+                    return contentWidth * (box.height / box.width)
+                }
+            }
             let size = image.size
             guard size.width > 0, size.height > 0 else { return maxHeight }
             return contentWidth * (size.height / size.width)
 
+        case .file(let url):
+            // QuickLook for most things, but a PDF is drawn by PDFKit and
+            // its first page gives a real aspect ratio.
+            if url.pathExtension.lowercased() == "pdf",
+               let page = PDFDocument(url: url)?.page(at: 0) {
+                let box = page.bounds(for: .mediaBox)
+                if box.width > 0, box.height > 0 {
+                    return contentWidth * (box.height / box.width)
+                }
+            }
+            return maxHeight
+
         case .files(let urls):
-            // Stacked cells, one per file (see ContentPreviewView.filesPreview).
             return CGFloat(urls.count) * 220 + CGFloat(max(0, urls.count - 1)) * 10
 
-        // Everything below renders through a web view, QuickLook, or another
-        // panel — all of which genuinely want the room and none of which can
-        // be measured cheaply. They keep exactly today's size.
-        case .html, .file, .blob, .group:
+        case .group(let items):
+            // MultiItemPreviewView stacks its items; a two-item group does
+            // not need the height a six-item one does.
+            return CGFloat(items.count) * 150
+
+        case .html(let html, let plain):
+            // A WKWebView's rendered height cannot be read synchronously, so
+            // this is decided from the source. Anything carrying an image or
+            // a table lays out in ways the stripped text cannot predict and
+            // keeps the full height; text-only HTML renders close enough to
+            // prose to measure its plain form. Reuses the same two checks
+            // capture already uses to classify HTML.
+            if ClipboardManager.htmlContainsImage(html) || ClipboardManager.htmlContainsTable(html) {
+                return maxHeight
+            }
+            guard !plain.isEmpty else { return maxHeight }
+            return wrappedHeight(plain, font: .systemFont(ofSize: 13))
+
+        // A blob's height depends on payloads it would have to decode to
+        // know anything about, so it keeps exactly today's size.
+        case .blob:
             return maxHeight
         }
     }
 
-    private static func textHeight(_ text: String, size: CGFloat, monospaced: Bool) -> CGFloat {
+    /// `.text` is not one thing: RichTextContentPreview fans it out by
+    /// detectedType into seven different renderers, each with its own font,
+    /// wrapping rule and chrome. Measuring them all as 13pt prose — which is
+    /// what the first version of this did — is wrong for all but one.
+    private static func textCaseHeight(_ text: String, detected: ClipboardContentType) -> CGFloat {
+        switch detected {
+        case .url:
+            // Renders a live WebsitePreview.
+            return maxHeight
+
+        case .code(let language) where language == "LaTeX":
+            return maxHeight        // LaTeXDocumentPreview lays itself out
+        case .latex, .markdown:
+            return maxHeight        // rendered markup, same reason
+
+        case .code, .json:
+            // CodeSyntaxPreview: monospace 12 inside ScrollView([.horizontal,
+            // .vertical]) — it does NOT wrap, it scrolls sideways. Height is
+            // the line count, not a wrapped height.
+            return unwrappedLineHeight(text, font: .monospacedSystemFont(ofSize: 12, weight: .regular),
+                                       inset: 12)
+
+        case .table:
+            // StyledTablePreview: one row per line, 11pt text with 5pt
+            // vertical padding either side and 1pt between rows, inside 12pt
+            // padding plus its own 4pt.
+            let rows = text.split(whereSeparator: \.isNewline).count
+            let rowHeight: CGFloat = 11 * 1.3 + 10 + 1
+            return CGFloat(rows) * rowHeight + 32
+
+        case .plain, .address, .email, .phone, .hexColor:
+            // The default branch renders monospaced 13 — NOT the proportional
+            // system font the first version measured with. Monospace is wider,
+            // so it needs more lines, and measuring proportionally
+            // under-counted every one of these.
+            return wrappedHeight(text, font: .monospacedSystemFont(ofSize: 13, weight: .regular))
+        }
+    }
+
+    /// Height of an attributed string laid out at the content width, using
+    /// its own fonts.
+    private static func attributedHeight(_ attr: NSAttributedString) -> CGFloat {
+        guard attr.length > 0 else { return minHeight - chromeHeight }
+        let measured = attr.length > measuredTextLimit
+            ? attr.attributedSubstring(from: NSRange(location: 0, length: measuredTextLimit))
+            : attr
+        let bounds = measured.boundingRect(
+            with: NSSize(width: contentWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading])
+        return ceil(bounds.height) + 12
+    }
+
+    /// For views that scroll horizontally instead of wrapping: the height is
+    /// simply how many lines there are.
+    private static func unwrappedLineHeight(_ text: String, font: NSFont, inset: CGFloat) -> CGFloat {
+        let measured = String(text.prefix(measuredTextLimit))
+        let lines = max(1, measured.split(separator: "\n", omittingEmptySubsequences: false).count)
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        return CGFloat(lines) * lineHeight + inset
+    }
+
+    /// Wrapped height at the content width, for the views that do wrap.
+    private static func wrappedHeight(_ text: String, font: NSFont) -> CGFloat {
         guard !text.isEmpty else { return minHeight - chromeHeight }
         let measured = String(text.prefix(measuredTextLimit))
-        let font: NSFont = monospaced
-            ? .monospacedSystemFont(ofSize: size, weight: .regular)
-            : .systemFont(ofSize: size)
         let bounds = (measured as NSString).boundingRect(
             with: NSSize(width: contentWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
