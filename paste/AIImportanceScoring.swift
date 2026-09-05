@@ -377,7 +377,7 @@ final class ImportanceScoringService: ObservableObject {
     /// truncation limit, so an auto-triggered run never gets close to
     /// needing it. Manual runs (D key, refresh button) never consult this
     /// at all and always go through in full.
-    static let autoAnalysisLengthCeiling = 8_000
+    static let autoAnalysisLengthCeiling = 120_000
 
     @Published private(set) var breakdowns: [UUID: ImportanceBreakdown] = [:]
 
@@ -388,8 +388,14 @@ final class ImportanceScoringService: ObservableObject {
         if let cached = breakdowns[item.id], !cached.isIndeterminate { return cached }
 
         let threshold = ImportanceWeightsStore.shared.threshold
-        let sourceText = item.content.plainText ?? item.ocrText
-        let trimmed = (sourceText ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // Both, not one or the other. `plainText ?? ocrText` meant an item
+        // that has both — a file with a name AND OCR'd contents, an HTML
+        // clip with recognised text — was judged on the first one only, and
+        // the richer of the two was never even looked at.
+        let candidates = [item.content.plainText, item.ocrText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let trimmed = candidates.max(by: { scoreOnly($0, item: item) < scoreOnly($1, item: item) }) ?? ""
 
         if trimmed.isEmpty {
             let pending = ImportanceBreakdown(
@@ -412,6 +418,13 @@ final class ImportanceScoringService: ObservableObject {
             return pending
         }
 
+        // The ceiling exists from when scoring read the WHOLE text: a long
+        // document diluted its own score, so refusing outright saved wasted
+        // model calls. Chunk scoring replaced that — a long document is
+        // judged by its densest paragraph — so length no longer dilutes
+        // anything and the ceiling now only blocks exactly the items best-
+        // chunk scoring was built to rescue. It stays as a far higher
+        // backstop against pathological inputs, not as a content judgement.
         if trimmed.count > Self.autoAnalysisLengthCeiling {
             let breakdown = ImportanceBreakdown(
                 itemID: item.id,
@@ -433,7 +446,8 @@ final class ImportanceScoringService: ObservableObject {
             return breakdown
         }
 
-        let evidence = Self.bestChunkEvidence(in: trimmed)
+        var evidence = Self.bestChunkEvidence(in: trimmed)
+        if let appSignal = Self.sourceAppSignal(for: item) { evidence.append(appSignal) }
         let penalties = ImportanceJunkDetector.gather(from: trimmed, tags: item.tags, primary: item.primaryTag)
 
         let evidenceTotal = min(1.0, evidence.reduce(0) { $0 + $1.points })
@@ -463,25 +477,129 @@ final class ImportanceScoringService: ObservableObject {
         breakdowns.removeAll()
     }
 
-    /// Scores each ~200-character chunk of `text` independently and
-    /// returns only the densest chunk's evidence. A short text is a
-    /// single chunk, so nothing changes for the cases that were already
-    /// working; a long text is judged by its best paragraph, not by the
-    /// sum of matches spread across everything around it.
-    private static func bestChunkEvidence(in text: String) -> [ImportanceSignal] {
+    /// Cheap score used only to pick between two candidate source texts.
+    private func scoreOnly(_ text: String, item: ClipboardItem) -> Double {
+        let evidence = Self.bestChunk(in: text).signals
+        let ev = min(1.0, evidence.reduce(0) { $0 + $1.points })
+        let pen = max(-1.0, ImportanceJunkDetector.gather(from: text, tags: item.tags,
+                                                          primary: item.primaryTag)
+                            .reduce(0) { $0 + $1.points })
+        return max(0, min(1.0, ev + pen))
+    }
+
+    /// Scores each ~200-character chunk independently and returns only the
+    /// densest chunk's evidence, along with the chunk itself.
+    ///
+    /// Returning the winning TEXT as well as its score matters beyond the
+    /// gate: `AIStructuringService` truncates over-long content with
+    /// `prefix()` before sending it to the model, so a document whose value
+    /// sits on its third page was scored on page three and then had page one
+    /// sent. The winning chunk lets the two agree.
+    static func bestChunk(in text: String) -> (signals: [ImportanceSignal], text: String) {
         let chunks = ChunkSplitter.chunks(of: text)
-        guard chunks.count > 1 else { return ExtractableEntityDetector.gather(from: text) }
+        guard chunks.count > 1 else {
+            return (ExtractableEntityDetector.gather(from: text) + StructuralSignalDetector.gather(from: text), text)
+        }
 
         var best: [ImportanceSignal] = []
+        var bestText = String(chunks[0])
         var bestTotal = -1.0
-        for chunk in chunks {
-            let signals = ExtractableEntityDetector.gather(from: String(chunk))
-            let total = min(1.0, signals.reduce(0) { $0 + $1.points })
+        let count = Double(chunks.count)
+        for (i, chunk) in chunks.enumerated() {
+            let body = String(chunk)
+            var signals = ExtractableEntityDetector.gather(from: body)
+            signals += StructuralSignalDetector.gather(from: body)
+            var total = min(1.0, signals.reduce(0) { $0 + $1.points })
+            // Small lead bias: an invoice number or a total sits near the
+            // top far more often than in a footer, and two chunks that score
+            // identically should not be separated by iteration order alone.
+            if count > 1 {
+                total += (1.0 - Double(i) / (count - 1)) * Self.positionBonus
+            }
             if total > bestTotal {
                 bestTotal = total
                 best = signals
+                bestText = body
             }
         }
-        return best
+        return (best, bestText)
+    }
+
+    /// How much the first chunk is favoured over the last. Deliberately
+    /// small — it breaks ties, it does not decide the outcome.
+    private static let positionBonus = 0.04
+
+    /// Apps whose copies are structured data far more often than not.
+    /// `sourceBundleID` is recorded on every captured item and the scorer
+    /// ignored it completely, even though where something came from is real
+    /// evidence about what it is.
+    private static let structuredSourceApps: Set<String> = [
+        "com.apple.Numbers", "com.microsoft.Excel", "com.apple.Preview",
+        "com.adobe.Reader", "com.apple.iWork.Numbers", "com.google.Chrome.app",
+        "com.apple.Notes", "com.microsoft.Word", "com.apple.mail",
+        "com.readdle.PDFExpert-Mac", "com.apple.iBooksX",
+    ]
+
+    /// Modest on purpose: it should tip a borderline item over, never carry
+    /// a junk one on its own.
+    private static let sourceAppWeight = 0.10
+
+    private static func sourceAppSignal(for item: ClipboardItem) -> ImportanceSignal? {
+        guard let bundleID = item.sourceBundleID,
+              structuredSourceApps.contains(bundleID) else { return nil }
+        return ImportanceSignal(
+            kind: nil, label: "Structured source app",
+            detail: "copied from \(item.sourceAppName ?? bundleID), which usually means records rather than prose",
+            matchCount: 1, points: sourceAppWeight)
+    }
+
+    private static func bestChunkEvidence(in text: String) -> [ImportanceSignal] {
+        bestChunk(in: text).signals
+    }
+}
+
+/// Signals about the SHAPE of the text rather than the entities in it.
+///
+/// The entity detector answers "is there a date / a price / an ID in here",
+/// which misses content whose value is that it is a RECORD: a run of
+/// `key: value` lines, a consistent column count, a repeated delimiter.
+/// Those say "this is structured data worth extracting" more reliably than
+/// any single entity match, and previously scored nothing at all.
+enum StructuralSignalDetector {
+    private static let minRepeats = 3
+
+    static func gather(from text: String) -> [ImportanceSignal] {
+        let lines = text.split(whereSeparator: \.isNewline).map(String.init)
+        guard lines.count >= minRepeats else { return [] }
+        var found: [ImportanceSignal] = []
+
+        // Several lines of "Label: value" is a record, not prose.
+        let labelled = lines.filter { line in
+            guard let colon = line.firstIndex(of: ":") else { return false }
+            let key = line[line.startIndex..<colon]
+            return !key.isEmpty && key.count <= 40
+                && line.index(after: colon) < line.endIndex
+        }.count
+        if labelled >= minRepeats {
+            found.append(ImportanceSignal(
+                kind: nil, label: "Repeated labelled lines",
+                detail: "\(labelled) lines shaped like \"Label: value\" — a record rather than prose",
+                matchCount: labelled, points: 0.28))
+        }
+
+        // Consistent column count across lines is a table, whatever the
+        // delimiter happens to be.
+        for delimiter in ["\t", "|", ","] {
+            let counts = lines.map { $0.components(separatedBy: delimiter).count }.filter { $0 > 1 }
+            guard counts.count >= minRepeats,
+                  let first = counts.first,
+                  counts.allSatisfy({ $0 == first }) else { continue }
+            found.append(ImportanceSignal(
+                kind: nil, label: "Consistent columns",
+                detail: "\(counts.count) lines with \(first) columns — tabular data",
+                matchCount: counts.count, points: 0.30))
+            break
+        }
+        return found
     }
 }

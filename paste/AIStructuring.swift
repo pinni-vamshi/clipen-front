@@ -382,6 +382,34 @@ final class AIStructuringService: ObservableObject {
         runAndValidate(item: item, trigger: "auto_capture")
     }
 
+    /// A dedicated, minimal repair call for the one failure that is purely
+    /// structural: the model extracted the right values but could not wrap
+    /// them in one valid JSON object.
+    ///
+    /// The normal retry replays the whole extraction task with a correction
+    /// appended, which re-asks the model to read the content again and can
+    /// come back with DIFFERENT values. That is the right shape for
+    /// `.noExtractedData` (it genuinely missed fields) and `.copiedExample`
+    /// (it invented a value), but it is the wrong shape for `.notJSON` and
+    /// `.notSerialisable`, where the data was already correct and only the
+    /// braces were wrong. Re-extracting risks losing values that were right.
+    ///
+    /// This asks for exactly one thing — fix the syntax, change no values —
+    /// and never sees the original content at all, so it cannot invent
+    /// anything that was not already in the model's own answer.
+    static let maxJSONRepairAttempts = 2
+
+    private static let jsonRepairPrompt = """
+    You are a JSON repair tool. The text below was meant to be ONE valid JSON     object but is malformed — most often several separate objects placed one     after another, a missing or extra brace, a trailing comma, or an unquoted key.
+
+    Fix ONLY the structure:
+    - Merge everything into a single JSON object with one pair of outer braces.
+    - Keep every key and every value exactly as written. Do not reword,     translate, summarise, add or remove any value.
+    - If the same key appears twice, keep the first occurrence.
+
+    Return the corrected JSON object and nothing else — no prose, no code fence.
+    """
+
     /// A failed analysis is retried — but never with the identical request.
     /// Re-asking the same question was measured on real captures at a
     /// near-0% success rate: an item that failed attempt 1 failed every
@@ -519,7 +547,8 @@ final class AIStructuringService: ObservableObject {
     }
 
     private func runAndValidate(item: ClipboardItem, attempt: Int = 1, startedAt: Date = Date(),
-                                trigger: String = "manual_refresh", priorAttempts: [PriorAttempt] = []) {
+                                trigger: String = "manual_refresh", priorAttempts: [PriorAttempt] = [],
+                                jsonRepairsUsed: Int = 0) {
         states[item.id] = .running
         attempts[item.id] = attempt
         if attempt == 1 {
@@ -582,6 +611,18 @@ final class AIStructuringService: ObservableObject {
                     self.states[item.id] = .done(json)
                     ClipboardManager.shared.updateAIStructuredText(id: item.id, json: json)
                     Self.trackAnalysisFinished(item: item, success: true, startedAt: startedAt, trigger: trigger)
+                } else if reason == .notJSON || reason == .notSerialisable,
+                          jsonRepairsUsed < Self.maxJSONRepairAttempts {
+                    // Structural failure only: the values were extracted, the
+                    // wrapper is wrong. Hand the model's own output to the
+                    // repair tool rather than re-running the extraction, which
+                    // would re-read the content and could come back with
+                    // different values than the ones it already got right.
+                    DebugLog.write("AI-JSONFIX \(item.id.uuidString.prefix(4)) a\(attempt) r\(jsonRepairsUsed + 1): \(reason?.rawValue ?? "?")")
+                    self.runJSONRepair(item: item, malformed: raw, attempt: attempt,
+                                       repairsUsed: jsonRepairsUsed + 1,
+                                       startedAt: startedAt, trigger: trigger,
+                                       priorAttempts: priorAttempts)
                 } else {
                     let why = reason?.rawValue ?? "unknown"
                     self.attemptFailures[item.id, default: []].append("attempt \(attempt): \(why)")
@@ -593,10 +634,29 @@ final class AIStructuringService: ObservableObject {
                     let cap = min(reason?.attemptCap ?? Self.maxAttempts, Self.maxAttempts)
                     if attempt < cap {
                         DebugLog.write("AI \(item.id.uuidString.prefix(4)): attempt \(attempt) rejected (\(why)), retrying with repair context")
+                        // Repairs already spent carry forward: the budget is
+                        // per ITEM, not per attempt, or three attempts each
+                        // granting two repairs would be nine model calls.
                         self.runAndValidate(
                             item: item, attempt: attempt + 1, startedAt: startedAt, trigger: trigger,
-                            priorAttempts: priorAttempts + [PriorAttempt(attempt: attempt, raw: raw, reason: reason)])
+                            priorAttempts: priorAttempts + [PriorAttempt(attempt: attempt, raw: raw, reason: reason)],
+                            jsonRepairsUsed: jsonRepairsUsed)
                     } else {
+                        // An item the gate scored highly that produced no
+                        // fields is the scorer over-predicting — the one
+                        // signal telling you which patterns promise data they
+                        // don't deliver. Nothing recorded it before, so the
+                        // weights had no evidence to be tuned against.
+                        if reason == .noExtractedData {
+                            let breakdown = ImportanceScoringService.shared.evaluate(item)
+                            let names = breakdown.evidence.map(\.label).joined(separator: ", ")
+                            DebugLog.write("AI-OVERPREDICT \(item.id.uuidString.prefix(4)) score=\(String(format: "%.2f", breakdown.finalScore)) threshold=\(String(format: "%.2f", breakdown.threshold)) signals=[\(names)] produced no fields")
+                            PostHogTracking.capture("ai_no_extracted_data", properties: [
+                                "content_type": item.primaryTag.folderName,
+                                "score": breakdown.finalScore,
+                                "signals": names,
+                            ])
+                        }
                         let message = reason == .noExtractedData
                             ? "Nothing structured to extract from this item."
                             : "Failed after \(attempt) attempts (\(why))."
@@ -625,13 +685,88 @@ final class AIStructuringService: ObservableObject {
                     // accumulated priors carry through unchanged rather than
                     // gaining an empty entry.
                     self.runAndValidate(item: item, attempt: attempt + 1, startedAt: startedAt,
-                                        trigger: trigger, priorAttempts: priorAttempts)
+                                        trigger: trigger, priorAttempts: priorAttempts,
+                                        jsonRepairsUsed: jsonRepairsUsed)
                 } else {
                     self.states[item.id] = .failed(error.localizedDescription)
                     Self.trackAnalysisFinished(item: item, success: false, startedAt: startedAt, trigger: trigger)
                 }
             }
         }
+    }
+
+    /// Runs the JSON repair tool on one malformed answer.
+    ///
+    /// On success the item is done — the repaired object is validated exactly
+    /// like a fresh answer, so a repair that quietly dropped the fields still
+    /// gets caught by `containsRealData` and falls through.
+    ///
+    /// On failure it does NOT keep repairing forever: after
+    /// `maxJSONRepairAttempts` it hands back to the normal retry chain, which
+    /// re-runs the whole extraction with the correction text — the original
+    /// behaviour, just reached later. The malformed answer is carried into
+    /// `priorAttempts` either way, so the extraction retry still sees what
+    /// went wrong.
+    private func runJSONRepair(item: ClipboardItem, malformed: String, attempt: Int,
+                               repairsUsed: Int, startedAt: Date, trigger: String,
+                               priorAttempts: [PriorAttempt]) {
+        states[item.id] = .running
+        Task {
+            let tStart = Date()
+            let tag = "\(item.id.uuidString.prefix(4)) r\(repairsUsed)"
+            do {
+                let (repaired, gateWaitMs) = try await Self.structure(
+                    source: .content(malformed), prompt: Self.jsonRepairPrompt)
+                let (json, reason) = Self.validatedJSON(from: repaired, sourceText: malformed)
+                let ms = Int(Date().timeIntervalSince(tStart) * 1000)
+                DebugLog.write("AI-JSONFIX \(tag) \(ms)ms gate=\(gateWaitMs)ms result=\(json == nil ? "still \(reason?.rawValue ?? "?")" : "ok")")
+
+                if let json {
+                    self.states[item.id] = .done(json)
+                    ClipboardManager.shared.updateAIStructuredText(id: item.id, json: json)
+                    Self.trackAnalysisFinished(item: item, success: true, startedAt: startedAt, trigger: trigger)
+                    return
+                }
+
+                // Another structural failure and repairs left: try repairing
+                // the repair. Anything else (it came back with no data, or
+                // copied an example) is not a syntax problem, so send it to
+                // the extraction retry instead.
+                if reason == .notJSON || reason == .notSerialisable,
+                   repairsUsed < Self.maxJSONRepairAttempts {
+                    self.runJSONRepair(item: item, malformed: repaired, attempt: attempt,
+                                       repairsUsed: repairsUsed + 1,
+                                       startedAt: startedAt, trigger: trigger,
+                                       priorAttempts: priorAttempts)
+                    return
+                }
+                self.fallBackToExtractionRetry(item: item, attempt: attempt, startedAt: startedAt,
+                                               trigger: trigger, priorAttempts: priorAttempts,
+                                               raw: malformed, reason: .notJSON)
+            } catch {
+                DebugLog.write("AI-JSONFIX \(tag) THREW \(String(describing: error).prefix(160))")
+                self.fallBackToExtractionRetry(item: item, attempt: attempt, startedAt: startedAt,
+                                               trigger: trigger, priorAttempts: priorAttempts,
+                                               raw: malformed, reason: .notJSON)
+            }
+        }
+    }
+
+    /// Repair is spent — resume the ordinary retry chain from where it left
+    /// off, or give up if this was already the last attempt.
+    private func fallBackToExtractionRetry(item: ClipboardItem, attempt: Int, startedAt: Date,
+                                           trigger: String, priorAttempts: [PriorAttempt],
+                                           raw: String, reason: RejectionReason) {
+        attemptFailures[item.id, default: []].append("attempt \(attempt): \(reason.rawValue) (json repair exhausted)")
+        let cap = min(reason.attemptCap, Self.maxAttempts)
+        guard attempt < cap else {
+            states[item.id] = .failed("Failed after \(attempt) attempts (\(reason.rawValue)).")
+            Self.trackAnalysisFinished(item: item, success: false, startedAt: startedAt, trigger: trigger)
+            return
+        }
+        runAndValidate(item: item, attempt: attempt + 1, startedAt: startedAt, trigger: trigger,
+                       priorAttempts: priorAttempts + [PriorAttempt(attempt: attempt, raw: raw, reason: reason)],
+                       jsonRepairsUsed: Self.maxJSONRepairAttempts)
     }
 
     /// Fired once per top-level analysis (never on a retry), and once more
@@ -919,6 +1054,24 @@ final class AIStructuringService: ObservableObject {
     /// Characters of clipboard content that still fit once this specific
     /// prompt (including any repair instructions already appended) has
     /// taken its share of the window.
+    /// A `cap`-sized window of `text` containing `anchor`, with whatever is
+    /// left over split before and after it so the passage keeps its context.
+    /// Falls back to the head if the anchor cannot be located.
+    private static func windowAround(anchor: String, in text: String, cap: Int) -> String {
+        guard cap > 0 else { return "" }
+        guard !anchor.isEmpty, let range = text.range(of: anchor) else {
+            return String(text.prefix(cap))
+        }
+        let anchorLength = text.distance(from: range.lowerBound, to: range.upperBound)
+        guard anchorLength < cap else { return String(text[range].prefix(cap)) }
+
+        let slack = cap - anchorLength
+        let before = slack / 2
+        let startOffset = max(0, text.distance(from: text.startIndex, to: range.lowerBound) - before)
+        let start = text.index(text.startIndex, offsetBy: startOffset)
+        return String(text[start...].prefix(cap))
+    }
+
     private static func maxContentCharacters(promptChars: Int) -> Int {
         let promptTokens = Int(Double(promptChars) / promptCharsPerToken)
         let budgetTokens = modelContextTokens - outputReserveTokens - promptTokens
@@ -955,9 +1108,15 @@ final class AIStructuringService: ObservableObject {
         let contentCap = Self.maxContentCharacters(promptChars: effectivePrompt.count)
         let truncated: String
         if rawContent.count > contentCap {
-            truncated = String(rawContent.prefix(contentCap))
-                + "\n[content truncated — too long to analyse in full]"
-            DebugLog.write("AI-TRUNC content \(rawContent.count)ch -> \(contentCap)ch (prompt \(effectivePrompt.count)ch)")
+            // Centre the window on the passage the importance scorer actually
+            // scored, rather than blindly taking the head. The gate judges a
+            // long document by its densest chunk; sending prefix() meant it
+            // scored page three and then handed the model page one, so the
+            // very thing that earned the analysis was the thing left out.
+            let anchor = ImportanceScoringService.bestChunk(in: rawContent).text
+            let window = Self.windowAround(anchor: anchor, in: rawContent, cap: contentCap)
+            truncated = window + "\n[content truncated — too long to analyse in full]"
+            DebugLog.write("AI-TRUNC content \(rawContent.count)ch -> \(window.count)ch centred on best chunk (prompt \(effectivePrompt.count)ch)")
         } else {
             truncated = rawContent
         }
