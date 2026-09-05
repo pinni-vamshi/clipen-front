@@ -561,51 +561,59 @@ struct TutorialSheet: View {
     }
 
     private var pastePracticePage: some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Now paste them back")
-                        .font(.system(size: 22, weight: .medium)).tracking(-0.4)
-                        .foregroundColor(.textPri)
-                    Text("Newest copy first — the top one is a single tap of V.")
-                        .font(.system(size: 12)).foregroundColor(.textSec)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        VStack(alignment: .leading, spacing: 16) {
+            // Top half: the ring's contents on the left, the demo on the
+            // right, split by the hairline.
+            HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Now paste them back")
+                            .font(.system(size: 22, weight: .medium)).tracking(-0.4)
+                            .foregroundColor(.textPri)
+                        Text("Newest copy first — the top one is a single tap of V.")
+                            .font(.system(size: 12)).foregroundColor(.textSec)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                // The ring's contents. Rows never move and never fill; the one
-                // being taught right now simply gets a blue border.
-                VStack(alignment: .leading, spacing: 9) {
-                    MicroLabel(text: "Clipboard history — newest first")
-                    VStack(spacing: -1) {
-                        ForEach(pasteTargets.indices, id: \.self) { i in
-                            historyRow(i).zIndex(currentPasteTarget == i ? 2 : 1)
+                    // Rows never move and never fill; the one being taught
+                    // right now simply gets a blue border.
+                    VStack(alignment: .leading, spacing: 9) {
+                        MicroLabel(text: "Clipboard history — newest first")
+                        VStack(spacing: -1) {
+                            ForEach(pasteTargets.indices, id: \.self) { i in
+                                historyRow(i).zIndex(currentPasteTarget == i ? 2 : 1)
+                            }
                         }
                     }
-                }
 
-                // Always on screen, never gated on the animation: the user can
-                // paste whenever they like.
-                if currentPasteTarget < pasteTargets.count {
-                    pasteField(currentPasteTarget)
+                    Spacer(minLength: 0)
                 }
+                .frame(width: 320)
+                .padding(.trailing, 22)
 
-                Spacer(minLength: 0)
+                Rectangle().fill(Color.border).frame(width: 1)
+
+                InteractionLabStage(lab: lab)
+                    .padding(.leading, 18)
+                    .frame(maxWidth: .infinity)
             }
-            .frame(width: 320)
-            .padding(.trailing, 22)
+            .frame(maxHeight: .infinity, alignment: .top)
 
-            Rectangle().fill(Color.border).frame(width: 1)
-
-            InteractionLabStage(lab: lab)
-                .padding(.leading, 18)
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .topTrailing) { replayButton }
+            // The target runs the full width of the panel, under both
+            // columns — it's the one thing the user has to act on, so it gets
+            // the whole width rather than being squeezed into the left third.
+            if currentPasteTarget < pasteTargets.count {
+                pasteField(currentPasteTarget)
+            }
         }
-        .padding(.horizontal, 22).padding(.vertical, 16)
+        .padding(.horizontal, 22).padding(.top, 16).padding(.bottom, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .topTrailing) { replayButton }
     }
 
     private var replayButton: some View {
+        // Offset left of the sheet's own close button, which is an overlay on
+        // the same corner — they were drawing on top of each other.
         Button { lab.play() } label: {
             Text("Replay")
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
@@ -616,6 +624,7 @@ struct TutorialSheet: View {
         }
         .buttonStyle(.plain)
         .help("Play the gesture again")
+        .padding(.top, 24).padding(.trailing, 56)
     }
 
     private func historyRow(_ i: Int) -> some View {
@@ -666,9 +675,11 @@ struct TutorialSheet: View {
                     }
                 }
             }
-            .padding(.horizontal, 13).padding(.vertical, 11)
+            .padding(.horizontal, 16).padding(.vertical, 20)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
             .overlay(Rectangle().stroke(Color.accent, lineWidth: 1.5))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .id(i)
         .transition(.opacity)
     }
