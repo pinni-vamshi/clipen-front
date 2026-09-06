@@ -241,7 +241,12 @@ struct TutorialSheet: View {
         .frame(width: 760).background(Color.surface)
         .onAppear {
             openedAt = Date()
-            manager.onboardingCoreLoopOnly = true
+            // Page-scoped, not sheet-scoped. Page 2 teaches the core loop and
+            // nothing else, so a stray X or Space there drops the learner into
+            // a stage it never mentioned. Page 3 is the opposite: it exists to
+            // show those very interactions, and blocking them for the whole
+            // tutorial meant every key it taught did nothing when tried.
+            manager.onboardingCoreLoopOnly = (page == 1)
             AuthManager.shared.registerActionUsage(actionID: "action.onboarding-started")
         }
         .onDisappear {
@@ -249,6 +254,7 @@ struct TutorialSheet: View {
             manager.onboardingCoreLoopOnly = false
         }
         .onChange(of: page) { _, now in
+            manager.onboardingCoreLoopOnly = (now == 1)
             // The demo only runs on page 2, and it plays whichever of
             // pasteOne/Two/Three matches the item the user is on.
             if now == 1 {
