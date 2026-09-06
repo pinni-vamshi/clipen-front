@@ -735,6 +735,9 @@ extension ClipboardManager {
         guard let original = inlineEditOriginals.removeValue(forKey: id) else { return }
         replaceItemContent(id: id, newContent: original)
         TableCellExtractor.invalidate(itemID: id)
+        // Edited content means the instant extraction is stale too;
+        // clearing lets it re-run against what the item now says.
+        InstantExtractionService.shared.invalidate(id)
         invalidateCachesAfterContentEdit()
         flashStatus("Edit reverted.")
     }

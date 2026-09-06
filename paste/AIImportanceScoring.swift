@@ -677,3 +677,181 @@ enum StructuralSignalDetector {
         return found
     }
 }
+
+// MARK: - Instant structured extraction
+
+/// Structured fields pulled out of a clip the moment it is captured,
+/// without a model and without waiting for one.
+///
+/// The Details panel had two speeds and nothing in between: intrinsic
+/// facts plus `NSDataDetector` matches, computed lazily when D was pressed,
+/// and a full model pass that takes 20-60s. Everything genuinely
+/// structured but not a date/phone/address — "Invoice: INV-4471",
+/// "Order Total: $89.20", a reference code, a person's name — was
+/// reachable only through the slow path, so the first D-press on a clip
+/// that plainly contained fields showed almost nothing.
+///
+/// This runs at capture instead: by the time D is pressed the values are
+/// already sitting in memory. It is deliberately not a model — every
+/// signal here is deterministic and costs microseconds, which is what
+/// makes running it on every copy defensible.
+///
+/// `Extractor` is the seam a learned extractor (GLiNER-class token
+/// classification, zero-shot entity types) drops into later without
+/// touching the capture wiring, the cache, or the merge: it takes text,
+/// it returns fields, and everything around it stays as-is.
+enum InstantStructuredExtractor {
+    /// Same ceiling `SystemDataDetector` scans to — this runs on every
+    /// copy, so a pasted log file must not turn into unbounded work.
+    static let maxScanLength = 100_000
+    private static let maxFields = 24
+    private static let maxValueLength = 400
+
+    /// "Label: value" lines — the single densest source of real structure
+    /// in copied text, and the one an LLM was previously being asked to
+    /// re-derive. Bounded on both sides so a URL ("https://…") and prose
+    /// containing a colon don't masquerade as fields.
+    private static let labeledFieldRe = try? NSRegularExpression(
+        pattern: #"(?m)^[ \t]*([A-Za-z][A-Za-z0-9 /_&.'-]{1,40}?)[ \t]*:[ \t]*(?!//)([^\r\n]{1,400})$"#)
+
+    private static let referenceCodeRe = try? NSRegularExpression(
+        pattern: #"\b(?=[A-Z0-9-]{6,24}\b)(?=[A-Z-]*[0-9])(?=[0-9-]*[A-Z])[A-Z0-9-]{6,24}\b"#)
+
+    private static let moneyRe = try? NSRegularExpression(
+        pattern: #"[$€£¥₹]\s?\d[\d,]*(\.\d+)?|\b\d[\d,]*(\.\d{2})?\s?(USD|EUR|GBP|INR|JPY|AUD|CAD)\b"#)
+
+    /// Keys that are almost always page furniture rather than data, and
+    /// which otherwise dominate the panel on anything copied from a web
+    /// page or an email client.
+    private static let noiseKeys: Set<String> = [
+        "http", "https", "note", "warning", "error", "tip", "example",
+        "subject", "from", "to", "cc", "bcc", "sent", "reply-to",
+    ]
+
+    static func extract(from text: String) -> [DetailField] {
+        guard !text.isEmpty else { return [] }
+        let scanned = text.count > maxScanLength ? String(text.prefix(maxScanLength)) : text
+        let ns = scanned as NSString
+
+        var out: [DetailField] = []
+        var seen = Set<String>()
+
+        func add(_ key: String, _ value: String) {
+            guard out.count < maxFields else { return }
+            let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !k.isEmpty, !v.isEmpty, v.count <= maxValueLength else { return }
+            guard !noiseKeys.contains(k.lowercased()) else { return }
+            // Same alphanumerics-only identity the panel merges on, so a
+            // value found twice here never becomes two rows downstream.
+            let identity = DetailUnit.valueIdentity(v)
+            guard !identity.isEmpty, !seen.contains(identity) else { return }
+            seen.insert(identity)
+            out.append(DetailField(key: k, value: v))
+        }
+
+        // 1. Explicit "Label: value" pairs — real, self-describing structure.
+        if let re = labeledFieldRe {
+            for m in re.matches(in: scanned, range: NSRange(location: 0, length: ns.length)) {
+                guard m.numberOfRanges >= 3 else { continue }
+                add(ns.substring(with: m.range(at: 1)), ns.substring(with: m.range(at: 2)))
+            }
+        }
+
+        // 2. Identifiers and amounts, which carry meaning without a label.
+        if let re = referenceCodeRe {
+            for m in re.matches(in: scanned, range: NSRange(location: 0, length: ns.length)).prefix(6) {
+                add("Reference", ns.substring(with: m.range))
+            }
+        }
+        if let re = moneyRe {
+            for m in re.matches(in: scanned, range: NSRange(location: 0, length: ns.length)).prefix(6) {
+                add("Amount", ns.substring(with: m.range))
+            }
+        }
+
+        // 3. Named entities — the one kind of content no pattern can
+        //    express, and already on-device via NLTagger.
+        let tagger = NLTagger(tagSchemes: [.nameType])
+        tagger.string = scanned
+        var entityCount = 0
+        tagger.enumerateTags(in: scanned.startIndex..<scanned.endIndex, unit: .word,
+                             scheme: .nameType,
+                             options: [.omitWhitespace, .omitPunctuation, .joinNames]) { tag, range in
+            guard entityCount < 8 else { return false }
+            guard let tag else { return true }
+            let key: String
+            switch tag {
+            case .personalName:     key = "Name"
+            case .organizationName: key = "Organization"
+            case .placeName:        key = "Place"
+            default:                return true
+            }
+            let before = out.count
+            add(key, String(scanned[range]))
+            if out.count > before { entityCount += 1 }
+            return true
+        }
+
+        return out
+    }
+}
+
+/// Owns instant extraction results per item: run once at capture, read
+/// back when the Details panel opens.
+///
+/// Results are cached in memory rather than persisted — recomputing is
+/// microseconds, and adding a field to the stored item would migrate the
+/// on-disk history schema for something that cheap to rebuild.
+@MainActor
+final class InstantExtractionService {
+    static let shared = InstantExtractionService()
+
+    private var fields: [UUID: [DetailField]] = [:]
+    /// Separate from `fields`: an item that legitimately yielded nothing
+    /// must not be re-extracted on every panel open.
+    private var completed = Set<UUID>()
+
+    private init() {}
+
+    func fields(for id: UUID) -> [DetailField]? { fields[id] }
+
+    func invalidate(_ id: UUID) {
+        fields[id] = nil
+        completed.remove(id)
+    }
+
+    /// Fire-and-forget, once ever per item. Runs off the main thread: this
+    /// is on the path of every single copy, and the main thread is also
+    /// the event tap's thread — a pasted log file must never be able to
+    /// stall a keystroke.
+    func extractIfNeeded(item: ClipboardItem) {
+        guard !completed.contains(item.id) else { return }
+        completed.insert(item.id)
+
+        // Both sources, for the same reason the importance scorer reads
+        // both: a screenshot has only OCR, an HTML clip only plain text.
+        let sources = [item.content.plainText, item.ocrText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard !sources.isEmpty else {
+            // No text yet — an image still awaiting OCR. Allow a later
+            // pass once OCR lands.
+            completed.remove(item.id)
+            return
+        }
+        let text = sources.joined(separator: "\n")
+        let id = item.id
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let extracted = InstantStructuredExtractor.extract(from: text)
+            guard !extracted.isEmpty else { return }
+            Task { @MainActor in
+                InstantExtractionService.shared.fields[id] = extracted
+                // The panel may already be open on this item — an image
+                // whose OCR just landed is the common case.
+                ClipboardManager.shared.refreshDetailsPanelIfShowing(itemID: id)
+            }
+        }
+    }
+}

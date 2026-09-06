@@ -892,6 +892,11 @@ extension ClipboardManager {
                     self.items[idx].ocrText = ocrResult
                     self.items[idx].embedding = nil
                     self.recomputeEmbeddingsInBackground()
+                    // OCR is the first moment an image has any text to
+                    // extract from — the capture-time pass found nothing
+                    // and deliberately left itself re-runnable for exactly
+                    // this.
+                    InstantExtractionService.shared.extractIfNeeded(item: self.items[idx])
                     AIStructuringService.shared.autoAnalyzeIfNeeded(item: self.items[idx])
                     // OCR is what gives an image any detectable text at all,
                     // and it lands well after capture — so an image copied

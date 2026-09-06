@@ -132,6 +132,19 @@ extension ClipboardManager {
             }
         }
 
+        // The instant layer, extracted at capture rather than now — by the
+        // time D is pressed these already exist. Placed after the AI units
+        // so the model still wins a collision (its keys are semantic where
+        // these are categorical), but ahead of the raw NSDataDetector rows,
+        // since a labelled "Invoice: INV-4471" is a better row than the
+        // same string surfaced only as an untyped reference match.
+        for field in InstantExtractionService.shared.fields(for: item.id) ?? [] {
+            let identity = DetailUnit.valueIdentity(field.value)
+            guard !identity.isEmpty, !seen.contains(identity) else { continue }
+            seen.insert(identity)
+            units.append(DetailUnit(.single(field), sourceLabel: sourceLabel))
+        }
+
         for field in systemDetectedFields(for: item) {
             let identity = DetailUnit.valueIdentity(field.value)
             guard !identity.isEmpty, !seen.contains(identity) else { continue }

@@ -27,14 +27,31 @@ enum TagDetector {
         case .files(let urls):
             return filesTag(for: urls)
 
-        case .html(_, plain: let plain):
+        // Structured formats are asked about their STRUCTURE before their
+        // plain-text fallback is consulted. Classifying an HTML or rich-text
+        // clip purely by its flattened text is how a real table came out
+        // tagged `.html`: the markup was never looked at, and the plain-text
+        // table detector only recognises perfectly uniform TSV/CSV, which a
+        // flattened HTML table almost never is. That tag is load-bearing —
+        // `DeterministicStructuring` converts tables to JSON with no model
+        // call at all, and it only runs for `.table` — so mistagging here
+        // silently routed every HTML table through the slow model path.
+        //
+        // "Dominant" and not merely "present": a table inside a long article
+        // must not retag the whole clip. See `htmlIsDominantDataTable`.
+        case .html(let html, plain: let plain):
+            if TableCellExtractor.htmlIsDominantDataTable(html) { return .table }
             return textTag(for: plain, color: nil) ?? .html
 
-        case .richText(_, plain: let plain):
+        case .richText(let attr, plain: let plain):
+            if TableCellExtractor.attributedIsDominantDataTable(attr) { return .table }
             return textTag(for: plain, color: nil) ?? .richText
 
-        case .rtfd(_, plain: let plain):
-
+        case .rtfd(let data, plain: let plain):
+            if let attr = NSAttributedString(rtfd: data, documentAttributes: nil),
+               TableCellExtractor.attributedIsDominantDataTable(attr) {
+                return .table
+            }
             return textTag(for: plain, color: nil) ?? .richText
 
         case .text(let s):

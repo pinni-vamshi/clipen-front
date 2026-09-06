@@ -131,6 +131,13 @@ class ClipboardManager: ObservableObject {
             if mayHaveNewItems {
                 let oldIDs = Set(oldValue.map(\.id))
                 for item in items where !oldIDs.contains(item.id) {
+                    // Two passes, deliberately unrelated in speed. The
+                    // instant one finishes in microseconds and is what the
+                    // first D-press actually shows; the model one takes
+                    // 20-60s and lands underneath it later. Neither gates
+                    // the other — this is not a fallback chain, they simply
+                    // run at their own pace and merge in `detailUnits`.
+                    InstantExtractionService.shared.extractIfNeeded(item: item)
                     AIStructuringService.shared.autoAnalyzeIfNeeded(item: item)
                 }
             }

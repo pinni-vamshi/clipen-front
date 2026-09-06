@@ -191,6 +191,67 @@ enum TableCellExtractor {
         return isDataTable(rows)
     }
 
+    /// Share of the clip's visible text that lives inside its tables, used
+    /// to decide whether this clip *is* a table or merely *contains* one.
+    ///
+    /// A table is very often a small part of a much larger page — one
+    /// two-row spec table in the middle of a long article, a pricing grid
+    /// under three paragraphs of copy. Tagging the whole clip `.table`
+    /// because a `<table>` appeared somewhere inside it would mislabel the
+    /// clip, hand the wrong preview to the popup, and route it into the
+    /// table-to-JSON conversion, which would then throw away everything
+    /// that wasn't in the table. Measuring instead of just testing for
+    /// presence is what separates "this clip is a table" from "this clip
+    /// has a table in it."
+    ///
+    /// Non-dominant tables are NOT lost: `cells(fromHTML:)` still extracts
+    /// them for preview and the table editor, and `segments(for:)` still
+    /// splits mixed content into text and table parts. This governs the
+    /// TAG only.
+    static func htmlTableDominance(_ html: String) -> Double {
+        HTMLTableParser.tableDominance(inHTML: html)
+    }
+
+    /// Minimum share of the text a table must be for the clip to be tagged
+    /// `.table`. Matches the fill-ratio threshold `isDataTable` already
+    /// uses, so both "is this shaped like data" and "is this mostly the
+    /// table" answer to the same bar.
+    static let tableDominanceThreshold = 0.6
+
+    /// Non-table text this side of a caption. A ratio alone can't tell
+    /// "a table under a one-line heading" from "a table buried in an
+    /// article" — a short lead-in over a small table scores about 0.59 and
+    /// would be rejected on ratio, even though the clip plainly *is* the
+    /// table. Anything under roughly a sentence or two of surrounding text
+    /// is a caption, not competing content.
+    static let tableCaptionBudget = 160
+
+    /// The tag-level question: is this clip essentially a data table?
+    /// Requires a real, well-formed data grid, AND that the grid is either
+    /// most of the text or leaves no more than a caption beside it.
+    static func htmlIsDominantDataTable(_ html: String) -> Bool {
+        guard htmlIsDataTable(html) else { return false }
+        let split = HTMLTableParser.tableTextSplit(inHTML: html)
+        guard split.total > 0 else { return false }
+        let ratio = Double(split.table) / Double(split.total)
+        return ratio >= tableDominanceThreshold
+            || (split.total - split.table) <= tableCaptionBudget
+    }
+
+    /// Same question for rich text / RTFD, which carry tables as
+    /// `NSTextTableBlock` runs rather than markup — a table copied out of
+    /// Numbers, Excel or Word arrives this way, and hit exactly the same
+    /// "tagged by plain-text fallback only" bug that HTML did.
+    static func attributedIsDominantDataTable(_ attr: NSAttributedString) -> Bool {
+        guard let rows = cells(from: attr), isDataTable(rows) else { return false }
+        let tableChars = rows.reduce(0) { $0 + $1.reduce(0) { $0 + $1.filter { !$0.isWhitespace }.count } }
+        let totalChars = attr.string.filter { !$0.isWhitespace }.count
+        guard totalChars > 0 else { return false }
+        let ratio = Double(min(tableChars, totalChars)) / Double(totalChars)
+        return ratio >= tableDominanceThreshold
+            || max(0, totalChars - tableChars) <= tableCaptionBudget
+    }
+
     static func pureText(for item: ClipboardItem) -> String? {
         if let rows = cells(for: item), isDataTable(rows) {
             return rows.map { $0.joined(separator: "\t") }.joined(separator: "\n")
@@ -279,7 +340,26 @@ enum TableCellExtractor {
         }
     }
 
+    /// Real DOM parse first; the regex below is only a fallback for input
+    /// libxml2 refuses outright.
+    ///
+    /// The regex path cannot express what HTML tables actually do. It reads
+    /// `<tr>...</tr>` non-greedily, so a table nested inside a cell ends the
+    /// OUTER row at the INNER `</tr>` — layout and email HTML nest tables
+    /// constantly. It also has no way to see `colspan`/`rowspan`, so a
+    /// merged header emits fewer cells than the rows below it, `isDataTable`
+    /// sees a ragged width and rejects the whole table, and a genuine table
+    /// silently stops being one. `HTMLTableParser` walks a real tree, takes
+    /// only rows structurally belonging to the table in hand, and expands
+    /// spans into a dense grid, which is what makes widths uniform.
     private static func cells(fromHTML html: String) -> [[String]]? {
+        if let grid = HTMLTableParser.bestGrid(fromHTML: html), !grid.isEmpty {
+            return grid
+        }
+        return cellsViaRegex(fromHTML: html)
+    }
+
+    private static func cellsViaRegex(fromHTML html: String) -> [[String]]? {
         let opts: NSRegularExpression.Options = [.caseInsensitive, .dotMatchesLineSeparators]
         guard let rowRe = try? NSRegularExpression(pattern: "<tr[^>]*>(.*?)</tr>", options: opts),
               let cellRe = try? NSRegularExpression(pattern: "<t[dh][^>]*>(.*?)</t[dh]>", options: opts)
@@ -407,6 +487,126 @@ enum TableCellExtractor {
             .replacingOccurrences(of: "</div>", with: "\n", options: .caseInsensitive)
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
             .htmlDecoded
+    }
+}
+
+/// HTML table extraction over a real document tree, via `XMLDocument`'s
+/// `.documentTidyHTML` mode (libxml2's HTML parser, already part of
+/// Foundation — no new dependency, and it recovers from the malformed
+/// markup real clipboard HTML is full of: unclosed `<tr>`, stray tags,
+/// missing `<tbody>`).
+///
+/// Everything here exists because the regex it replaced could not, even in
+/// principle, answer three questions that decide whether a table survives:
+/// which table a row belongs to (nesting), how wide a row really is
+/// (`colspan`/`rowspan`), and how much of the clip the table actually is.
+enum HTMLTableParser {
+    /// A single cell claiming thousands of columns is malformed or hostile;
+    /// either way it must not be allowed to allocate a grid that size.
+    private static let maxSpan = 64
+    private static let maxRows = 2000
+
+    private static func document(_ html: String) -> XMLDocument? {
+        try? XMLDocument(data: Data(html.utf8), options: [.documentTidyHTML])
+    }
+
+    /// Tables that are not themselves inside another table. A nested table
+    /// is part of its parent's cell, not a table in its own right.
+    private static func topLevelTables(_ doc: XMLDocument) -> [XMLElement] {
+        let nodes = (try? doc.nodes(forXPath: "//table[not(ancestor::table)]")) ?? []
+        return nodes.compactMap { $0 as? XMLElement }
+    }
+
+    private static func cellText(_ el: XMLElement) -> String {
+        (el.stringValue ?? "")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Rows structurally belonging to THIS table. Selecting direct children
+    /// (plus the section elements tidy inserts) rather than descendants is
+    /// what keeps a nested table's rows out — the exact failure the regex
+    /// had, where an inner `</tr>` truncated the outer row.
+    private static func directRows(_ table: XMLElement) -> [XMLElement] {
+        let nodes = (try? table.nodes(forXPath: "./tr | ./thead/tr | ./tbody/tr | ./tfoot/tr")) ?? []
+        return nodes.compactMap { $0 as? XMLElement }
+    }
+
+    /// One table as a dense, uniform-width grid with `colspan`/`rowspan`
+    /// expanded — a spanned cell is written into every slot it covers.
+    ///
+    /// Uniform width is the point: `isDataTable` requires every row to have
+    /// the same count, and merged header cells are precisely why real
+    /// tables used to fail that test.
+    static func grid(from table: XMLElement) -> [[String]] {
+        var filled: [[String?]] = []
+        func ensure(_ r: Int, _ c: Int) {
+            while filled.count <= r { filled.append([]) }
+            while filled[r].count <= c { filled[r].append(nil) }
+        }
+
+        for (r, rowEl) in directRows(table).prefix(maxRows).enumerated() {
+            let cellEls = ((try? rowEl.nodes(forXPath: "./td | ./th")) ?? [])
+                .compactMap { $0 as? XMLElement }
+            var c = 0
+            for cell in cellEls {
+                ensure(r, c)
+                // Step over slots a rowspan from an earlier row already owns.
+                while c < filled[r].count, filled[r][c] != nil { c += 1 }
+                let text = cellText(cell)
+                let colspan = min(maxSpan, max(1, Int(cell.attribute(forName: "colspan")?.stringValue ?? "1") ?? 1))
+                let rowspan = min(maxSpan, max(1, Int(cell.attribute(forName: "rowspan")?.stringValue ?? "1") ?? 1))
+                for dr in 0..<rowspan {
+                    for dc in 0..<colspan {
+                        ensure(r + dr, c + dc)
+                        filled[r + dr][c + dc] = text
+                    }
+                }
+                c += colspan
+            }
+        }
+
+        let width = filled.map(\.count).max() ?? 0
+        guard width > 0 else { return [] }
+        return filled
+            .map { row in (0..<width).map { $0 < row.count ? (row[$0] ?? "") : "" } }
+            .filter { $0.contains { !$0.isEmpty } }
+    }
+
+    /// The largest top-level table, by cell count — when a page holds
+    /// several, the biggest is the one the clip is actually about.
+    static func bestGrid(fromHTML html: String) -> [[String]]? {
+        guard let doc = document(html) else { return nil }
+        let grids = topLevelTables(doc).map { grid(from: $0) }.filter { !$0.isEmpty }
+        return grids.max { lhs, rhs in
+            lhs.count * (lhs.first?.count ?? 0) < rhs.count * (rhs.first?.count ?? 0)
+        }
+    }
+
+    /// Visible, whitespace-stripped character counts: how much text is
+    /// inside top-level tables, and how much the document holds in total.
+    /// Returned as both numbers rather than a ratio because the caller
+    /// needs the absolute remainder too — a ratio alone can't distinguish
+    /// a caption from an article (see `tableCaptionBudget`).
+    static func tableTextSplit(inHTML html: String) -> (table: Int, total: Int) {
+        guard let doc = document(html), let root = doc.rootElement() else { return (0, 0) }
+        func visibleLength(_ s: String?) -> Int {
+            (s ?? "").replacingOccurrences(of: "\\s+", with: "", options: .regularExpression).count
+        }
+        let total = visibleLength(root.stringValue)
+        guard total > 0 else { return (0, 0) }
+        let tableChars = topLevelTables(doc).reduce(0) { $0 + visibleLength($1.stringValue) }
+        return (min(tableChars, total), total)
+    }
+
+    /// Share of the document's visible text that sits inside top-level
+    /// tables. 1.0 is a clip that is nothing but table; a lone spec table
+    /// inside a long article scores near zero.
+    static func tableDominance(inHTML html: String) -> Double {
+        let split = tableTextSplit(inHTML: html)
+        guard split.total > 0 else { return 0 }
+        return min(1.0, Double(split.table) / Double(split.total))
     }
 }
 

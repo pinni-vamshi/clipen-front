@@ -245,6 +245,9 @@ extension ClipboardManager {
         replaceItemContent(id: id, newContent: .html(html, plain: plain))
 
         TableCellExtractor.invalidate(itemID: id)
+        // Edited content means the instant extraction is stale too;
+        // clearing lets it re-run against what the item now says.
+        InstantExtractionService.shared.invalidate(id)
     }
 
     func updateItemRichText(id: UUID, editedAttributedString attr: NSAttributedString) {
@@ -294,6 +297,9 @@ extension ClipboardManager {
         let plain = plainParts.joined(separator: "\n\n")
         replaceItemContent(id: id, newContent: .html(html, plain: plain))
         TableCellExtractor.invalidate(itemID: id)
+        // Edited content means the instant extraction is stale too;
+        // clearing lets it re-run against what the item now says.
+        InstantExtractionService.shared.invalidate(id)
     }
 
     func replaceItemContent(id: UUID, newContent: ClipboardContent) {
@@ -413,6 +419,9 @@ extension ClipboardManager {
 
     func evictCaches(for id: UUID) {
         TableCellExtractor.invalidate(itemID: id)
+        // Edited content means the instant extraction is stale too;
+        // clearing lets it re-run against what the item now says.
+        InstantExtractionService.shared.invalidate(id)
         EmbeddedImageExtractor.invalidate(itemID: id)
 
         inlineEditOriginals.removeValue(forKey: id)
