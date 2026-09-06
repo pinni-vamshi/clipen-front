@@ -1404,7 +1404,30 @@ struct ClipenSettingsView: View {
 
     private var mainBehaviourSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("03", "MAIN BEHAVIOUR")
+            HStack(spacing: 8) {
+                sectionHeader("03", "MAIN BEHAVIOUR")
+
+                // Moved here from the Interactions header (icon-only, no
+                // label) — support kept hearing "I can't find where to turn
+                // sounds off," and this section sits above Interactions on
+                // the page, so it's seen first. Same on/off color language
+                // as the Hints pill below (accent when on, textDim when
+                // off), just a circular icon badge instead of a text pill.
+                Button {
+                    manager.interactionSoundsEnabled.toggle()
+                } label: {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(manager.interactionSoundsEnabled ? .accent : .textDim)
+                        .frame(width: 22, height: 22)
+                        .background(manager.interactionSoundsEnabled ? Color.accentDim : Color.surfaceHi,
+                                    in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help(manager.interactionSoundsEnabled
+                      ? "Turn off sound feedback for popup gestures (V, Space, X, C, S, P, R, Delete)"
+                      : "Play a sound for every popup gesture (V, Space, X, C, S, P, R, Delete)")
+            }
 
             rowCard {
                 openDelayRow(1)
@@ -1655,21 +1678,9 @@ struct ClipenSettingsView: View {
                 .help(manager.showPopupInteractionHints
                       ? "Hide the interaction hint strip at the top of the popup"
                       : "Show the interaction hint strip at the top of the popup")
-
-                Button {
-                    manager.interactionSoundsEnabled.toggle()
-                } label: {
-                    Text(manager.interactionSoundsEnabled ? "Navigation sounds: On" : "Navigation sounds: Off")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(manager.interactionSoundsEnabled ? .accent : .textDim)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(manager.interactionSoundsEnabled ? Color.accentDim : Color.white.opacity(0.06),
-                                    in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .help(manager.interactionSoundsEnabled
-                      ? "Turn off sound feedback for popup gestures (V, Space, X, C, S, P, R, Delete)"
-                      : "Play a sound for every popup gesture (V, Space, X, C, S, P, R, Delete)")
+                // Sounds toggle moved to the MAIN BEHAVIOUR header (icon-only,
+                // circular) — see mainBehaviourSection. Left here only as a
+                // pointer so a future reader doesn't go looking for it.
             }
 
             KeyboardInteractionPanel()
