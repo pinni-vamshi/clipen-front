@@ -1407,21 +1407,28 @@ struct ClipenSettingsView: View {
             HStack(spacing: 8) {
                 sectionHeader("03", "MAIN BEHAVIOUR")
 
-                // Moved here from the Interactions header (icon-only, no
-                // label) — support kept hearing "I can't find where to turn
-                // sounds off," and this section sits above Interactions on
-                // the page, so it's seen first. Same on/off color language
-                // as the Hints pill below (accent when on, textDim when
-                // off), just a circular icon badge instead of a text pill.
+                // Moved here from the Interactions header — support kept
+                // hearing "I can't find where to turn sounds off," and this
+                // section sits above Interactions on the page, so it's seen
+                // first. Solid-fill badge, not the tinted/dim style used
+                // elsewhere: full accent blue with a white icon when on so
+                // it reads as "active," full grey with a dimmed icon when
+                // off so it reads as "disabled" at a glance — plus a label,
+                // since an icon alone was the thing nobody could find.
                 Button {
                     manager.interactionSoundsEnabled.toggle()
                 } label: {
-                    Image(systemName: "speaker.wave.2.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(manager.interactionSoundsEnabled ? .accent : .textDim)
-                        .frame(width: 22, height: 22)
-                        .background(manager.interactionSoundsEnabled ? Color.accentDim : Color.surfaceHi,
-                                    in: Circle())
+                    HStack(spacing: 6) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(manager.interactionSoundsEnabled ? .white : Color.white.opacity(0.5))
+                            .frame(width: 22, height: 22)
+                            .background(manager.interactionSoundsEnabled ? Color.accent : Color.textDim,
+                                        in: Circle())
+                        Text("Sounds")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.textSec)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help(manager.interactionSoundsEnabled
