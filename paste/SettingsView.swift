@@ -1416,7 +1416,7 @@ struct ClipenSettingsView: View {
                 Button {
                     manager.interactionSoundsEnabled.toggle()
                 } label: {
-                    Image(systemName: "mic.fill")
+                    Image(systemName: "speaker.wave.2.fill")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(manager.interactionSoundsEnabled ? .accent : .textDim)
                         .frame(width: 22, height: 22)
