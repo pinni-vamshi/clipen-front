@@ -5,11 +5,12 @@ class DetailsPanel: AnchoredPopoverPanel {
     func show(units: [DetailUnit],
               selectedIndex: Int,
               markOrders: [Int: Int],
+              analyzing: Bool = false,
               near popupFrame: NSRect,
               anchorPoint: NSPoint? = nil) {
 
         let content = DetailsPanelView(units: units, selectedIndex: selectedIndex,
-                                       markOrders: markOrders)
+                                       markOrders: markOrders, analyzing: analyzing)
 
         let w: CGFloat = 400
         let minHeight: CGFloat = 160
@@ -21,7 +22,7 @@ class DetailsPanel: AnchoredPopoverPanel {
             case .group(_, let fields): return partial + 64 + CGFloat(max(0, fields.count - 1)) * 22
             }
         }
-        let h: CGFloat = min(maxHeight, max(minHeight, contentHeight))
+        let h: CGFloat = min(maxHeight, max(minHeight, contentHeight + (analyzing ? 24 : 0)))
         present(content, size: NSSize(width: w, height: h),
                 near: popupFrame, anchorPoint: anchorPoint)
     }
@@ -69,12 +70,35 @@ struct DetailUnit: Equatable, Identifiable {
         case .group(_, let fields): return fields.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
         }
     }
+
+    /// Every value this unit carries, used to decide whether a
+    /// system-detected field is already covered by an AI-extracted one.
+    var detailValues: [String] {
+        switch kind {
+        case .single(let f): return [f.value]
+        case .group(_, let fields): return fields.map(\.value)
+        }
+    }
+
+    /// Dedupe identity for a value across the two extraction layers.
+    /// Compared on alphanumerics only so the same fact written two ways —
+    /// "+1 (555) 123-4567" by NSDataDetector and "15551234567" by the model
+    /// — collapses to one row instead of appearing twice.
+    static func valueIdentity(_ value: String) -> String {
+        String(value.lowercased().unicodeScalars.filter {
+            CharacterSet.alphanumerics.contains($0)
+        }.map(Character.init))
+    }
 }
 
 struct DetailsPanelView: View {
     let units: [DetailUnit]
     let selectedIndex: Int
     let markOrders: [Int: Int]
+    /// The AI pass is still running underneath the instantly-available
+    /// system-detected rows. Shown as a footer rather than replacing the
+    /// list, because the list is already usable while it runs.
+    var analyzing: Bool = false
 
     @Namespace private var selectionNamespace
 
@@ -149,8 +173,30 @@ struct DetailsPanelView: View {
                 }
             }
             }
+
+            if analyzing { analyzingFooter }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Sits under the rows, never over them: the system-detected rows above
+    /// are already selectable and pasteable, so this is a promise of MORE
+    /// coming, not a blocking spinner.
+    private var analyzingFooter: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.55)
+                .frame(width: 10, height: 10)
+            Text(units.isEmpty ? "Analyzing\u{2026}" : "Analyzing for more\u{2026}")
+                .font(.system(size: 9, weight: .medium)).tracking(0.4)
+                .foregroundColor(.textDim)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black.opacity(0.10))
+        .overlay(Divider().background(Color.border), alignment: .top)
     }
 
     @ViewBuilder

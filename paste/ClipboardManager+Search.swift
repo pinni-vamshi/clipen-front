@@ -104,9 +104,113 @@ extension ClipboardManager {
     /// `sourceLabel` is set only when this item's units are part of a
     /// combined multi-item view (see `enterDetailsStage`), so each row can
     /// show which item it came from.
+    /// Two layers, in one list. The system layer (NSDataDetector over the
+    /// item's text, plus what the file/image itself already knows about
+    /// itself) is synchronous and always available, so D opens onto real
+    /// content immediately instead of onto "No analysis for this item."
+    /// The AI layer is added on top whenever the model has produced JSON
+    /// for this item — either from an earlier run, or from the run kicked
+    /// off underneath this very panel.
+    ///
+    /// AI units come FIRST and win every collision: the model's keys are
+    /// semantic ("Invoice total") where the detector's are categorical
+    /// ("Date"), so where both found the same value the model's row is the
+    /// better one to keep. Collisions are compared on
+    /// `DetailUnit.valueIdentity`, not on the raw string, so the same fact
+    /// formatted two ways still collapses to one row.
     func detailUnits(for item: ClipboardItem, sourceLabel: String? = nil) -> [DetailUnit] {
-        guard let json = item.aiStructuredText, !json.isEmpty else { return [] }
-        return AIFactIndex.groupedFlatten(json).map { DetailUnit($0, sourceLabel: sourceLabel) }
+        var units: [DetailUnit] = []
+        var seen = Set<String>()
+
+        if let json = item.aiStructuredText, !json.isEmpty {
+            for kind in AIFactIndex.groupedFlatten(json) {
+                let unit = DetailUnit(kind, sourceLabel: sourceLabel)
+                units.append(unit)
+                for value in unit.detailValues {
+                    seen.insert(DetailUnit.valueIdentity(value))
+                }
+            }
+        }
+
+        for field in systemDetectedFields(for: item) {
+            let identity = DetailUnit.valueIdentity(field.value)
+            guard !identity.isEmpty, !seen.contains(identity) else { continue }
+            seen.insert(identity)
+            units.append(DetailUnit(.single(field), sourceLabel: sourceLabel))
+        }
+        return units
+    }
+
+    /// The instant layer: everything about an item that can be known
+    /// without a model. Text (including a screenshot's OCR, which is why
+    /// images get real rows too) goes through NSDataDetector; images and
+    /// files also contribute the facts their own representation carries.
+    func systemDetectedFields(for item: ClipboardItem) -> [DetailField] {
+        var fields = Self.intrinsicFields(for: item)
+
+        // Both sources, joined — a screenshot has only OCR, an HTML clip
+        // has only plain text, and a PDF file can have both.
+        let sources = [item.content.plainText, item.ocrText]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        if !sources.isEmpty {
+            fields += SystemDataDetector.fields(in: sources.joined(separator: "\n"))
+        }
+        return fields
+    }
+
+    /// Facts the item already carries in its own representation — no
+    /// detection involved, so these are exact rather than inferred.
+    private static func intrinsicFields(for item: ClipboardItem) -> [DetailField] {
+        var out: [DetailField] = []
+        switch item.content {
+        case .image(let image, let rawData, let dataType):
+            let px = image.representations.first.map {
+                CGSize(width: $0.pixelsWide, height: $0.pixelsHigh)
+            } ?? image.size
+            if px.width > 1, px.height > 1 {
+                out.append(DetailField(key: "Dimensions",
+                                       value: "\(Int(px.width)) \u{00D7} \(Int(px.height)) px"))
+            }
+            out.append(DetailField(key: "File size", value: byteLabel(rawData.count)))
+            if let format = imageFormatLabel(dataType) {
+                out.append(DetailField(key: "Format", value: format))
+            }
+        case .file(let url):
+            out += fileFields(for: url)
+        case .files(let urls):
+            out.append(DetailField(key: "Files", value: "\(urls.count) item\(urls.count == 1 ? "" : "s")"))
+            if let first = urls.first, urls.count == 1 { out += fileFields(for: first) }
+        default:
+            break
+        }
+        return out
+    }
+
+    private static func fileFields(for url: URL) -> [DetailField] {
+        var out: [DetailField] = [DetailField(key: "File name", value: url.lastPathComponent)]
+        if !url.pathExtension.isEmpty {
+            out.append(DetailField(key: "Kind", value: url.pathExtension.uppercased()))
+        }
+        out.append(DetailField(key: "Path", value: url.deletingLastPathComponent().path))
+        if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+            out.append(DetailField(key: "File size", value: byteLabel(size)))
+        }
+        return out
+    }
+
+    private static func byteLabel(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private static func imageFormatLabel(_ type: NSPasteboard.PasteboardType) -> String? {
+        let raw = type.rawValue.lowercased()
+        for (needle, label) in [("pdf", "PDF"), ("png", "PNG"), ("jpeg", "JPEG"), ("jpg", "JPEG"),
+                                ("gif", "GIF"), ("tiff", "TIFF"), ("heic", "HEIC"), ("webp", "WebP")]
+        where raw.contains(needle) {
+            return label
+        }
+        return nil
     }
 
     /// Short, human-identifiable label for an item, used only in combined
@@ -138,6 +242,9 @@ extension ClipboardManager {
         // edited: signalEditDenied bumps a generation counter the row watches
         // and plays the denied sound, so a second refusal on the same item
         // shakes again rather than being swallowed as "no change".
+        // Empty now means the item genuinely has nothing in it — no
+        // detectable data, no model output — since the system layer runs
+        // synchronously above and needs no analysis to have happened.
         guard !units.isEmpty else {
             signalEditDenied(for: item.id)
             flashStatus(isCombined ? "No analysis for any marked item." : "No analysis for this item.")
@@ -146,12 +253,20 @@ extension ClipboardManager {
         }
         detailUnits = units
         detailsIndex = 0
+        markedDetailIndices = []
+        fieldMarkSeq = [:]
         detailsSourceItemID = isCombined ? nil : item.id
         detailsCombinedItemIDs = isCombined ? Set(combinedSources.map(\.id)) : []
         setSidePanelStage(.details)
         AuthManager.shared.registerActionUsage(actionID: "action.details")
         playInteractionSoundIfEnabled(.similar)
         updateDetailsPanel()
+        // The panel is open on the system layer; the model layer is still
+        // missing, so ask for it now and let it fill in underneath. This is
+        // the case that used to be reachable only by being refused.
+        if !isCombined, item.aiStructuredText == nil {
+            retriggerAnalysisForMissingDetails(item)
+        }
     }
 
     func updateDetailsPanel() {
@@ -163,6 +278,7 @@ extension ClipboardManager {
         detailsPanel.show(units: detailUnits,
                           selectedIndex: detailsIndex,
                           markOrders: unifiedMarkOrder().fields,
+                          analyzing: detailsAnalysisRunning,
                           near: previewWindow.frame,
                           anchorPoint: anchor)
     }
@@ -211,6 +327,11 @@ extension ClipboardManager {
         fieldMarkSeq = [:]
         detailsSourceItemID = item.id
         updateDetailsPanel()
+        // Rows are showing, but they may be the system layer alone. Ask for
+        // the model layer so browsing still fills coverage in — the guard
+        // is on the analysis being absent, NOT on the panel being empty,
+        // which it no longer is for most items.
+        if item.aiStructuredText == nil { scheduleDetailsAnalysisRetrigger(for: item) }
     }
 
     /// Landing on an item with no AI analysis inside the Details flow (D's
@@ -258,8 +379,15 @@ extension ClipboardManager {
         // and D can never show anything. This used to return silently: the
         // user got a shake and "No analysis for this item." and was never
         // told the feature was off, let alone where.
+        // How loudly a "can't run" answer is reported depends on whether
+        // the user is looking at something. With system-detected rows
+        // already on screen the panel is useful as it stands, so the notice
+        // is a brief parallel aside rather than a banner to dismiss; with
+        // an empty panel it IS the answer, so it stays until acted on.
+        let panelAlreadyUseful = !detailUnits.isEmpty
         guard aiStructuringEnabled else {
-            showAISetupNotice(String(localized: "Details is off — turn on AI structuring to use it."))
+            showAISetupNotice(String(localized: "Details is off — turn on AI structuring to use it."),
+                              autoDismissAfter: panelAlreadyUseful ? Self.parallelNoticeDuration : nil)
             return
         }
         // Pre-flight, so a run that cannot possibly succeed is never started.
@@ -267,13 +395,21 @@ extension ClipboardManager {
         // inference gate, throws "unavailable", and only then reports — for
         // an answer that was knowable before it began.
         guard LocalLLMManager.shared.canRunAnalysis else {
-            showAISetupNotice(String(localized: "Details needs a model — none is available yet."))
+            showAISetupNotice(String(localized: "Details needs a model — none is available yet."),
+                              autoDismissAfter: panelAlreadyUseful ? Self.parallelNoticeDuration : nil)
             return
         }
         guard AIStructuringService.shared.state(for: item.id) != .running else { return }
         detailsAwaitingAnalysisItemID = item.id
         AIStructuringService.shared.refresh(item: item, trigger: "details_missing")
+        // Redraw so the footer starts saying the deeper pass is running.
+        updateDetailsPanel()
     }
+
+    /// How long the "AI analysis isn't available" aside stays up when it is
+    /// running alongside a panel that already has system-detected rows in
+    /// it. Long enough to read, short enough not to sit over the list.
+    static let parallelNoticeDuration: TimeInterval = 2.0
 
     /// Combine sink target for `AIStructuringService.$states`. Only acts
     /// while the Details panel is actually waiting on the one item
@@ -309,9 +445,13 @@ extension ClipboardManager {
             // two. Say so in the popup and offer the jump; don't perform it.
             LocalLLMManager.shared.refreshAppleAvailability()
             let hasLocalModel = !LocalLLMManager.shared.downloadedTiers.isEmpty
+            // Same rule as the pre-flight refusals above: an aside when the
+            // panel is already showing system-detected rows, a banner that
+            // waits to be acted on when it is the only answer there is.
             showAISetupNotice(hasLocalModel
                 ? String(localized: "Details couldn't run — switch to your downloaded model.")
-                : String(localized: "Details needs a model to run."))
+                : String(localized: "Details needs a model to run."),
+                autoDismissAfter: detailUnits.isEmpty ? nil : Self.parallelNoticeDuration)
         }
 
         // Still on the same item, and still in the Details flow — a
@@ -323,13 +463,64 @@ extension ClipboardManager {
         let item = displayItems[selectedIndex]
         let units = detailUnits(for: item)
         guard !units.isEmpty else { return }
+        // This is a rebuild of the SAME item's panel — the model layer
+        // landing on top of the system layer that was already showing — so
+        // the user's marks and cursor must survive it. They are stored as
+        // positions, and the model's rows are inserted ABOVE the detected
+        // ones, so every position shifts; re-anchor by unit identity.
+        reanchorDetailSelection(from: detailUnits, to: units)
         detailUnits = units
-        detailsIndex = 0
-        markedDetailIndices = []
-        fieldMarkSeq = [:]
         detailsSourceItemID = item.id
         setSidePanelStage(.details)
         updateDetailsPanel()
+    }
+
+    /// Rebuilds the open Details panel for one item in place, when a new
+    /// input for it arrives after the panel was already drawn — today
+    /// that is an image's OCR text landing. Does nothing unless that exact
+    /// item is the one on screen, and nothing if the rebuild produces the
+    /// same rows, so it is safe to call speculatively.
+    func refreshDetailsPanelIfShowing(itemID: UUID) {
+        guard inDetailsStage, previewWindow.isVisible,
+              detailsCombinedItemIDs.isEmpty,
+              detailsSourceItemID == itemID,
+              displayItems.indices.contains(selectedIndex),
+              displayItems[selectedIndex].id == itemID else { return }
+        let units = detailUnits(for: displayItems[selectedIndex])
+        guard units != detailUnits, !units.isEmpty else { return }
+        reanchorDetailSelection(from: detailUnits, to: units)
+        detailUnits = units
+        updateDetailsPanel()
+    }
+
+    /// Carries the Details cursor and marks across a rebuild of the same
+    /// item's unit list. Units are addressed by index everywhere (marks,
+    /// mark order, paste), which is fine while a list is stable and wrong
+    /// the moment rows are inserted into it — so the indices are mapped
+    /// through `DetailUnit.id`. Anything that no longer exists is dropped
+    /// rather than left pointing at whatever moved into its slot.
+    private func reanchorDetailSelection(from old: [DetailUnit], to new: [DetailUnit]) {
+        var positionByID: [String: Int] = [:]
+        for (idx, unit) in new.enumerated() where positionByID[unit.id] == nil {
+            positionByID[unit.id] = idx
+        }
+
+        var movedMarks: Set<Int> = []
+        var movedSeq: [Int: Int] = [:]
+        for oldIdx in markedDetailIndices {
+            guard old.indices.contains(oldIdx),
+                  let newIdx = positionByID[old[oldIdx].id] else { continue }
+            movedMarks.insert(newIdx)
+            if let seq = fieldMarkSeq[oldIdx] { movedSeq[newIdx] = seq }
+        }
+        markedDetailIndices = movedMarks
+        fieldMarkSeq = movedSeq
+
+        if old.indices.contains(detailsIndex), let newIdx = positionByID[old[detailsIndex].id] {
+            detailsIndex = newIdx
+        } else {
+            detailsIndex = 0
+        }
     }
 
     /// Hold D to mark/unmark the unit under the cursor — same gesture,

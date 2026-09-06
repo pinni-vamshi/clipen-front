@@ -857,11 +857,30 @@ extension ClipboardManager {
                     let req = VNRecognizeTextRequest()
                     req.recognitionLevel = .accurate
                     req.usesLanguageCorrection = true
-                    try? VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([req])
-                    let text = (req.results ?? [])
+                    // Barcodes ride along on the same handler and the same
+                    // pass. A QR code is the one thing on a screenshot that
+                    // carries an exact machine-readable value OCR cannot
+                    // read at all, and it is exactly the kind of thing
+                    // someone screenshots in order to use it later.
+                    let barcodeReq = VNDetectBarcodesRequest()
+                    try? VNImageRequestHandler(cgImage: cgImage, options: [:])
+                        .perform([req, barcodeReq])
+                    var text = (req.results ?? [])
                         .compactMap { $0.topCandidates(1).first?.string }
                         .joined(separator: " ")
                         .trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Appended as a labelled line rather than kept apart:
+                    // ocrText is what search, importance scoring, the AI
+                    // pass and now NSDataDetector all read, so a payload
+                    // put here reaches every one of them at once. A URL in
+                    // a QR code becomes a Details "Link" row for free.
+                    let payloads = (barcodeReq.results ?? [])
+                        .compactMap { $0.payloadStringValue?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                    if !payloads.isEmpty {
+                        let line = "QR: " + Array(Set(payloads)).sorted().joined(separator: "\nQR: ")
+                        text = text.isEmpty ? line : text + "\n" + line
+                    }
                     if !text.isEmpty { extracted = text }
                 }
                 guard let ocrResult = extracted else { return }
@@ -874,6 +893,12 @@ extension ClipboardManager {
                     self.items[idx].embedding = nil
                     self.recomputeEmbeddingsInBackground()
                     AIStructuringService.shared.autoAnalyzeIfNeeded(item: self.items[idx])
+                    // OCR is what gives an image any detectable text at all,
+                    // and it lands well after capture — so an image copied
+                    // and immediately opened with D showed only its
+                    // intrinsic facts. Rebuild that panel now the text
+                    // exists, keeping the cursor and marks where they are.
+                    self.refreshDetailsPanelIfShowing(itemID: itemID)
                 }
             }
         }

@@ -620,12 +620,29 @@ class ClipboardManager: ObservableObject {
     /// states the problem where they already are and offers the jump as a
     /// choice.
     @Published var aiSetupNotice: String? = nil
+    /// Guards the auto-dismiss timer against a NEWER notice: a second
+    /// notice raised inside the first one's window must not be torn down
+    /// when that first timer fires.
+    private var aiSetupNoticeToken = 0
 
-    func showAISetupNotice(_ reason: String) {
+    /// `autoDismissAfter: nil` keeps the banner up until the user acts on
+    /// it — correct when the banner is the only answer they got. A
+    /// duration is for the parallel case, where the Details panel is
+    /// already showing system-detected rows and this is only an aside
+    /// explaining why no deeper pass is coming.
+    func showAISetupNotice(_ reason: String, autoDismissAfter seconds: TimeInterval? = nil) {
+        aiSetupNoticeToken += 1
+        let token = aiSetupNoticeToken
         aiSetupNotice = reason
+        guard let seconds else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.aiSetupNoticeToken == token else { return }
+            self.aiSetupNotice = nil
+        }
     }
 
     func dismissAISetupNotice() {
+        aiSetupNoticeToken += 1
         aiSetupNotice = nil
     }
 
@@ -810,6 +827,16 @@ class ClipboardManager: ObservableObject {
     let detailsPanel = DetailsPanel()
     var detailUnits: [DetailUnit] = []
     var detailsIndex: Int = 0
+
+    /// True while the model layer is still being produced for the item the
+    /// Details panel is showing. The panel is already usable from the
+    /// system-detected layer, so this only drives the footer that says
+    /// more is coming — never a block on interacting with the rows.
+    var detailsAnalysisRunning: Bool {
+        guard let id = detailsSourceItemID else { return false }
+        if detailsAwaitingAnalysisItemID == id { return true }
+        return AIStructuringService.shared.state(for: id) == .running
+    }
     var detailsSourceItemID: UUID? = nil
     /// Non-empty while the panel shows COMBINED details from every marked
     /// item at once (D pressed with 2+ items marked in the main list),

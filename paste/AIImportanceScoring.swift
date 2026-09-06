@@ -154,12 +154,26 @@ struct ImportanceBreakdown {
 /// patches for ("22 July 2026" vs "07/22/2026" vs "next Friday" are all
 /// just `.date` to it).
 enum SystemDataDetector {
+    /// `.link` is in the set purely for the Details panel — the importance
+    /// scorer below ignores link matches, and always did. Emails arrive
+    /// here as `mailto:` links, so they need no separate pass.
     private static let detector = try? NSDataDetector(types:
         NSTextCheckingResult.CheckingType.date.rawValue
         | NSTextCheckingResult.CheckingType.phoneNumber.rawValue
-        | NSTextCheckingResult.CheckingType.address.rawValue)
+        | NSTextCheckingResult.CheckingType.address.rawValue
+        | NSTextCheckingResult.CheckingType.link.rawValue)
 
     struct Counts { var dates = 0; var phones = 0; var addresses = 0 }
+
+    /// Scanning is linear in the text length and this runs on the main
+    /// thread when the Details panel opens, so a pathological clip (a
+    /// whole log file, a pasted database dump) is truncated rather than
+    /// allowed to stall the keystroke that opened the panel.
+    static let maxScanLength = 100_000
+    /// Per-kind and overall caps, so a page of a hundred phone numbers
+    /// yields a browsable panel rather than a hundred rows to cycle past.
+    private static let maxPerKind = 12
+    private static let maxTotal = 40
 
     static func counts(in text: String) -> Counts {
         guard let detector else { return Counts() }
@@ -174,6 +188,66 @@ enum SystemDataDetector {
             }
         }
         return result
+    }
+
+    /// The same scan as `counts`, but keeping the matched VALUES instead of
+    /// throwing them away — this is what lets the Details panel show
+    /// something the instant D is pressed, with no model run and no wait.
+    ///
+    /// The value kept is the matched substring as the user copied it, not a
+    /// reformatted rendering of it: Details rows are pasteable, so what
+    /// lands in the destination app should be what was in the source.
+    static func fields(in text: String) -> [DetailField] {
+        guard let detector, !text.isEmpty else { return [] }
+        let scanned = text.count > maxScanLength ? String(text.prefix(maxScanLength)) : text
+        let ns = scanned as NSString
+        var out: [DetailField] = []
+        var perKind: [String: Int] = [:]
+        var seen = Set<String>()
+
+        detector.enumerateMatches(in: scanned, options: [],
+                                  range: NSRange(location: 0, length: ns.length)) { match, _, stop in
+            guard let match, out.count < maxTotal else {
+                if out.count >= maxTotal { stop.pointee = true }
+                return
+            }
+            let raw = ns.substring(with: match.range)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else { return }
+
+            let key: String
+            var value = raw
+            switch match.resultType {
+            case .date:        key = "Date"
+            case .phoneNumber: key = "Phone"
+            case .address:
+                key = "Address"
+                // Postal addresses match across line breaks; a Details row
+                // is one line, so fold the run-in whitespace.
+                value = raw.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+                           .joined(separator: " ")
+            case .link:
+                if let url = match.url, url.scheme?.lowercased() == "mailto" {
+                    key = "Email"
+                    value = url.absoluteString
+                        .replacingOccurrences(of: "mailto:", with: "", options: .caseInsensitive)
+                } else {
+                    key = "Link"
+                    value = match.url?.absoluteString ?? raw
+                }
+            default: return
+            }
+
+            guard value.count <= 400 else { return }
+            let dedupe = key + "\u{1}" + value.lowercased()
+            guard !seen.contains(dedupe) else { return }
+            let used = perKind[key, default: 0]
+            guard used < maxPerKind else { return }
+            perKind[key] = used + 1
+            seen.insert(dedupe)
+            out.append(DetailField(key: key, value: value))
+        }
+        return out
     }
 }
 
