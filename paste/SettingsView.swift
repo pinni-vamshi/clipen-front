@@ -1671,14 +1671,20 @@ struct ClipenSettingsView: View {
             HStack(spacing: 8) {
                 sectionHeader("05", "INTERACTIONS")
 
+                // Same solid-pill treatment as the Sounds toggle in
+                // MAIN BEHAVIOUR — full accent blue when on, full grey when
+                // off — instead of the tinted/dim style, so the two toggles
+                // read the same way at a glance. Label and position
+                // unchanged; only the pill's size and fill match Sounds.
                 Button {
                     manager.showPopupInteractionHints.toggle()
                 } label: {
                     Text(manager.showPopupInteractionHints ? "Hints in popup: On" : "Hints in popup: Off")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(manager.showPopupInteractionHints ? .accent : .textDim)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(manager.showPopupInteractionHints ? Color.accentDim : Color.white.opacity(0.06),
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(manager.showPopupInteractionHints ? .white : Color.white.opacity(0.6))
+                        .padding(.horizontal, 10)
+                        .frame(height: 22)
+                        .background(manager.showPopupInteractionHints ? Color.accent : Color.textDim,
                                     in: Capsule())
                 }
                 .buttonStyle(.plain)
