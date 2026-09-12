@@ -541,7 +541,12 @@ extension ClipboardManager {
                 return nil
             }
 
-            if displayItems.isEmpty && !previewWindow.isVisible && !shift {
+            // Falls back to All BEFORE deciding there is nothing to show:
+            // this guard hands Cmd-V back to the frontmost app, so an emptied
+            // active collection reaching it meant the popup could not be
+            // opened at all — the keystroke just pasted through instead.
+            if displayItems.isEmpty, !previewWindow.isVisible, !shift,
+               !fallBackToAllIfViewEmpty() {
                 return Unmanaged.passUnretained(event)
             }
 

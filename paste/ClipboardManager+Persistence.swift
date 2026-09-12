@@ -325,7 +325,11 @@ extension ClipboardManager {
         updated.aiStructuredText  = old.aiStructuredText
         updated.collections       = old.collections
         updated.embedding         = old.embedding
+        // Every caller of this function is changing what the item IS, so the
+        // row that draws it has to be told. See `contentRevision`.
+        updated.contentRevision   = old.contentRevision &+ 1
         items[idx] = updated
+        invalidateContentDerivedCaches(for: id)
         invalidateBlobCaches(for: id)
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
@@ -417,22 +421,41 @@ extension ClipboardManager {
         selectedIndex = 0
     }
 
-    func evictCaches(for id: UUID) {
+    /// Caches derived from an item's CONTENT, keyed on its id alone.
+    ///
+    /// Split out of `evictCaches` because an edit and a deletion need
+    /// different amounts of forgetting. Every one of these is keyed by
+    /// `item.id` with no content hash, and an edit preserves the id — so
+    /// without this they answered with pre-edit content for the rest of the
+    /// session. `InstantExtractionService` is worse than a stale cache: it
+    /// guards on a once-ever `completed` set, so the item would never be
+    /// re-extracted at all.
+    ///
+    /// Deliberately does NOT touch `inlineEditOriginals` or `itemMarkSeq`,
+    /// which `evictCaches` does clear. Both must survive an edit —
+    /// `saveInlineEditOriginal` stores the pre-edit content immediately
+    /// before the update lands, and clearing it here would delete the undo
+    /// snapshot that Revert depends on.
+    func invalidateContentDerivedCaches(for id: UUID) {
         TableCellExtractor.invalidate(itemID: id)
         // Edited content means the instant extraction is stale too;
         // clearing lets it re-run against what the item now says.
         InstantExtractionService.shared.invalidate(id)
         EmbeddedImageExtractor.invalidate(itemID: id)
-
-        inlineEditOriginals.removeValue(forKey: id)
-        diffLineCache.removeValue(forKey: id)
-        diffWordCache.removeValue(forKey: id)
         // ImportanceScoringService caches one breakdown per item, and each
         // holds that item's full source text — including the uncapped text
         // of items too long to auto-analyze. Its `invalidate(_:)` existed
         // but had no callers, so nothing dropped an entry when its item
         // left the ring.
         ImportanceScoringService.shared.invalidate(id)
+        diffLineCache.removeValue(forKey: id)
+        diffWordCache.removeValue(forKey: id)
+    }
+
+    func evictCaches(for id: UUID) {
+        invalidateContentDerivedCaches(for: id)
+
+        inlineEditOriginals.removeValue(forKey: id)
         // Only ever written, never removed: an item stayed in the mark-order
         // map after being unmarked and after being deleted.
         itemMarkSeq.removeValue(forKey: id)

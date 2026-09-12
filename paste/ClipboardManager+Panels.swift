@@ -733,11 +733,11 @@ extension ClipboardManager {
 
     func revertInlineEdit(id: UUID) {
         guard let original = inlineEditOriginals.removeValue(forKey: id) else { return }
+        // `replaceItemContent` now invalidates the content-derived caches
+        // itself, so the hand-written copy that used to sit here is gone —
+        // it was the only place that ever did this, which is exactly why
+        // undoing an edit refreshed those caches and making one did not.
         replaceItemContent(id: id, newContent: original)
-        TableCellExtractor.invalidate(itemID: id)
-        // Edited content means the instant extraction is stale too;
-        // clearing lets it re-run against what the item now says.
-        InstantExtractionService.shared.invalidate(id)
         invalidateCachesAfterContentEdit()
         flashStatus("Edit reverted.")
     }
@@ -1221,7 +1221,7 @@ extension ClipboardManager {
         guard pendingFirstOpen else { return }
         pendingFirstOpen = false
         pendingFirstOpenTimer = nil
-        guard !displayItems.isEmpty else { return }
+        guard fallBackToAllIfViewEmpty() else { return }
         openPopupNow()
         cycleCount += 1
     }
@@ -1230,6 +1230,11 @@ extension ClipboardManager {
 
         lastPollActivityAt = Date()
         popupTagFilter = nil
+        // Covers every open path at once. An active collection that has been
+        // emptied (or deleted down to nothing) must not open onto a blank
+        // popup — All is the default view and the only one guaranteed to have
+        // the user's clips in it.
+        fallBackToAllIfViewEmpty()
         let withinRememberWindow: Bool = {
             guard let savedAt = rememberedSelectionSavedAt else { return false }
             guard rememberLastPositionTimeoutMinutes > 0 else { return true }

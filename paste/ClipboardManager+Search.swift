@@ -694,6 +694,42 @@ extension ClipboardManager {
         }
     }
 
+    /// Drops the popup's narrowing filters when they leave nothing on screen,
+    /// so an emptied collection falls back to All instead of taking the popup
+    /// down with it. Returns true when something is visible afterwards.
+    ///
+    /// Deleting the last item in a collection used to hit a plain
+    /// `displayItems.isEmpty -> dismissPreview()` test. That reads the
+    /// FILTERED view as "the history is empty" when the history is usually
+    /// still full — everything else simply lives outside the collection being
+    /// looked at. So the popup vanished mid-action, and re-opening it was then
+    /// refused by the same test on the open path, which stranded the user on an
+    /// empty collection with no way back to their clips from the popup at all.
+    ///
+    /// Filters drop cheapest-first: a tag filter is a within-session narrowing
+    /// and goes before the collection, which the user picked deliberately and
+    /// which persists across launches. A search query is deliberately NOT
+    /// cleared — "no results for this search" is a true statement about a
+    /// filter the user is actively typing, not a dead end they fell into.
+    @discardableResult
+    func fallBackToAllIfViewEmpty() -> Bool {
+        guard displayItems.isEmpty else { return true }
+        guard !items.isEmpty else { return false }
+
+        if popupTagFilter != nil {
+            popupTagFilter = nil
+            if !displayItems.isEmpty { return true }
+        }
+        if let emptied = activeCollection {
+            activeCollection = nil
+            if !displayItems.isEmpty {
+                flashStatus(String(localized: "\u{201C}\(emptied)\u{201D} is empty \u{2014} showing All."))
+                return true
+            }
+        }
+        return !displayItems.isEmpty
+    }
+
     func deleteSelected() {
         if !markedItemIDs.isEmpty {
             deleteMarked()
@@ -706,7 +742,7 @@ extension ClipboardManager {
         popupSessionDeleted = true
         items.remove(at: realIndex)
         markBlobPurgeNeeded()
-        if displayItems.isEmpty { dismissPreview(); return }
+        if !fallBackToAllIfViewEmpty() { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
 
         selectionDidChange()
@@ -720,7 +756,7 @@ extension ClipboardManager {
         markedItemIDs = []
         items.removeAll { ids.contains($0.id) }
         markBlobPurgeNeeded()
-        if displayItems.isEmpty { dismissPreview(); return }
+        if !fallBackToAllIfViewEmpty() { dismissPreview(); return }
         selectedIndex = min(selectedIndex, displayItems.count - 1)
         selectionDidChange()
         flashStatus("Deleted \(ids.count) items.")

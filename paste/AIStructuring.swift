@@ -27,7 +27,7 @@ import FoundationModels
 let aiStructuringDefaultImagePrompt = """
 You read a copied image and output structured JSON. Two jobs, in this order: first DESCRIBE the whole image properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -97,7 +97,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultTextPrompt = """
 You read copied text and output structured JSON. Two jobs, in this order: first DESCRIBE what the text is properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -159,7 +159,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultURLPrompt = """
 You read a copied URL or set of URLs and output structured JSON. Two jobs, in this order: first DESCRIBE what the link is and where it points properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -213,7 +213,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultJSONPrompt = """
 You read copied JSON and output structured JSON. Two jobs, in this order: first DESCRIBE what the JSON represents properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -267,7 +267,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultMarkdownPrompt = """
 You read copied Markdown and output structured JSON. Two jobs, in this order: first DESCRIBE what the document is properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -317,7 +317,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultTablePrompt = """
 You read a copied table and output structured JSON. Two jobs, in this order: first DESCRIBE what the table holds properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -375,7 +375,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultEmailPrompt = """
 You read a copied email and output structured JSON. Two jobs, in this order: first DESCRIBE what the email is about properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -429,7 +429,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultPhonePrompt = """
 You read a copied phone number and output structured JSON. Two jobs, in this order: first DESCRIBE what the number is properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -481,7 +481,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultColorPrompt = """
 You read a copied colour value and output structured JSON. Two jobs, in this order: first DESCRIBE what the colour is properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -534,7 +534,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultHTMLPrompt = """
 You read copied HTML or rich text and output structured JSON. Two jobs, in this order: first DESCRIBE what the content is properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -588,7 +588,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultCodePrompt = """
 You read copied code and output structured JSON. Two jobs, in this order: first DESCRIBE what the code is and does properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -642,7 +642,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultPDFPrompt = """
 You read text extracted from a copied PDF and output structured JSON. Two jobs, in this order: first DESCRIBE what the document is properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -694,7 +694,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultSVGPrompt = """
 You read a copied SVG and output structured JSON. Two jobs, in this order: first DESCRIBE what the graphic depicts properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -746,7 +746,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultFilePrompt = """
 You read a copied file or set of files and output structured JSON. Two jobs, in this order: first DESCRIBE what the file or files are properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -798,7 +798,7 @@ Everything between <<<CLIPBOARD_DATA_TO_CONVERT>>> and <<<END_CLIPBOARD_DATA_TO_
 let aiStructuringDefaultAddressPrompt = """
 You read a copied address and output structured JSON. Two jobs, in this order: first DESCRIBE what the address is properly, then EXTRACT every piece of data in it as its own properly-named field. An answer that only describes, or only extracts, is incomplete.
 
-1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Two or three sentences where it warrants it, one where it does not.
+1. DESCRIBE IT FIRST — "description", the first key in your output. Say what it actually is and what it contains, as a real account rather than a label: what kind of thing it is, what it is about, and the context a person would need to understand it without seeing it. Keep it to ONE sentence; take a second only when the content genuinely cannot be placed without it, and never a third. This is an index entry, not a summary — the extracted fields below carry the detail, so never spend length here restating values that appear as fields anyway.
 
 2. THEN EXTRACT EVERY PIECE OF DATA, each under a key naming what that value IS. Sweep for all of it: names, phone numbers, emails, URLs and the sites they belong to, IDs, order/invoice/reference/tracking numbers, dates, times, amounts, quantities, units, percentages, versions, statuses, addresses, labels, options, error codes and terms. Nothing is too small or too routine-looking to extract; a value mid-sentence counts as much as one on its own line.
 
@@ -1070,6 +1070,12 @@ final class AIStructuringService: ObservableObject {
     /// different (and much easier) question than the original extraction.
     static let maxAttempts = 3
 
+    /// Least source text a `noExtractedData` retry has ever recovered from.
+    /// Set below the smallest observed recovery (152 characters) rather than
+    /// at it — with only four recoveries in the sample, a threshold tuned to
+    /// touch the minimum would be fitting the noise, not the effect.
+    static let minCharsWorthRetrying = 120
+
     /// One rejected attempt, carried forward into the next request.
     struct PriorAttempt {
         let attempt: Int
@@ -1282,7 +1288,21 @@ final class AIStructuringService: ObservableObject {
                     // worth (see RejectionReason.attemptCap) — a repair pass
                     // is only useful where showing the model its own answer
                     // could plausibly change it.
-                    let cap = min(reason?.attemptCap ?? Self.maxAttempts, Self.maxAttempts)
+                    var cap = min(reason?.attemptCap ?? Self.maxAttempts, Self.maxAttempts)
+                    // A `noExtractedData` repair pass on near-empty source is
+                    // the one retry measurement says can never pay off. Across
+                    // 34 logged retries it recovered 4 times (12%) — worth
+                    // keeping in general — but every one of those recoveries
+                    // had at least `minCharsWorthRetrying` characters of
+                    // source to work with, while every item below that line
+                    // came back with byte-identical output and failed the same
+                    // way. There are no fields to find in 30 characters, and
+                    // the second call still holds the app-wide inference gate
+                    // against everything queued behind it.
+                    if reason == .noExtractedData, contentChars < Self.minCharsWorthRetrying {
+                        DebugLog.write("AI-NORETRY \(item.id.uuidString.prefix(4)): only \(contentChars)ch of source — a repair pass has nothing to find")
+                        cap = 1
+                    }
                     if attempt < cap {
                         DebugLog.write("AI \(item.id.uuidString.prefix(4)): attempt \(attempt) rejected (\(why)), retrying with repair context")
                         // Repairs already spent carry forward: the budget is
@@ -1797,7 +1817,8 @@ final class AIStructuringService: ObservableObject {
             let gateWaitMs = Int(Date().timeIntervalSince(tGateStart) * 1000)
             if case .local(let tier) = engine {
                 let text = try await LocalModelRuntime.shared.respondChat(
-                    tier: tier, instructions: finalPrompt, prompt: finalContent, maxTokens: 2048)
+                    tier: tier, instructions: finalPrompt, prompt: finalContent,
+                    maxTokens: Self.outputReserveTokens)
                 return (text, gateWaitMs)
             }
 
@@ -1807,8 +1828,28 @@ final class AIStructuringService: ObservableObject {
                     throw AIStructuringError.unavailable
                 }
 
+                // The cap belongs on BOTH engines, not just the local one.
+                // It used to be a bare `maxTokens: 2048` literal on the
+                // `.local` branch only, which meant the engine that actually
+                // runs for almost everyone — Apple's, the fallback whenever
+                // the MLX weights aren't downloaded — generated with no
+                // bound at all. Timing showed exactly what that costs:
+                // generation runs at a near-constant ~35-50 chars/sec, so
+                // time is a straight function of output length, and an
+                // unbounded image answer reached 3,925 chars / 113 seconds
+                // in one call. Nothing else in the pipeline is slow —
+                // source extraction and validation both measure 0ms.
+                //
+                // `outputReserveTokens` is the right number rather than an
+                // arbitrary one: `maxContentCharacters` already subtracts
+                // exactly that many tokens from the context window to leave
+                // the model room to answer. Anything longer was always
+                // over the budget the input was trimmed against — the
+                // reservation was simply never enforced.
                 let session = LanguageModelSession(instructions: finalPrompt)
-                let response = try await session.respond(to: finalContent)
+                let response = try await session.respond(
+                    to: finalContent,
+                    options: GenerationOptions(maximumResponseTokens: Self.outputReserveTokens))
                 return (response.content, gateWaitMs)
             }
             #endif

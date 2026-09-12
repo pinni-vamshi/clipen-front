@@ -740,7 +740,8 @@ struct ImageRunRow: View, Equatable {
     static func == (l: ImageRunRow, r: ImageRunRow) -> Bool {
         guard l.run.count == r.run.count else { return false }
         for (a, b) in zip(l.run, r.run) {
-            if a.item.id != b.item.id || a.index != b.index || a.item.isPinned != b.item.isPinned {
+            if a.item.id != b.item.id || a.index != b.index || a.item.isPinned != b.item.isPinned
+                || a.item.contentRevision != b.item.contentRevision {
                 return false
             }
         }
@@ -1159,6 +1160,7 @@ struct PopoverRow: View, Equatable {
 
     static func == (l: PopoverRow, r: PopoverRow) -> Bool {
         l.item.id == r.item.id &&
+        l.item.contentRevision == r.item.contentRevision &&
         l.index == r.index &&
         l.isSelected == r.isSelected &&
         l.markOrder == r.markOrder &&

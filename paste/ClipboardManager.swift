@@ -1748,6 +1748,28 @@ struct ClipboardItem: Identifiable {
     let primaryTag: ClipboardTag
     let detectedColor: NSColor?
     var isPinned:  Bool     = false
+
+    /// Bumped every time this item's `content` is replaced by an edit.
+    ///
+    /// Exists for view diffing, nothing else. `PopoverRow`/`ImageRunRow` are
+    /// `Equatable` and applied with `.equatable()`, which makes their `==` the
+    /// authority on whether SwiftUI re-renders a row at all. Neither could
+    /// compare `content` directly — it holds whole images and RTF blobs — so
+    /// both compared cheap scalars instead, and an edit that changed ONLY the
+    /// text left every one of those scalars identical: same id (edits preserve
+    /// it), same pin/urlTitle/diffBadge/userNote (copied across), and
+    /// `metadataSummary` is nil for every text-ish case. `==` answered "equal",
+    /// the row body was skipped, and the popup kept drawing pre-edit text while
+    /// paste — which reads `items[idx].content` directly — used the new text.
+    ///
+    /// A counter rather than a preview comparison because the row renders up to
+    /// `rowPreviewPrefix`'s 1024 characters while `searchPreviewNorm` caps at
+    /// 200: comparing that would have silently missed any edit past character
+    /// 200. This is exact at any length and O(1).
+    ///
+    /// Not persisted — `PersistedItem` is a separate DTO, and across a relaunch
+    /// every row is built fresh anyway.
+    var contentRevision: Int = 0
     var embedding: [Float]? = nil
     /// Embedding of just the AI-structured JSON (flattened key/value pairs,
     /// one vector for the whole thing), kept separate from `embedding` so
