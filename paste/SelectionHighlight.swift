@@ -104,19 +104,31 @@ struct SelectionHighlight: ViewModifier {
                 .scaleEffect(isSelected ? SelectionHighlightStyle.cellScale : 1.0)
                 .animation(SelectionHighlightStyle.spring, value: isSelected)
         case .textCell:
-            // No matchedGeometryEffect and no scale, for the same reason
-            // `.cell` avoids the former: these live inside an HStack that
-            // nils the ambient transaction. Deliberately no scaleEffect at
-            // all — the chip's width is what a packed row was measured
-            // against, so growing it on selection would shove its
-            // neighbours off the line.
+            // Identical to `.cell` in every animated property — same spring,
+            // same scale, same shadow — and differs ONLY in stroke width.
+            // A selected member of a packed row has to travel and lift the
+            // same way whether that row holds thumbnails or text; anything
+            // else reads as two different selection systems in one list.
+            //
+            // The scale is emphatically not a layout problem: `scaleEffect`
+            // is a render transform, so the chip's frame — which is what
+            // the row was width-packed against — does not change, and its
+            // neighbours do not move.
+            //
+            // No matchedGeometryEffect, for exactly the reason `.cell`
+            // documents above: these live inside an HStack that nils the
+            // ambient transaction, so a matched frame change would jump
+            // while the spring below was still running.
             content
                 .overlay {
                     RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous)
-                        .stroke(Color.white.opacity(0.9),
+                        .stroke(Color.white.opacity(0.85),
                                 lineWidth: SelectionHighlightStyle.textCellBorderWidth)
                         .opacity(isSelected ? 1 : 0)
+                        .shadow(color: Color.black.opacity(isSelected ? 0.3 : 0),
+                                radius: isSelected ? 6 : 0, x: 0, y: isSelected ? 2 : 0)
                 }
+                .scaleEffect(isSelected ? SelectionHighlightStyle.cellScale : 1.0)
                 .animation(SelectionHighlightStyle.spring, value: isSelected)
         }
     }

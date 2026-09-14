@@ -242,13 +242,22 @@ struct DetailsPanelView: View {
                                     Text(source.uppercased())
                                         .font(.system(size: 8, weight: .bold)).tracking(0.5)
                                         .foregroundColor(wholeSelected ? .white.opacity(0.55) : .accentColor.opacity(0.8))
+                                        .transaction { $0.animation = nil }
                                 }
                                 unitRow(unit, wholeSelected: wholeSelected,
                                        focusedFieldIndex: focusedFieldIndex,
                                        wholeMarkOrder: wholeMarkOrder,
                                        fieldMarkOrder: { fi in stopIndex(fi).flatMap { markOrders[$0] } })
                             }
-                            .transaction { $0.animation = nil }
+                            // The nil transaction that used to sit here
+                            // wrapped the field rows too, and a
+                            // matched-geometry frame change animates with
+                            // the AMBIENT transaction — so the shared
+                            // selection box could never glide between
+                            // fields, only between cards. It is now applied
+                            // to the text content itself (see `unitRow`),
+                            // which is all it was ever for: keeping labels
+                            // and values from cross-fading on a rebuild.
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
                             .selectionHighlight(isSelected: wholeSelected,
@@ -314,6 +323,7 @@ struct DetailsPanelView: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                .transaction { $0.animation = nil }
 
             case .group(let key, let fields):
 
@@ -321,6 +331,7 @@ struct DetailsPanelView: View {
                     Text(key.uppercased())
                         .font(.system(size: 9, weight: .bold)).tracking(0.7)
                         .foregroundColor(wholeSelected ? .white.opacity(0.75) : .secondary)
+                        .transaction { $0.animation = nil }
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(fields.indices, id: \.self) { fi in
                             let field = fields[fi]
@@ -344,17 +355,31 @@ struct DetailsPanelView: View {
                                     markBadge(order, onWhite: fieldFocused)
                                 }
                             }
+                            // Content only — deliberately INSIDE the
+                            // highlight below, so the box is free to glide
+                            // while the text itself still never animates.
+                            .transaction { $0.animation = nil }
                             .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(
-                                // Only a field selected on its OWN gets this
-                                // pill — the whole-section highlight already
-                                // covers the entire card via
-                                // .selectionHighlight above, so drawing this
-                                // too would double up the same state.
-                                (focusedFieldIndex == fi && !wholeSelected)
-                                    ? Color.accentColor.opacity(0.85) : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            )
+                            // The SAME selection box the cards use, in the
+                            // same namespace — not a separately drawn pill.
+                            // A plain .background here meant the highlight
+                            // popped in and out when D stepped between
+                            // fields, while stepping between cards glided,
+                            // so one panel had two different selection
+                            // behaviours depending on which kind of stop you
+                            // happened to be on. Sharing the namespace lets
+                            // matchedGeometryEffect carry one box smoothly
+                            // across every stop — field to field, and field
+                            // to the whole-section row that follows it.
+                            //
+                            // Exactly one stop is ever selected, so there is
+                            // never more than one matched-geometry source:
+                            // when the whole section is selected the card
+                            // owns the box and no field claims it.
+                            .selectionHighlight(
+                                isSelected: focusedFieldIndex == fi && !wholeSelected,
+                                namespace: selectionNamespace,
+                                inset: 0)
                         }
                     }
                 }
