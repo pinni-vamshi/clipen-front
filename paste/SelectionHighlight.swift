@@ -6,6 +6,9 @@ enum SelectionHighlightStyle {
     static let cornerRadius: CGFloat = 8
     static let cellCornerRadius: CGFloat = 6
     static let cellBorderWidth: CGFloat = 4.0
+    /// Thin enough to sit around text without crowding it — see
+    /// `SelectionHighlightAppearance.textCell`.
+    static let textCellBorderWidth: CGFloat = 1.5
     static let spring = Animation.spring(response: 0.35, dampingFraction: 0.75)
 
     static let rowRailSpacing: CGFloat = 8
@@ -18,6 +21,19 @@ enum SelectionHighlightAppearance {
 
     case rowSurface
     case cell
+    /// The `.cell` treatment retuned for text rather than a thumbnail.
+    ///
+    /// `.cell` is built for a 51pt image: a 4pt white stroke on the content's
+    /// exact bounds reads as a ring around a picture, and a 1.22x pop is free
+    /// because the cell is fixed-size with space around it. Applied to a text
+    /// chip both are wrong — the stroke lands directly on the glyphs instead
+    /// of around them, and scaling a chip inside a width-packed row pushes its
+    /// neighbours out of the line it was measured to fit. This keeps the same
+    /// visual language (white outline marking the selected member of an
+    /// accent-filled row) at a weight text can survive: thinner stroke, no
+    /// scale, and the chip supplies its own padding so the outline has
+    /// somewhere to sit.
+    case textCell
 }
 
 struct SelectionHighlight: ViewModifier {
@@ -86,6 +102,21 @@ struct SelectionHighlight: ViewModifier {
                 }
 
                 .scaleEffect(isSelected ? SelectionHighlightStyle.cellScale : 1.0)
+                .animation(SelectionHighlightStyle.spring, value: isSelected)
+        case .textCell:
+            // No matchedGeometryEffect and no scale, for the same reason
+            // `.cell` avoids the former: these live inside an HStack that
+            // nils the ambient transaction. Deliberately no scaleEffect at
+            // all — the chip's width is what a packed row was measured
+            // against, so growing it on selection would shove its
+            // neighbours off the line.
+            content
+                .overlay {
+                    RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous)
+                        .stroke(Color.white.opacity(0.9),
+                                lineWidth: SelectionHighlightStyle.textCellBorderWidth)
+                        .opacity(isSelected ? 1 : 0)
+                }
                 .animation(SelectionHighlightStyle.spring, value: isSelected)
         }
     }

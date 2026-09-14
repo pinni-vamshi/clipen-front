@@ -1128,9 +1128,31 @@ struct TextRunRow: View, Equatable {
     /// evenly across every gap in the row (see `body`), so a 2-chip row
     /// and a 4-chip row both fill the same line width instead of the
     /// shorter one hugging the left edge with dead space on the right.
-    // Not private: also read from ClipboardManager.computeRowSegments,
-    // which packs chunks against this same value.
-    static let chipGap: CGFloat = 14
+    /// Minimum gap either side of the divider between two chips. Measured
+    /// against real font metrics rather than picked by eye: four six-digit
+    /// codes (the common case — one-time passwords) come to 4x61pt of chip,
+    /// leaving 73pt for three gaps inside the 317pt line, so anything above
+    /// ~11 here drops the fourth code onto a row of its own. 14 did exactly
+    /// that, and before the gap accounting was fixed it instead packed all
+    /// four and overflowed the line by 14pt.
+    static let chipGap: CGFloat = 8
+    /// Ceiling on how far a gap may stretch. Gaps are flexible so they stay
+    /// equal to each other whatever the row holds, but unbounded they would
+    /// push a two-chip row's members to opposite edges of the line with a
+    /// void between them; past this the leftover space collects at the
+    /// trailing edge instead.
+    static let chipGapMax: CGFloat = 40
+    /// Padding inside a chip, either side of its text. The selection
+    /// outline is drawn on the chip's bounds, so this is also what keeps it
+    /// off the glyphs — without it the stroke sits directly on the text.
+    static let chipHPadding: CGFloat = 8
+    static let chipVPadding: CGFloat = 4
+    private static let dividerWidth: CGFloat = 1
+    /// What one gap between two chips actually costs on screen: a Spacer
+    /// each side of the divider. Packing and rendering both read this, so
+    /// the measurement can't drift from the layout again.
+    static var gapTotal: CGFloat { chipGap * 2 + dividerWidth }
+
     private static let railWidth: CGFloat = 22
     private static let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
 
@@ -1138,19 +1160,36 @@ struct TextRunRow: View, Equatable {
     // available content width is identical; no reason to re-derive it.
     static var lineWidth: CGFloat { ImageRunRow.lineWidth }
 
+    /// The one place that decides what string a chip is. Eligibility,
+    /// width measurement and rendering all go through it — they each used
+    /// to pattern-match `case .text` on their own, so the moment one of
+    /// them learned about a new content type and the others didn't, chips
+    /// measured 0pt wide and drew empty.
+    static func chipText(for item: ClipboardItem) -> String? {
+        guard let plain = item.content.plainText else { return nil }
+        let trimmed = plain.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// Real measured width at the exact font the chip renders in, not a
     /// character-count estimate — a guess reads wrong the moment a code
-    /// mixes narrow and wide glyphs, which most of these do.
+    /// mixes narrow and wide glyphs, which most of these do. Includes the
+    /// chip's own padding, since that is part of what has to fit.
     static func measuredChipWidth(for item: ClipboardItem) -> CGFloat {
-        guard case .text(let s) = item.content else { return 0 }
-        let str = s.trimmingCharacters(in: .whitespacesAndNewlines) as NSString
-        return ceil(str.size(withAttributes: [.font: font]).width)
+        guard let s = chipText(for: item) else { return 0 }
+        let width = (s as NSString).size(withAttributes: [.font: font]).width
+        return ceil(width) + chipHPadding * 2
     }
 
     private var isAnySelected: Bool { run.contains(where: { $0.index == selectedIndex }) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: SelectionHighlightStyle.rowRailSpacing) {
+        // .center, not the .top that ImageRunRow uses. There it makes no
+        // visible difference — a 51pt thumbnail all but fills the row — but
+        // a single line of text is barely a third of the row's height, so
+        // top-aligning it left every packed row sitting high against its
+        // own top edge instead of on the row's centre line.
+        HStack(alignment: .center, spacing: SelectionHighlightStyle.rowRailSpacing) {
             railBadge
                 .frame(width: Self.railWidth)
                 .frame(maxHeight: .infinity, alignment: .center)
@@ -1168,17 +1207,20 @@ struct TextRunRow: View, Equatable {
             // how much slack the row has — a row with 2 short chips
             // spreads them across the full line width instead of leaving
             // it bunched at the left with empty space on the right.
-            HStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 0) {
                 ForEach(Array(run.enumerated()), id: \.element.item.id) { cellIdx, entry in
                     if cellIdx > 0 {
                         Spacer(minLength: Self.chipGap)
+                            .frame(maxWidth: Self.chipGapMax)
                         Rectangle()
                             .fill(Color.secondary.opacity(0.2))
-                            .frame(width: 1, height: 14)
+                            .frame(width: Self.dividerWidth, height: 14)
                         Spacer(minLength: Self.chipGap)
+                            .frame(maxWidth: Self.chipGapMax)
                     }
                     TextRunCell(item: entry.item, index: entry.index,
                                 isSelected: entry.index == selectedIndex,
+                                rowSelected: isAnySelected,
                                 selectionNamespace: selectionNamespace,
                                 markOrder: markedItemIDs.firstIndex(of: entry.item.id).map { $0 + 1 },
                                 shakeGeneration: editDeniedShake?.itemID == entry.item.id
@@ -1226,6 +1268,11 @@ private struct TextRunCell: View, Equatable {
     let item: ClipboardItem
     let index: Int
     let isSelected: Bool
+    /// Whether ANY chip in this row is selected — which turns the whole row
+    /// accent-filled behind every chip, not just the chosen one. The text
+    /// has to lighten to stay legible on that fill even when this
+    /// particular chip isn't the selected one.
+    let rowSelected: Bool
     let selectionNamespace: Namespace.ID
     let markOrder: Int?
     let shakeGeneration: Int
@@ -1234,6 +1281,7 @@ private struct TextRunCell: View, Equatable {
         l.item.id == r.item.id
             && l.index == r.index
             && l.isSelected == r.isSelected
+            && l.rowSelected == r.rowSelected
             && l.markOrder == r.markOrder
             && l.shakeGeneration == r.shakeGeneration
     }
@@ -1241,20 +1289,23 @@ private struct TextRunCell: View, Equatable {
     @State private var shakeOffsetX: CGFloat = 0
     private func runShake() { runDeniedShake($shakeOffsetX) }
 
-    private var displayText: String {
-        guard case .text(let s) = item.content else { return "" }
-        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var displayText: String { TextRunRow.chipText(for: item) ?? "" }
+
+    private var textColor: Color {
+        if isSelected { return .white }
+        return rowSelected ? .white.opacity(0.72) : .primary
     }
 
     var body: some View {
         Text(displayText)
             .font(.system(size: 12, design: .monospaced))
             .lineLimit(1)
-            .foregroundColor(.primary)
+            .foregroundColor(textColor)
             .fixedSize()
-            .padding(.vertical, 4)
+            .padding(.horizontal, TextRunRow.chipHPadding)
+            .padding(.vertical, TextRunRow.chipVPadding)
             .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
-                                 inset: 0, appearance: .cell)
+                                 inset: 0, appearance: .textCell)
             .overlay(alignment: .topTrailing) {
                 if let order = markOrder {
                     Text("\(order)")
@@ -2180,11 +2231,32 @@ extension ClipboardManager {
     /// packing only makes sense for the short stuff that's mostly empty
     /// space in a full-height row today.
     static func isTextRunEligible(_ item: ClipboardItem) -> Bool {
-        guard case .text(let s) = item.content else { return false }
-        guard item.urlTitle == nil, !item.tags.contains(.table) else { return false }
-        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains("\n") else { return false }
-        return trimmed.count <= TextRunRow.maxEligibleLength
+        // Not just `.text`. A code copied off a web page almost never
+        // arrives as `.text`: if the HTML carries any styling at all,
+        // capture keeps it as `.html(html, plain: "281051")` (see
+        // ClipboardManager+Capture). Those render in the list exactly like a
+        // bare short string, so gating on `.text` alone meant half the short
+        // codes packed and half kept a full row of their own, with nothing
+        // on screen to explain the difference.
+        switch item.content {
+        case .text, .html, .richText, .rtfd: break
+        default: return false
+        }
+        guard item.urlTitle == nil,
+              !item.tags.contains(.table),
+              // Colour clips earn their own row: PopoverRow draws a swatch
+              // for them, and a bare chip would silently drop it.
+              item.detectedColor == nil else { return false }
+        guard let s = TextRunRow.chipText(for: item) else { return false }
+        guard !s.contains("\n"), s.count <= TextRunRow.maxEligibleLength else { return false }
+        // Same argument as the swatch: a rich clip whose actual point is an
+        // embedded image must keep the row that can show the thumbnail.
+        switch item.content {
+        case .text: break
+        default:
+            if EmbeddedImageExtractor.firstImage(for: item) != nil { return false }
+        }
+        return true
     }
 
     var rowSegments: [PopupRowSegment] {
@@ -2247,7 +2319,11 @@ extension ClipboardManager {
             var currentWidth: CGFloat = 0
             for entry in textRun.reversed() {
                 let w = TextRunRow.measuredChipWidth(for: entry.item)
-                let withGap = current.isEmpty ? w : currentWidth + TextRunRow.chipGap + w
+                // gapTotal, not chipGap: a gap renders as Spacer + divider +
+                // Spacer, so charging one chipGap here under-counted every
+                // gap by more than half and let rows pack past the width
+                // they were supposed to fit inside.
+                let withGap = current.isEmpty ? w : currentWidth + TextRunRow.gapTotal + w
                 if !current.isEmpty,
                    withGap > TextRunRow.lineWidth || current.count >= TextRunRow.maxPerLine {
                     chunksOldestFirst.append(current)
