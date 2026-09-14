@@ -212,6 +212,17 @@ struct PopoverPreviewView: View {
                 }
             }
         }
+        if ClipboardManager.isTextRunEligible(items[idx]) {
+            for segment in rowSegments {
+                if case .textRun(let run) = segment, run.contains(where: { $0.index == idx }) {
+                    // Unlike image runs, a text run is always exactly one
+                    // visual row regardless of chip count — width capped
+                    // it at build time — so there's never a taller run to
+                    // refine into.
+                    return (AnyHashable(segment.id), false)
+                }
+            }
+        }
         return (AnyHashable(items[idx].id), false)
     }
 
@@ -634,6 +645,15 @@ struct PopoverPreviewView: View {
                                         .equatable()
 
                                         .id(segment.id)
+
+                                case .textRun(let run):
+                                    TextRunRow(run: run, selectedIndex: selectedIndex,
+                                               selectionNamespace: selectionNamespace,
+                                               markedItemIDs: manager.markedItemIDs,
+                                               editDeniedShake: manager.editDeniedShake)
+                                        .equatable()
+
+                                        .id(segment.id)
                                 }
                                 if segIdx < segments.count - 1 {
                                     Divider().padding(.leading, 38).opacity(0.25)
@@ -766,7 +786,9 @@ struct ImageRunRow: View, Equatable {
 
     static let maxPerLine = 4
 
-    private static let lineWidth: CGFloat = 420
+    // Not private: TextRunRow packs onto the same row geometry (same
+    // insets, same rail), so it reuses this rather than re-deriving it.
+    static let lineWidth: CGFloat = 420
         - SelectionHighlightStyle.rowInset * 2
         - 18 - railWidth - SelectionHighlightStyle.rowRailSpacing - 1 - SelectionHighlightStyle.rowRailSpacing
 
@@ -1052,6 +1074,225 @@ private struct ImageRunCell: View, Equatable {
             guard new > 0 else { return }
             runShake()
         }
+    }
+}
+
+/// A row of short plain-text codes packed side by side — "DGOJPL",
+/// "281051", "625679" — instead of each getting a full row mostly empty
+/// under its own text. Same structure as `ImageRunRow` (shared rail, thin
+/// dividers between members, one row overall), but the chunk size isn't a
+/// fixed count: how many chips fit is decided by their REAL measured text
+/// width against the row's available width (see
+/// `ClipboardManager.computeRowSegments`), so a row of long codes packs 2,
+/// a row of short ones packs up to `maxPerLine`.
+struct TextRunRow: View, Equatable {
+    let run: [(item: ClipboardItem, index: Int)]
+    let selectedIndex: Int
+    let selectionNamespace: Namespace.ID
+    let markedItemIDs: [UUID]
+    let editDeniedShake: ClipboardManager.DeniedShakeSignal?
+
+    static func == (l: TextRunRow, r: TextRunRow) -> Bool {
+        guard l.run.count == r.run.count else { return false }
+        for (a, b) in zip(l.run, r.run) {
+            if a.item.id != b.item.id || a.index != b.index || a.item.isPinned != b.item.isPinned
+                || a.item.contentRevision != b.item.contentRevision {
+                return false
+            }
+        }
+        let lSelected = l.isAnySelected
+        let rSelected = r.isAnySelected
+        if lSelected != rSelected { return false }
+        if lSelected && l.selectedIndex != r.selectedIndex { return false }
+        let lMarked = Set(l.run.map(\.item.id)).intersection(l.markedItemIDs)
+        let rMarked = Set(r.run.map(\.item.id)).intersection(r.markedItemIDs)
+        if lMarked != rMarked { return false }
+        func shakeGen(_ row: TextRunRow) -> Int {
+            row.run.contains(where: { $0.item.id == row.editDeniedShake?.itemID })
+                ? row.editDeniedShake?.generation ?? 0 : 0
+        }
+        if shakeGen(l) != shakeGen(r) { return false }
+        return true
+    }
+
+    /// Past this many characters a plain-text item reads as real content,
+    /// not a short code, and keeps its own full row — see
+    /// `ClipboardManager.isTextRunEligible`.
+    static let maxEligibleLength = 24
+    /// Upper bound on chips per row, same cap as the image run — but
+    /// usually fewer actually land here: width, not count, is what decides
+    /// how many fit (see the packing in `computeRowSegments`).
+    static let maxPerLine = 4
+    /// Minimum breathing room either side of the divider between two
+    /// chips. The real gap is often larger: leftover row width is split
+    /// evenly across every gap in the row (see `body`), so a 2-chip row
+    /// and a 4-chip row both fill the same line width instead of the
+    /// shorter one hugging the left edge with dead space on the right.
+    // Not private: also read from ClipboardManager.computeRowSegments,
+    // which packs chunks against this same value.
+    static let chipGap: CGFloat = 14
+    private static let railWidth: CGFloat = 22
+    private static let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+
+    // Same row geometry as ImageRunRow — same insets, same rail — so the
+    // available content width is identical; no reason to re-derive it.
+    static var lineWidth: CGFloat { ImageRunRow.lineWidth }
+
+    /// Real measured width at the exact font the chip renders in, not a
+    /// character-count estimate — a guess reads wrong the moment a code
+    /// mixes narrow and wide glyphs, which most of these do.
+    static func measuredChipWidth(for item: ClipboardItem) -> CGFloat {
+        guard case .text(let s) = item.content else { return 0 }
+        let str = s.trimmingCharacters(in: .whitespacesAndNewlines) as NSString
+        return ceil(str.size(withAttributes: [.font: font]).width)
+    }
+
+    private var isAnySelected: Bool { run.contains(where: { $0.index == selectedIndex }) }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: SelectionHighlightStyle.rowRailSpacing) {
+            railBadge
+                .frame(width: Self.railWidth)
+                .frame(maxHeight: .infinity, alignment: .center)
+                .padding(.vertical, 2)
+                .clipped()
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(Color.secondary.opacity(0.25))
+                .frame(width: 1)
+                .frame(maxHeight: .infinity)
+
+            // Two equal-width Spacers flank every divider rather than one
+            // fixed gap. SwiftUI splits leftover space evenly across
+            // Spacers with no priority difference between them, so with N
+            // chips the (N-1) gaps all end up the same width regardless of
+            // how much slack the row has — a row with 2 short chips
+            // spreads them across the full line width instead of leaving
+            // it bunched at the left with empty space on the right.
+            HStack(spacing: 0) {
+                ForEach(Array(run.enumerated()), id: \.element.item.id) { cellIdx, entry in
+                    if cellIdx > 0 {
+                        Spacer(minLength: Self.chipGap)
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.2))
+                            .frame(width: 1, height: 14)
+                        Spacer(minLength: Self.chipGap)
+                    }
+                    TextRunCell(item: entry.item, index: entry.index,
+                                isSelected: entry.index == selectedIndex,
+                                selectionNamespace: selectionNamespace,
+                                markOrder: markedItemIDs.firstIndex(of: entry.item.id).map { $0 + 1 },
+                                shakeGeneration: editDeniedShake?.itemID == entry.item.id
+                                    ? editDeniedShake?.generation ?? 0 : 0)
+                        .equatable()
+                }
+            }
+            .frame(width: Self.lineWidth, alignment: .leading)
+            .transaction { $0.animation = nil }
+        }
+        .padding(.horizontal, 9).padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .selectionHighlight(isSelected: isAnySelected,
+                            namespace: selectionNamespace,
+                            inset: SelectionHighlightStyle.rowInset,
+                            appearance: .rowSurface)
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: SelectedRowFramePreferenceKey.self,
+                    value: isAnySelected ? geo.frame(in: .global) : nil)
+            }
+        )
+    }
+
+    /// The selected chip's own type icon while one of these is selected;
+    /// the count otherwise, since there's no single item to badge — mirrors
+    /// ImageRunRow's rail without needing that row's analysis-state ring
+    /// (short codes are never AI-analysed the same way).
+    @ViewBuilder
+    private var railBadge: some View {
+        if let selectedEntry = run.first(where: { $0.index == selectedIndex }) {
+            Image(systemName: selectedEntry.item.primaryTag.icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
+        } else {
+            Text("\(run.count)")
+                .font(.system(size: 9, weight: .black))
+                .foregroundColor(.secondary.opacity(0.75))
+        }
+    }
+}
+
+private struct TextRunCell: View, Equatable {
+    let item: ClipboardItem
+    let index: Int
+    let isSelected: Bool
+    let selectionNamespace: Namespace.ID
+    let markOrder: Int?
+    let shakeGeneration: Int
+
+    static func == (l: TextRunCell, r: TextRunCell) -> Bool {
+        l.item.id == r.item.id
+            && l.index == r.index
+            && l.isSelected == r.isSelected
+            && l.markOrder == r.markOrder
+            && l.shakeGeneration == r.shakeGeneration
+    }
+
+    @State private var shakeOffsetX: CGFloat = 0
+    private func runShake() { runDeniedShake($shakeOffsetX) }
+
+    private var displayText: String {
+        guard case .text(let s) = item.content else { return "" }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        Text(displayText)
+            .font(.system(size: 12, design: .monospaced))
+            .lineLimit(1)
+            .foregroundColor(.primary)
+            .fixedSize()
+            .padding(.vertical, 4)
+            .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
+                                 inset: 0, appearance: .cell)
+            .overlay(alignment: .topTrailing) {
+                if let order = markOrder {
+                    Text("\(order)")
+                        .font(.system(size: 8, weight: .black))
+                        .foregroundColor(.white)
+                        .frame(width: 14, height: 14)
+                        .background(Color(red: 0.20, green: 0.78, blue: 0.35), in: Circle())
+                        .offset(x: 4, y: -4)
+                        .help("Marked #\(order) for multi-paste — hold V to toggle")
+                }
+            }
+            .id(item.id)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                ClipboardManager.shared.uiSelectItem(at: index)
+                ClipboardManager.shared.pasteItemKeepingPopupOpen(id: item.id)
+            }
+            .onTapGesture(count: 1) {
+                let mods = NSEvent.modifierFlags
+                if mods.contains(.shift) {
+                    ClipboardManager.shared.uiRangeSelectItem(to: index)
+                    return
+                }
+                if mods.contains(.command) {
+                    ClipboardManager.shared.uiToggleSelectItem(at: index)
+                    return
+                }
+                ClipboardManager.shared.uiSelectItem(at: index)
+                ClipboardManager.shared.uiPreviewSelectedItem()
+            }
+            .onDrag {
+                item.makeItemProvider()
+            }
+            .offset(x: shakeOffsetX)
+            .onChange(of: shakeGeneration) { _, new in
+                guard new > 0 else { return }
+                runShake()
+            }
     }
 }
 
@@ -1907,11 +2148,17 @@ extension NSPopover {
 enum PopupRowSegment: Identifiable {
     case single(item: ClipboardItem, index: Int)
     case imageRun([(item: ClipboardItem, index: Int)])
+    /// Consecutive short plain-text items — verification codes, short IDs —
+    /// packed side by side onto one row instead of each taking a full row
+    /// of its own. See `ClipboardManager.isTextRunEligible` and
+    /// `TextRunRow`.
+    case textRun([(item: ClipboardItem, index: Int)])
 
     var id: String {
         switch self {
         case .single(let item, _): return item.id.uuidString
         case .imageRun(let run):   return "run-" + (run.first?.item.id.uuidString ?? "")
+        case .textRun(let run):    return "trun-" + (run.first?.item.id.uuidString ?? "")
         }
     }
 }
@@ -1925,6 +2172,21 @@ extension ClipboardManager {
         }
     }
 
+    /// Eligible for packing several onto one row alongside other short
+    /// codes — "DGOJPL", "281051", "625679". Deliberately narrow: only bare
+    /// plain text, one line, short enough that several genuinely fit side
+    /// by side. Anything with a URL title, already tagged as a table, or
+    /// past the length cap keeps its own full row exactly as before —
+    /// packing only makes sense for the short stuff that's mostly empty
+    /// space in a full-height row today.
+    static func isTextRunEligible(_ item: ClipboardItem) -> Bool {
+        guard case .text(let s) = item.content else { return false }
+        guard item.urlTitle == nil, !item.tags.contains(.table) else { return false }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains("\n") else { return false }
+        return trimmed.count <= TextRunRow.maxEligibleLength
+    }
+
     var rowSegments: [PopupRowSegment] {
         if let cached = _rowSegments { return cached }
         let computed = Self.computeRowSegments(for: displayItems)
@@ -1934,33 +2196,31 @@ extension ClipboardManager {
 
     static func computeRowSegments(for items: [ClipboardItem]) -> [PopupRowSegment] {
         var result: [PopupRowSegment] = []
-        var run: [(item: ClipboardItem, index: Int)] = []
+        var imageRun: [(item: ClipboardItem, index: Int)] = []
+        var textRun: [(item: ClipboardItem, index: Int)] = []
 
-        func flushRun() {
-            guard !run.isEmpty else { return }
-            // Chunk from the OLD end of the run forward, not the new end.
-            // New captures are always prepended to `items` (index 0), so a
-            // run's tail-relative position never moves — only its
-            // front-relative position does. Slicing front-first here used to
-            // mean every chunk boundary after the first re-shifted on every
-            // new image capture, changing `.imageRun` chunk identity (keyed
-            // on each chunk's first member) for chunks whose actual members
-            // barely changed — SwiftUI then tore down and rebuilt those rows
-            // instead of diffing them, which is what read as jerky/jumpy
-            // whenever several images were copied back to back. Anchoring
-            // chunk boundaries to the tail means only the newest (leading,
-            // still-growing) chunk's identity changes; every older chunk's
-            // membership — and therefore its id — is invariant to further
-            // insertions at the front.
-            let n = run.count
+        // Fixed-size chunking (images): anchor the irregular remainder
+        // chunk at the NEW (top/newest) end, so older chunks' membership —
+        // and therefore identity — is invariant to further insertions at
+        // the front. New captures are always prepended to `items` (index
+        // 0), so a run's tail-relative position never moves. Slicing
+        // front-first here used to mean every chunk boundary after the
+        // first re-shifted on every new image capture, changing
+        // `.imageRun` chunk identity for chunks whose actual members barely
+        // changed — SwiftUI then tore down and rebuilt those rows instead
+        // of diffing them, which read as jerky whenever several images
+        // were copied back to back.
+        func flushImageRun() {
+            guard !imageRun.isEmpty else { return }
+            let n = imageRun.count
             let remainder = n % ImageRunRow.maxPerLine
             var chunks: [[(item: ClipboardItem, index: Int)]] = []
             if remainder > 0 {
-                chunks.append(Array(run[0..<remainder]))
+                chunks.append(Array(imageRun[0..<remainder]))
             }
             var i = remainder
             while i < n {
-                chunks.append(Array(run[i..<(i + ImageRunRow.maxPerLine)]))
+                chunks.append(Array(imageRun[i..<(i + ImageRunRow.maxPerLine)]))
                 i += ImageRunRow.maxPerLine
             }
             for chunk in chunks {
@@ -1970,17 +2230,62 @@ extension ClipboardManager {
                     result.append(.single(item: chunk[0].item, index: chunk[0].index))
                 }
             }
-            run = []
+            imageRun = []
         }
+
+        // Width-based chunking (text): chunk size isn't constant here —
+        // how many codes fit depends on how long each one actually is — so
+        // the same "anchor the newest end" stability trick is done by
+        // packing greedily from the OLD (tail) end forward, i.e. over the
+        // run reversed, then reversing the result back. Only the newest,
+        // still-growing chunk shifts as more short codes get prepended;
+        // every older chunk's membership stays put.
+        func flushTextRun() {
+            guard !textRun.isEmpty else { return }
+            var chunksOldestFirst: [[(item: ClipboardItem, index: Int)]] = []
+            var current: [(item: ClipboardItem, index: Int)] = []
+            var currentWidth: CGFloat = 0
+            for entry in textRun.reversed() {
+                let w = TextRunRow.measuredChipWidth(for: entry.item)
+                let withGap = current.isEmpty ? w : currentWidth + TextRunRow.chipGap + w
+                if !current.isEmpty,
+                   withGap > TextRunRow.lineWidth || current.count >= TextRunRow.maxPerLine {
+                    chunksOldestFirst.append(current)
+                    current = [entry]
+                    currentWidth = w
+                } else {
+                    current.append(entry)
+                    currentWidth = withGap
+                }
+            }
+            if !current.isEmpty { chunksOldestFirst.append(current) }
+
+            for chunk in chunksOldestFirst.reversed() {
+                let ordered = Array(chunk.reversed())
+                if ordered.count >= 2 {
+                    result.append(.textRun(ordered))
+                } else {
+                    result.append(.single(item: ordered[0].item, index: ordered[0].index))
+                }
+            }
+            textRun = []
+        }
+
         for (idx, item) in items.enumerated() {
             if isImageRunEligible(item.content) {
-                run.append((item, idx))
+                flushTextRun()
+                imageRun.append((item, idx))
+            } else if isTextRunEligible(item) {
+                flushImageRun()
+                textRun.append((item, idx))
             } else {
-                flushRun()
+                flushImageRun()
+                flushTextRun()
                 result.append(.single(item: item, index: idx))
             }
         }
-        flushRun()
+        flushImageRun()
+        flushTextRun()
         return result
     }
 }

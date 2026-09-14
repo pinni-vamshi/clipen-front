@@ -89,7 +89,8 @@ extension ClipboardManager {
         registerDetailsKeyPress()
         if inDetailsStage {
             guard !detailUnits.isEmpty else { return }
-            detailsIndex = Self.cyclicIndex(detailsIndex, count: detailUnits.count, backward: backward)
+            let stopCount = DetailUnit.stops(for: detailUnits).count
+            detailsIndex = Self.cyclicIndex(detailsIndex, count: stopCount, backward: backward)
             AuthManager.shared.registerActionUsage(actionID: "action.details")
             playInteractionSoundIfEnabled(.similar)
             updateDetailsPanel()
@@ -507,42 +508,55 @@ extension ClipboardManager {
     }
 
     /// Carries the Details cursor and marks across a rebuild of the same
-    /// item's unit list. Units are addressed by index everywhere (marks,
-    /// mark order, paste), which is fine while a list is stable and wrong
-    /// the moment rows are inserted into it — so the indices are mapped
-    /// through `DetailUnit.id`. Anything that no longer exists is dropped
-    /// rather than left pointing at whatever moved into its slot.
+    /// item's unit list. `detailsIndex`/`markedDetailIndices`/`fieldMarkSeq`
+    /// are all STOP indices (see `DetailUnit.stops(for:)`), which is fine
+    /// while a list is stable and wrong the moment rows are inserted into
+    /// it — so each old stop is mapped through its unit's `DetailUnit.id`
+    /// rather than its raw position. A stop that pointed at one field
+    /// inside a group keeps pointing at that same field if the rebuilt
+    /// group still has it at that position; otherwise it falls back to
+    /// that unit's whole-section stop rather than landing on an unrelated
+    /// field. Anything whose unit no longer exists is dropped rather than
+    /// left pointing at whatever moved into its slot.
     private func reanchorDetailSelection(from old: [DetailUnit], to new: [DetailUnit]) {
         var positionByID: [String: Int] = [:]
         for (idx, unit) in new.enumerated() where positionByID[unit.id] == nil {
             positionByID[unit.id] = idx
         }
+        let oldStops = DetailUnit.stops(for: old)
+        let newStops = DetailUnit.stops(for: new)
+
+        func remap(_ oldStopIndex: Int) -> Int? {
+            guard oldStops.indices.contains(oldStopIndex) else { return nil }
+            let oldStop = oldStops[oldStopIndex]
+            guard old.indices.contains(oldStop.unitIndex),
+                  let newUnitIndex = positionByID[old[oldStop.unitIndex].id] else { return nil }
+            let sameField = DetailStop(unitIndex: newUnitIndex, fieldIndex: oldStop.fieldIndex)
+            if let exact = newStops.firstIndex(of: sameField) { return exact }
+            return newStops.firstIndex(of: DetailStop(unitIndex: newUnitIndex, fieldIndex: nil))
+        }
 
         var movedMarks: Set<Int> = []
         var movedSeq: [Int: Int] = [:]
         for oldIdx in markedDetailIndices {
-            guard old.indices.contains(oldIdx),
-                  let newIdx = positionByID[old[oldIdx].id] else { continue }
+            guard let newIdx = remap(oldIdx) else { continue }
             movedMarks.insert(newIdx)
             if let seq = fieldMarkSeq[oldIdx] { movedSeq[newIdx] = seq }
         }
         markedDetailIndices = movedMarks
         fieldMarkSeq = movedSeq
 
-        if old.indices.contains(detailsIndex), let newIdx = positionByID[old[detailsIndex].id] {
-            detailsIndex = newIdx
-        } else {
-            detailsIndex = 0
-        }
+        detailsIndex = remap(detailsIndex) ?? 0
     }
 
     /// Hold D to mark/unmark the unit under the cursor — same gesture,
     /// threshold and intent as hold-V on the main list and hold-R in the
-    /// Similar panel, aimed at this panel's own cursor. Marking a GROUP
-    /// marks it as one whole unit — its `pasteText` (all sub-fields joined
-    /// as readable lines) is what pastes, not one sub-field.
+    /// Similar panel, aimed at this panel's own cursor. Marks whichever
+    /// stop is currently under the cursor: a single field inside a group if
+    /// that's what D landed on, or the whole section if D has stepped past
+    /// every field onto the group's own whole-section stop.
     func toggleDetailFieldMark() {
-        guard inDetailsStage, detailUnits.indices.contains(detailsIndex) else { return }
+        guard inDetailsStage, DetailUnit.stops(for: detailUnits).indices.contains(detailsIndex) else { return }
         if markedDetailIndices.contains(detailsIndex) {
             markedDetailIndices.remove(detailsIndex)
             fieldMarkSeq[detailsIndex] = nil

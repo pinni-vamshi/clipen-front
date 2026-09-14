@@ -203,8 +203,14 @@ extension ClipboardManager {
         captureRememberedSelection()
 
         if inDetailsStage {
+            // detailsIndex/order.fields address STOPS (DetailUnit.stops),
+            // not units directly — a group's fields and its whole-section
+            // row are each their own stop, so this resolves through the
+            // same expansion the panel cycles and marks over. See
+            // DetailStop in DetailsPanel.swift.
+            let stops = DetailUnit.stops(for: detailUnits)
             guard displayItems.indices.contains(selectedIndex),
-                  detailUnits.indices.contains(detailsIndex) else {
+                  stops.indices.contains(detailsIndex) else {
                 setSidePanelStage(.none); previewWindow.hide(); return
             }
             let source = displayItems[selectedIndex]
@@ -216,8 +222,8 @@ extension ClipboardManager {
                 for (id, rank) in order.items {
                     if let it = byID[id] { ranked.append((rank, it)) }
                 }
-                for (idx, rank) in order.fields where detailUnits.indices.contains(idx) {
-                    ranked.append((rank, ClipboardItem(content: .text(detailUnits[idx].pasteText))))
+                for (idx, rank) in order.fields where stops.indices.contains(idx) {
+                    ranked.append((rank, ClipboardItem(content: .text(stops[idx].text(in: detailUnits)))))
                 }
                 ranked.sort { $0.rank < $1.rank }
                 let ordered = ranked.map(\.item)
@@ -232,15 +238,10 @@ extension ClipboardManager {
                 return
             }
 
-            guard detailUnits.indices.contains(detailsIndex) else {
-                setSidePanelStage(.none)
-                previewWindow.hide()
-                return
-            }
-            let unit = detailUnits[detailsIndex]
+            let text = stops[detailsIndex].text(in: detailUnits)
             setSidePanelStage(.none)
             previewWindow.hide()
-            handleTransformResult(.text(unit.pasteText), restoring: source)
+            handleTransformResult(.text(text), restoring: source)
             return
         }
 
