@@ -720,6 +720,17 @@ extension ClipboardManager {
     /// refused by the same test on the open path, which stranded the user on an
     /// empty collection with no way back to their clips from the popup at all.
     ///
+    /// Called ONLY from the delete paths below — deliberately never on popup
+    /// open or on Cmd-V. It cannot tell "emptied by a delete" from "empty
+    /// because it is new", and those need opposite outcomes: a collection
+    /// the user just deleted down to nothing should fall back to All, but a
+    /// brand-new collection is empty precisely because the user switched
+    /// into it to fill it. 1.6.52 also ran this on every open and every
+    /// Cmd-V, which cleared a new collection before its first copy was
+    /// captured — that copy went to All untagged, and no new collection
+    /// could ever receive a first item. Only a delete knows the collection
+    /// WAS non-empty a moment ago, so only a delete may call this.
+    ///
     /// Filters drop cheapest-first: a tag filter is a within-session narrowing
     /// and goes before the collection, which the user picked deliberately and
     /// which persists across launches. A search query is deliberately NOT

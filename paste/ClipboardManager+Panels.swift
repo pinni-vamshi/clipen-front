@@ -1221,7 +1221,10 @@ extension ClipboardManager {
         guard pendingFirstOpen else { return }
         pendingFirstOpen = false
         pendingFirstOpenTimer = nil
-        guard fallBackToAllIfViewEmpty() else { return }
+        // Not fallBackToAllIfViewEmpty(): an empty collection at open time is
+        // normally one the user just created and is about to fill, and
+        // clearing it here would send their next copy to All instead.
+        guard !displayItems.isEmpty else { return }
         openPopupNow()
         cycleCount += 1
     }
@@ -1230,11 +1233,6 @@ extension ClipboardManager {
 
         lastPollActivityAt = Date()
         popupTagFilter = nil
-        // Covers every open path at once. An active collection that has been
-        // emptied (or deleted down to nothing) must not open onto a blank
-        // popup — All is the default view and the only one guaranteed to have
-        // the user's clips in it.
-        fallBackToAllIfViewEmpty()
         let withinRememberWindow: Bool = {
             guard let savedAt = rememberedSelectionSavedAt else { return false }
             guard rememberLastPositionTimeoutMinutes > 0 else { return true }

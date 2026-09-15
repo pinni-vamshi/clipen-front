@@ -541,12 +541,18 @@ extension ClipboardManager {
                 return nil
             }
 
-            // Falls back to All BEFORE deciding there is nothing to show:
-            // this guard hands Cmd-V back to the frontmost app, so an emptied
-            // active collection reaching it meant the popup could not be
-            // opened at all — the keystroke just pasted through instead.
-            if displayItems.isEmpty, !previewWindow.isVisible, !shift,
-               !fallBackToAllIfViewEmpty() {
+            // Hands Cmd-V back untouched when there is nothing to show, and
+            // deliberately does NOT fall back to All first. An empty view
+            // here is almost always a collection that is empty because it is
+            // NEW — the user switched into it precisely to fill it. Falling
+            // back cleared activeCollection on this keystroke, before the
+            // copy that would have been its first item had even been
+            // captured (the poll runs every 0.1-0.5s, and HTML copies take an
+            // extra background hop), so that copy landed untagged in All and
+            // a new collection could never receive its first item. The one
+            // case that should fall back — a delete emptying the collection
+            // — is handled at the delete itself (see fallBackToAllIfViewEmpty).
+            if displayItems.isEmpty && !previewWindow.isVisible && !shift {
                 return Unmanaged.passUnretained(event)
             }
 
