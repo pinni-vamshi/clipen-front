@@ -99,6 +99,14 @@ class ClipboardManager: ObservableObject {
             _availableTags = nil
             _itemIndexByID = nil
             updatePendingPasteID()
+            // Keeps history_size/pinned_now/groups_now current on PostHog.
+            // This didSet already fires on every capture, delete, and pin
+            // toggle (see the comment on the fast path below), so it is the
+            // one place that can catch all three without a hook at each
+            // call site — debounced, so a burst of copies coalesces into
+            // one sync instead of one per item. See
+            // AuthManager.scheduleLivePersonPropertiesSync.
+            AuthManager.shared.scheduleLivePersonPropertiesSync()
             if !markedItemIDs.isEmpty {
                 let live = Set(items.map(\.id))
                 let cleaned = markedItemIDs.filter { live.contains($0) }

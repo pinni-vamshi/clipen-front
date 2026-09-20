@@ -759,11 +759,49 @@ final class AuthManager: ObservableObject {
         TrackingService.shared.recordEvent(id: actionID, count: count, value: value, extraProperties: extraProperties)
     }
 
+    private var livePersonPropertiesSyncWork: DispatchWorkItem?
+
+    /// Coalesces a burst of state-changing activity — copy, delete, pin,
+    /// unpin — into one PostHog `$set` a few seconds after things go quiet,
+    /// instead of firing a network request on every single event.
+    ///
+    /// `history_size`, `pinned_now` and `groups_now` used to be current only
+    /// immediately after launch or after an explicit group/collection
+    /// action: copying, deleting and pinning never called
+    /// `syncPersonPropertiesToPostHog` at all, so those three counts drifted
+    /// out of sync with reality for the rest of the session. Hooked from
+    /// `ClipboardManager.items`'s `didSet` — the one place that already
+    /// fires on every capture, delete, pin toggle, group and ungroup (see
+    /// its own comment on why it fires that broadly) — so this needed no
+    /// new call sites at all, just one more subscriber to a hook that
+    /// already existed.
+    ///
+    /// Debounced rather than called directly: `items` mutates on things far
+    /// more frequent than these counts changing (a pasteCount increment, an
+    /// OCR result landing, AI structured text being stored), and copying is
+    /// itself often rapid-fire. Coalescing means a burst of ten copies in
+    /// two seconds sends one `$set` shortly after the burst ends, not ten
+    /// individual requests.
+    func scheduleLivePersonPropertiesSync() {
+        livePersonPropertiesSyncWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.syncPersonPropertiesToPostHog()
+        }
+        livePersonPropertiesSyncWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+    }
+
     /// Re-sends the current-state person properties (item/pin/group/
     /// collection counts, version, plan) to PostHog. Called once at
-    /// launch, and again whenever an action actually changes one of these
-    /// counts (group/ungroup, collection create/delete).
+    /// launch, immediately after an explicit low-frequency action
+    /// (group/ungroup, collection create/delete), and — debounced — from
+    /// `scheduleLivePersonPropertiesSync` for everything else that changes
+    /// these counts.
     func syncPersonPropertiesToPostHog(setFirstSeen: Bool = false) {
+        // A call here already sends fresh values right now, so a debounced
+        // resend still pending from `scheduleLivePersonPropertiesSync`
+        // would only repeat the same $set a few seconds later.
+        livePersonPropertiesSyncWork?.cancel()
         let m = ClipboardManager.shared
         let groupCount = m.items.filter {
             if case .group = $0.content { return true }
