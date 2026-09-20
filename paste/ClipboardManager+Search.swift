@@ -867,6 +867,7 @@ extension ClipboardManager {
         previewWindow.hide()
         transformPanel.hide()
         itemPreviewPanel.hide()
+        hideDetailsNudge()
         userOpenedItemPreview = false
         cancelPendingFirstOpen()
         vTapHoldTimer?.invalidate()

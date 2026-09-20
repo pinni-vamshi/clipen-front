@@ -840,6 +840,7 @@ class ClipboardManager: ObservableObject {
     let itemPreviewPanel = ItemPreviewPanel()
     let sharePanel = SharePanel()
     let detailsPanel = DetailsPanel()
+    let detailsNudgePanel = DetailsNudgePanel()
     var detailUnits: [DetailUnit] = []
     var detailsIndex: Int = 0
 
@@ -925,29 +926,54 @@ class ClipboardManager: ObservableObject {
 
     @Published var showFirstCycleHint: Bool = false
 
-    /// One-time discovery hint for the Details panel (D key) — shown until
-    /// the user has pressed D five times, or dismisses it manually via its
-    /// own close button, whichever comes first. Was 2 presses; PostHog
-    /// showed that left the feature almost undiscovered (2 of 791 active
-    /// users had ever opened Details), so the hint was very likely
-    /// disappearing before it had a real chance to register — 5 gives it
-    /// meaningfully longer to be noticed.
-    @Published var showDetailsHint: Bool = !UserDefaults.standard.bool(forKey: "hasSeenDetailsHint")
-    private var detailsHintPressCount = 0
-    static let detailsHintDismissThreshold = 5
-    func registerDetailsKeyPress() {
-        guard showDetailsHint else { return }
-        detailsHintPressCount += 1
-        guard detailsHintPressCount >= Self.detailsHintDismissThreshold else { return }
-        dismissDetailsHint()
+    /// Discovery nudge for the Details panel (D key).
+    ///
+    /// Replaces the one-line "Tip: Press D…" banner that used to sit in the
+    /// popup's tip strip. PostHog measured how well that worked: 2 of 791
+    /// active users had ever opened Details. Raising its dismissal
+    /// threshold from 2 presses to 5 did not move that, because the problem
+    /// was never how LONG the line stayed on screen — it was a line of text
+    /// among other lines of text, nowhere near the item it described. The
+    /// nudge now takes the Details panel's own footprint and anchor, so it
+    /// occupies the space the fields themselves are about to fill. See
+    /// `DetailsNudgePanel`.
+    ///
+    /// Shown at most `maxDetailsNudgeShows` times, at most once per popup
+    /// session, and never again once the user has pressed D even once.
+    static let maxDetailsNudgeShows = 3
+    /// At most one appearance per popup session, so re-selecting a row
+    /// cannot re-show it and burn through the three-show budget in one
+    /// sitting. Reset on each popup open.
+    var detailsNudgeShownThisSession = false
+    var detailsNudgeWork: DispatchWorkItem?
+    private static let detailsNudgeLearnedKey = "clipen.detailsNudge.learned"
+    private static let detailsNudgeShowsKey   = "clipen.detailsNudge.shows"
+
+    var detailsNudgeLearned: Bool {
+        UserDefaults.standard.bool(forKey: Self.detailsNudgeLearnedKey)
+    }
+    var detailsNudgeShowCount: Int {
+        get { UserDefaults.standard.integer(forKey: Self.detailsNudgeShowsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.detailsNudgeShowsKey) }
     }
 
-    /// Manual dismissal via the hint's own close button — same permanent
-    /// "don't show again" outcome as reaching the press threshold, just
-    /// triggered by the user directly instead of by usage count.
-    func dismissDetailsHint() {
-        showDetailsHint = false
-        UserDefaults.standard.set(true, forKey: "hasSeenDetailsHint")
+    /// The first press of D, ever, is the entire goal — so one press retires
+    /// the nudge permanently. The old banner waited for five presses before
+    /// going away, which meant it kept occupying the tip strip for people
+    /// who had already found the feature.
+    func registerDetailsKeyPress() {
+        guard !detailsNudgeLearned else { return }
+        UserDefaults.standard.set(true, forKey: Self.detailsNudgeLearnedKey)
+        AuthManager.shared.registerActionUsage(actionID: "action.details-nudge-learned")
+        hideDetailsNudge()
+    }
+
+    /// Manual dismissal via the nudge's own close button — same permanent
+    /// "don't show again" outcome as pressing D.
+    func dismissDetailsNudge() {
+        UserDefaults.standard.set(true, forKey: Self.detailsNudgeLearnedKey)
+        AuthManager.shared.registerActionUsage(actionID: "action.details-nudge-dismissed")
+        hideDetailsNudge()
     }
 
     @Published var launchAtLoginEnabled: Bool = (SMAppService.mainApp.status == .enabled)
@@ -1361,6 +1387,9 @@ class ClipboardManager: ObservableObject {
 
     func setSidePanelStage(_ new: SidePanelStage) {
         guard new != sidePanelStage else { return }
+        // A real panel is taking this space — the nudge occupies the same
+        // anchor, so it always yields.
+        if new != .none { hideDetailsNudge() }
 
         switch sidePanelStage {
         case .transform:

@@ -400,3 +400,167 @@ struct DetailsPanelView: View {
             .background(onWhite ? Color.white : Color.accentColor, in: Circle())
     }
 }
+
+// MARK: - Details discoverability nudge
+
+/// Teaches D by appearing exactly where D's answer will appear.
+///
+/// Replaces the one-line "Tip: Press D…" banner that used to sit in the
+/// popup's tip strip alongside every other tip: it never moved, never
+/// pointed at the item it was talking about, and read past as easily as any
+/// other line of text. This takes the Details panel's own footprint and
+/// anchor instead, so the prompt occupies the space the fields themselves
+/// will fill a moment later.
+///
+/// Deliberately NOT the existing `NudgeLessonPanel` treatment. That is an
+/// 820x500 floating window with a full keyboard illustration and
+/// Learned/Later buttons — it interrupts, and it teaches a key in the
+/// abstract, detached from any real item. This shows a single key pressing
+/// itself over ghosts of the real fields it is about to reveal, next to the
+/// row it belongs to.
+final class DetailsNudgePanel: AnchoredPopoverPanel {
+    func show(fieldHint: String,
+              near popupFrame: NSRect,
+              anchorPoint: NSPoint?,
+              onDismiss: @escaping () -> Void) {
+        let content = DetailsNudgeView(fieldHint: fieldHint, onDismiss: onDismiss)
+        present(content, size: NSSize(width: 400, height: 236),
+                near: popupFrame, anchorPoint: anchorPoint)
+    }
+}
+
+private struct DetailsNudgeView: View {
+    /// A short, item-specific line naming what is actually behind D for the
+    /// row this is anchored to — "Total, order number and date" reads as a
+    /// promise about THIS item, where a generic "view extracted fields"
+    /// reads as documentation.
+    let fieldHint: String
+    let onDismiss: () -> Void
+
+    @State private var pressed = false
+    @State private var rippling = false
+    @State private var revealed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "list.bullet.rectangle")
+                    .font(.system(size: 10, weight: .semibold)).foregroundColor(.textDim)
+                Text("DETAILS")
+                    .font(.system(size: 9, weight: .semibold)).tracking(1.6)
+                    .foregroundColor(.textDim)
+                Spacer()
+                Text("TIP")
+                    .font(.system(size: 8, weight: .bold)).tracking(1.0)
+                    .foregroundColor(.textDim.opacity(0.6))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            Divider().background(Color.border)
+
+            ZStack {
+                ghostRows
+                VStack(spacing: 14) {
+                    keyCap
+                    VStack(spacing: 3) {
+                        (Text("Press ") + Text("D").foregroundColor(.accent).bold()
+                            + Text(" for this item's details"))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.textPri)
+                        Text(fieldHint)
+                            .font(.system(size: 11))
+                            .foregroundColor(.textSec)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider().background(Color.border)
+            HStack(spacing: 8) {
+                Text("Tap D again to step through each field")
+                    .font(.system(size: 10)).foregroundColor(.textDim)
+                Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.textDim)
+                }
+                .buttonStyle(.plain)
+                .help("Don't show this tip again")
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { startLoop() }
+    }
+
+    /// Skeletons of the fields D would reveal, firming up a beat after each
+    /// press so the key's effect is visible, not just the key.
+    private var ghostRows: some View {
+        VStack(spacing: 10) {
+            ghost(width: 120)
+            ghost(width: 86)
+            ghost(width: 142)
+        }
+        .padding(.horizontal, 16)
+        .opacity(0.9)
+    }
+
+    private func ghost(width: CGFloat) -> some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(Color.textDim.opacity(0.28))
+                .frame(width: 52, height: 6)
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .fill(Color.textDim.opacity(0.18))
+                .frame(width: width, height: 8)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 26)
+        .background(revealed ? Color.accentDim : Color.surfaceHi,
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
+    /// One key, pressing itself. The whole point of the different animation:
+    /// no keyboard to locate the key on, just the key doing the thing the
+    /// user is being asked to do.
+    private var keyCap: some View {
+        Text("D")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: 46, height: 46)
+            .background(Color.accent, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.black.opacity(0.22))
+                    .frame(height: pressed ? 1 : 3)
+                    .mask(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.accent, lineWidth: 2)
+                    .scaleEffect(rippling ? 1.75 : 1.0)
+                    .opacity(rippling ? 0 : 0.55)
+            }
+            .shadow(color: Color.accent.opacity(pressed ? 0.5 : 0.35),
+                    radius: pressed ? 4 : 10, x: 0, y: pressed ? 1 : 4)
+            .offset(y: pressed ? 3 : 0)
+    }
+
+    /// Driven by explicit repeating animations installed once, on appear.
+    /// This panel is shown and then left alone — it is not re-rendered per
+    /// keystroke the way the row badges are — so the usual objection to
+    /// `.repeatForever` (re-installing it on every state change) does not
+    /// apply here.
+    private func startLoop() {
+        withAnimation(.easeInOut(duration: 0.34).repeatForever(autoreverses: true).delay(0.2)) {
+            pressed = true
+        }
+        withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false).delay(0.2)) {
+            rippling = true
+        }
+        withAnimation(.easeInOut(duration: 0.34).repeatForever(autoreverses: true).delay(0.45)) {
+            revealed = true
+        }
+    }
+}

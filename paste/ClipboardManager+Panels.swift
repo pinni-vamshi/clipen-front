@@ -761,6 +761,7 @@ extension ClipboardManager {
     }
 
     func selectionDidChange() {
+        evaluateDetailsNudge()
         syncItemPreviewWithSelection()
         syncTransformPanelWithSelection()
         syncShareStageWithSelection()
@@ -1233,6 +1234,7 @@ extension ClipboardManager {
 
         lastPollActivityAt = Date()
         popupTagFilter = nil
+        detailsNudgeShownThisSession = false
         let withinRememberWindow: Bool = {
             guard let savedAt = rememberedSelectionSavedAt else { return false }
             guard rememberLastPositionTimeoutMinutes > 0 else { return true }
@@ -1763,4 +1765,95 @@ extension ClipboardManager {
         AuthManager.shared.registerActionUsage(actionID: "action.collection-share")
     }
 
+}
+
+// MARK: - Details discovery nudge
+
+extension ClipboardManager {
+
+    /// Long enough that the nudge never flashes past while someone is
+    /// cycling through rows — it appears only once the selection settles on
+    /// a row that actually has details.
+    private static var detailsNudgeDwell: TimeInterval { 0.7 }
+
+    /// Considers showing the "press D" nudge beside the selected row.
+    ///
+    /// Gated on the row genuinely HAVING analysis, which is the same
+    /// condition that makes its rail badge alternate with the sparkles
+    /// glyph: the nudge promises fields, so it must never appear over a row
+    /// that has none to show.
+    ///
+    /// Deliberately NOT gated on `autoTipsEnabled`. That setting defaults to
+    /// OFF and governs the opt-in practice lessons; gating on it would
+    /// silently disable, for almost everyone, the one nudge that exists to
+    /// fix a measured discovery failure (2 of 791 active users had ever
+    /// opened Details).
+    func evaluateDetailsNudge() {
+        detailsNudgeWork?.cancel()
+        detailsNudgeWork = nil
+        guard detailsNudgeIsEligible else { return }
+
+        let work = DispatchWorkItem { [weak self] in self?.presentDetailsNudgeIfStillValid() }
+        detailsNudgeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.detailsNudgeDwell, execute: work)
+    }
+
+    private var detailsNudgeIsEligible: Bool {
+        !detailsNudgeLearned
+            && detailsNudgeShowCount < Self.maxDetailsNudgeShows
+            && !detailsNudgeShownThisSession
+            && previewWindow.isVisible
+            && sidePanelStage == .none
+            && !isInlineEditing
+            && !isSearchActive
+            && !popupPinnedOpen
+            && displayItems.indices.contains(selectedIndex)
+    }
+
+    private func presentDetailsNudgeIfStillValid() {
+        detailsNudgeWork = nil
+        // Re-checked rather than trusted: the dwell means everything below
+        // had 0.7s to change underneath this.
+        guard detailsNudgeIsEligible else { return }
+
+        let item = displayItems[selectedIndex]
+        guard case .done = AIStructuringService.shared.state(for: item) else { return }
+        let units = detailUnits(for: item)
+        guard !units.isEmpty else { return }
+
+        detailsNudgeShownThisSession = true
+        detailsNudgeShowCount += 1
+        AuthManager.shared.registerActionUsage(actionID: "action.details-nudge-shown")
+        detailsNudgePanel.show(
+            fieldHint: Self.detailsNudgeFieldHint(for: units),
+            near: previewWindow.frame,
+            anchorPoint: selectedRowAnchor(),
+            onDismiss: { [weak self] in self?.dismissDetailsNudge() }
+        )
+    }
+
+    func hideDetailsNudge() {
+        detailsNudgeWork?.cancel()
+        detailsNudgeWork = nil
+        detailsNudgePanel.hide()
+    }
+
+    /// Names what is actually behind D for THIS row — "Total, order number
+    /// and date" — rather than describing the feature in the abstract. A
+    /// promise about the item in front of you is what the old banner's
+    /// generic wording could never make.
+    static func detailsNudgeFieldHint(for units: [DetailUnit]) -> String {
+        let names = units.prefix(3)
+            .map { $0.headingKey.replacingOccurrences(of: "_", with: " ").lowercased() }
+            .filter { !$0.isEmpty }
+        guard let first = names.first else { return "Paste any single field on its own" }
+
+        let listed: String
+        switch names.count {
+        case 1:  listed = first
+        case 2:  listed = "\(first) and \(names[1])"
+        default: listed = "\(first), \(names[1]) and \(names[2])"
+        }
+        return listed.prefix(1).uppercased() + listed.dropFirst() + " — paste any one on its own"
+    }
 }

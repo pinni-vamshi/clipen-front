@@ -241,7 +241,6 @@ struct PopoverPreviewView: View {
                 updateAvailableBanner
                 aiSetupBanner
                 firstCycleHint
-                detailsHint
                 rememberForeverBanner
 
                 Divider().padding(.bottom, 4)
@@ -513,34 +512,6 @@ struct PopoverPreviewView: View {
                         .underline()
                 }
                 .buttonStyle(.plain)
-            }
-            .foregroundColor(Self.bannerBlue)
-            .padding(.horizontal, 14).padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white)
-            .transition(.opacity)
-        }
-    }
-
-    @ViewBuilder
-    private var detailsHint: some View {
-        if manager.showDetailsHint {
-            HStack(spacing: 6) {
-                Image(systemName: "list.bullet.rectangle").font(.system(size: 10, weight: .semibold))
-                Text("Tip: Press D to view and paste individual details")
-                    .font(.system(size: 11, weight: .bold))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
-                Spacer()
-
-                Button {
-                    manager.dismissDetailsHint()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .bold))
-                }
-                .buttonStyle(.plain)
-                .help("Dismiss this tip")
             }
             .foregroundColor(Self.bannerBlue)
             .padding(.horizontal, 14).padding(.vertical, 6)
