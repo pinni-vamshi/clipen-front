@@ -58,6 +58,11 @@ enum TextTraditionalDetectors {
 
         if scanDocument, isLatex(t) {
             candidates.append(.init(type: .latex, confidence: 0.9, method: .deterministic))
+        } else if scanDocument, isUnicodeMath(t) {
+            // Lower confidence than real LaTeX on purpose: markup is proof,
+            // whereas a run of symbols is inference and should lose to any
+            // detector that can point at actual syntax.
+            candidates.append(.init(type: .latex, confidence: 0.72, method: .deterministic))
         }
 
         if scanDocument, isMarkdown(t) {
@@ -156,6 +161,80 @@ enum TextTraditionalDetectors {
         let inlineMath = text.hasPrefix("$") && text.hasSuffix("$") && text.count > 2
         let displayMath = text.hasPrefix("\\[") && text.hasSuffix("\\]")
         return keywords.contains(where: { text.contains($0) }) || inlineMath || displayMath
+    }
+
+    /// Math written as Unicode symbols rather than LaTeX commands.
+    ///
+    /// `isLatex` can only see markup — backslash commands or `$` delimiters —
+    /// so it misses the form maths actually arrives in when copied out of a
+    /// PDF, a Word equation, a web page or a chat answer: literal `∈`, `α`,
+    /// `⊕`, `→`, with not one backslash anywhere. A whole category of
+    /// mathematical clips was landing as ordinary prose and rendering in the
+    /// plain-text preview.
+    ///
+    /// Three conditions, all required, because the cost of a false positive
+    /// is mislabelling normal writing as maths:
+    ///  - a STRONG operator (`∈`, `∑`, `≠`, `→`…). Greek letters alone are
+    ///    deliberately not enough, or every line of Greek prose would match.
+    ///  - at least `minDistinctMathSymbols` different symbols, so one stray
+    ///    `α` or a lone `°` in a sentence cannot qualify.
+    ///  - at least `minTotalMathSymbols` occurrences, so a passing mention
+    ///    loses to a genuine derivation.
+    static func isUnicodeMath(_ text: String) -> Bool {
+        guard !text.contains("\\"), !text.contains("$") else { return false }
+
+        var distinct = Set<Character>()
+        var total = 0
+        var sawStrong = false
+        for ch in text {
+            if strongMathOperators.contains(ch) {
+                sawStrong = true
+                distinct.insert(ch); total += 1
+                continue
+            }
+            if isMathSymbolCharacter(ch) {
+                distinct.insert(ch); total += 1
+            }
+        }
+        return sawStrong
+            && distinct.count >= minDistinctMathSymbols
+            && total >= minTotalMathSymbols
+    }
+
+    private static let minDistinctMathSymbols = 3
+    private static let minTotalMathSymbols = 6
+
+    /// Symbols that essentially only occur in mathematics. One of these has
+    /// to be present before anything else is even counted.
+    private static let strongMathOperators: Set<Character> = [
+        "\u{2208}", "\u{2209}", "\u{220B}",            // ∈ ∉ ∋
+        "\u{2200}", "\u{2203}", "\u{2204}",            // ∀ ∃ ∄
+        "\u{2211}", "\u{220F}", "\u{222B}",            // ∑ ∏ ∫
+        "\u{2295}", "\u{2297}", "\u{2299}",            // ⊕ ⊗ ⊙
+        "\u{2260}", "\u{2264}", "\u{2265}",            // ≠ ≤ ≥
+        "\u{2261}", "\u{2248}", "\u{221D}",            // ≡ ≈ ∝
+        "\u{2192}", "\u{21A6}", "\u{21D2}", "\u{21D4}", // → ↦ ⇒ ⇔
+        "\u{221A}", "\u{221E}", "\u{2202}", "\u{2207}", // √ ∞ ∂ ∇
+        "\u{2286}", "\u{2282}", "\u{222A}", "\u{2229}", // ⊆ ⊂ ∪ ∩
+        "\u{2227}", "\u{2228}", "\u{00AC}",            // ∧ ∨ ¬
+        "\u{2245}", "\u{2254}", "\u{22A2}", "\u{22A8}", // ≅ ≔ ⊢ ⊨
+    ]
+
+    /// Counted toward the density thresholds but never sufficient alone:
+    /// Greek letters, sub/superscript digits, and the general Unicode
+    /// maths-symbol category.
+    private static func isMathSymbolCharacter(_ ch: Character) -> Bool {
+        guard let scalar = ch.unicodeScalars.first, ch.unicodeScalars.count == 1 else { return false }
+        switch scalar.value {
+        case 0x0370...0x03FF, 0x1D400...0x1D7FF:  // Greek, maths alphanumerics
+            return true
+        case 0x2070...0x209F:                     // super/subscripts
+            return true
+        case 0x2212, 0x00B7, 0x22C5, 0x00D7, 0x00F7:  // − · ⋅ × ÷
+            return true
+        default:
+            return scalar.properties.isMath
+        }
     }
 
     private static func isMarkdown(_ text: String) -> Bool {

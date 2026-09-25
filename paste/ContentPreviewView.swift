@@ -507,7 +507,11 @@ enum HTMLTableParser {
     private static let maxRows = 2000
 
     private static func document(_ html: String) -> XMLDocument? {
-        try? XMLDocument(data: Data(html.utf8), options: [.documentTidyHTML])
+        // Via TidyHTML, not a bare XMLDocument call: parsing raw UTF-8 with
+        // no declared encoding silently drops every non-ASCII character, so
+        // currency symbols, accented names and CJK were being stripped out
+        // of extracted tables. See TidyHTML for the measurements.
+        TidyHTML.document(html)
     }
 
     /// Tables that are not themselves inside another table. A nested table

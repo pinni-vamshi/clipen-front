@@ -274,8 +274,146 @@ struct DelimitedTablePreview: View {
     }
 }
 
+/// Display-only repair for maths that arrived as Unicode rather than markup.
+///
+/// Copying an equation out of a PDF is lossy in ways nothing downstream can
+/// undo — superscripts are flattened to ordinary characters, and symbols
+/// like `\u{2295}` are dropped outright — but a few of the wounds ARE
+/// mechanical and reversible, and they are the ones that make the text look
+/// broken rather than merely imperfect.
+///
+/// Strictly presentation. The stored clip is never touched, so pasting still
+/// delivers the original bytes exactly as copied.
+enum MathTextRepair {
+
+    /// Extractors emit a spacing accent as its own character BEFORE the
+    /// letter it belongs to (`B\u{00B4}ezout`). Rewriting it as the matching
+    /// combining mark AFTER that letter lets normalisation form the real
+    /// precomposed character.
+    private static let spacingToCombining: [Character: Character] = [
+        "\u{00B4}": "\u{0301}",   // acute
+        "\u{0060}": "\u{0300}",   // grave
+        "\u{00A8}": "\u{0308}",   // diaeresis
+        "\u{02C6}": "\u{0302}",   // circumflex
+        "\u{02DC}": "\u{0303}",   // tilde
+        "\u{00B8}": "\u{0327}",   // cedilla
+    ]
+
+    static func repaired(_ text: String) -> String {
+        var out = ""
+        out.reserveCapacity(text.count)
+
+        let chars = Array(text)
+        var i = 0
+        while i < chars.count {
+            let ch = chars[i]
+            let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
+
+            // Spacing accent standing in for a combining one. MUST be tested
+            // before the generic swap below: U+00B4 also carries the
+            // Diacritic property, so the generic branch would match it first
+            // and merely move it after the letter — leaving "e" + spacing
+            // acute, which composes into nothing. "B´ezout" came out as
+            // "Be´zout" rather than "Bézout" until this was ordered first.
+            if let combining = spacingToCombining[ch], let next, next.isLetter {
+                out.append(next)
+                out.append(combining)
+                i += 2
+                continue
+            }
+
+            // A true combining mark emitted before its base, e.g. the overlay
+            // that should make "=" into "≠". Swap them so normalisation can
+            // join them; correctly-ordered marks already normalise on their
+            // own. Restricted to non-spacing marks so spacing accents cannot
+            // reach here.
+            if let next, ch.unicodeScalars.count == 1,
+               ch.unicodeScalars.first!.properties.generalCategory == .nonspacingMark,
+               !next.isWhitespace,
+               next.unicodeScalars.first!.properties.generalCategory != .nonspacingMark {
+                out.append(next)
+                out.append(ch)
+                i += 2
+                continue
+            }
+
+            out.append(ch)
+            i += 1
+        }
+
+        // Joins the pairs rearranged above into single precomposed characters
+        // (e → é, = → ≠).
+        out = out.precomposedStringWithCanonicalMapping
+
+        return spacedRelations(in: out)
+    }
+
+    /// Extraction routinely closes the gap on one side of a relation —
+    /// `v= 0`, `N >0`. Only `=` `<` `>` are touched, and only when a real
+    /// character sits hard against them, which is enough to restore the
+    /// reading rhythm without rewriting anything the author chose.
+    private static func spacedRelations(in text: String) -> String {
+        let relations: Set<Character> = ["=", "<", ">"]
+        var out = ""
+        out.reserveCapacity(text.count + 16)
+        let chars = Array(text)
+
+        for (i, ch) in chars.enumerated() {
+            guard relations.contains(ch) else { out.append(ch); continue }
+            let prev = i > 0 ? chars[i - 1] : nil
+            let next = i + 1 < chars.count ? chars[i + 1] : nil
+            // Left alone inside operators the author wrote deliberately
+            // (<=, >=, ==, =>), where inserting a space would break them.
+            if let prev, relations.contains(prev) { out.append(ch); continue }
+            if let next, relations.contains(next) { out.append(ch); continue }
+
+            if let prev, !prev.isWhitespace, !prev.isNewline { out.append(" ") }
+            out.append(ch)
+            if let next, !next.isWhitespace, !next.isNewline { out.append(" ") }
+        }
+        return out
+    }
+}
+
+/// One place that configures MathJax rendering.
+///
+/// The same four modifiers used to be repeated at all three call sites, and
+/// they drifted: the standalone preview was the only one NOT wrapped in
+/// `GatedMath`, so the one path a `.latex` clip actually takes was also the
+/// one bypassing the serialisation that keeps concurrent renders from
+/// stuttering. Sharing the configuration is what stops that recurring.
+private struct MathView: View {
+    let source: String
+    var fontSize: CGFloat = 13
+    /// Inline text flow (`blockText`) versus stacked block views.
+    var inline: Bool = false
+
+    var body: some View {
+        GatedMath(source: source) {
+            LaTeX(source)
+                .font(NSFont.systemFont(ofSize: fontSize))
+                .parsingMode(.onlyEquations)
+                .blockMode(inline ? .blockText : .blockViews)
+                .errorMode(.original)
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 struct LaTeXRenderedPreview: View {
     let text: String
+
+    /// Whether there is any actual markup for MathJax to act on.
+    ///
+    /// Load-bearing. Unicode maths now also arrives tagged `.latex` (see
+    /// `TextTraditionalDetectors.isUnicodeMath`), and it carries no markup
+    /// at all — so wrapping it in `\[ … \]` the way real LaTeX is wrapped
+    /// would hand MathJax an entire multi-line proof as ONE display
+    /// equation. That renders far worse than the plain text it replaced.
+    private var hasMarkup: Bool {
+        text.contains("\\") || text.contains("$")
+    }
 
     private var normalizedSource: String {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -285,16 +423,23 @@ struct LaTeXRenderedPreview: View {
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
-
-            LaTeX(normalizedSource)
-                .font(NSFont.systemFont(ofSize: 15))
-                .parsingMode(.onlyEquations)
-                .blockMode(.blockViews)
-
-                .errorMode(.original)
-                .foregroundColor(.primary)
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if hasMarkup {
+                    MathView(source: normalizedSource, fontSize: 15)
+                } else {
+                    // Repaired, kept as text, set in a serif face so the
+                    // symbols and letters sit together the way they do in a
+                    // typeset document instead of in the monospace the
+                    // plain-text preview would use.
+                    Text(MathTextRepair.repaired(text))
+                        .font(.system(size: 14, design: .serif))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -429,15 +574,7 @@ struct LaTeXDocumentPreview: View {
     ]
 
     private func mathBlock(_ source: String) -> some View {
-        GatedMath(source: source) {
-            LaTeX(source)
-                .font(NSFont.systemFont(ofSize: 13))
-                .parsingMode(.onlyEquations)
-                .blockMode(.blockViews)
-                .errorMode(.original)
-                .foregroundColor(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
+        MathView(source: source)
     }
 
     private static let theoremEnvironments: [String: String] = [
@@ -754,15 +891,7 @@ struct LaTeXDocumentPreview: View {
     @ViewBuilder
     private func inlineContent(_ line: String) -> some View {
         if line.contains("$") || line.contains("\\[") || line.contains("\\(") {
-            GatedMath(source: line) {
-                LaTeX(line)
-                    .font(NSFont.systemFont(ofSize: 13))
-                    .parsingMode(.onlyEquations)
-                    .blockMode(.blockText)
-                    .errorMode(.original)
-                    .foregroundColor(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            MathView(source: line, inline: true)
         } else {
             Text(formattedText(line))
                 .font(.system(size: 13))
