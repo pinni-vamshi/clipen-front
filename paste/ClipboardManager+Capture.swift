@@ -63,7 +63,7 @@ extension ClipboardManager {
         if Self.pasteboardIsConcealed(pb) {
             lastChangeCount = pb.changeCount
             addUncapturedPlaceholder(
-                reason: String(localized: "Not captured — pastes with system default"),
+                reason: String(localized: "No preview — pastes with system default"),
                 changeCount: pb.changeCount)
             return
         }
@@ -75,7 +75,7 @@ extension ClipboardManager {
             let appName = frontmost.localizedName ?? "This app"
             CopyFeedbackPanel.shared.show(message: "\(appName) is excluded from copying")
             addUncapturedPlaceholder(
-                reason: String(localized: "Not captured — pastes with system default"),
+                reason: String(localized: "No preview — pastes with system default"),
                 changeCount: pb.changeCount)
             return
         }
@@ -98,7 +98,7 @@ extension ClipboardManager {
                 guard let self, self.captureAttemptGeneration == generationBefore else { return }
                 CopyFeedbackPanel.shared.show()
                 self.addUncapturedPlaceholder(
-                    reason: String(localized: "Not captured — pastes with system default"),
+                    reason: String(localized: "No preview — pastes with system default"),
                     changeCount: changeCountAtAttempt)
             }
         }
@@ -736,104 +736,11 @@ extension ClipboardManager {
     /// Falls back to the regex version whenever the parse fails, so
     /// malformed markup still yields the text it always did.
     static func stripHTMLTags(_ html: String) -> String? {
-        if let parsed = structuredText(fromHTMLString: html) { return parsed }
+        if let parsed = TidyHTML.plainText(html) { return parsed }
         return regexStrippedHTML(html)
     }
 
     /// Elements whose text is markup plumbing, never page content.
-    private static let nonContentElements: Set<String> = [
-        "script", "style", "head", "noscript", "template",
-        "svg", "math", "iframe", "object", "embed", "canvas", "map", "area",
-    ]
-
-    /// Elements that end the current line.
-    private static let blockElements: Set<String> = [
-        "p", "div", "section", "article", "header", "footer", "main", "aside",
-        "nav", "ul", "ol", "li", "table", "thead", "tbody", "tfoot", "tr",
-        "blockquote", "pre", "figure", "figcaption", "hr", "dl", "dt", "dd",
-        "form", "fieldset", "address", "details", "summary",
-        "h1", "h2", "h3", "h4", "h5", "h6",
-    ]
-
-    /// Elements that deserve a blank line around them, not just a break.
-    private static let spacedBlockElements: Set<String> = [
-        "p", "article", "section", "table", "blockquote", "pre", "figure",
-        "ul", "ol", "dl", "h1", "h2", "h3", "h4", "h5", "h6",
-    ]
-
-    private static func structuredText(fromHTMLString html: String) -> String? {
-        guard let doc = TidyHTML.document(html), let root = doc.rootElement() else { return nil }
-
-        var out = ""
-        out.reserveCapacity(min(html.count, 200_000))
-        appendNode(root, into: &out, listDepth: 0)
-
-        // Collapse runs of SPACES only. Tabs separate table cells and leading
-        // spaces indent nested list items — both were inserted deliberately
-        // above, and an earlier "[ \t]+" -> " " pass destroyed both of them.
-        var text = out.replacingOccurrences(of: "[^\\S\\n\\t]+", with: " ",
-                                            options: .regularExpression)
-        text = text.replacingOccurrences(of: " *\\t *", with: "\t",
-                                         options: .regularExpression)
-        // Trailing spaces before a break only — never the leading ones after
-        // it, which are the list indentation.
-        text = text.replacingOccurrences(of: " +\n", with: "\n",
-                                         options: .regularExpression)
-        text = text.replacingOccurrences(of: "\\n{3,}", with: "\n\n",
-                                         options: .regularExpression)
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    private static func appendNode(_ node: XMLNode, into out: inout String, listDepth: Int) {
-        switch node.kind {
-        case .text:
-            // Already entity-decoded by the parser — the whole reason this
-            // path exists.
-            if let value = node.stringValue, !value.isEmpty { out += value }
-            return
-        case .comment, .processingInstruction, .DTDKind:
-            return
-        default:
-            break
-        }
-
-        let name = (node.name ?? "").lowercased()
-        guard !nonContentElements.contains(name) else { return }
-
-        if name == "br" { out += "\n"; return }
-        if name == "hr" { out += "\n\n"; return }
-
-        let isBlock  = blockElements.contains(name)
-        let isSpaced = spacedBlockElements.contains(name)
-        let isListItem = name == "li"
-        var childDepth = listDepth
-
-        if isBlock {
-            out += isSpaced ? "\n\n" : "\n"
-            if isListItem {
-                // Two spaces per level of nesting, so sub-lists stay legible.
-                out += String(repeating: "  ", count: max(0, listDepth - 1)) + "\u{2022} "
-            }
-        }
-        if name == "ul" || name == "ol" { childDepth += 1 }
-
-        if let children = node.children {
-            var first = true
-            for child in children {
-                // Cells are tab-separated, matching how the rest of the app
-                // reads pasted tables.
-                if !first, let childName = child.name?.lowercased(),
-                   childName == "td" || childName == "th" {
-                    out += "\t"
-                }
-                appendNode(child, into: &out, listDepth: childDepth)
-                first = false
-            }
-        }
-
-        if isBlock { out += isSpaced ? "\n\n" : "\n" }
-    }
 
     private static func regexStrippedHTML(_ html: String) -> String? {
         var s = html
@@ -1379,5 +1286,100 @@ enum TidyHTML {
     static func document(_ html: String) -> XMLDocument? {
         guard let data = (charsetHint + html).data(using: .utf8) else { return nil }
         return try? XMLDocument(data: data, options: [.documentTidyHTML])
+    }
+
+    private static let nonContentElements: Set<String> = [
+        "script", "style", "head", "noscript", "template",
+        "svg", "math", "iframe", "object", "embed", "canvas", "map", "area",
+    ]
+
+    /// Elements that end the current line.
+    private static let blockElements: Set<String> = [
+        "p", "div", "section", "article", "header", "footer", "main", "aside",
+        "nav", "ul", "ol", "li", "table", "thead", "tbody", "tfoot", "tr",
+        "blockquote", "pre", "figure", "figcaption", "hr", "dl", "dt", "dd",
+        "form", "fieldset", "address", "details", "summary",
+        "h1", "h2", "h3", "h4", "h5", "h6",
+    ]
+
+    /// Elements that deserve a blank line around them, not just a break.
+    private static let spacedBlockElements: Set<String> = [
+        "p", "article", "section", "table", "blockquote", "pre", "figure",
+        "ul", "ol", "dl", "h1", "h2", "h3", "h4", "h5", "h6",
+    ]
+
+    /// Readable plain text from an HTML document or fragment.
+    static func plainText(_ html: String) -> String? {
+        guard let doc = document(html), let root = doc.rootElement() else { return nil }
+
+        var out = ""
+        out.reserveCapacity(min(html.count, 200_000))
+        appendNode(root, into: &out, listDepth: 0)
+
+        // Collapse runs of SPACES only. Tabs separate table cells and leading
+        // spaces indent nested list items — both were inserted deliberately
+        // above, and an earlier "[ \t]+" -> " " pass destroyed both of them.
+        var text = out.replacingOccurrences(of: "[^\\S\\n\\t]+", with: " ",
+                                            options: .regularExpression)
+        text = text.replacingOccurrences(of: " *\\t *", with: "\t",
+                                         options: .regularExpression)
+        // Trailing spaces before a break only — never the leading ones after
+        // it, which are the list indentation.
+        text = text.replacingOccurrences(of: " +\n", with: "\n",
+                                         options: .regularExpression)
+        text = text.replacingOccurrences(of: "\\n{3,}", with: "\n\n",
+                                         options: .regularExpression)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func appendNode(_ node: XMLNode, into out: inout String, listDepth: Int) {
+        switch node.kind {
+        case .text:
+            // Already entity-decoded by the parser — the whole reason this
+            // path exists.
+            if let value = node.stringValue, !value.isEmpty { out += value }
+            return
+        case .comment, .processingInstruction, .DTDKind:
+            return
+        default:
+            break
+        }
+
+        let name = (node.name ?? "").lowercased()
+        guard !nonContentElements.contains(name) else { return }
+
+        if name == "br" { out += "\n"; return }
+        if name == "hr" { out += "\n\n"; return }
+
+        let isBlock  = blockElements.contains(name)
+        let isSpaced = spacedBlockElements.contains(name)
+        let isListItem = name == "li"
+        var childDepth = listDepth
+
+        if isBlock {
+            out += isSpaced ? "\n\n" : "\n"
+            if isListItem {
+                // Two spaces per level of nesting, so sub-lists stay legible.
+                out += String(repeating: "  ", count: max(0, listDepth - 1)) + "\u{2022} "
+            }
+        }
+        if name == "ul" || name == "ol" { childDepth += 1 }
+
+        if let children = node.children {
+            var first = true
+            for child in children {
+                // Cells are tab-separated, matching how the rest of the app
+                // reads pasted tables.
+                if !first, let childName = child.name?.lowercased(),
+                   childName == "td" || childName == "th" {
+                    out += "\t"
+                }
+                appendNode(child, into: &out, listDepth: childDepth)
+                first = false
+            }
+        }
+
+        if isBlock { out += isSpaced ? "\n\n" : "\n" }
     }
 }

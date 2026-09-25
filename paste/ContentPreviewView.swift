@@ -481,8 +481,20 @@ enum TableCellExtractor {
         return segments.isEmpty ? nil : segments
     }
 
+    /// Prose between tables, via the same parser the capture path uses.
+    ///
+    /// This was a third, weaker HTML-to-text implementation: four regex
+    /// passes that knew only `<br>`, `</p>` and `</div>`, so headings and
+    /// list items ran together and `.htmlDecoded` handled only the entities
+    /// it happened to know. Sharing `TidyHTML` means these chunks get the
+    /// same block separation, list markers and entity decoding as everything
+    /// else — and, more to the point, they stop silently losing non-ASCII
+    /// the way this file's table extraction did.
+    ///
+    /// The old passes remain as the fallback for markup too broken to parse.
     private static func stripHTMLTags(_ html: String) -> String {
-        html.replacingOccurrences(of: "<br[^>]*>", with: "\n", options: .regularExpression)
+        if let parsed = TidyHTML.plainText(html) { return parsed }
+        return html.replacingOccurrences(of: "<br[^>]*>", with: "\n", options: .regularExpression)
             .replacingOccurrences(of: "</p>", with: "\n", options: .caseInsensitive)
             .replacingOccurrences(of: "</div>", with: "\n", options: .caseInsensitive)
             .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)

@@ -1528,7 +1528,7 @@ struct PopoverRow: View, Equatable {
                 .foregroundColor(.white)
                 .frame(width: 20, height: 20)
                 .background(Color.orange, in: Circle())
-                .help("macOS wouldn't let Clipen copy this — pasting uses the system clipboard instead")
+                .help("Clipen couldn't read this one, so there is no preview to show — pasting it still works, straight from the system clipboard, for as long as it stays the current copy")
         } else if isSelected {
             let analysisState = AIStructuringService.shared.state(for: item)
             let analysing = analysisState == .running

@@ -77,7 +77,7 @@ extension ClipboardManager {
         guard !displayItems.isEmpty, selectedIndex < displayItems.count else { return }
 
         if displayItems[selectedIndex].isUncaptured {
-            flashStatus(String(localized: "Clipen never received this copy, so it can't be transformed."))
+            flashStatus(String(localized: "No preview for this one, so there is nothing to transform — it still pastes normally."))
             return
         }
 

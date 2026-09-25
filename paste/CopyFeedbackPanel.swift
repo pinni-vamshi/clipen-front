@@ -26,9 +26,15 @@ final class CopyFeedbackPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
     }
 
+    /// "Can't copy" was wrong, and it undersold what actually happens. The
+    /// copy itself succeeded — it is on the system clipboard exactly as
+    /// normal. The only thing Clipen could not do is READ it, so it has no
+    /// preview to show and nothing to store. Pasting still works, through
+    /// the system clipboard. Saying "can't copy" made a handled case look
+    /// like a failure.
     static func defaultMessage() -> String {
         ClipboardManager.shared.uncapturedFallbackEnabled
-            ? String(localized: "Can't copy — pastes with system default")
+            ? String(localized: "No preview — still pastes normally")
             : String(localized: "Can't copy this")
     }
 
