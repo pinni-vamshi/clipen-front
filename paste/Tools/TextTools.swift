@@ -61,10 +61,7 @@ enum TextTools {
         },
         make("text.pascal-case", icon: "textformat.abc", label: "PascalCase", group: "DEV") {
             guard isIdentifierLike($0) else { return nil }
-            let out = $0.components(separatedBy: .init(charactersIn: " _-"))
-                .filter { !$0.isEmpty }
-                .map { $0.capitalized }
-                .joined()
+            let out = $0.toPascalCase
             return out == $0 ? nil : out
         },
     ]
@@ -387,20 +384,72 @@ enum TextTools {
         return t.unicodeScalars.allSatisfy { allowed.contains($0) }
     }
 
+    /// JSON is re-laid-out, never re-encoded. Going through
+    /// JSONSerialization shuffled the keys (a dictionary has no order),
+    /// escaped every "/" as "\\/", and rewrote numbers — `1.0` became `1`
+    /// and 64-bit ids lost their last digits. The text is only validated
+    /// here; whitespace outside strings is the only thing that changes.
     private static func jsonPretty(_ str: String) -> String? {
-        guard let data = str.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data),
-              let out = try? JSONSerialization.data(withJSONObject: obj, options: .prettyPrinted)
-        else { return nil }
-        return String(data: out, encoding: .utf8)
+        guard isValidJSON(str) else { return nil }
+        let out = reflowJSON(str, indent: "  ")
+        return out == str ? nil : out
     }
 
     private static func jsonMinify(_ str: String) -> String? {
-        guard let data = str.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data),
-              let out = try? JSONSerialization.data(withJSONObject: obj)
-        else { return nil }
-        return String(data: out, encoding: .utf8)
+        guard isValidJSON(str) else { return nil }
+        let out = reflowJSON(str, indent: nil)
+        return out == str ? nil : out
+    }
+
+    private static func isValidJSON(_ str: String) -> Bool {
+        guard let data = str.data(using: .utf8) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])) != nil
+            && isJSON(str)
+    }
+
+    private static func reflowJSON(_ str: String, indent: String?) -> String {
+        var out = ""
+        var depth = 0
+        var inString = false
+        var escaped = false
+        let chars = Array(str.trimmingCharacters(in: .whitespacesAndNewlines))
+        func newline() {
+            guard let indent else { return }
+            out.append("\n")
+            out.append(String(repeating: indent, count: max(0, depth)))
+        }
+        for (i, c) in chars.enumerated() {
+            if inString {
+                out.append(c)
+                if escaped { escaped = false }
+                else if c == "\\" { escaped = true }
+                else if c == "\"" { inString = false }
+                continue
+            }
+            switch c {
+            case "\"":
+                inString = true
+                out.append(c)
+            case "{", "[":
+                out.append(c)
+                // Empty containers stay `{}` / `[]`.
+                let next = chars[(i + 1)...].first { !$0.isWhitespace }
+                depth += 1
+                if next != "}" && next != "]" { newline() }
+            case "}", "]":
+                depth -= 1
+                if let last = out.last(where: { !$0.isWhitespace }), last != "{" && last != "[" { newline() }
+                out.append(c)
+            case ",":
+                out.append(c)
+                newline()
+            case ":":
+                out.append(indent == nil ? ":" : ": ")
+            default:
+                if !c.isWhitespace { out.append(c) }
+            }
+        }
+        return out
     }
 
 }

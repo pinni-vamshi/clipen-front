@@ -692,6 +692,50 @@ enum EmbeddedImageExtractor {
 /// snapshot (memory, then disk) — no page, no process. Scrolling or clicking
 /// the snapshot brings the live page back, and the reference panel's
 /// Reload button always loads it fresh.
+/// Links Clipen must never open on its own. Requesting a link is not
+/// harmless: a sign-in link, password reset, email verification, invite or
+/// unsubscribe/approve link is spent by the first GET, so a background title
+/// fetch or preview prefetch left the user with "this link has expired".
+/// Signed URLs (S3 and friends) and anything carrying a token are private too.
+enum LinkSafety {
+    private static let sensitiveQueryKeys: Set<String> = [
+        "token", "access_token", "id_token", "refresh_token", "auth", "authtoken",
+        "code", "otp", "key", "apikey", "api_key", "secret", "sig", "signature",
+        "password", "pass", "pwd", "session", "sessionid", "sid", "ticket",
+        "nonce", "state", "magic", "hash", "jwt", "invite", "reset",
+        "x-amz-signature", "x-amz-credential", "x-goog-signature", "se", "sv", "sp",
+    ]
+    private static let sensitivePathWords = [
+        "login", "signin", "sign-in", "sign_in", "logout", "signout", "auth", "oauth",
+        "magic", "verify", "verification", "confirm", "activate", "reset", "password",
+        "invite", "invitation", "unsubscribe", "approve", "accept", "decline",
+        "callback", "token", "otp", "2fa", "mfa", "sso", "saml", "download",
+    ]
+
+    static func mustNotAutoOpen(_ url: URL) -> Bool {
+        if url.user != nil || url.password != nil { return true }
+        if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems {
+            for item in items {
+                let name = item.name.lowercased()
+                if sensitiveQueryKeys.contains(name) || name.contains("token") || name.contains("signature") {
+                    return true
+                }
+                // A long random-looking value is a credential whatever it's called.
+                if let v = item.value, v.count >= 24,
+                   v.allSatisfy({ $0.isLetter || $0.isNumber || "-_.~%=+/".contains($0) }),
+                   v.contains(where: \.isNumber), v.contains(where: \.isLetter) {
+                    return true
+                }
+            }
+        }
+        if let fragment = url.fragment?.lowercased(),
+           fragment.contains("token") || fragment.contains("code=") { return true }
+        let path = url.path.lowercased()
+        let segments = path.split(whereSeparator: { $0 == "/" || $0 == "." })
+        return segments.contains { seg in sensitivePathWords.contains { seg.contains($0) } }
+    }
+}
+
 final class WebsitePreviewPool {
     static let shared = WebsitePreviewPool()
 
@@ -732,6 +776,8 @@ final class WebsitePreviewPool {
     }
 
     func storeSnapshot(_ image: NSImage, for url: URL) {
+        // Snapshots are unencrypted cache files: none for private links.
+        guard !LinkSafety.mustNotAutoOpen(url) else { return }
         memory.setObject(image, forKey: key(url) as NSString)
         let file = diskURL(url)
         let dir = diskDir
@@ -789,7 +835,8 @@ final class WebsitePreviewPool {
             return
         }
         let k = key(url)
-        guard snapshot(for: url) == nil, prefetching[k] == nil,
+        guard !LinkSafety.mustNotAutoOpen(url),
+              snapshot(for: url) == nil, prefetching[k] == nil,
               prefetching.count < Self.maxConcurrentPrefetches else { return }
         let view = makeWebView()
         let delegate = PrefetchDelegate { [weak self] in self?.endPrefetch(k) }
@@ -866,9 +913,37 @@ final class WebsitePreviewContainer: NSView, WKNavigationDelegate {
     private func show(forceLive: Bool) {
         if !forceLive, let image = WebsitePreviewPool.shared.snapshot(for: url) {
             showSnapshot(image)
+        } else if !forceLive, LinkSafety.mustNotAutoOpen(url) {
+            showHeldBack()
         } else {
             goLive()
         }
+    }
+
+    /// A sign-in, reset or other one-time link: opening it here would spend
+    /// it, so the page loads only when the user clicks.
+    private var heldBackLabel: NSTextField?
+
+    private func showHeldBack() {
+        removeWebView()
+        snapshotView?.removeFromSuperview()
+        snapshotView = nil
+        progress.stopAnimation(nil)
+        progress.isHidden = true
+        guard heldBackLabel == nil else { return }
+        let label = NSTextField(wrappingLabelWithString: String(localized:
+            "This looks like a sign-in or one-time link, so it isn't opened automatically — opening it can use it up.\nClick to load the page."))
+        label.alignment = .center
+        label.textColor = .secondaryLabelColor
+        label.font = .systemFont(ofSize: 12)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -32),
+        ])
+        heldBackLabel = label
     }
 
     private func showSnapshot(_ image: NSImage) {
@@ -892,6 +967,8 @@ final class WebsitePreviewContainer: NSView, WKNavigationDelegate {
     }
 
     private func goLive() {
+        heldBackLabel?.removeFromSuperview()
+        heldBackLabel = nil
         snapshotView?.removeFromSuperview()
         snapshotView = nil
         removeWebView()
@@ -930,7 +1007,7 @@ final class WebsitePreviewContainer: NSView, WKNavigationDelegate {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if snapshotView != nil { goLive() } else { super.mouseDown(with: event) }
+        if snapshotView != nil || heldBackLabel != nil { goLive() } else { super.mouseDown(with: event) }
     }
 
     // MARK: WKNavigationDelegate

@@ -85,6 +85,14 @@ struct MainWindowView: View {
 
     private var filtered: [ClipboardItem] {
         guard !debouncedSearchText.isEmpty else { return mainFilteredItems }
+        let trimmed = debouncedSearchText.trimmingCharacters(in: .whitespaces)
+        if trimmed.count < 2 {
+            let q = ClipboardItem.normalize(trimmed)
+            guard !q.isEmpty else { return mainFilteredItems }
+            return mainFilteredItems.filter {
+                $0.searchPreviewNorm.contains(q) || $0.searchEmbedNorm.contains(q) || $0.searchMetaNorm.contains(q)
+            }
+        }
         let hits = manager.hybridSearch(query: debouncedSearchText)
         if hits.isEmpty { return [] }
         let visible = Set(mainFilteredItems.map(\.id))
@@ -1207,6 +1215,16 @@ private struct HistoryListPane: View, Equatable {
         let base = tagFilter.map { tag in items.filter { $0.tags.contains(tag) } } ?? items
         let pinOrdered = manager.applyPinOrdering(base)
         guard !searchText.isEmpty else { return pinOrdered }
+        // One character: plain substring match, as the popup does. Ranked
+        // search needs two, so a single character always said "No matches".
+        let trimmed = searchText.trimmingCharacters(in: .whitespaces)
+        if trimmed.count < 2 {
+            let q = ClipboardItem.normalize(trimmed)
+            guard !q.isEmpty else { return pinOrdered }
+            return pinOrdered.filter {
+                $0.searchPreviewNorm.contains(q) || $0.searchEmbedNorm.contains(q) || $0.searchMetaNorm.contains(q)
+            }
+        }
         let hits = manager.hybridSearch(query: searchText)
         if hits.isEmpty { return [] }
         let visible = Set(pinOrdered.map(\.id))

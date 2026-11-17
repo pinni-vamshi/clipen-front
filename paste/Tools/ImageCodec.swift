@@ -331,8 +331,9 @@ enum ImageService {
             .appendingPathComponent("Clipen/Converted/\(fileName)", isDirectory: false)
     }
 
-    private static func pathExtension(for dataType: NSPasteboard.PasteboardType) -> String {
+    static func pathExtension(for dataType: NSPasteboard.PasteboardType) -> String {
         let raw = dataType.rawValue.lowercased()
+        if raw.contains("pdf") { return "pdf" }
         if raw.contains("png") { return "png" }
         if raw.contains("jpeg") || raw.contains("jpg") { return "jpg" }
         if raw.contains("webp") { return "webp" }

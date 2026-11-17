@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 nonisolated enum DebugLog {
@@ -120,8 +121,26 @@ extension ClipboardManager {
         }
     }
 
+    /// The key that types V under Command on the current layout — the key
+    /// the system's own paste uses. Every check used keycode 9, V's place on
+    /// a US keyboard; on Dvorak that key is K, so Clipen opened on ⌘K and
+    /// never saw the user's ⌘V. Refreshed whenever the layout changes.
+    nonisolated(unsafe) static var pasteKeyCode = 9
+    nonisolated(unsafe) private static var layoutObserver: NSObjectProtocol?
+
+    static func refreshPasteKeyCode() {
+        pasteKeyCode = Int(commandVKeyCode())
+        guard layoutObserver == nil else { return }
+        layoutObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
+            object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { pasteKeyCode = Int(commandVKeyCode()) }
+            }
+    }
+
     func createEventTap() {
         teardownEventTap()
+        Self.refreshPasteKeyCode()
 
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
@@ -172,7 +191,7 @@ extension ClipboardManager {
         // of Clipen. Nothing about that helped the dictation case, so the
         // check is now scoped to the one event that needed it.
         if type == .keyDown,
-           event.getIntegerValueField(.keyboardEventKeycode) == 9,
+           event.getIntegerValueField(.keyboardEventKeycode) == Int64(Self.pasteKeyCode),
            event.flags.contains(.maskCommand) {
             let insertion = pasteLooksLikeForeignTextInsertion(event)
             if DebugLog.isEnabled {
@@ -281,7 +300,7 @@ extension ClipboardManager {
             return Unmanaged.passUnretained(event)
         }
 
-        if key == 9, let timer = vTapHoldTimer {
+        if key == Self.pasteKeyCode, let timer = vTapHoldTimer {
             timer.invalidate()
             vTapHoldTimer = nil
             DispatchQueue.main.async { [weak self] in
@@ -289,7 +308,7 @@ extension ClipboardManager {
                 self?.cycleNext()
             }
         }
-        if key == 9, let timer = firstOpenHoldTimer {
+        if key == Self.pasteKeyCode, let timer = firstOpenHoldTimer {
             timer.invalidate()
             firstOpenHoldTimer = nil
         }
@@ -410,7 +429,7 @@ extension ClipboardManager {
         // a stage the tutorial isn't teaching. Dropped rather than passed
         // through, so a stray X or Space doesn't leak into the app behind.
         if onboardingCoreLoopOnly, previewWindow.isVisible {
-            let isCoreKey = (key == 9 && held) || key == 53 || key == 36 || key == 76
+            let isCoreKey = (key == Int64(Self.pasteKeyCode) && held) || key == 53 || key == 36 || key == 76
             if !isCoreKey { return nil }
         }
 
@@ -513,7 +532,7 @@ extension ClipboardManager {
             return Unmanaged.passUnretained(event)
         }
 
-        if key == 9 {
+        if key == Int64(Self.pasteKeyCode) {
             if opt && !previewWindow.isVisible {
                 return Unmanaged.passUnretained(event)
             }
@@ -926,8 +945,8 @@ extension ClipboardManager {
     }
 
     func notePopupHintKeyDown(keycode: Int, cmd: Bool) {
+        if keycode == Self.pasteKeyCode, cmd { hintKeyVDown = true }
         switch keycode {
-        case 9 where cmd:  hintKeyVDown = true
         case 7 where cmd:  hintKeyXDown = true
         case 8 where cmd:  hintKeyCDown = true
         case 11 where cmd: hintKeyBDown = true
@@ -939,8 +958,8 @@ extension ClipboardManager {
     }
 
     func notePopupHintKeyUp(keycode: Int) {
+        if keycode == Self.pasteKeyCode { hintKeyVDown = false }
         switch keycode {
-        case 9:  hintKeyVDown = false
         case 7:  hintKeyXDown = false
         case 8:  hintKeyCDown = false
         case 11: hintKeyBDown = false
@@ -948,7 +967,7 @@ extension ClipboardManager {
         case 49: hintKeySpaceDown = false
         default: break
         }
-        if keycode == 9 { popupHintVMark = false }
+        if keycode == Self.pasteKeyCode { popupHintVMark = false }
         if keycode == 7 { popupHintXHold = false }
         scheduleHintSync()
     }

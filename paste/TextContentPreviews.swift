@@ -289,8 +289,13 @@ struct MarkdownTextPreview: View {
 enum DelimitedTableParser {
 
     nonisolated static func detectDelimiter(_ text: String) -> Character {
+        // Whichever separator the header line uses most. Tab and comma only
+        // used to be considered, so a semicolon file (Excel's CSV in most
+        // of Europe) came out as one column.
         let firstLine = text.prefix(while: { $0 != "\n" && $0 != "\r" })
-        return firstLine.contains("\t") ? "\t" : ","
+        let counts: [(Character, Int)] = ["\t", ",", ";"].map { d in (d, firstLine.filter { $0 == d }.count) }
+        guard let best = counts.max(by: { $0.1 < $1.1 }), best.1 > 0 else { return "," }
+        return firstLine.contains("\t") ? "\t" : best.0
     }
 
     nonisolated static func parse(_ text: String, delimiter: Character) -> [[String]] {
@@ -316,7 +321,10 @@ enum DelimitedTableParser {
                 } else {
                     field.append(c)
                 }
-            } else if c == "\"" {
+            } else if c == "\"" && field.isEmpty {
+                // Quotes only open a quoted field at its start. Mid-field
+                // (`5" screen`) it's a literal; treated as an opener, it
+                // swallowed the rest of the file into one cell.
                 inQuotes = true
             } else if c == delimiter {
                 endField()

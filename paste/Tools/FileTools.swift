@@ -25,17 +25,17 @@ enum FileTools {
             label: "Show in Finder",
             group: "FILE",
             preview: { item in
-                let urls = fileURLs(for: item).filter { FileManager.default.fileExists(atPath: $0.path) }
+                let urls = userFacingURLs(for: item).filter { FileManager.default.fileExists(atPath: $0.path) }
                 guard !urls.isEmpty else { return nil }
                 return urls.count == 1 ? urls[0].path : "\(urls.count) files"
             },
             runSync: { item in
-                let urls = fileURLs(for: item).filter { FileManager.default.fileExists(atPath: $0.path) }
+                let urls = userFacingURLs(for: item).filter { FileManager.default.fileExists(atPath: $0.path) }
                 guard !urls.isEmpty else { return .status("File no longer exists.") }
                 return .revealFiles(urls, message: "Shown in Finder.")
             },
             runAsync: { item in
-                let urls = fileURLs(for: item).filter { FileManager.default.fileExists(atPath: $0.path) }
+                let urls = userFacingURLs(for: item).filter { FileManager.default.fileExists(atPath: $0.path) }
                 guard !urls.isEmpty else { return .status("File no longer exists.") }
                 return .revealFiles(urls, message: "Shown in Finder.")
             }
@@ -67,17 +67,17 @@ enum FileTools {
             label: "Paste File Path",
             group: "FILE",
             preview: { item in
-                let paths = fileURLs(for: item).map(\.path)
+                let paths = userFacingURLs(for: item).map(\.path)
                 guard !paths.isEmpty else { return nil }
                 return paths.joined(separator: "\n")
             },
             runSync: { item in
-                let paths = fileURLs(for: item).map(\.path)
+                let paths = userFacingURLs(for: item).map(\.path)
                 guard !paths.isEmpty else { return nil }
                 return .text(paths.joined(separator: "\n"))
             },
             runAsync: { item in
-                let paths = fileURLs(for: item).map(\.path)
+                let paths = userFacingURLs(for: item).map(\.path)
                 guard !paths.isEmpty else { return nil }
                 return .text(paths.joined(separator: "\n"))
             }
@@ -107,17 +107,17 @@ enum FileTools {
             label: "Paste File Info",
             group: "INFO",
             preview: { item in
-                let urls = fileURLs(for: item)
+                let urls = userFacingURLs(for: item)
                 guard !urls.isEmpty else { return nil }
                 return urls.count == 1 ? infoLines(for: urls[0]).joined(separator: " · ") : "\(urls.count) files"
             },
             runSync: { item in
-                let urls = fileURLs(for: item)
+                let urls = userFacingURLs(for: item)
                 guard !urls.isEmpty else { return nil }
                 return .text(urls.map { infoLines(for: $0).joined(separator: "\n") }.joined(separator: "\n\n"))
             },
             runAsync: { item in
-                let urls = fileURLs(for: item)
+                let urls = userFacingURLs(for: item)
                 guard !urls.isEmpty else { return nil }
                 return .text(urls.map { infoLines(for: $0).joined(separator: "\n") }.joined(separator: "\n\n"))
             }
@@ -184,6 +184,18 @@ enum FileTools {
             }
         )
     ]
+
+    /// What the user copied, where it still exists — else Clipen's copy.
+    /// For paths, Finder and info, which are about the user's file; the
+    /// content tools keep reading the snapshot, which can't have changed.
+    static func userFacingURLs(for item: ClipboardItem) -> [URL] {
+        let snapshots = fileURLs(for: item)
+        guard item.originalFileURL == nil,   // an edited file IS Clipen's copy
+              let sources = item.sourceFileURLs, sources.count == snapshots.count,
+              sources.allSatisfy({ FileManager.default.fileExists(atPath: $0.path) })
+        else { return snapshots }
+        return sources
+    }
 
     static func fileURLs(for item: ClipboardItem) -> [URL] {
         switch item.content {

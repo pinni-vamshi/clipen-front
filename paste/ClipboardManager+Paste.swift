@@ -74,6 +74,9 @@ extension ClipboardManager {
 
     func injectCharacters(_ text: String, completion: (() -> Void)? = nil) {
         let systemWide = AXUIElementCreateSystemWide()
+        // Same bound as `focusedApplication`: a hung app must not hold the
+        // paste for the default 6 s.
+        AXUIElementSetMessagingTimeout(systemWide, 0.25)
         var focusedRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(systemWide,
                                          kAXFocusedUIElementAttribute as CFString,
@@ -110,7 +113,10 @@ extension ClipboardManager {
     private func typeCharacters(_ text: String, completion: (() -> Void)?) {
         let src = CGEventSource(stateID: .hidSystemState)
         DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.06) {
-            for scalar in text.unicodeScalars {
+            for (n, scalar) in text.unicodeScalars.enumerated() {
+                // A breather now and then: a few thousand events in one burst
+                // overflow some apps' input queues and characters go missing.
+                if n > 0, n % 64 == 0 { usleep(4_000) }
                 var chars: [UniChar]
                 if scalar.value <= 0xFFFF {
                     chars = [UniChar(scalar.value)]
@@ -122,11 +128,17 @@ extension ClipboardManager {
                     guard let base = ptr.baseAddress else { return }
                     if let dn = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: true) {
                         dn.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
+                        // No modifiers. A `.hidSystemState` event carries the
+                        // keys physically held, so typing while ⌘ was still
+                        // down (Return to commit with ⌘ held) turned every
+                        // character into a shortcut — ⌘W, ⌘Q — in the target.
+                        dn.flags = []
                         ClipboardManager.tagSynthetic(dn)
                         dn.post(tap: .cghidEventTap)
                     }
                     if let up = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: false) {
                         up.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: base)
+                        up.flags = []
                         ClipboardManager.tagSynthetic(up)
                         up.post(tap: .cghidEventTap)
                     }
@@ -509,6 +521,20 @@ extension ClipboardManager {
             pb.clearContents()
             write(item, to: pb, plainOnly: pastePlainTextByDefault)
             lastChangeCount = pb.changeCount
+            // Files that no longer exist write nothing: say so instead of
+            // pressing Cmd-V on an empty clipboard.
+            if (pb.pasteboardItems ?? []).isEmpty {
+                CopyFeedbackPanel.shared.show(message: String(localized: "Those files no longer exist"))
+                completion?()
+                return
+            }
+            // The clipboard now holds this item, so a later Cmd-V — with
+            // Clipen running or not — pastes it. Recorded so the tag and
+            // the next paste know. Not when Pure paste stripped it: the
+            // clipboard then holds less than the item.
+            if !(pastePlainTextByDefault && item.content.isFormatted), !(pb.pasteboardItems ?? []).isEmpty {
+                markSystemClipboard(itemID: item.id, changeCount: pb.changeCount)
+            }
         }
         let writeMs = ms(tWrite)
 
@@ -579,7 +605,18 @@ extension ClipboardManager {
         if itemList.count > 1 {
             TrackingService.shared.recordMarkedBatch(id: "multi_paste", size: itemList.count)
         }
-        let item      = itemList[0]
+        pasteSequence(itemList, target: target)
+    }
+
+    /// One item of a multi-paste, then the rest. Kept apart from
+    /// `commitMultiPaste` so the once-per-paste bookkeeping above runs once:
+    /// recursing through it recorded a 3-item paste as batches of 3 and 2.
+    private func pasteSequence(_ itemList: [ClipboardItem], target: NSRunningApplication?) {
+        guard let item = itemList.first else {
+            isSimulatingPaste = false
+            selectedIndex = 0; cycleCount = 0
+            return
+        }
         let remaining = Array(itemList.dropFirst())
 
         let token = beginPasteSimulation()
@@ -588,6 +625,11 @@ extension ClipboardManager {
         pb.clearContents()
         write(item, to: pb, plainOnly: pastePlainTextByDefault)
         lastChangeCount = pb.changeCount
+        // The clipboard holds this item now (the last one once the sequence
+        // ends), so the tag and the next Cmd-V follow it, as in simulatePaste.
+        if !(pastePlainTextByDefault && item.content.isFormatted), !(pb.pasteboardItems ?? []).isEmpty {
+            markSystemClipboard(itemID: item.id, changeCount: pb.changeCount)
+        }
 
         activateAndWaitIfNeeded(target) { [weak self] ok in
             guard let self else { return }
@@ -603,7 +645,7 @@ extension ClipboardManager {
                         self.selectedIndex = 0; self.cycleCount = 0
                     } else {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            self.commitMultiPaste(remaining, target: target)
+                            self.pasteSequence(remaining, target: target)
                         }
                     }
                 }
@@ -616,7 +658,7 @@ extension ClipboardManager {
                         self.endPasteSimulation(token: token)
                         self.selectedIndex = 0; self.cycleCount = 0
                     } else {
-                        self.commitMultiPaste(remaining, target: target)
+                        self.pasteSequence(remaining, target: target)
                     }
                 }
             }

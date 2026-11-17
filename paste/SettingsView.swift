@@ -694,8 +694,8 @@ struct ClipenSettingsView: View {
             Text("Starting position").font(.system(size: 11, weight: .semibold)).foregroundColor(.textSec)
 
             HStack(spacing: 14) {
-                pinCounterButton("minus", enabled: manager.pinStartPosition > 1) {
-                    manager.pinStartPosition = max(1, manager.pinStartPosition - 1)
+                pinCounterButton("minus", enabled: manager.pinStartPosition > ClipboardManager.minPinStartPosition) {
+                    manager.pinStartPosition = max(ClipboardManager.minPinStartPosition, manager.pinStartPosition - 1)
                 }
                 Text("\(manager.pinStartPosition)")
                     .font(.system(size: 20, weight: .bold))
@@ -707,7 +707,7 @@ struct ClipenSettingsView: View {
             }
             .frame(maxWidth: .infinity)
 
-            Text("At most \(ClipboardManager.maxPinnedItems) items can be pinned at once.")
+            Text("Row 1 is always your latest copy, the one a plain ⌘V pastes. At most \(ClipboardManager.maxPinnedItems) items can be pinned at once.")
                 .font(.system(size: 10)).foregroundColor(.textSec)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1244,6 +1244,21 @@ struct ClipenSettingsView: View {
             .frame(maxWidth: .infinity, alignment: .center)
 
             Button {
+                // Turning the limit back on deletes everything past it, for
+                // good — say how much before doing it.
+                if manager.unlimitedRingSize {
+                    let over = manager.items.filter { !$0.isPinned && !$0.isUncaptured && !manager.isRememberProtected($0) }.count - manager.maxItems
+                    if over > 0 {
+                        let alert = NSAlert()
+                        alert.messageText = String(localized: "Delete your \(over) oldest items?")
+                        alert.informativeText = String(localized: "Your history is limited to \(manager.maxItems) items again, so the oldest ones beyond that are removed. Pinned items and collections you chose to keep stay. This can't be undone.")
+                        alert.alertStyle = .warning
+                        alert.addButton(withTitle: String(localized: "Delete and Limit"))
+                        alert.addButton(withTitle: String(localized: "Cancel"))
+                        alert.buttons.first?.hasDestructiveAction = true
+                        guard alert.runModal() == .alertFirstButtonReturn else { return }
+                    }
+                }
                 withAnimation { manager.unlimitedRingSize.toggle() }
             } label: {
                 HStack(spacing: 5) {

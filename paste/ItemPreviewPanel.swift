@@ -346,7 +346,11 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     private func present(_ view: AnyView, width w: CGFloat, height h: CGFloat,
                          near popupFrame: NSRect, anchorPoint: NSPoint?,
                          contentKey: AnyHashable? = nil) {
-        let screen = NSScreen.main?.visibleFrame ?? .zero
+        // The screen the popup is on — `NSScreen.main` is the focused app's
+        // screen, so with the popup on another display the side was chosen
+        // against the wrong edges and the panel could open off screen.
+        let screen = NSScreen.screens.first(where: { $0.frame.intersects(popupFrame) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame ?? .zero
         let preferredRightX = popupFrame.maxX + 10
         let rightFits = preferredRightX + w <= screen.maxX
         let leftFits = popupFrame.minX - w - 10 >= screen.minX + 10

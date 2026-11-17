@@ -1491,7 +1491,7 @@ final class AIStructuringService: ObservableObject {
            let json = DeterministicStructuring.convert(item: item) {
             DebugLog.write("AI \(item.id.uuidString.prefix(4)): deterministic \(item.primaryTag.rawValue) conversion, no model call")
             states[item.id] = .done(json)
-            ClipboardManager.shared.updateAIStructuredText(id: item.id, json: json)
+            ClipboardManager.shared.updateAIStructuredText(id: item.id, json: json, revision: item.contentRevision)
             Self.trackAnalysisFinished(item: item, success: true, startedAt: startedAt, trigger: trigger)
             return
         }
@@ -1533,7 +1533,7 @@ final class AIStructuringService: ObservableObject {
                 DebugLog.write("AI-TIME \(tag) total=\(totalMs)ms source=\(sourceMs)ms model=\(modelMs)ms gen=\(modelMs - gateWaitMs)ms validate=\(validateMs)ms gate=\(gateWaitMs)ms content=\(contentChars)ch prompt=\(promptChars)ch out=\(raw.count)ch json=\(json == nil ? "INVALID(\(reason?.rawValue ?? "?"))" : "ok")")
                 if let json {
                     self.states[item.id] = .done(json)
-                    ClipboardManager.shared.updateAIStructuredText(id: item.id, json: json)
+                    ClipboardManager.shared.updateAIStructuredText(id: item.id, json: json, revision: item.contentRevision)
                     Self.trackAnalysisFinished(item: item, success: true, startedAt: startedAt, trigger: trigger)
                 } else if reason == .notJSON || reason == .notSerialisable,
                           jsonRepairsUsed < Self.maxJSONRepairAttempts {
@@ -1671,7 +1671,7 @@ final class AIStructuringService: ObservableObject {
 
                 if let json {
                     self.states[item.id] = .done(json)
-                    ClipboardManager.shared.updateAIStructuredText(id: item.id, json: json)
+                    ClipboardManager.shared.updateAIStructuredText(id: item.id, json: json, revision: item.contentRevision)
                     Self.trackAnalysisFinished(item: item, success: true, startedAt: startedAt, trigger: trigger)
                     return
                 }

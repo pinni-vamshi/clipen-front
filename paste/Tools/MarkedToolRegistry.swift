@@ -549,9 +549,9 @@ enum MarkedToolService {
                         case .files(let us):
                             urls.append(contentsOf: us.filter { FileManager.default.fileExists(atPath: $0.path) })
                         case .image(_, let data, let dataType):
-                            let ext = dataType.rawValue.contains("pdf") ? "pdf"
-                                : dataType.rawValue.contains("jpeg") ? "jpg"
-                                : dataType.rawValue.contains("gif") ? "gif" : "png"
+                            // The extension follows the bytes: HEIC, TIFF and
+                            // WebP used to be written out as `.png`.
+                            let ext = ImageService.pathExtension(for: dataType)
                             let url = dir.appendingPathComponent("item-\(idx + 1).\(ext)")
                             try data.write(to: url, options: .atomic)
                             urls.append(url)

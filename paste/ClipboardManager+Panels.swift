@@ -144,9 +144,9 @@ extension ClipboardManager {
         case .files(let urls):
             return urls.filter { FileManager.default.fileExists(atPath: $0.path) }
         case .image(_, let rawData, let dataType):
-            let ext = dataType.rawValue.contains("gif") ? "gif"
-                : dataType.rawValue.contains("pdf") ? "pdf"
-                : dataType.rawValue.contains("jpeg") ? "jpg" : "png"
+            // Named for what the bytes are: HEIC and TIFF were shared as
+            // `.png`, which apps on the other end refused or mis-opened.
+            let ext = ImageService.pathExtension(for: dataType)
             return Self.shareTempFile(rawData, ext: ext, id: item.id).map { [$0] } ?? []
         case .svg(let src):
             return Self.shareTempFile(Data(src.utf8), ext: "svg", id: item.id).map { [$0] } ?? []
@@ -623,6 +623,11 @@ extension ClipboardManager {
     func commitInlineMixedEdit(with segments: [ContentSegment]) {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
+        // Saving without a change must not rebuild the item: rebuilding
+        // drops the formats it was copied with and re-encodes its HTML.
+        if let item = item(id: id), TableCellExtractor.segments(for: item) == segments {
+            finishInlineEditCommit(); return
+        }
         saveInlineEditOriginal(for: id)
         updateItemMixed(id: id, segments: segments)
         finishInlineEditCommit()
@@ -651,6 +656,10 @@ extension ClipboardManager {
     func commitInlineRichEdit(with attributedString: NSAttributedString) {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
+        if let item = item(id: id), let before = Self.editableAttributedString(for: item),
+           before.isEqual(to: attributedString) {
+            finishInlineEditCommit(); return
+        }
         saveInlineEditOriginal(for: id)
         updateItemRichText(id: id, editedAttributedString: attributedString)
         finishInlineEditCommit()
@@ -660,11 +669,14 @@ extension ClipboardManager {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
         saveInlineEditOriginal(for: id)
+        let revisionBefore = item(id: id)?.contentRevision
         if let item = item(id: id), case .file = item.content {
             updateFileItemText(id: id, newText: newText)
         } else {
             updateItemText(id: id, newText: newText)
         }
+        // Nothing changed (Enter without typing): no Undo Edit to offer.
+        if item(id: id)?.contentRevision == revisionBefore { discardUnusedEditOriginal(for: id) }
         finishInlineEditCommit()
     }
 
@@ -675,6 +687,9 @@ extension ClipboardManager {
     func commitInlineTableEdit(with rows: [[String]]) {
         guard let id = inlineEditItemID else { return }
         inlineEditItemID = nil
+        if let item = item(id: id), TableCellExtractor.cells(for: item) == rows {
+            finishInlineEditCommit(); return
+        }
         saveInlineEditOriginal(for: id)
         updateItemTable(id: id, rows: rows)
         finishInlineEditCommit()
@@ -725,6 +740,13 @@ extension ClipboardManager {
         endInlineEditPresentation()
     }
 
+    private func discardUnusedEditOriginal(for id: UUID) {
+        guard let saved = inlineEditOriginals[id], let item = item(id: id),
+              item.content.plainText == saved.plainText else { return }
+        inlineEditOriginals.removeValue(forKey: id)
+        inlineEditOriginalSidecars.removeValue(forKey: id)
+    }
+
     private func saveInlineEditOriginal(for id: UUID) {
         guard inlineEditOriginals[id] == nil,
               let item = item(id: id) else { return }
@@ -740,6 +762,13 @@ extension ClipboardManager {
         // it was the only place that ever did this, which is exactly why
         // undoing an edit refreshed those caches and making one did not.
         replaceItemContent(id: id, newContent: original, sidecar: originalSidecar)
+        // Back on the original file: it is no longer "the original of an
+        // edit". Left set, the next edit rewrote that original in place,
+        // and Revert to Original then had nothing unchanged to go back to.
+        if case .file(let url) = original, let i = indexOfItem(id: id),
+           items[i].originalFileURL == url {
+            items[i].originalFileURL = nil
+        }
         invalidateCachesAfterContentEdit()
         flashStatus("Edit reverted.")
     }

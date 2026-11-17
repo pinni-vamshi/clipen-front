@@ -690,14 +690,9 @@ extension ClipboardManager {
         }
         selectedIndex = 0
         setSidePanelStage(.none)
-        // A quick Cmd-V is a normal paste: it pastes what is on the
-        // clipboard. The top row is not always that — pins sit above the
-        // newest copy by default, and re-copying a pinned item leaves it
-        // where it is — so the item linked to the live clipboard wins.
-        if let liveID = systemClipboardItemID, let live = item(id: liveID),
-           pastesFromSystemClipboard(live) {
-            pendingPasteItemID = liveID
-        }
+        // Row 1, always: the newest copy. When the clipboard still holds
+        // it, `simulatePaste` uses the system's own paste; when something
+        // else has written to the clipboard since, Clipen pastes its copy.
         AuthManager.shared.registerFastPasteAction()
         commitPaste(countsAsFastPaste: true)
         showFastPasteHintIfNeeded()
@@ -773,6 +768,10 @@ extension ClipboardManager {
         guard let realIndex = indexOfItem(id: target.id) else { return }
         AuthManager.shared.registerActionUsage(actionID: "action.delete")
         popupSessionDeleted = true
+        // Like every other removal: the item's file copies and per-item
+        // caches go with it, not at some later purge.
+        evictFileSnapshots(for: items[realIndex])
+        evictCaches(for: target.id)
         items.remove(at: realIndex)
         markBlobPurgeNeeded()
         if !fallBackToAllIfViewEmpty() { dismissPreview(); return }
@@ -787,6 +786,10 @@ extension ClipboardManager {
         AuthManager.shared.registerActionUsage(actionID: "action.delete", count: ids.count)
         popupSessionDeleted = true
         markedItemIDs = []
+        for item in items where ids.contains(item.id) {
+            evictFileSnapshots(for: item)
+            evictCaches(for: item.id)
+        }
         items.removeAll { ids.contains($0.id) }
         markBlobPurgeNeeded()
         if !fallBackToAllIfViewEmpty() { dismissPreview(); return }
@@ -810,6 +813,7 @@ extension ClipboardManager {
         guard realIndex != 0 else { return }
         let moved = items.remove(at: realIndex)
         items.insert(moved, at: 0)
+        if !moved.isPinned { frontPinnedItemID = nil }
         if let nextID, let idx = indexInDisplayItems(id: nextID) {
             selectedIndex = idx
         } else {
@@ -824,6 +828,7 @@ extension ClipboardManager {
         let movedIDs = Set(orderedItems.map(\.id))
         let remaining = items.filter { !movedIDs.contains($0.id) }
         items = orderedItems + remaining
+        if orderedItems.contains(where: { !$0.isPinned }) { frontPinnedItemID = nil }
         if let firstID = orderedItems.first?.id,
            let newIdx = indexInDisplayItems(id: firstID) {
             selectedIndex = newIdx

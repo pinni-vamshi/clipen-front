@@ -131,11 +131,18 @@ extension ClipboardManager {
 
         if captureFiles {
             let urls = fileURLs(from: pb)
-            if !urls.isEmpty {
+            if !urls.isEmpty, !Self.textIsCopiedPath(of: urls, in: pb) {
             // Match against what's already captured BEFORE copying: a folder
             // copied twice used to be snapshotted in full twice.
             // (This runs on the capture queue; `items` belongs to main.)
-            let readCaptured = { self.items.compactMap { item in item.fileURLsForIdentity.map { (item.id, $0) } } }
+            // Also claims the capture: snapshotting a big folder or a file on
+            // a network drive takes longer than the 0.7 s "couldn't capture"
+            // timer, which then flashed a false failure and left a
+            // "No preview" row under the real item.
+            let readCaptured = { () -> [(UUID, [URL])] in
+                self.captureAttemptGeneration &+= 1
+                return self.items.compactMap { item in item.fileURLsForIdentity.map { (item.id, $0) } }
+            }
             let captured = Thread.isMainThread ? readCaptured() : DispatchQueue.main.sync(execute: readCaptured)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 if let identity = FileSnapshotStore.identity(of: urls),
@@ -144,24 +151,41 @@ extension ClipboardManager {
                         guard let self, let idx = self.indexOfItem(id: match.0) else { return }
                         self.captureAttemptGeneration &+= 1
                         self.bringToTop(at: idx, recopied: ClipboardItem(content: .files(urls)))
+                        // Same files, maybe from a new place: remember where.
+                        if let i = self.indexOfItem(id: match.0) { self.items[i].sourceFileURLs = urls }
+                        // Same files copied again: the clipboard holds this
+                        // item, so it's linked like any other capture. Missed
+                        // here, a re-copied file lost its tag and pasted
+                        // Clipen's snapshot instead of what was copied.
+                        self.frontPinnedItemID = self.items.first(where: { $0.id == match.0 })?.isPinned == true ? match.0 : nil
+                        self.markSystemClipboard(itemID: match.0, changeCount: captureChangeCount)
                     }
                     return
                 }
                 let snapshots = FileSnapshotStore.snapshot(urls)
                 guard !snapshots.isEmpty else {
-                    DispatchQueue.main.async { CopyFeedbackPanel.shared.show() }
+                    DispatchQueue.main.async { [weak self] in
+                        CopyFeedbackPanel.shared.show()
+                        self?.addUncapturedPlaceholder(
+                            reason: String(localized: "No preview — pastes with system default"),
+                            changeCount: captureChangeCount)
+                    }
                     return
                 }
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
-                    self.addCaptured(ClipboardItem(content: snapshots.count == 1
-                        ? .file(snapshots[0]) : .files(snapshots)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
+                    var captured = ClipboardItem(content: snapshots.count == 1
+                        ? .file(snapshots[0]) : .files(snapshots))
+                    // Only when every file was snapshotted, so the two lists
+                    // line up one to one.
+                    if snapshots.count == urls.count { captured.sourceFileURLs = urls }
+                    self.addCaptured(captured, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                 }
             }
             return
             }
 
-            if resolvePromisedFiles(from: pb) { return }
+            if resolvePromisedFiles(from: pb, sidecar: sidecarSnapshot, changeCount: captureChangeCount) { return }
         }
 
         let htmlCandidate = Self.readHTML(from: pb)
@@ -597,22 +621,31 @@ extension ClipboardManager {
             }
         }
 
-        if let string = pasteboard.string(forType: .string),
-           let url = parseFileURL(string) {
-            urls.append(url)
-        }
+        // Plain text alone is never a file copy. A path copied as text —
+        // Finder's Copy as Pathname, a "copy path" extension, a terminal —
+        // was turned into a file here, snapshotted into FileCopies, and
+        // pasted back as Clipen's copy instead of the path the user copied.
 
         let codeListTypes: [NSPasteboard.PasteboardType] = [
             .init("code/file-list"),
             .init("org.chromium.web-custom-data"),
             .init("vscode-editor-data")
         ]
+        // Editor file lists (VS Code's explorer) carry `file://` URIs, and
+        // only those are taken. Chromium's custom data is a binary pickle of
+        // UTF-16 strings: read as UTF-8 and split on NULs it falls apart into
+        // single characters, and the "/" of any MIME type in it ("text/…",
+        // which Notion, Figma and Slack write on every copy) was a bare path
+        // to the disk root — so an ordinary copy snapshotted "/" recursively.
         for type in codeListTypes {
-            guard let data = pasteboard.data(forType: type),
-                  let raw = String(data: data, encoding: .utf8)
-                          ?? String(data: data, encoding: .utf16) else { continue }
-            for line in raw.split(whereSeparator: { $0 == "\n" || $0 == "\r" || $0 == "\u{0}" }) {
-                if let url = parseFileURL(String(line)) { urls.append(url) }
+            guard let data = pasteboard.data(forType: type) else { continue }
+            let raw = type.rawValue == "org.chromium.web-custom-data"
+                ? String(data: data, encoding: .utf16LittleEndian)
+                : String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16)
+            guard let raw else { continue }
+            for token in raw.split(whereSeparator: { $0.unicodeScalars.allSatisfy { $0.value < 0x20 } }) {
+                guard let start = token.range(of: "file://") else { continue }
+                if let url = parseFileURL(String(token[start.lowerBound...])) { urls.append(url) }
             }
         }
 
@@ -626,7 +659,7 @@ extension ClipboardManager {
         }
     }
 
-    func resolvePromisedFiles(from pb: NSPasteboard) -> Bool {
+    func resolvePromisedFiles(from pb: NSPasteboard, sidecar: [String: Data], changeCount: Int) -> Bool {
         guard let receivers = pb.readObjects(
             forClasses: [NSFilePromiseReceiver.self],
             options: nil
@@ -654,6 +687,9 @@ extension ClipboardManager {
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             let existing = resolved.filter { FileManager.default.fileExists(atPath: $0.path) }
+            // The promised files were written to a temp folder only so they
+            // could be snapshotted; they are never needed after that.
+            defer { try? FileManager.default.removeItem(at: destDir) }
             guard !existing.isEmpty else {
                 CopyFeedbackPanel.shared.show()
                 return
@@ -663,23 +699,62 @@ extension ClipboardManager {
                 CopyFeedbackPanel.shared.show()
                 return
             }
-            self.addItem(ClipboardItem(
-                content: snapshots.count == 1 ? .file(snapshots[0]) : .files(snapshots)))
+            // Through addCaptured like every other copy, so the item keeps the
+            // source's other flavours and is linked to the live clipboard.
+            self.addCaptured(ClipboardItem(
+                content: snapshots.count == 1 ? .file(snapshots[0]) : .files(snapshots)),
+                sidecar: sidecar, changeCount: changeCount)
         }
         return true
+    }
+
+    /// A "copy path" action that writes the file URL alongside the path as
+    /// text. Its plain text is the full path of every file, where a Finder
+    /// file copy writes only the names. That's a path the user copied, so it
+    /// is kept as text: the preview shows the path, and the file URL stays
+    /// in the sidecar, so a paste into Finder still gives the original file
+    /// rather than Clipen's snapshot of it.
+    static func textIsCopiedPath(of urls: [URL], in pb: NSPasteboard) -> Bool {
+        guard let text = pb.string(forType: .string) else { return false }
+        let lines = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard lines.count == urls.count else { return false }
+        let paths = Set(urls.map { $0.standardizedFileURL.path })
+        return lines.allSatisfy { line in
+            var raw = line
+            if raw.count >= 2, let q = raw.first, q == "'" || q == "\"", raw.last == q {
+                raw = String(raw.dropFirst().dropLast())
+            }
+            let path: String
+            if raw.hasPrefix("file://") {
+                guard let url = URL(string: raw), url.isFileURL else { return false }
+                path = url.path
+            } else if raw.hasPrefix("/") || raw.hasPrefix("~") {
+                // Shell-escaped forms (`My\ File.md`) name the same file.
+                path = (raw.replacingOccurrences(of: "\\", with: "") as NSString).expandingTildeInPath
+            } else {
+                return false
+            }
+            return paths.contains(URL(fileURLWithPath: path).standardizedFileURL.path)
+        }
     }
 
     func parseFileURL(_ raw: String) -> URL? {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !text.contains("\n") else { return nil }
 
-        if text.hasPrefix("file://"),
-           let url = URL(string: text.removingPercentEncoding ?? text),
-           url.isFileURL {
-            return url
+        if text.hasPrefix("file://") {
+            // Percent-encoded as written; decoding first broke names with a
+            // literal "%" and, on older systems, any name with a space.
+            if let url = URL(string: text) ?? URL(string: text.removingPercentEncoding ?? text),
+               url.isFileURL { return url }
+            return nil
         }
 
-        if text.hasPrefix("/") || text.hasPrefix("~") {
+        // A bare "/" or "~" is the disk or the home folder, never a file
+        // anyone copied.
+        if text.count > 1, text.hasPrefix("/") || text.hasPrefix("~/") {
             return URL(fileURLWithPath: (text as NSString).expandingTildeInPath)
         }
 
@@ -839,6 +914,7 @@ extension ClipboardManager {
 
         items.removeAll { $0.isUncaptured }
         items.insert(item, at: 0)
+        frontPinnedItemID = nil
         selectedIndex = 0
         uncapturedPlaceholderChangeCount = changeCount
     }
@@ -875,6 +951,7 @@ extension ClipboardManager {
             if captureIsPostPasteWrite,
                Date().timeIntervalSince(lastForeignInsertionAt) < Self.postPasteRestoreWindow { return existingID }
             bringToTop(at: existing, recopied: item)
+            frontPinnedItemID = items.first(where: { $0.id == existingID })?.isPinned == true ? existingID : nil
             return existingID
         }
 
@@ -892,6 +969,7 @@ extension ClipboardManager {
             item.collections = [activeCollection]
         }
 
+        frontPinnedItemID = nil
         if case .text(let newText) = item.content {
             var mutableItem = item
             if let badge = computeDiffBadge(newText: newText, against: items) {
@@ -1071,32 +1149,49 @@ extension ClipboardManager {
         markBlobPurgeNeeded()
     }
 
+    /// Reads a copied link's page title. Never for a link that opening
+    /// would spend or expose (see `LinkSafety`), only for HTML, and only the
+    /// first 256 KB — the whole response used to be downloaded into memory,
+    /// so copying a link to a large file fetched all of it.
     func fetchURLTitle(for itemID: UUID, url: URL) {
+        guard !LinkSafety.mustNotAutoOpen(url) else { return }
         var request = URLRequest(url: url, timeoutInterval: 5)
         request.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
-        URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
-            guard let self, let data,
-                  let html = String(data: data, encoding: .utf8)
-                          ?? String(data: data, encoding: .isoLatin1) else { return }
-            guard let startRange = html.range(of: "<title", options: .caseInsensitive),
-                  let gtIdx = html[startRange.upperBound...].firstIndex(of: ">"),
-                  let endRange = html.range(of: "</title>", options: .caseInsensitive) else { return }
+        Task.detached(priority: .utility) { [weak self] in
+            guard let (bytes, response) = try? await URLSession.shared.bytes(for: request),
+                  let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  (http.mimeType ?? "").lowercased().contains("html") else { return }
+            var data = Data()
+            do {
+                for try await byte in bytes {
+                    data.append(byte)
+                    if data.count >= 256 * 1024 { break }
+                    // The title is near the top; stop once it's been read.
+                    if byte == UInt8(ascii: ">"), data.count > 16,
+                       data.suffix(8).elementsEqual("</title>".utf8.map { $0 })
+                        || data.suffix(8).elementsEqual("</TITLE>".utf8.map { $0 }) { break }
+                }
+            } catch { return }
+            bytes.task.cancel()
+            guard let html = String(data: data, encoding: .utf8)
+                    ?? String(data: data, encoding: .isoLatin1),
+                  let startRange = html.range(of: "<title", options: .caseInsensitive),
+                  let gtIdx = html[startRange.upperBound...].firstIndex(of: ">") else { return }
             let titleStart = html.index(after: gtIdx)
-            guard titleStart < endRange.lowerBound else { return }
-            let title = String(html[titleStart..<endRange.lowerBound])
+            guard let endRange = html.range(of: "</title>", options: .caseInsensitive,
+                                            range: titleStart..<html.endIndex) else { return }
+            let rawTitle = String(html[titleStart..<endRange.lowerBound])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-                .htmlDecoded
-            guard !title.isEmpty else { return }
-            DispatchQueue.main.async { [weak self] in
-                guard let self,
-                      let idx = self.indexOfItem(id: itemID),
-                      idx < self.items.count else { return }
+            guard !rawTitle.isEmpty else { return }
+            await MainActor.run { [weak self] in
+                let title = rawTitle.htmlDecoded
+                guard let self, !title.isEmpty, let idx = self.indexOfItem(id: itemID) else { return }
                 self.items[idx].urlTitle = title
                 self.items[idx].embedding = nil
                 self.lastSearchQuery = nil
                 self.recomputeEmbeddingsInBackground()
             }
-        }.resume()
+        }
     }
 
     func computeDiffBadge(newText: String, against existing: [ClipboardItem]) -> String? {

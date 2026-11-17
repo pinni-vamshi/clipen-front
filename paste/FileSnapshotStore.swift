@@ -2,6 +2,7 @@ import Foundation
 
 enum FileSnapshotStore {
     static func snapshot(_ urls: [URL]) -> [URL] {
+        let urls = urls.filter(isSafeToSnapshot)
         guard !urls.isEmpty else { return [] }
 
         let fileManager = FileManager.default
@@ -25,6 +26,34 @@ enum FileSnapshotStore {
         }
 
         return copiedURLs
+    }
+
+    /// A new, empty folder of Clipen's own, for a file Clipen writes itself.
+    static func makeFolder() -> URL? {
+        let folder = baseDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            return folder
+        } catch { return nil }
+    }
+
+    /// Whether `url` is one of Clipen's own copies, which it may rewrite.
+    static func contains(_ url: URL) -> Bool {
+        let base = baseDirectory.standardizedFileURL.resolvingSymlinksInPath().path
+        return url.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(base + "/")
+    }
+
+    /// Never the disk, a volume, the home folder, or anything that contains
+    /// FileCopies itself — copying those would copy the snapshots into
+    /// themselves, or the whole drive.
+    private static func isSafeToSnapshot(_ url: URL) -> Bool {
+        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let base = baseDirectory.standardizedFileURL.resolvingSymlinksInPath().path
+        if path == "/" || path == home || path == "/Users" || path == "/System" { return false }
+        let parts = path.split(separator: "/")
+        if parts.count <= 2, parts.first == "Volumes" { return false }
+        return !(base == path || base.hasPrefix(path + "/"))
     }
 
     private static func cloneOrCopy(from source: URL, to destination: URL) -> Bool {

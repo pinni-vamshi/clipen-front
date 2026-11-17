@@ -655,7 +655,9 @@ struct PopoverPreviewView: View {
                                                selectionNamespace: selectionNamespace,
                                                shakeGeneration: manager.editDeniedShake?.itemID == item.id
                                                    ? manager.editDeniedShake?.generation ?? 0 : 0,
-                                               isSystemClipboard: manager.systemClipboardItemID == item.id)
+                                               isSystemClipboard: idx == 0
+                                                   && manager.systemClipboardItemID == item.id
+                                                   && manager.showsSystemDefaultTag(item, displayIndex: idx))
                                         .equatable()
                                         .id(item.id)
 
@@ -2483,7 +2485,13 @@ extension ClipboardManager {
         }
 
         for (idx, item) in items.enumerated() {
-            if isImageRunEligible(item.content) {
+            // Row 1 is the newest copy, the one a plain Cmd-V pastes, and the
+            // only row that can carry the "System default" tag — which a
+            // packed row of codes or images has no room to show. It always
+            // gets a row of its own.
+            if idx == 0 {
+                result.append(.single(item: item, index: idx))
+            } else if isImageRunEligible(item.content) {
                 flushTextRun()
                 imageRun.append((item, idx))
             } else if isTextRunEligible(item) {

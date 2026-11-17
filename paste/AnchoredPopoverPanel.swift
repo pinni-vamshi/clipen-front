@@ -72,7 +72,11 @@ class AnchoredPopoverPanel: NSObject, NSPopoverDelegate {
         // the window back before anything below reuses or re-shows it.
         cancelFadeOut()
 
-        let screen = NSScreen.main?.visibleFrame ?? .zero
+        // The screen the popup is on — `NSScreen.main` is the focused app's
+        // screen, so with the popup on another display the side was chosen
+        // against the wrong edges and the panel could open off screen.
+        let screen = NSScreen.screens.first(where: { $0.frame.intersects(popupFrame) })?.visibleFrame
+            ?? NSScreen.main?.visibleFrame ?? .zero
         let rightFits = popupFrame.maxX + 8 + size.width <= screen.maxX
         let leftFits  = popupFrame.minX - size.width - 8 >= screen.minX + 8
         let placeRight = rightFits || !leftFits

@@ -393,9 +393,19 @@ class ClipboardManager: ObservableObject {
     // applied a beat after launch (`applyPlanLimits`), and anything trimmed
     // against a placeholder of 10 in between was deleted for good.
     @Published var maxItems: Int = UserDefaults.standard.object(forKey: "preferredRingSize") as? Int ?? 20 {
-        didSet {
-            DispatchQueue.main.async { [weak self] in self?.trimRingToLimit() }
-        }
+        didSet { scheduleRingTrim() }
+    }
+
+    /// Trimming deletes for good, so it waits for the size to settle. It
+    /// ran on every change, and the slider changes it continuously: drag
+    /// from 500 down to 10 and back up, and 490 items were already gone.
+    /// "All" is windowed by `maxItems` at once, so the list still reflects
+    /// the new size immediately.
+    func scheduleRingTrim(after delay: TimeInterval = 1.5) {
+        ringTrimWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.trimRingToLimit() }
+        ringTrimWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Removes the oldest unprotected items beyond the ring size. The one
@@ -420,6 +430,8 @@ class ClipboardManager: ObservableObject {
     /// this is true. `setRingSize`/the slider are disabled in Settings
     /// while this is on; the guard there is a backend safety net, not the
     /// primary gate.
+    var ringTrimWork: DispatchWorkItem?
+
     @Published var unlimitedRingSize: Bool = UserDefaults.standard.bool(forKey: "unlimitedRingSize") {
         didSet {
             guard oldValue != unlimitedRingSize else { return }
@@ -795,7 +807,10 @@ class ClipboardManager: ObservableObject {
                 searchIntentTag = intentTag
             } else if trimmed.count >= 2 {
                 searchIntentTag = nil
-                let rankedIDs = hybridSearch(query: debouncedPopupSearchQuery, logRanking: true)
+                // Ranking logs only when debug logging is on: `logRanking` bypasses
+                // the search cache, so it was re-running the full search (and
+                // the query embedding) on every rebuild of this list.
+                let rankedIDs = hybridSearch(query: debouncedPopupSearchQuery, logRanking: DebugLog.isEnabled)
                 let allowed = Set(result.map(\.id))
                 result = rankedIDs.filter { allowed.contains($0.id) }
             } else if !trimmed.isEmpty {
@@ -1145,8 +1160,15 @@ class ClipboardManager: ObservableObject {
         }
     }
     static let maxPinnedItems = 5
+    /// Row pins start at. Row 1 always belongs to the newest copy — the item
+    /// a plain Cmd-V pastes (see `applyPinOrdering`) — so the lowest is 2.
+    /// A stored 1 from older versions reads as 2, which is where those pins
+    /// now appear anyway.
+    static let minPinStartPosition = 2
     @Published var pinStartPosition: Int =
-        min(max(1, UserDefaults.standard.object(forKey: "pinStartPosition") as? Int ?? 1), ClipboardManager.maxPinnedItems) {
+        min(max(ClipboardManager.minPinStartPosition,
+                UserDefaults.standard.object(forKey: "pinStartPosition") as? Int ?? ClipboardManager.minPinStartPosition),
+            ClipboardManager.maxPinnedItems) {
         didSet {
             UserDefaults.standard.set(pinStartPosition, forKey: "pinStartPosition")
             if oldValue != pinStartPosition { AuthManager.shared.registerActionUsage(actionID: "setting.pin_position", value: pinStartPosition) }
@@ -1407,7 +1429,14 @@ class ClipboardManager: ObservableObject {
     // Clipen pasting a different item, a tool restoring an old clipboard —
     // the link is gone and Clipen pastes its own copy as before.
 
-    /// Shown as the "System default" tag in the popup.
+    /// A pinned item that was just copied again: it is the newest copy, so it
+    /// takes row 1 (see `applyPinOrdering`) although it stays pinned. Any
+    /// newer copy, or an item moved to the front, takes row 1 back.
+    var frontPinnedItemID: UUID? {
+        didSet { if frontPinnedItemID != oldValue { _displayItems = nil } }
+    }
+
+    /// The history item the clipboard holds right now, when Clipen knows it.
     @Published private(set) var systemClipboardItemID: UUID?
     private(set) var systemClipboardChangeCount = -1
     private var systemClipboardRevision = 0
@@ -1431,17 +1460,21 @@ class ClipboardManager: ObservableObject {
     /// Not when it has been edited since it was copied, and not for
     /// formatted content while Pure paste is on — the system copy still
     /// carries the formatting Pure paste exists to remove.
+    /// The "System default" tag. A promise: with Clipen quit, Cmd-V would
+    /// paste exactly this. So only row 1 — what a plain Cmd-V pastes — and
+    /// only while the clipboard still holds this item unchanged. The tag
+    /// used to follow the item wherever it sat, so after a dictation tool
+    /// put an old clipboard back it showed on row 7 or 8, and it stayed on
+    /// an item after it was edited.
+    func showsSystemDefaultTag(_ item: ClipboardItem, displayIndex: Int) -> Bool {
+        displayIndex == 0 && pastesFromSystemClipboard(item)
+    }
+
     func pastesFromSystemClipboard(_ item: ClipboardItem) -> Bool {
         guard item.id == systemClipboardItemID,
               NSPasteboard.general.changeCount == systemClipboardChangeCount,
               item.contentRevision == systemClipboardRevision else { return false }
-        if pastePlainTextByDefault {
-            switch item.content {
-            case .html, .richText, .rtfd: return false
-            default: break
-            }
-        }
-        return true
+        return !(pastePlainTextByDefault && item.content.isFormatted)
     }
 
     // MARK: Paste-and-restore tools (dictation apps, text expanders)
@@ -2038,6 +2071,11 @@ struct ClipboardItem: Identifiable {
 
     var originalFileURL: URL? = nil
 
+    /// The files the user actually copied. `content` holds Clipen's snapshot
+    /// of them in FileCopies, so path, reveal and info tools used to show
+    /// Clipen's private copy instead. See `FileTools.userFacingURLs`.
+    var sourceFileURLs: [URL]? = nil
+
     var pastedToAppName:  String? = nil
     var pastedToBundleID: String? = nil
     var lastPastedAt: Date? = nil
@@ -2620,6 +2658,14 @@ enum ClipboardContent {
 
     indirect case group([ClipboardItem])
 
+    /// Carries formatting that Pure paste removes.
+    var isFormatted: Bool {
+        switch self {
+        case .richText, .html, .rtfd: return true
+        default: return false
+        }
+    }
+
     var plainText: String? {
         switch self {
         case .text(let s):               return s
@@ -2747,25 +2793,49 @@ extension String {
             .joined(separator: " ")
     }
 
+    /// The words of an identifier or phrase: split on anything that isn't
+    /// a letter or digit, and at case changes — `fooBar` is foo|Bar and
+    /// `HTTPServer` is HTTP|Server. The old converters split on spaces only
+    /// (camelCase turned `fooBar` into `foobar`) or put an underscore before
+    /// every capital (`Hello World` → `hello__world`, `HTTPServer` →
+    /// `h_t_t_p_server`).
+    var identifierWords: [String] {
+        var words: [String] = []
+        var current = ""
+        let chars = Array(self)
+        for (i, c) in chars.enumerated() {
+            guard c.isLetter || c.isNumber else {
+                if !current.isEmpty { words.append(current); current = "" }
+                continue
+            }
+            if let last = current.last, c.isUppercase {
+                let nextIsLower = i + 1 < chars.count && chars[i + 1].isLowercase
+                if last.isLowercase || last.isNumber || (last.isUppercase && nextIsLower) {
+                    words.append(current); current = ""
+                }
+            }
+            current.append(c)
+        }
+        if !current.isEmpty { words.append(current) }
+        return words
+    }
+
     var toCamelCase: String {
-        let words = components(separatedBy: .init(charactersIn: " _-")).filter { !$0.isEmpty }
-        return words.enumerated().map { i, w in i == 0 ? w.lowercased() : w.capitalized }.joined()
+        identifierWords.enumerated().map { i, w in
+            i == 0 ? w.lowercased() : w.prefix(1).uppercased() + w.dropFirst().lowercased()
+        }.joined()
+    }
+
+    var toPascalCase: String {
+        identifierWords.map { $0.prefix(1).uppercased() + $0.dropFirst().lowercased() }.joined()
     }
 
     var toSnakeCase: String {
-        unicodeScalars.reduce("") { acc, char in
-            if CharacterSet.uppercaseLetters.contains(char) && !acc.isEmpty {
-                return acc + "_" + String(char).lowercased()
-            }
-            return acc + String(char)
-        }
-        .replacingOccurrences(of: " ", with: "_")
-        .replacingOccurrences(of: "-", with: "_")
-        .lowercased()
+        identifierWords.map { $0.lowercased() }.joined(separator: "_")
     }
 
     var toKebabCase: String {
-        toSnakeCase.replacingOccurrences(of: "_", with: "-")
+        identifierWords.map { $0.lowercased() }.joined(separator: "-")
     }
 }
 

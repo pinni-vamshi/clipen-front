@@ -109,8 +109,15 @@ enum HistoryCrypto {
 
 extension ClipboardManager {
 
-    func updateAIStructuredText(id: UUID, json: String?) {
+    /// `revision` is the item's `contentRevision` when its analysis started:
+    /// an analysis takes seconds, and an edit in between used to have the
+    /// result for the OLD text written onto the new one.
+    func updateAIStructuredText(id: UUID, json: String?, revision: Int? = nil) {
         guard let idx = indexOfItem(id: id) else { return }
+        if let revision, items[idx].contentRevision != revision {
+            DebugLog.write("AI \(id.uuidString.prefix(4)): result dropped, item edited during analysis")
+            return
+        }
         guard items[idx].aiStructuredText != json else { return }
         items[idx].aiStructuredText = json
         items[idx].embedding = nil
@@ -183,14 +190,23 @@ extension ClipboardManager {
               case .file(let url) = items[idx].content,
               FileKindDetector.isTextFile(url) else { return }
 
-        if items[idx].originalFileURL == nil {
-
-            let original = url
-            guard (try? String(contentsOf: original, encoding: .utf8)) != newText else { return }
+        // Clipen only ever writes inside its own FileCopies folder. The edited
+        // copy used to go BESIDE the item's file — for an item that points at
+        // the user's real file (older history, a snapshot that failed) that
+        // put `name-edited.ext` in their folder, overwriting any file already
+        // called that, and later edits rewrote it in place.
+        let ownsFile = FileSnapshotStore.contains(url)
+        if items[idx].originalFileURL == nil || !ownsFile {
+            let original = items[idx].originalFileURL ?? url
+            guard (try? String(contentsOf: url, encoding: .utf8)) != newText else { return }
             let stem = original.deletingPathExtension().lastPathComponent
             let ext  = original.pathExtension
             let editedName = ext.isEmpty ? "\(stem)-edited" : "\(stem)-edited.\(ext)"
-            let editedURL = original.deletingLastPathComponent().appendingPathComponent(editedName)
+            guard let folder = FileSnapshotStore.makeFolder() else {
+                flashStatus("Couldn't save the edit.")
+                return
+            }
+            let editedURL = folder.appendingPathComponent(editedName)
             do {
                 try newText.write(to: editedURL, atomically: true, encoding: .utf8)
             } catch {
@@ -220,8 +236,14 @@ extension ClipboardManager {
         guard let idx = indexOfItem(id: id),
               let original = items[idx].originalFileURL,
               case .file(let editedURL) = items[idx].content else { return }
-        if editedURL != original {
+        // Only Clipen's own copy is ever deleted, folder and all.
+        if editedURL != original, FileSnapshotStore.contains(editedURL) {
+            let folder = editedURL.deletingLastPathComponent()
             try? FileManager.default.removeItem(at: editedURL)
+            if FileSnapshotStore.contains(folder),
+               (try? FileManager.default.contentsOfDirectory(atPath: folder.path))?.isEmpty == true {
+                try? FileManager.default.removeItem(at: folder)
+            }
         }
         replaceItemContent(id: id, newContent: .file(original))
         if let i = indexOfItem(id: id) {
@@ -240,6 +262,38 @@ extension ClipboardManager {
         replaceItemContent(id: id, newContent: Self.reboundEditedContent(old: old.content, newText: newText))
     }
 
+    /// Swaps in only what the edit changed. Replacing the whole string gave
+    /// all of it the first character's attributes, so fixing one typo in a
+    /// formatted paragraph wiped its bold, links and colours. Text before and
+    /// after the change keeps its own formatting; inserted text takes the
+    /// formatting of the text it was typed into.
+    static func replaceChangedRange(in text: NSMutableAttributedString, with newText: String) {
+        let old = Array(text.string.utf16)
+        let new = Array(newText.utf16)
+        var prefix = 0
+        while prefix < old.count, prefix < new.count, old[prefix] == new[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < old.count - prefix, suffix < new.count - prefix,
+              old[old.count - 1 - suffix] == new[new.count - 1 - suffix] { suffix += 1 }
+        // Never split a surrogate pair or a composed character.
+        let oldNS = text.string as NSString
+        let newNS = newText as NSString
+        if prefix > 0, prefix < oldNS.length {
+            prefix = oldNS.rangeOfComposedCharacterSequence(at: prefix).location
+        }
+        while suffix > 0 {
+            let oldEnd = old.count - suffix
+            let newEnd = new.count - suffix
+            let oldOK = oldEnd >= oldNS.length || oldNS.rangeOfComposedCharacterSequence(at: oldEnd).location == oldEnd
+            let newOK = newEnd >= newNS.length || newNS.rangeOfComposedCharacterSequence(at: newEnd).location == newEnd
+            if oldOK && newOK && oldEnd >= prefix && newEnd >= prefix { break }
+            suffix -= 1
+        }
+        let replaced = NSRange(location: prefix, length: old.count - prefix - suffix)
+        let inserted = newNS.substring(with: NSRange(location: prefix, length: new.count - prefix - suffix))
+        text.replaceCharacters(in: replaced, with: inserted)
+    }
+
     private static func reboundEditedContent(old: ClipboardContent, newText: String) -> ClipboardContent {
         switch old {
         case .richText(let attr, plain: _):
@@ -248,7 +302,7 @@ extension ClipboardManager {
                 return .text(newText)
             }
 
-            mutable.replaceCharacters(in: NSRange(location: 0, length: mutable.length), with: newText)
+            Self.replaceChangedRange(in: mutable, with: newText)
             return .richText(NSAttributedString(attributedString: mutable), plain: newText)
 
         case .rtfd(let data, plain: _):
@@ -261,7 +315,7 @@ extension ClipboardManager {
             else { return .text(newText) }
             let mutable = NSMutableAttributedString(attributedString: attr)
             if mutable.length == 0 { return .text(newText) }
-            mutable.replaceCharacters(in: NSRange(location: 0, length: mutable.length), with: newText)
+            Self.replaceChangedRange(in: mutable, with: newText)
             let attrs = (docAttrs as? [NSAttributedString.DocumentAttributeKey: Any]) ?? [
                 .documentType: NSAttributedString.DocumentType.rtfd
             ]
@@ -372,6 +426,7 @@ extension ClipboardManager {
         updated.pasteCountByApp   = old.pasteCountByApp
         updated.pastedToAppNames  = old.pastedToAppNames
         updated.originalFileURL   = old.originalFileURL
+        updated.sourceFileURLs    = old.sourceFileURLs
         updated.sidecarTypes      = sidecar
         updated.ocrText           = old.ocrText
         updated.aiStructuredText  = old.aiStructuredText
@@ -383,6 +438,15 @@ extension ClipboardManager {
         items[idx] = updated
         invalidateContentDerivedCaches(for: id)
         invalidateBlobCaches(for: id)
+        // The transform list was cached per item id, so after an edit or a
+        // richer re-copy it kept offering transforms (and previews) of the
+        // old content until another item was selected.
+        if lastTransformCacheItemID == id {
+            lastTransformCacheItemID = nil
+            transformDisplaysCache = []
+            ToolRegistry.invalidateCache()
+            if inTransformStage { refreshTransformDisplaysCache(); updateTransformPanel() }
+        }
         lastSearchQuery = nil
         recomputeEmbeddingsInBackground()
         prewarmPreviewCaches(for: updated)
@@ -408,9 +472,12 @@ extension ClipboardManager {
             let appSupport = FileManager.default
                 .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             let snapshotBase = appSupport.appendingPathComponent("Clipen/FileCopies").path
+            // Only an item's own `FileCopies/<id>` folder — never the base
+            // itself, which a URL one level too shallow would have named.
             let dirs = Set(urls
-                .filter { $0.path.hasPrefix(snapshotBase) }
-                .map    { $0.deletingLastPathComponent() })
+                .filter { $0.path.hasPrefix(snapshotBase + "/") }
+                .map    { $0.deletingLastPathComponent() }
+                .filter { $0.deletingLastPathComponent().path == snapshotBase })
             for dir in dirs {
                 try? FileManager.default.removeItem(at: dir)
             }
@@ -444,14 +511,29 @@ extension ClipboardManager {
         _displayItems = nil
     }
 
+    /// Row 1 is the newest copy: the item the system clipboard holds when
+    /// nothing else has written to it since, and the one a plain Cmd-V
+    /// pastes. Pins used to start at row 1 by default, so the newest copy —
+    /// and its "System default" tag — sat below every pin. A pinned item
+    /// copied again is the newest copy too: it leads, and leaves the pin
+    /// block for as long as it does.
     func applyPinOrdering(_ list: [ClipboardItem]) -> [ClipboardItem] {
-        guard list.contains(where: \.isPinned) else { return list }
-        let pinned   = list.filter(\.isPinned)
-        let unpinned = list.filter { !$0.isPinned }
-        let leadingCount = min(max(0, pinStartPosition - 1), unpinned.count)
-        var result = Array(unpinned.prefix(leadingCount))
+        let leadPin = frontPinnedItemID.flatMap { id in list.first { $0.id == id && $0.isPinned } }
+        guard leadPin != nil || list.contains(where: \.isPinned) else { return list }
+        let pinned   = list.filter { $0.isPinned && $0.id != leadPin?.id }
+        var unpinned = ArraySlice(list.filter { !$0.isPinned })
+        var result: [ClipboardItem] = []
+        if let leadPin {
+            result.append(leadPin)
+        } else if let first = unpinned.first {
+            result.append(first)
+            unpinned = unpinned.dropFirst()
+        }
+        // Rows between row 1 and the first pin.
+        let between = min(max(0, pinStartPosition - 2), unpinned.count)
+        result.append(contentsOf: unpinned.prefix(between))
         result.append(contentsOf: pinned)
-        result.append(contentsOf: unpinned.dropFirst(leadingCount))
+        result.append(contentsOf: unpinned.dropFirst(between))
         return result
     }
     func removeItem(at index: Int) {
@@ -471,6 +553,22 @@ extension ClipboardManager {
         items.removeAll()
         markBlobPurgeNeeded()
         selectedIndex = 0
+        // "Delete all … can't be undone" has to hold for the safety copies
+        // too. The previous history stayed in history.clip.bak, and any
+        // set-aside manifest (corrupt-*, recovered-*) kept its items and
+        // their images — the next launch's recovery could even bring the
+        // cleared items back as "Recovered". Queued after the save, which
+        // itself writes the pre-clear history to .bak one last time.
+        persistHistory()
+        let dir = historyDir
+        let backup = historyBackupURL
+        saveQueue.async {
+            try? FileManager.default.removeItem(at: backup)
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+            for name in names where name.hasPrefix("history.clip.corrupt-") || name.hasPrefix("history.clip.recovered-") {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(name))
+            }
+        }
     }
 
     /// Caches derived from an item's CONTENT, keyed on its id alone.
@@ -564,6 +662,8 @@ extension ClipboardManager {
         var collections: [String]? = nil
 
         var originalFilePath: String? = nil
+        /// Where copied files came from (the snapshot lives in FileCopies).
+        var sourceFilePaths: [String]? = nil
 
         init(id: UUID, timestamp: Date, isPinned: Bool, urlTitle: String?, type: String,
              text: String?, imageData: Data?, imageBlob: String?, imageType: String?,
@@ -618,7 +718,7 @@ extension ClipboardManager {
                          html: String? = nil,
                          urlTitle: String? = nil,
                          groupChildren: [PersistedItem]? = nil) -> PersistedItem {
-            PersistedItem(
+            var record = PersistedItem(
                 id: item.id, timestamp: item.timestamp, isPinned: item.isPinned,
                 urlTitle: urlTitle, type: type, text: text,
                 imageData: imageData, imageBlob: imageBlob, imageType: imageType,
@@ -634,6 +734,8 @@ extension ClipboardManager {
                 groupChildren: groupChildren,
                 collections: item.collections.isEmpty ? nil : Array(item.collections),
                 originalFilePath: item.originalFileURL?.path)
+            record.sourceFilePaths = item.sourceFileURLs?.map(\.path)
+            return record
         }
     }
 
@@ -1052,6 +1154,7 @@ extension ClipboardManager {
         item.isPinned = p.isPinned
         item.collections = Set(p.collections ?? [])
         if let orig = p.originalFilePath { item.originalFileURL = URL(fileURLWithPath: orig) }
+        item.sourceFileURLs = p.sourceFilePaths?.map { URL(fileURLWithPath: $0) }
         item.sourceBundleID   = p.sourceBundleID
         item.pastedToAppName  = p.pastedToAppName
         item.pastedToBundleID = p.pastedToBundleID
@@ -1365,10 +1468,13 @@ extension ClipboardManager {
 
         if persisted == nil, !primaryExisted,
            let legacy = try? Data(contentsOf: legacyPlaintextHistoryURL) {
-            if let cipher = HistoryCrypto.encrypt(legacy) {
-                try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
+            // The plaintext file goes only once its encrypted copy is on
+            // disk: a failed write (full disk, protected volume) used to
+            // delete the only copy of the old history.
+            if let cipher = HistoryCrypto.encrypt(legacy),
+               (try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])) != nil {
+                try? FileManager.default.removeItem(at: legacyPlaintextHistoryURL)
             }
-            try? FileManager.default.removeItem(at: legacyPlaintextHistoryURL)
             do {
                 persisted = try dec.decode([PersistedItem].self, from: legacy)
             } catch {

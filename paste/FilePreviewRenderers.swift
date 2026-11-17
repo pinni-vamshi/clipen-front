@@ -422,7 +422,12 @@ private struct HTMLFilePreview: NSViewRepresentable {
     let url: URL
 
     func makeNSView(context: Context) -> WKWebView {
-        let view = WKWebView()
+        // A copied HTML file is someone else's page: previewing it must not
+        // run its scripts inside Clipen (they could still reach the network).
+        // Same rule as HTMLStringPreview, and what Quick Look does.
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        let view = WKWebView(frame: .zero, configuration: config)
         view.allowsMagnification = true
         load(url, in: view)
         return view
@@ -433,11 +438,7 @@ private struct HTMLFilePreview: NSViewRepresentable {
     }
 
     private func load(_ url: URL, in view: WKWebView) {
-        if url.pathExtension.lowercased() == "webarchive" {
-            view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-        } else {
-            view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-        }
+        view.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
     }
 
     static func dismantleNSView(_ view: WKWebView, coordinator: ()) {

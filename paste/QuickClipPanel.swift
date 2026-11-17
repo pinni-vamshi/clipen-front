@@ -777,7 +777,9 @@ class QuickClipPanel: NSPanel {
             return
         }
         var f = self.frame
-        let screen = NSScreen.main?.visibleFrame ?? f
+        // This panel's own screen, as the resize code above uses.
+        let screen = (self.screen ?? NSScreen.screens.first(where: { $0.frame.intersects(f) }))?.visibleFrame
+            ?? NSScreen.main?.visibleFrame ?? f
         if show {
             if f.maxX + similarSidebarWidth <= screen.maxX {
                 similarGrewLeft = false
