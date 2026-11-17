@@ -317,11 +317,15 @@ struct InteractionLabStage: View {
                 .opacity(lab.resultText == nil ? 0 : 1)
                 .frame(height: 16)
 
+            // Grows to fit. It was pinned to 30pt — two lines — so every
+            // longer tip ended in "…" and the only place to read the rest
+            // was the Tips list in Settings.
             Text(LocalizedStringKey(lab.currentCaption))
                 .font(.system(size: 11))
                 .foregroundColor(.textSec)
                 .multilineTextAlignment(.center)
-                .frame(height: 30)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(minHeight: 30)
 
             if showKeyRow {
                 VStack(spacing: 8) {
@@ -350,11 +354,63 @@ struct InteractionLabStage: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
+        .background(WindowVisibilityObserver { lab.setHostVisible($0) })
         .task {
 
             guard !lab.isPlaying else { return }
             lab.play()
         }
+    }
+}
+
+/// Reports whether the window this view sits in is actually visible on
+/// screen — false when it's ordered out, minimised, fully covered, on
+/// another Space, or the screen is locked. `.onAppear`/`.onDisappear` can't
+/// say this: hiding a window fires neither.
+struct WindowVisibilityObserver: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+
+    func makeNSView(context: Context) -> ObserverView {
+        let view = ObserverView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: ObserverView, context: Context) {
+        view.onChange = onChange
+    }
+
+    final class ObserverView: NSView {
+        var onChange: ((Bool) -> Void)?
+        private var lastReported: Bool?
+        private var observers: [NSObjectProtocol] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers = []
+            if let window {
+                let names: [Notification.Name] = [NSWindow.didChangeOcclusionStateNotification,
+                                                  NSWindow.willCloseNotification,
+                                                  NSWindow.didMiniaturizeNotification,
+                                                  NSWindow.didDeminiaturizeNotification]
+                observers = names.map { name in
+                    NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] note in
+                        self?.report(closing: note.name == NSWindow.willCloseNotification)
+                    }
+                }
+            }
+            report(closing: false)
+        }
+
+        private func report(closing: Bool) {
+            let visible = !closing && (window?.occlusionState.contains(.visible) ?? false)
+            guard visible != lastReported else { return }
+            lastReported = visible
+            onChange?(visible)
+        }
+
+        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
     }
 }
 
@@ -369,5 +425,81 @@ extension View {
         background(GeometryReader { geo in
             Color.clear.preference(key: key, value: geo.size.width)
         })
+    }
+}
+
+
+// MARK: - Window visibility in the environment
+//
+// Clipen's windows are never destroyed, only hidden — the popup, the main
+// window, every panel. Measured: a hidden window keeps running its SwiftUI
+// animations at full cost (hiding its view doesn't stop them either), so
+// every looping animation that had ever started — a pulsing key in
+// Settings, the AI badge in the popup — kept redrawing for the rest of the
+// session with nothing on screen. Each window root publishes whether it is
+// really visible; looping animations run only while it is.
+
+private struct WindowVisibleKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// False while the window this view lives in is hidden, minimised, fully
+    /// covered, on another Space, or the screen is locked.
+    var isWindowVisible: Bool {
+        get { self[WindowVisibleKey.self] }
+        set { self[WindowVisibleKey.self] = newValue }
+    }
+}
+
+struct TracksWindowVisibility: ViewModifier {
+    @State private var visible = true
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.isWindowVisible, visible)
+            .background(WindowVisibilityObserver { visible = $0 })
+    }
+}
+
+/// A looping animation that runs only while its window is on screen and
+/// `enabled` holds.
+///
+/// Snapping the flag back without animation does NOT stop a running
+/// `.repeatForever` — measured: it kept costing exactly what an ungated loop
+/// did. What stops it is SwiftUI discarding the view that owns it, so the
+/// animated content takes a new identity whenever visibility flips (measured:
+/// hidden cost dropped to zero). The flag is still reset so the loop restarts
+/// cleanly from rest.
+struct LoopWhileVisible: ViewModifier {
+    @Environment(\.isWindowVisible) private var visible
+    @Binding var flag: Bool
+    let animation: Animation
+    var enabled: Bool = true
+
+    func body(content: Content) -> some View {
+        content
+            .id(visible)
+            .onAppear { update() }
+            .onChange(of: visible) { _, _ in update() }
+            .onChange(of: enabled) { _, _ in update() }
+    }
+
+    private func update() {
+        if visible && enabled {
+            withAnimation(animation) { flag = true }
+        } else {
+            var still = Transaction(animation: nil)
+            still.disablesAnimations = true
+            withTransaction(still) { flag = false }
+        }
+    }
+}
+
+extension View {
+    func tracksWindowVisibility() -> some View { modifier(TracksWindowVisibility()) }
+
+    func loopWhileVisible(_ flag: Binding<Bool>, animation: Animation, enabled: Bool = true) -> some View {
+        modifier(LoopWhileVisible(flag: flag, animation: animation, enabled: enabled))
     }
 }

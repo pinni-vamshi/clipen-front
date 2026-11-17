@@ -1,6 +1,20 @@
 import AppKit
 import SwiftUI
 
+/// Whether popovers being hidden right now should fade out rather than snap.
+///
+/// Opening has always animated; closing never did, so everything vanished
+/// abruptly. But a close is not always a dismissal: a PASTE has to take the
+/// popup away before the simulated Cmd-V, so focus is already back in the
+/// target app. This flag is the one switch between the two, and it is set
+/// only by `dismissPreview()` — Escape, a click outside, the auto-dismiss
+/// timer — for the length of that synchronous call. Every paste path calls
+/// `hide()` directly and never sets it, so it stays instant.
+enum PopoverClose {
+    static var animated = false
+    static let fadeDuration: TimeInterval = 0.12
+}
+
 class AnchoredPopoverPanel: NSObject, NSPopoverDelegate {
     let anchorPanel: NSPanel
     let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 1, height: 1))
@@ -8,6 +22,8 @@ class AnchoredPopoverPanel: NSObject, NSPopoverDelegate {
 
     private var wantsVisible = false
     private var shownStrip: NSRect? = nil
+    /// The pending close after a fade-out, kept so a re-present can cancel it.
+    private var fadeOutWork: DispatchWorkItem?
 
     var isVisible: Bool { wantsVisible && popover.isShown }
 
@@ -52,16 +68,23 @@ class AnchoredPopoverPanel: NSObject, NSPopoverDelegate {
                                 size: NSSize,
                                 near popupFrame: NSRect,
                                 anchorPoint: NSPoint?) {
+        // Needed again before a fade-out finished: stop the close and bring
+        // the window back before anything below reuses or re-shows it.
+        cancelFadeOut()
+
         let screen = NSScreen.main?.visibleFrame ?? .zero
         let rightFits = popupFrame.maxX + 8 + size.width <= screen.maxX
         let leftFits  = popupFrame.minX - size.width - 8 >= screen.minX + 8
         let placeRight = rightFits || !leftFits
 
         popover.contentSize = size
-        if let hosting = popover.contentViewController as? NSHostingController<Content> {
-            hosting.rootView = content
+        // Side panels hide rather than close, so their looping animations
+        // need to know when they're off screen (see TracksWindowVisibility).
+        let tracked = content.modifier(TracksWindowVisibility())
+        if let hosting = popover.contentViewController as? NSHostingController<ModifiedContent<Content, TracksWindowVisibility>> {
+            hosting.rootView = tracked
         } else {
-            popover.contentViewController = NSHostingController(rootView: content)
+            popover.contentViewController = NSHostingController(rootView: tracked)
         }
 
         let anchorY = anchorPoint?.y ?? popupFrame.midY
@@ -77,7 +100,14 @@ class AnchoredPopoverPanel: NSObject, NSPopoverDelegate {
             return
         }
 
-        if popover.isShown { popover.performClose(nil) }
+        // Instant, then show: closing with the system animation and showing
+        // again in the same turn can leave the new show swallowed by the
+        // close that is still finishing.
+        if popover.isShown {
+            popover.animates = false
+            popover.performClose(nil)
+            popover.animates = true
+        }
         anchorPanel.setFrame(desiredStrip, display: false)
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
         shownStrip = desiredStrip
@@ -92,12 +122,35 @@ class AnchoredPopoverPanel: NSObject, NSPopoverDelegate {
 
     func hide() {
         wantsVisible = false
+        shownStrip = nil
+        fadeOutWork?.cancel()
+        fadeOutWork = nil
+        // `isVisible` is already false above, so the rest of the app treats
+        // this as gone immediately; the fade is only what the eye sees.
+        if PopoverClose.animated, popover.isShown {
+            fadeOutWork = popover.clipenAnimateOut { [weak self] in self?.finishHide() }
+            return
+        }
+        finishHide()
+    }
+
+    private func cancelFadeOut() {
+        guard fadeOutWork != nil else { return }
+        fadeOutWork?.cancel()
+        fadeOutWork = nil
+        popover.clipenCancelAnimateOut()
+    }
+
+    private func finishHide() {
+        fadeOutWork = nil
+        // Presented again during the fade: nothing left to close.
+        guard !wantsVisible else { return }
+        popover.clipenCancelAnimateOut()
         if popover.isShown {
             popover.animates = false
             popover.performClose(nil)
             popover.animates = true
         }
         anchorPanel.orderOut(nil)
-        shownStrip = nil
     }
 }

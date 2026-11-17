@@ -42,7 +42,10 @@ class ClipboardManager: ObservableObject {
     var sidecarBlobCache: [UUID: String] = [:]
     var embeddingsDirty = false
     var aiEmbeddingsDirty = false
-    var historyDirty = false
+    /// `itemsRevision` of the last history write that reached disk, and of
+    /// the newest one asked for. Save-queue only.
+    var lastSavedRevision = -1
+    var latestRequestedSaveRevision = -1
     var blobPurgeNeeded = true
 
     // Memoized line/word splits used by the diff-badge computation
@@ -94,7 +97,6 @@ class ClipboardManager: ObservableObject {
     @Published var items: [ClipboardItem] = [] {
         didSet {
             itemsRevision &+= 1
-            historyDirty = true
             _displayItems = nil
             _availableTags = nil
             _itemIndexByID = nil
@@ -387,27 +389,29 @@ class ClipboardManager: ObservableObject {
     }
     @Published var isSearchActive: Bool = false
     @Published private(set) var searchIntentTag: ClipboardTag? = nil
-    @Published var maxItems: Int = 10 {
+    // Starts at the user's saved size, not a placeholder: the real value is
+    // applied a beat after launch (`applyPlanLimits`), and anything trimmed
+    // against a placeholder of 10 in between was deleted for good.
+    @Published var maxItems: Int = UserDefaults.standard.object(forKey: "preferredRingSize") as? Int ?? 20 {
         didSet {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-
-                guard self.isHistoryFullyLoaded else { return }
-                guard !self.unlimitedRingSize else { return }
-                let trimmable = self.items.indices.filter {
-                    !self.items[$0].isPinned && !self.isRememberProtected(self.items[$0])
-                }
-                if trimmable.count > self.maxItems {
-                    let toRemove = trimmable.suffix(from: self.maxItems)
-                    for idx in toRemove.reversed() {
-                        self.evictFileSnapshots(for: self.items[idx])
-                        self.evictCaches(for: self.items[idx].id)
-                        self.items.remove(at: idx)
-                    }
-                    self.markBlobPurgeNeeded()
-                }
-            }
+            DispatchQueue.main.async { [weak self] in self?.trimRingToLimit() }
         }
+    }
+
+    /// Removes the oldest unprotected items beyond the ring size. The one
+    /// implementation — capture and the size setting each had their own,
+    /// and the capture one ran while history was still loading (trimming
+    /// against a half-loaded list) and removed at most one item per copy.
+    func trimRingToLimit() {
+        guard isHistoryFullyLoaded, !unlimitedRingSize else { return }
+        let trimmable = items.indices.filter { !items[$0].isPinned && !isRememberProtected(items[$0]) }
+        guard trimmable.count > maxItems else { return }
+        for idx in trimmable.suffix(from: maxItems).reversed() {
+            evictFileSnapshots(for: items[idx])
+            evictCaches(for: items[idx].id)
+            items.remove(at: idx)
+        }
+        markBlobPurgeNeeded()
     }
 
     /// When on, the ring is never trimmed by item count at all — `maxItems`
@@ -569,6 +573,7 @@ class ClipboardManager: ObservableObject {
     @Published var interactionSoundsEnabled: Bool = UserDefaults.standard.object(forKey: "interactionSoundsEnabled") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(interactionSoundsEnabled, forKey: "interactionSoundsEnabled")
+            if !oldValue && interactionSoundsEnabled { InteractionToneGenerator.shared.play(frequency: InteractionSound.cycle.frequency) }
             if oldValue != interactionSoundsEnabled { AuthManager.shared.registerActionUsage(actionID: "setting.interaction_sounds", value: interactionSoundsEnabled) }
         }
     }
@@ -618,7 +623,7 @@ class ClipboardManager: ObservableObject {
     /// that cannot reach the window itself — the popup panel, for instance.
     /// MainWindowView watches this, switches tabs and clears it; SettingsView
     /// scrolls to the section and highlights it.
-    enum SettingsRoute: Equatable { case aiStructuring }
+    enum SettingsRoute: Equatable { case general, aiStructuring }
 
     @Published var pendingSettingsRoute: SettingsRoute? = nil
 
@@ -917,6 +922,68 @@ class ClipboardManager: ObservableObject {
     var hintShiftHeld = false
     var hintSyncScheduled = false
 
+    /// Which key Clipen's gestures ride on. ⌘V is the original design and
+    /// the recommended one; ⌥V and ⌃V leave ⌘V entirely to macOS for people
+    /// who'd rather reach for Clipen separately (asked for by several users,
+    /// who otherwise uninstalled rather than share ⌘V). Whichever is chosen,
+    /// its modifier plays the part ⌘ always has: hold it and tap V to open
+    /// and cycle, let go to paste. Shift still goes backwards in every mode.
+    enum PopupTrigger: String, CaseIterable {
+        case commandV
+        case optionV
+        case controlV
+
+        var keys: String {
+            switch self {
+            case .commandV: return "⌘V"
+            case .optionV:  return "⌥V"
+            case .controlV: return "⌃V"
+            }
+        }
+
+        var accessibilityName: String {
+            switch self {
+            case .commandV: return "Command V"
+            case .optionV:  return "Option V"
+            case .controlV: return "Control V"
+            }
+        }
+
+        var flag: CGEventFlags {
+            switch self {
+            case .commandV: return .maskCommand
+            case .optionV:  return .maskAlternate
+            case .controlV: return .maskControl
+            }
+        }
+
+        /// What choosing this key gives up — nil for ⌘V, which gives up nothing.
+        var tradeOff: String? {
+            switch self {
+            case .commandV: return nil
+            case .optionV:  return "⌘V is left entirely to macOS. Hold ⌥ and tap V to open Clipen — ⌥V no longer types √."
+            case .controlV: return "⌘V is left entirely to macOS. Hold ⌃ and tap V to open Clipen — apps that use ⌃V themselves, like Terminal, lose it."
+            }
+        }
+    }
+
+    @Published var popupTrigger: PopupTrigger =
+        PopupTrigger(rawValue: UserDefaults.standard.string(forKey: "popupTrigger") ?? "") ?? .commandV {
+        didSet {
+            UserDefaults.standard.set(popupTrigger.rawValue, forKey: "popupTrigger")
+            if oldValue != popupTrigger {
+                AuthManager.shared.registerActionUsage(actionID: "setting.popup_trigger", value: popupTrigger.rawValue)
+            }
+        }
+    }
+
+    /// Whether the chosen trigger key is held. For ⌥ and ⌃ it must be held
+    /// WITHOUT ⌘, so ⌘-shortcuts (⌥⌘V, ⌃⌘V…) still belong to the app in front.
+    func triggerHeld(_ flags: CGEventFlags) -> Bool {
+        guard flags.contains(popupTrigger.flag) else { return false }
+        return popupTrigger == .commandV || !flags.contains(.maskCommand)
+    }
+
     @Published var reverseCycleUsesB: Bool = UserDefaults.standard.bool(forKey: "reverseCycleUsesB") {
         didSet {
             UserDefaults.standard.set(reverseCycleUsesB, forKey: "reverseCycleUsesB")
@@ -1211,6 +1278,7 @@ class ClipboardManager: ObservableObject {
     enum CaseTransformKind { case lowercase, uppercase }
     var caseTransformOriginals: [UUID: (text: String, kind: CaseTransformKind)] = [:]
     var inlineEditOriginals: [UUID: ClipboardContent] = [:]
+    var inlineEditOriginalSidecars: [UUID: [String: Data]?] = [:]
 
     var popupOpenedAt: Date? = nil
     var popupSessionPasted = false
@@ -1324,6 +1392,85 @@ class ClipboardManager: ObservableObject {
 
     /// When the pasteboard was last seen changing under us.
     var lastPasteboardChangeAt: Date = .distantPast
+
+    // MARK: The item that IS the system clipboard
+    //
+    // The newest copy is already sitting on the system clipboard, exactly as
+    // the source app put it there — every format, file promises, the lot.
+    // Pasting it used to clear that and write Clipen's stored version back,
+    // which can only ever be the same or less. Now the item that still
+    // matches the live clipboard pastes with the system's own paste, and
+    // Clipen steps in only from the second item on.
+    //
+    // "Still matches" is exact: the clipboard's change counter is stamped at
+    // capture, so the moment anything else writes to it — another app,
+    // Clipen pasting a different item, a tool restoring an old clipboard —
+    // the link is gone and Clipen pastes its own copy as before.
+
+    /// Shown as the "System default" tag in the popup.
+    @Published private(set) var systemClipboardItemID: UUID?
+    private(set) var systemClipboardChangeCount = -1
+    private var systemClipboardRevision = 0
+
+    func markSystemClipboard(itemID: UUID, changeCount: Int) {
+        guard let item = item(id: itemID), NSPasteboard.general.changeCount == changeCount else { return }
+        systemClipboardChangeCount = changeCount
+        systemClipboardRevision = item.contentRevision
+        if systemClipboardItemID != itemID { systemClipboardItemID = itemID }
+    }
+
+    /// Drops the link once the clipboard has moved on. Called every poll, so
+    /// the tag follows within a fraction of a second whoever changed it.
+    func refreshSystemClipboardLink() {
+        guard systemClipboardItemID != nil,
+              NSPasteboard.general.changeCount != systemClipboardChangeCount else { return }
+        systemClipboardItemID = nil
+    }
+
+    /// Whether pasting `item` can simply use what's on the clipboard now.
+    /// Not when it has been edited since it was copied, and not for
+    /// formatted content while Pure paste is on — the system copy still
+    /// carries the formatting Pure paste exists to remove.
+    func pastesFromSystemClipboard(_ item: ClipboardItem) -> Bool {
+        guard item.id == systemClipboardItemID,
+              NSPasteboard.general.changeCount == systemClipboardChangeCount,
+              item.contentRevision == systemClipboardRevision else { return false }
+        if pastePlainTextByDefault {
+            switch item.content {
+            case .html, .richText, .rtfd: return false
+            default: break
+            }
+        }
+        return true
+    }
+
+    // MARK: Paste-and-restore tools (dictation apps, text expanders)
+    //
+    // Handy, Wispr Flow and similar tools paste by writing their text to the
+    // clipboard, pressing Cmd-V, and then WRITING THE USER'S OLD CLIPBOARD
+    // BACK a fraction of a second later. To a clipboard manager that last
+    // write looks like a brand-new copy of the old item, so it landed above
+    // the dictation — the dictated text sat second or third, and the next
+    // Cmd-V pasted the previous copy instead of what was just dictated.
+    //
+    // The Cmd-V is the tell: anything written to the pasteboard AFTER it
+    // (higher change count, inside a short window) is the tool putting things
+    // back, not the user copying.
+
+    /// When the last foreign text-insertion Cmd-V went past, and the
+    /// pasteboard's change count at that instant.
+    var lastForeignInsertionAt: Date = .distantPast
+    var foreignInsertionChangeCount: Int = -1
+
+    /// Set by the poller for the change it is about to capture: true when
+    /// that change was written after a foreign paste keystroke.
+    var captureIsPostPasteWrite = false
+
+    /// How long after the keystroke a write still counts as the restore.
+    /// Handy waits 60ms by default; the setting is user-adjustable and slow
+    /// targets stretch it, so this is generous — a real copy of something
+    /// already in history inside it only skips a reorder, never loses data.
+    static let postPasteRestoreWindow: TimeInterval = 3
 
     /// How fresh a pasteboard write has to be for a foreign Cmd-V to read as
     /// "an app is inserting its own text" rather than "a relayed keypress".
@@ -1472,11 +1619,7 @@ class ClipboardManager: ObservableObject {
             .sink { [weak self] _ in
                 guard let self else { return }
 
-                guard self.isHistoryFullyLoaded else { return }
-                let snapshot = self.items
-                self.saveQueue.async {
-                    self.saveHistory(snapshot: snapshot)
-                }
+                self.persistHistory()
             }
         aiStateCancellable = AIStructuringService.shared.$states
             .receive(on: RunLoop.main)
@@ -1516,6 +1659,7 @@ class ClipboardManager: ObservableObject {
     private var screenChangeObserver: NSObjectProtocol?
     private var globalClickMonitor: Any?
     private var referenceSurfacePollTimer: Timer?
+    private var spaceChangeObserver: NSObjectProtocol?
     private var lastReferenceSurfaceBundleID: String?
     private var lastReferenceSurfaceCheckAt: Date = .distantPast
 
@@ -1584,6 +1728,25 @@ class ClipboardManager: ObservableObject {
         // whether NSWorkspace considers it a "new" frontmost app. This
         // works uniformly for every app, not just ones with special-cased
         // AppleScript support.
+    }
+
+    /// The click monitor and the 2-second backup timer exist only while a
+    /// Reference panel is open — they're how a panel follows the app you're
+    /// in. They used to be installed at launch for everyone and never
+    /// removed, so the timer woke the app every 2 seconds and every click
+    /// anywhere ran a check, all day, for people with no panel open.
+    func startReferenceSurfaceMonitoring() {
+        // Switching desktops (F3, a four-finger swipe) often keeps the same
+        // app in front — two browser windows on two Spaces — so no app
+        // switch fires. Nothing used to listen for the Space change itself;
+        // the panel waited for its 2-second backup timer.
+        if spaceChangeObserver == nil {
+            spaceChangeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.recheckReferenceSurfaceIfNeeded(forceIfSameApp: true)
+            }
+        }
         if globalClickMonitor == nil {
             globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
                 self?.recheckReferenceSurfaceIfNeeded()
@@ -1613,6 +1776,19 @@ class ClipboardManager: ObservableObject {
         }
     }
 
+    func stopReferenceSurfaceMonitoring() {
+        if let observer = spaceChangeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            spaceChangeObserver = nil
+        }
+        if let monitor = globalClickMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalClickMonitor = nil
+        }
+        referenceSurfacePollTimer?.invalidate()
+        referenceSurfacePollTimer = nil
+    }
+
     /// Shared by the click monitor and the poll timer. Same-app rechecks are
     /// throttled — an actual AppleScript round-trip on every single click
     /// while the user is just working inside one app would be wasteful and
@@ -1635,10 +1811,26 @@ class ClipboardManager: ObservableObject {
     // Clipen's real windows (Settings, main history window), and it froze
     // every reference panel's collapse state indefinitely rather than
     // correctly collapsing panels that don't belong there.
+    /// Which reference panels belong on screen for the app now in front.
+    ///
+    /// Decided straight away from the APP alone, so the panel shrinks or
+    /// comes back the moment you switch. It used to wait first for an
+    /// AppleScript / Accessibility round trip to the app (its front tab or
+    /// window title) — slow, and stalled indefinitely by a busy app.
+    /// That context is now fetched afterwards, only to choose between
+    /// several pages from the same app.
+    ///
+    /// There is no "meaning" fallback any more. It compared window titles
+    /// with pinned items using sentence embeddings, and measured on this
+    /// model unrelated pairs scored as high as related ones ("Inbox —
+    /// Gmail" vs a Python snippet: 1.00), so panels surfaced in apps they
+    /// had nothing to do with.
     func surfaceReferencePanel(forActiveApp bundleID: String) {
         guard referenceAppAffinityEnabled,
               !quickClipPanels.isEmpty else { return }
+        applyReferenceSurface(bundleID: bundleID)
 
+        guard quickClipPanels.contains(where: { $0.carousel.ownedPageCount(for: bundleID) > 1 }) else { return }
         let alreadyFetching = pendingReferenceBundleID != nil
         pendingReferenceBundleID = bundleID
         guard !alreadyFetching else { return }
@@ -1647,10 +1839,15 @@ class ClipboardManager: ObservableObject {
 
     private func fetchReferenceContext(for bundleID: String) {
         referenceContextQueue.async { [weak self] in
-            let (liveContext, tabTexts) = AppContextService.fetchContext(for: bundleID)
+            let (liveContext, _) = AppContextService.fetchContext(for: bundleID)
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.applyReferenceSurface(bundleID: bundleID, liveContext: liveContext, tabTexts: tabTexts)
+                if let liveContext,
+                   NSWorkspace.shared.frontmostApplication?.bundleIdentifier == bundleID {
+                    for panel in self.quickClipPanels {
+                        panel.carousel.jumpToPage(ownedBy: bundleID, context: liveContext)
+                    }
+                }
                 if let latest = self.pendingReferenceBundleID, latest != bundleID {
                     self.fetchReferenceContext(for: latest)
                 } else {
@@ -1660,22 +1857,13 @@ class ClipboardManager: ObservableObject {
         }
     }
 
-    private func applyReferenceSurface(bundleID: String, liveContext: String?, tabTexts: [String]) {
+    private func applyReferenceSurface(bundleID: String) {
         guard referenceAppAffinityEnabled,
               !quickClipPanels.isEmpty else { return }
 
-        var matched: QuickClipPanel?
-        for panel in quickClipPanels where panel.carousel.jumpToPage(ownedBy: bundleID, context: liveContext) {
-            matched = panel
-            break
-        }
-
-        if matched == nil, let (panel, pageID) = semanticBestMatch(forBundleID: bundleID, in: quickClipPanels, tabTexts: tabTexts),
-           !panel.carousel.isDismissed(bundleID: bundleID, pageID: pageID) {
-            panel.carousel.jumpToPage(id: pageID)
-
-            matched = panel
-        }
+        // EVERY panel with a page from this app — only the first one used to
+        // come forward, and a second panel from the same app stayed hidden.
+        let matched = quickClipPanels.filter { $0.carousel.jumpToPage(ownedBy: bundleID) }
 
         // The "did the app actually change" signal both manual-override
         // flags below rely on — clear any that no longer match the app
@@ -1691,14 +1879,11 @@ class ClipboardManager: ObservableObject {
         }
 
         for panel in quickClipPanels {
-            if panel === matched {
+            if matched.contains(where: { $0 === panel }) {
                 if panel.manualCollapseBundleID == bundleID {
                     // User explicitly minimized this while this same app was
                     // still frontmost — leave it collapsed until they
-                    // actually switch away and come back, instead of this
-                    // very re-check (fired by the click that minimized it)
-                    // immediately deciding it belongs here and popping it
-                    // back open.
+                    // actually switch away and come back.
                     continue
                 }
                 AuthManager.shared.registerActionUsage(actionID: "ref.auto_surface")
@@ -1706,11 +1891,8 @@ class ClipboardManager: ObservableObject {
                 panel.restoreIfCollapsed()
                 panel.orderFrontRegardless()
             } else if panel.manualExpandBundleID == bundleID {
-                // User clicked the badge's body to peek at it, unlinked,
-                // while this same app was frontmost — leave it open until
-                // the app actually changes, instead of this very re-check
-                // (fired by the click that opened it) immediately deciding
-                // it doesn't belong here and snapping it shut again.
+                // User clicked the badge to peek at it while this same app
+                // was frontmost — leave it open until the app changes.
                 continue
             } else {
                 panel.manualExpandBundleID = nil
@@ -1778,7 +1960,7 @@ class ClipboardManager: ObservableObject {
 
 struct ClipboardItem: Identifiable {
     let id:        UUID
-    let timestamp: Date
+    var timestamp: Date
     let content:   ClipboardContent
     let detectedType: ClipboardContentType
     let tags: [ClipboardTag]
@@ -1885,9 +2067,18 @@ struct ClipboardItem: Identifiable {
         self.sourceAppName = sourceAppName
         self.userNote  = userNote
         self.ocrText   = ocrText
-        self.detectedColor = ContentDetector.detectedColor(for: content)
-        self.detectedType  = ContentDetector.detectedType(for: content, color: self.detectedColor)
-        self.tags         = TagDetector.tags(for: content, color: self.detectedColor)
+        let color = ContentDetector.detectedColor(for: content)
+        self.detectedColor = color
+        // Detected once and used for both the type and the tag.
+        let textCandidates: [DetectionCandidate]?
+        if case .text(let s) = content {
+            textCandidates = TextTraditionalDetectors.candidates(for: s, color: color)
+        } else {
+            textCandidates = nil
+        }
+        self.detectedType  = textCandidates.map(ContentDetector.detectedType(fromCandidates:)) ?? .plain
+        self.tags         = TagDetector.tags(for: content, color: self.detectedColor,
+                                             textCandidates: textCandidates)
         self.primaryTag   = TagDetector.primaryTag(from: self.tags)
         rebuildSearchHaystacks()
     }
@@ -2239,14 +2430,36 @@ struct ClipboardItem: Identifiable {
         return parts.filter { !$0.isEmpty }.joined(separator: " ")
     }
 
+    /// Same content, for every kind that can be compared. Images, RTFD,
+    /// SVG and private payloads had no case here, so copying the same image
+    /// twice always made two entries and two image files. `Data ==` checks
+    /// length first, so comparing images costs almost nothing unless they
+    /// really are the same size. Files compare by
+    /// path here; matching a re-copied file against earlier snapshots
+    /// happens before the copy is made (`processCapturedPasteboard`), where
+    /// it can avoid the copy altogether.
     func isDuplicate(of other: ClipboardItem) -> Bool {
         switch (content, other.content) {
-        case (.text(let a),                     .text(let b)):                     return a == b
-        case (.richText(_, plain: let a),       .richText(_, plain: let b)):       return a == b
-        case (.html(let a, _),                  .html(let b, _)):                  return a == b
-        case (.file(let a),                     .file(let b)):                     return a == b
-        case (.files(let a),                    .files(let b)):                    return a == b
-        default:                                                                   return false
+        case (.text(let a),               .text(let b)):               return a == b
+        case (.richText(_, plain: let a), .richText(_, plain: let b)): return a == b
+        case (.html(let a, _),            .html(let b, _)):            return a == b
+        case (.rtfd(let a, _),            .rtfd(let b, _)):            return a == b
+        case (.image(_, let a, _),        .image(_, let b, _)):        return a == b
+        case (.svg(let a),                .svg(let b)):                return a == b
+        case (.blob(let a),               .blob(let b)):               return a == b
+        case (.file(let a),               .file(let b)):               return a == b
+        case (.files(let a),              .files(let b)):              return a == b
+        default:                                                       return false
+        }
+    }
+
+    /// Source files about to be copied, already captured: the item whose
+    /// snapshot has the same identity.
+    var fileURLsForIdentity: [URL]? {
+        switch content {
+        case .file(let url):   return [url]
+        case .files(let urls): return urls
+        default:               return nil
         }
     }
 }

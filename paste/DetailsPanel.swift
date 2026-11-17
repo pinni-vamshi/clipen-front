@@ -490,7 +490,11 @@ private struct DetailsNudgeView: View {
             .padding(.horizontal, 12).padding(.vertical, 7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear { startLoop() }
+        // New identity when the panel hides — that, not resetting the flags,
+        // is what stops a running repeatForever. The new view's onAppear
+        // starts the loop again only once the panel is back on screen.
+        .id(windowVisible)
+        .onAppear { if windowVisible { startLoop() } else { stopLoop() } }
     }
 
     /// Skeletons of the fields D would reveal, firming up a beat after each
@@ -552,6 +556,20 @@ private struct DetailsNudgeView: View {
     /// keystroke the way the row badges are — so the usual objection to
     /// `.repeatForever` (re-installing it on every state change) does not
     /// apply here.
+    @Environment(\.isWindowVisible) private var windowVisible
+
+    /// The panel hides rather than closes, and these three loops kept running
+    /// behind it. Snapping the flags back with no animation removes them.
+    private func stopLoop() {
+        var still = Transaction(animation: nil)
+        still.disablesAnimations = true
+        withTransaction(still) {
+            pressed = false
+            rippling = false
+            revealed = false
+        }
+    }
+
     private func startLoop() {
         withAnimation(.easeInOut(duration: 0.34).repeatForever(autoreverses: true).delay(0.2)) {
             pressed = true

@@ -65,7 +65,41 @@ final class InteractionLabController: ObservableObject {
         play()
     }
 
+    // MARK: Visibility
+    //
+    // Every demo loops forever by design, and every host stopped it only in
+    // `.onDisappear` — which SwiftUI never sends when a window is merely
+    // HIDDEN (the lesson panel's `orderOut`, closing the main window, a
+    // sheet's parent going away). So a demo seen once kept animating in an
+    // invisible window for the rest of the session: state changes every few
+    // hundred milliseconds, each re-rendering and re-laying-out a SwiftUI
+    // tree nobody could see. That was most of Clipen's idle CPU.
+    //
+    // The stage now reports whether its window is actually on screen
+    // (`WindowVisibilityObserver`), and the loop simply doesn't run when it
+    // isn't. It picks up again where the user can see it.
+    private var hostVisible = true
+    private var resumeWhenVisible = false
+
+    func setHostVisible(_ visible: Bool) {
+        guard visible != hostVisible else { return }
+        hostVisible = visible
+        if visible {
+            if resumeWhenVisible {
+                resumeWhenVisible = false
+                play()
+            }
+        } else if isPlaying {
+            halt()
+            resumeWhenVisible = true
+        }
+    }
+
     func play() {
+        guard hostVisible else {
+            resumeWhenVisible = true
+            return
+        }
         task?.cancel()
         resetStage()
         let demo = selectedDemo
@@ -92,6 +126,11 @@ final class InteractionLabController: ObservableObject {
     }
 
     func stop() {
+        resumeWhenVisible = false
+        halt()
+    }
+
+    private func halt() {
         task?.cancel()
         task = nil
         resetStage()

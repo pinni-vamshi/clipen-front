@@ -8,35 +8,126 @@ enum CodeLanguageDetector {
         }
 
         var scores: [String: Double] = [:]
+        var tokenHits: [String: Int] = [:]
 
-        if let shebangLang = shebangLanguage(text) {
+        let shebangLang = shebangLanguage(text)
+        if let shebangLang {
             scores[shebangLang, default: 0] += 6
         }
 
         for (lang, tokens) in weightedTokens {
             var s = 0.0
-            for (token, weight) in tokens where text.contains(token) {
+            var hits = 0
+            for (token, weight) in tokens where occurs(token, in: text) {
                 s += weight
+                hits += 1
             }
-            if s > 0 { scores[lang, default: 0] += s }
+            if s > 0 {
+                scores[lang, default: 0] += s
+                tokenHits[lang] = hits
+            }
         }
 
-        if let ext = fileExtension, let extLang = languageForExtension(ext) {
+        let extLang = fileExtension.flatMap { languageForExtension($0) }
+        if let extLang {
             scores[extLang, default: 0] += 4
         }
 
-        guard let best = scores.max(by: { $0.value < $1.value }) else { return nil }
-        return best.value >= 3 ? best.key : nil
+        guard let best = scores.max(by: { $0.value < $1.value }), best.value >= 3 else { return nil }
+
+        // A shebang or a file extension is direct evidence; keywords alone
+        // are not. One keyword is all ordinary writing ever trips — "the
+        // user interface", "she puts", "data class imbalance", "my
+        // companion" each used to score a full 3 and tag a sentence as
+        // TypeScript, Ruby or Kotlin. So a keyword-only verdict needs either
+        // two different keywords, or the punctuation density real code has
+        // and prose doesn't. SQL and YAML are exempt: SQL's tokens are
+        // matched in upper case, which prose effectively never is, and
+        // YAML's (`- name:`, `: |`) aren't things sentences contain — while
+        // YAML itself has almost no punctuation for the density test to see.
+        if best.key == shebangLang || best.key == extLang || best.key == "SQL" || best.key == "YAML" {
+            return best.key
+        }
+        let density = codePunctuationDensity(text)
+        let hits = tokenHits[best.key] ?? 0
+        if density >= 0.04 { return best.key }
+        if hits >= 2, density >= 0.015 || best.value >= 6 { return best.key }
+        return nil
     }
+
+    /// `text.contains(token)` with a word boundary in front of tokens that
+    /// start with a letter, so `val ` no longer matches inside "interval ",
+    /// `let ` inside "outlet ", or `end\n` at the end of "weekend".
+    private static func occurs(_ token: String, in text: String) -> Bool {
+        guard let first = token.first, first.isLetter else { return text.contains(token) }
+        var from = text.startIndex
+        while let r = text.range(of: token, options: .literal, range: from..<text.endIndex) {
+            if r.lowerBound == text.startIndex { return true }
+            let prev = text[text.index(before: r.lowerBound)]
+            if !(prev.isLetter || prev.isNumber || prev == "_") { return true }
+            from = text.index(after: r.lowerBound)
+        }
+        return false
+    }
+
+    /// Share of non-space characters that are code punctuation. Prose sits
+    /// well under 1%; even terse code is several percent.
+    private static func codePunctuationDensity(_ text: String) -> Double {
+        var symbols = 0
+        var total = 0
+        for ch in text.prefix(20_000) where !ch.isWhitespace {
+            total += 1
+            switch ch {
+            case "{", "}", "(", ")", "[", "]", ";", "=", "<", ">", "*", "&", "|": symbols += 1
+            default: break
+            }
+        }
+        return total == 0 ? 0 : Double(symbols) / Double(total)
+    }
+
+    /// Languages whose comments start with `#`. In these, a `# ...` line is a
+    /// comment, not a Markdown heading.
+    static let hashCommentLanguages: Set<String> = ["Python", "Shell", "Ruby", "YAML", "Perl", "PHP", "TOML"]
 
     static func languageForExtension(_ ext: String) -> String? {
         extensionMap[ext.lowercased()]
     }
 
+    /// The highlight.js language id for a name from anywhere in the app: a
+    /// detector display name ("Swift", "C/C++"), a fence tag from Markdown
+    /// ("swift", "py", "sh", "ts"), or a lowercase name ("json").
+    ///
+    /// This used to be an exact lookup on display names only, so `"json"`
+    /// (what the JSON preview passes), every Markdown fence tag and every
+    /// lowercase name returned nil. Highlightr treats nil as "guess", and
+    /// guessing runs every grammar it has over the text — slow, done twice
+    /// per copy by the capture-time prewarm, and sometimes the wrong
+    /// language entirely.
     static func hljsIdentifier(for displayName: String?) -> String? {
-        guard let displayName else { return nil }
-        return hljsMap[displayName]
+        guard let raw = displayName?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
+        if let id = hljsMap[raw] { return id }
+        let key = raw.lowercased()
+        if let id = hljsAliases[key] { return id }
+        if let display = extensionMap[key], let id = hljsMap[display] { return id }
+        if let display = hljsMap.keys.first(where: { $0.lowercased() == key }) { return hljsMap[display] }
+        // highlight.js knows far more languages than we name. A plain id is
+        // passed through; Highlightr falls back to guessing if it's unknown.
+        let idChars = CharacterSet.lowercaseLetters.union(.decimalDigits).union(CharacterSet(charactersIn: "+#-_"))
+        return key.unicodeScalars.allSatisfy(idChars.contains) ? key : nil
     }
+
+    private static let hljsAliases: [String: String] = [
+        "js": "javascript", "node": "javascript", "javascript": "javascript",
+        "ts": "typescript", "typescript": "typescript",
+        "py": "python", "python3": "python",
+        "sh": "bash", "shell": "bash", "zsh": "bash", "console": "bash", "terminal": "bash",
+        "c": "cpp", "c++": "cpp", "h": "cpp",
+        "objc": "objectivec", "objective-c": "objectivec", "obj-c": "objectivec",
+        "html": "xml", "xhtml": "xml", "svg": "xml", "plist": "xml",
+        "yml": "yaml", "md": "markdown", "tex": "latex",
+        "golang": "go", "rs": "rust", "kt": "kotlin", "rb": "ruby", "cs": "csharp", "c#": "csharp",
+        "toml": "ini", "conf": "ini", "dockerfile": "dockerfile", "docker": "dockerfile",
+    ]
 
     private static func shebangLanguage(_ text: String) -> String? {
         guard text.hasPrefix("#!") else { return nil }
@@ -54,7 +145,7 @@ enum CodeLanguageDetector {
         "Swift":      [("import SwiftUI", 4), ("@State", 3), ("guard let", 2), ("func ", 1), ("-> ", 0.5),
                        ("var ", 0.5), ("let ", 0.5), ("struct ", 1), ("?? ", 1), ("@Published", 3)],
         "Python":     [("def ", 1.5), ("if __name__", 4), ("elif ", 3), ("import ", 0.5), ("print(", 1),
-                       ("self.", 1), ("None", 1), ("lambda ", 2)],
+                       ("self.", 1), ("None", 1), ("lambda ", 2), ("):\n", 2), (" in range(", 3)],
         "JavaScript": [("function ", 1), ("=>", 1), ("console.log", 3), ("const ", 1), ("require(", 2),
                        ("document.", 2), ("=== ", 1.5), ("await ", 1)],
         "TypeScript": [("interface ", 3), (": string", 2), (": number", 2), (": void", 2), ("export ", 1),
@@ -96,7 +187,7 @@ enum CodeLanguageDetector {
         "kt": "Kotlin", "kts": "Kotlin",
         "java": "Java",
         "c": "C/C++", "h": "C/C++", "cpp": "C/C++", "cc": "C/C++", "cxx": "C/C++",
-        "hpp": "C/C++", "hh": "C/C++", "m": "C/C++", "mm": "C/C++",
+        "hpp": "C/C++", "hh": "C/C++", "m": "Objective-C", "mm": "Objective-C",
         "html": "HTML", "htm": "HTML", "xhtml": "HTML",
         "css": "CSS", "scss": "CSS", "sass": "CSS", "less": "CSS",
         "sql": "SQL",
@@ -106,6 +197,9 @@ enum CodeLanguageDetector {
         "json": "JSON",
         "yaml": "YAML", "yml": "YAML",
         "tex": "LaTeX",
+        "xml": "XML", "plist": "XML", "svg": "XML",
+        "toml": "TOML", "ini": "INI",
+        "dart": "Dart", "lua": "Lua", "scala": "Scala", "r": "R",
     ]
 
     private static let hljsMap: [String: String] = [
@@ -127,5 +221,13 @@ enum CodeLanguageDetector {
         "JSON": "json",
         "YAML": "yaml",
         "LaTeX": "latex",
+        "Objective-C": "objectivec",
+        "XML": "xml",
+        "TOML": "ini",
+        "INI": "ini",
+        "Dart": "dart",
+        "Lua": "lua",
+        "Scala": "scala",
+        "R": "r",
     ]
 }

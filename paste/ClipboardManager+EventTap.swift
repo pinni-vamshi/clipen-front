@@ -191,7 +191,10 @@ extension ClipboardManager {
             }
             // That app is pasting what it just wrote — let it reach its
             // target instead of turning into our popup.
-            if insertion { return Unmanaged.passUnretained(event) }
+            if insertion {
+                noteForeignInsertion()
+                return Unmanaged.passUnretained(event)
+            }
         }
 
         if type == .flagsChanged { return handleFlagsChanged(event) }
@@ -224,7 +227,8 @@ extension ClipboardManager {
 
     func handleFlagsChanged(_ event: CGEvent) -> Unmanaged<CGEvent>? {
 
-        let hasCmd = event.flags.contains(.maskCommand)
+        // "Command" throughout this function means the chosen trigger key.
+        let hasCmd = triggerHeld(event.flags)
         // Tracked BEFORE the paste-blocking guard below, or the state
         // desyncs: hold Command in a blocked app, switch away, and the
         // release would be missed while `cmdWasDown` stayed true forever.
@@ -353,7 +357,7 @@ extension ClipboardManager {
             }
         }
         if key == 49 { spaceKeyIsDown = false }
-        notePopupHintModifiers(cmd: event.flags.contains(.maskCommand),
+        notePopupHintModifiers(cmd: triggerHeld(event.flags),
                                shift: event.flags.contains(.maskShift))
         notePopupHintKeyUp(keycode: key)
         return Unmanaged.passUnretained(event)
@@ -366,13 +370,18 @@ extension ClipboardManager {
         }
         let key   = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
-        notePopupHintModifiers(cmd: flags.contains(.maskCommand),
-                               shift: flags.contains(.maskShift))
-        notePopupHintKeyDown(keycode: Int(key), cmd: flags.contains(.maskCommand))
+        // `held` is the chosen trigger key (⌘ by default, or ⌥ / ⌃ — see
+        // `PopupTrigger`). Every Clipen gesture below keys off it; `cmd`
+        // stays the real Command key for the ⌘C/⌘X copy hint only. When ⌥ or
+        // ⌃ is the trigger it is not ALSO a feature modifier, so `opt` /
+        // `ctrl` read false for it.
+        let held  = triggerHeld(flags)
+        notePopupHintModifiers(cmd: held, shift: flags.contains(.maskShift))
+        notePopupHintKeyDown(keycode: Int(key), cmd: held)
         let cmd   = flags.contains(.maskCommand)
         let shift = flags.contains(.maskShift)
-        let opt   = flags.contains(.maskAlternate)
-        let ctrl  = flags.contains(.maskControl)
+        let opt   = flags.contains(.maskAlternate) && popupTrigger != .optionV
+        let ctrl  = flags.contains(.maskControl) && popupTrigger != .controlV
 
         // A ⌘C / ⌘X going past the tap means a copy is about to land on the
         // pasteboard. Polling backs off to 0.5s after 60s without a
@@ -392,7 +401,7 @@ extension ClipboardManager {
             return Unmanaged.passUnretained(event)
         }
 
-        if inPageRangeMode && !cmd {
+        if inPageRangeMode && !held {
             return handlePageRangeKeyDown(key: key, event: event)
         }
 
@@ -401,7 +410,7 @@ extension ClipboardManager {
         // a stage the tutorial isn't teaching. Dropped rather than passed
         // through, so a stray X or Space doesn't leak into the app behind.
         if onboardingCoreLoopOnly, previewWindow.isVisible {
-            let isCoreKey = (key == 9 && cmd) || key == 53 || key == 36 || key == 76
+            let isCoreKey = (key == 9 && held) || key == 53 || key == 36 || key == 76
             if !isCoreKey { return nil }
         }
 
@@ -478,7 +487,7 @@ extension ClipboardManager {
 
         }
 
-        if isSearchActive && previewWindow.isVisible && !cmd {
+        if isSearchActive && previewWindow.isVisible && !held {
             if key == 51 {
                 if !popupSearchQuery.isEmpty {
                     DispatchQueue.main.async { [weak self] in self?.popupSearchQuery.removeLast() }
@@ -500,7 +509,7 @@ extension ClipboardManager {
             return nil
         }
 
-        guard cmd && !ctrl && !flags.contains(.maskSecondaryFn) else {
+        guard held && !ctrl && !flags.contains(.maskSecondaryFn) else {
             return Unmanaged.passUnretained(event)
         }
 

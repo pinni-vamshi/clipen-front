@@ -74,7 +74,12 @@ struct AsyncTextFilePreview: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color.primary.opacity(0.06))
                     }
-                    if let lang = CodeLanguageDetector.languageForExtension(url.pathExtension) {
+                    if ["md", "markdown"].contains(url.pathExtension.lowercased()) {
+                        // Tagged "MD" like Markdown text is, so it should
+                        // render like it too — not as raw source.
+                        MarkdownTextPreview(text: text)
+                            .padding(.top, isTruncated ? 8 : 0)
+                    } else if let lang = CodeLanguageDetector.languageForExtension(url.pathExtension) {
                         CodeSyntaxPreview(text: text, language: lang)
                             .padding(.top, isTruncated ? 8 : 0)
                     } else {
@@ -651,6 +656,7 @@ struct ZoomableImagePreview: NSViewRepresentable {
 struct HTMLStringPreview: NSViewRepresentable {
     final class Coordinator {
         var lastHTML: String?
+        var lastDark: Bool?
     }
 
     let html: String
@@ -658,22 +664,30 @@ struct HTMLStringPreview: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeNSView(context: Context) -> WKWebView {
-
-        let view = WKWebView()
+        // Copied HTML is someone else's markup. Scripts in it have no business
+        // running inside a clipboard preview (with no base URL they can still
+        // make network requests), and nothing here needs JavaScript.
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        let view = WKWebView(frame: .zero, configuration: config)
         view.setValue(false, forKey: "drawsBackground")
         view.allowsMagnification = true
-        loadHTML(view)
+        let dark = context.environment.colorScheme == .dark
+        loadHTML(view, dark: dark)
         context.coordinator.lastHTML = html
+        context.coordinator.lastDark = dark
         return view
     }
 
     func updateNSView(_ view: WKWebView, context: Context) {
-        guard context.coordinator.lastHTML != html else { return }
-        loadHTML(view)
+        let dark = context.environment.colorScheme == .dark
+        guard context.coordinator.lastHTML != html || context.coordinator.lastDark != dark else { return }
+        loadHTML(view, dark: dark)
         context.coordinator.lastHTML = html
+        context.coordinator.lastDark = dark
     }
 
-    private func loadHTML(_ view: WKWebView) {
+    private func loadHTML(_ view: WKWebView, dark: Bool) {
 
         let tableCSS = TableCellExtractor.htmlIsDataTable(html) ? """
             table {
@@ -692,6 +706,17 @@ struct HTMLStringPreview: NSViewRepresentable {
                 font-weight: 600;
             }
         """ : ""
+        // The page is drawn light on a transparent background, which in
+        // Dark Mode put black text straight onto the dark panel — readable
+        // only where the source happened to set its own background. Copied
+        // HTML is full of inline colours CSS can't reach individually, so
+        // in Dark Mode the whole page is inverted (hue-rotated back so
+        // colours keep their identity) and pictures are inverted again so
+        // they show as they really are.
+        let darkCSS = dark ? """
+            html { filter: invert(1) hue-rotate(180deg); }
+            img, video, picture, canvas, iframe { filter: invert(1) hue-rotate(180deg); }
+        """ : ""
         let styledHTML = """
         <!DOCTYPE html>
         <html>
@@ -708,8 +733,12 @@ struct HTMLStringPreview: NSViewRepresentable {
                 margin: 0;
                 padding: 8px;
                 background-color: transparent;
+                overflow-wrap: anywhere;
             }
+            img { max-width: 100%; height: auto; }
+            pre { white-space: pre-wrap; }
             \(tableCSS)
+            \(darkCSS)
         </style>
         </head>
         <body>

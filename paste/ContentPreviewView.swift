@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import AVKit
 import Highlightr
 import ModelIO
@@ -71,7 +72,7 @@ struct ContentPreviewView: View {
         case .files(let urls):
             filesPreview(urls)
         case .svg(let src):
-            textPreview(src, monospaced: true)
+            SVGPreview(source: src, fontSize: plainFontSize)
         case .blob(let typeMap):
             BlobContentPreview(typeMap: typeMap)
         case .group(let items):
@@ -676,59 +677,132 @@ enum EmbeddedImageExtractor {
     }
 }
 
+/// Link previews: a web page is rendered ONCE, kept as a picture, and the
+/// page itself is thrown away.
+///
+/// This used to keep up to seven live web pages in a pool — scripts, ads,
+/// video and animation all still running, each in its own WebKit process —
+/// for as long as Clipen ran, whether or not anything was showing them, and
+/// prefetching while cycling added more. A clipboard manager sits in the
+/// background all day; that was CPU and memory spent on pages nobody was
+/// looking at.
+///
+/// Now: the first time a link is previewed it loads live, a snapshot is
+/// taken once it has finished, and from then on the preview is that
+/// snapshot (memory, then disk) — no page, no process. Scrolling or clicking
+/// the snapshot brings the live page back, and the reference panel's
+/// Reload button always loads it fresh.
 final class WebsitePreviewPool {
     static let shared = WebsitePreviewPool()
-    private init() {}
 
-    private final class Entry {
-        let webView: WKWebView
-        var lastUsed: Date
-        init(webView: WKWebView, lastUsed: Date) { self.webView = webView; self.lastUsed = lastUsed }
+    private let memory: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 40
+        return cache
+    }()
+    private let diskQueue = DispatchQueue(label: "com.clipen.web-snapshots", qos: .utility)
+    private let diskDir: URL
+    /// A snapshot older than this is re-rendered: pages do change.
+    private static let snapshotLifetime: TimeInterval = 3 * 24 * 60 * 60
+    private static let maxDiskSnapshots = 200
+
+    private init() {
+        diskDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("com.clipen.app/WebSnapshots", isDirectory: true)
+        try? FileManager.default.createDirectory(at: diskDir, withIntermediateDirectories: true)
     }
 
-    private var entries: [String: Entry] = [:]
+    private func key(_ url: URL) -> String {
+        SHA256.hash(data: Data(url.absoluteString.utf8)).prefix(16)
+            .map { String(format: "%02x", $0) }.joined()
+    }
 
-    private let maxPoolSize = 7
+    private func diskURL(_ url: URL) -> URL { diskDir.appendingPathComponent(key(url) + ".jpg") }
 
-    private func makeWebView() -> WKWebView {
+    func snapshot(for url: URL) -> NSImage? {
+        let k = key(url) as NSString
+        if let hit = memory.object(forKey: k) { return hit }
+        let file = diskURL(url)
+        guard let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate,
+              Date().timeIntervalSince(modified) < Self.snapshotLifetime,
+              let image = NSImage(contentsOf: file) else { return nil }
+        memory.setObject(image, forKey: k)
+        return image
+    }
+
+    func storeSnapshot(_ image: NSImage, for url: URL) {
+        memory.setObject(image, forKey: key(url) as NSString)
+        let file = diskURL(url)
+        let dir = diskDir
+        diskQueue.async {
+            guard let tiff = image.tiffRepresentation,
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.8])
+            else { return }
+            try? jpeg.write(to: file, options: .atomic)
+            Self.pruneDisk(in: dir)
+        }
+    }
+
+    private static func pruneDisk(in dir: URL) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]),
+              files.count > maxDiskSnapshots else { return }
+        let byAge = files.sorted {
+            let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            return a < b
+        }
+        for stale in byAge.prefix(files.count - maxDiskSnapshots) {
+            try? FileManager.default.removeItem(at: stale)
+        }
+    }
+
+    func makeWebView() -> WKWebView {
         let view = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         view.allowsMagnification = true
         view.translatesAutoresizingMaskIntoConstraints = false
         return view
     }
 
-    func webView(for url: URL) -> WKWebView {
-        assert(Thread.isMainThread, "WKWebView must only be touched on the main thread")
-        let k = url.absoluteString
-        if let entry = entries[k] {
-            entry.lastUsed = Date()
-            return entry.webView
-        }
-        evictLeastRecentlyUsedIfNeeded()
-        let view = makeWebView()
-        entries[k] = Entry(webView: view, lastUsed: Date())
-        view.load(URLRequest(url: url, timeoutInterval: 10))
-        return view
-    }
+    // MARK: Prefetch
 
-    func hasPooledView(for url: URL) -> Bool { entries[url.absoluteString] != nil }
+    /// Prefetch loads a page ONCE, invisibly, so WebKit's shared cache holds
+    /// it when the preview is opened — then lets the page go. At most two at
+    /// a time, and each is torn down after it finishes or 15 seconds.
+    private var prefetching: [String: (view: WKWebView, delegate: PrefetchDelegate)] = [:]
+    private static let maxConcurrentPrefetches = 2
+
+    private final class PrefetchDelegate: NSObject, WKNavigationDelegate {
+        let done: () -> Void
+        init(done: @escaping () -> Void) { self.done = done }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { done() }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { done() }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                     withError error: Error) { done() }
+    }
 
     func prefetch(url: URL) {
         guard Thread.isMainThread else {
             DispatchQueue.main.async { [weak self] in self?.prefetch(url: url) }
             return
         }
-        guard !hasPooledView(for: url) else { return }
-        _ = webView(for: url)
+        let k = key(url)
+        guard snapshot(for: url) == nil, prefetching[k] == nil,
+              prefetching.count < Self.maxConcurrentPrefetches else { return }
+        let view = makeWebView()
+        let delegate = PrefetchDelegate { [weak self] in self?.endPrefetch(k) }
+        view.navigationDelegate = delegate
+        prefetching[k] = (view, delegate)
+        view.load(URLRequest(url: url, timeoutInterval: 10))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.endPrefetch(k) }
     }
 
-    private func evictLeastRecentlyUsedIfNeeded() {
-        guard entries.count >= maxPoolSize,
-              let oldestKey = entries.min(by: { $0.value.lastUsed < $1.value.lastUsed })?.key
-        else { return }
-        let evicted = entries.removeValue(forKey: oldestKey)
-        evicted?.webView.stopLoading()
-        evicted?.webView.removeFromSuperview()
+    private func endPrefetch(_ k: String) {
+        guard let entry = prefetching.removeValue(forKey: k) else { return }
+        entry.view.stopLoading()
+        entry.view.navigationDelegate = nil
     }
 }
 
@@ -737,99 +811,171 @@ struct WebsitePreview: NSViewRepresentable {
 
     var reloadToken: Int = 0
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
-        var progressView: NSProgressIndicator?
-        var lastLoadKey: String?
-        var lastURL: URL?
-
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation _: WKNavigation!) {
-            progressView?.isHidden = false
-            progressView?.startAnimation(nil)
-        }
-        func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
-            progressView?.stopAnimation(nil)
-            progressView?.isHidden = true
-        }
-        func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError _: Error) {
-            progressView?.stopAnimation(nil)
-            progressView?.isHidden = true
-        }
+    func makeNSView(context: Context) -> WebsitePreviewContainer {
+        WebsitePreviewContainer(url: url, reloadToken: reloadToken)
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    private static func attach(_ webView: WKWebView, to container: NSView, delegate: WKNavigationDelegate) {
-        container.subviews.filter { $0 is WKWebView }.forEach { $0.removeFromSuperview() }
-        webView.removeFromSuperview()
-        webView.navigationDelegate = delegate
-        container.addSubview(webView)
-        NSLayoutConstraint.activate([
-            webView.topAnchor.constraint(equalTo: container.topAnchor),
-            webView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            webView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
+    func updateNSView(_ container: WebsitePreviewContainer, context: Context) {
+        container.update(url: url, reloadToken: reloadToken)
     }
 
-    func makeNSView(context: Context) -> NSView {
-        let container = NSView()
+    static func dismantleNSView(_ container: WebsitePreviewContainer, coordinator: ()) {
+        container.tearDown()
+    }
+}
 
-        let wasAlreadyPooled = WebsitePreviewPool.shared.hasPooledView(for: url)
-        let webView = WebsitePreviewPool.shared.webView(for: url)
-        Self.attach(webView, to: container, delegate: context.coordinator)
+/// Shows a link's stored snapshot when there is one, the live page when
+/// there isn't (or when the user reaches for it), and never leaves a live
+/// page running once it's gone from the screen.
+final class WebsitePreviewContainer: NSView, WKNavigationDelegate {
+    private var url: URL
+    private var reloadToken: Int
+    private var webView: WKWebView?
+    private var snapshotView: SnapshotView?
+    private let progress = NSProgressIndicator()
 
-        let progress = NSProgressIndicator()
+    init(url: URL, reloadToken: Int) {
+        self.url = url
+        self.reloadToken = reloadToken
+        super.init(frame: .zero)
         progress.style = .spinning
         progress.controlSize = .small
         progress.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(progress)
+        progress.isHidden = true
+        addSubview(progress)
         NSLayoutConstraint.activate([
-            progress.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            progress.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            progress.centerXAnchor.constraint(equalTo: centerXAnchor),
+            progress.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
-        context.coordinator.progressView = progress
-        context.coordinator.lastLoadKey = "\(url.absoluteString)#\(reloadToken)"
-        context.coordinator.lastURL = url
-
-        if wasAlreadyPooled && !webView.isLoading {
-
-            progress.isHidden = true
-        } else {
-            progress.startAnimation(nil)
-        }
-        return container
+        show(forceLive: reloadToken > 0)
     }
 
-    func updateNSView(_ container: NSView, context: Context) {
-        let key = "\(url.absoluteString)#\(reloadToken)"
-        guard context.coordinator.lastLoadKey != key else { return }
-        let urlChanged = context.coordinator.lastURL != url
-        context.coordinator.lastLoadKey = key
-        context.coordinator.lastURL = url
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-        let wasAlreadyPooled = WebsitePreviewPool.shared.hasPooledView(for: url)
-        let webView = WebsitePreviewPool.shared.webView(for: url)
-        if webView.superview !== container {
-            Self.attach(webView, to: container, delegate: context.coordinator)
-        }
-
-        if !urlChanged {
-
-            context.coordinator.progressView?.isHidden = false
-            context.coordinator.progressView?.startAnimation(nil)
-            webView.load(URLRequest(url: url, timeoutInterval: 10))
-        } else if wasAlreadyPooled && !webView.isLoading {
-            context.coordinator.progressView?.isHidden = true
-            context.coordinator.progressView?.stopAnimation(nil)
-        } else {
-            context.coordinator.progressView?.isHidden = false
-            context.coordinator.progressView?.startAnimation(nil)
+    func update(url newURL: URL, reloadToken newToken: Int) {
+        if newURL != url {
+            url = newURL
+            reloadToken = newToken
+            show(forceLive: false)
+        } else if newToken != reloadToken {
+            reloadToken = newToken
+            goLive()
         }
     }
 
-    static func dismantleNSView(_ container: NSView, coordinator: Coordinator) {
-        guard let webView = container.subviews.first(where: { $0 is WKWebView }) as? WKWebView else { return }
-        webView.pauseAllMediaPlayback(completionHandler: nil)
+    private func show(forceLive: Bool) {
+        if !forceLive, let image = WebsitePreviewPool.shared.snapshot(for: url) {
+            showSnapshot(image)
+        } else {
+            goLive()
+        }
+    }
+
+    private func showSnapshot(_ image: NSImage) {
+        removeWebView()
+        let view = snapshotView ?? {
+            let v = SnapshotView()
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v, positioned: .below, relativeTo: progress)
+            NSLayoutConstraint.activate([
+                v.topAnchor.constraint(equalTo: topAnchor),
+                v.leadingAnchor.constraint(equalTo: leadingAnchor),
+                v.trailingAnchor.constraint(equalTo: trailingAnchor),
+                v.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+            snapshotView = v
+            return v
+        }()
+        view.image = image
+        progress.stopAnimation(nil)
+        progress.isHidden = true
+    }
+
+    private func goLive() {
+        snapshotView?.removeFromSuperview()
+        snapshotView = nil
+        removeWebView()
+        let view = WebsitePreviewPool.shared.makeWebView()
+        view.navigationDelegate = self
+        addSubview(view, positioned: .below, relativeTo: progress)
+        NSLayoutConstraint.activate([
+            view.topAnchor.constraint(equalTo: topAnchor),
+            view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: trailingAnchor),
+            view.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        webView = view
+        progress.isHidden = false
+        progress.startAnimation(nil)
+        view.load(URLRequest(url: url, timeoutInterval: 10))
+    }
+
+    private func removeWebView() {
+        guard let view = webView else { return }
+        view.stopLoading()
+        view.pauseAllMediaPlayback(completionHandler: nil)
+        view.navigationDelegate = nil
+        view.removeFromSuperview()
+        webView = nil
+    }
+
+    func tearDown() {
+        removeWebView()
+    }
+
+    // The stored picture is a stand-in; reaching for it — scrolling or
+    // clicking — means the user wants the real page.
+    override func scrollWheel(with event: NSEvent) {
+        if snapshotView != nil { goLive() } else { super.scrollWheel(with: event) }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if snapshotView != nil { goLive() } else { super.mouseDown(with: event) }
+    }
+
+    // MARK: WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        progress.stopAnimation(nil)
+        progress.isHidden = true
+        // Pages keep laying out for a moment after "finished"; give them that
+        // moment before taking the one picture that will stand in for them.
+        let pageURL = url
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self, weak webView] in
+            guard let self, let webView, webView === self.webView, webView.window != nil,
+                  webView.bounds.width > 40, webView.bounds.height > 40 else { return }
+            webView.takeSnapshot(with: nil) { image, _ in
+                guard let image else { return }
+                WebsitePreviewPool.shared.storeSnapshot(image, for: pageURL)
+            }
+        }
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        progress.stopAnimation(nil)
+        progress.isHidden = true
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: Error) {
+        progress.stopAnimation(nil)
+        progress.isHidden = true
+    }
+
+    /// Draws the snapshot filling the width, pinned to the top — how the page
+    /// itself sits. Passes every event through to the container.
+    private final class SnapshotView: NSView {
+        var image: NSImage? { didSet { needsDisplay = true } }
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func draw(_ dirtyRect: NSRect) {
+            guard let image, image.size.width > 0 else { return }
+            let scale = bounds.width / image.size.width
+            let height = image.size.height * scale
+            image.draw(in: NSRect(x: 0, y: 0, width: bounds.width, height: height),
+                       from: .zero, operation: .sourceOver, fraction: 1,
+                       respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
+        }
     }
 }
 
@@ -882,16 +1028,37 @@ final class AdjustedAttrCache {
 }
 
 extension NSAttributedString {
+    /// Makes rich text readable on the panel's own background.
+    ///
+    /// Three cases, of which the original handled only the first:
+    ///  - near-black text in Dark Mode / near-white text in Light Mode;
+    ///  - text with NO colour at all — plain RTF (TextEdit, many exports)
+    ///    leaves it unset, and unset draws black, so in Dark Mode it was
+    ///    black on dark;
+    ///  - a near-white highlight in Dark Mode (or near-black in Light) behind
+    ///    text that the first rule had just recoloured to match it, leaving
+    ///    white-on-white. Those page-colour backgrounds are dropped.
     func adjustingColorsForCurrentAppearance() -> NSAttributedString {
         let isDarkMode = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return AdjustedAttrCache.shared.adjusted(for: self, isDark: isDarkMode) {
+            let full = NSRange(location: 0, length: self.length)
+            func luminance(_ value: Any?) -> CGFloat? {
+                guard let color = value as? NSColor, let rgb = color.usingColorSpace(.deviceRGB) else { return nil }
+                return 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+            }
+            func clashingText(_ value: Any?) -> Bool {
+                if value == nil { return isDarkMode }
+                guard let lum = luminance(value) else { return false }
+                return isDarkMode ? lum < 0.25 : lum > 0.85
+            }
+            func pageBackground(_ value: Any?) -> Bool {
+                guard let lum = luminance(value) else { return false }
+                return isDarkMode ? lum > 0.85 : lum < 0.15
+            }
 
             var needsWork = false
-            self.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: self.length), options: []) { value, _, stop in
-                guard let color = value as? NSColor,
-                      let rgb = color.usingColorSpace(.deviceRGB) else { return }
-                let lum = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
-                if (isDarkMode && lum < 0.25) || (!isDarkMode && lum > 0.85) {
+            self.enumerateAttributes(in: full, options: []) { attrs, _, stop in
+                if clashingText(attrs[.foregroundColor]) || pageBackground(attrs[.backgroundColor]) {
                     needsWork = true
                     stop.pointee = true
                 }
@@ -899,13 +1066,11 @@ extension NSAttributedString {
             guard needsWork else { return self }
 
             let mutable = NSMutableAttributedString(attributedString: self)
-            mutable.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: mutable.length), options: []) { value, range, _ in
-                guard let color = value as? NSColor,
-                      let rgb = color.usingColorSpace(.deviceRGB) else { return }
-                let lum = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
-                if isDarkMode && lum < 0.25 {
-                    mutable.addAttribute(.foregroundColor, value: NSColor.white, range: range)
-                } else if !isDarkMode && lum > 0.85 {
+            mutable.enumerateAttributes(in: full, options: []) { attrs, range, _ in
+                if pageBackground(attrs[.backgroundColor]) {
+                    mutable.removeAttribute(.backgroundColor, range: range)
+                }
+                if clashingText(attrs[.foregroundColor]) {
                     mutable.addAttribute(.foregroundColor, value: NSColor.textColor, range: range)
                 }
             }
@@ -948,6 +1113,59 @@ private struct StackedImagePreviewCell: View {
             guard !Task.isCancelled, let decoded else { return }
             ItemThumbnailCache.shared.storeFileThumbnail(decoded, for: url)
             image = decoded
+        }
+    }
+}
+
+/// An SVG clip, drawn — it used to be shown only as its XML source. The
+/// graphic takes the space; the source stays underneath for reference.
+/// Decoded off the main thread once per source; falls back to the source
+/// alone if AppKit can't draw it.
+private struct SVGPreview: View {
+    let source: String
+    let fontSize: CGFloat
+
+    @State private var image: NSImage?
+    @State private var failed = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // A light card in both appearances: most SVGs are drawn
+                    // in dark ink for a light page and vanish on Dark Mode's
+                    // background otherwise.
+                    .background(Color(white: 0.95), in: RoundedRectangle(cornerRadius: 8))
+                Divider().padding(.vertical, 6)
+            }
+            if image != nil || failed {
+                ScrollView {
+                    Text(source.displayTrimmedLeading)
+                        .font(.system(size: fontSize - 1, design: .monospaced))
+                        .foregroundColor(image == nil ? .primary : .secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: image == nil ? .infinity : 110)
+            }
+        }
+        .task(id: source) {
+            image = nil
+            failed = false
+            let data = Data(source.utf8)
+            let decoded = await Task.detached(priority: .userInitiated) { () -> NSImage? in
+                guard let img = NSImage(data: data), img.isValid,
+                      img.size.width > 0, img.size.height > 0 else { return nil }
+                return img
+            }.value
+            guard !Task.isCancelled else { return }
+            image = decoded
+            failed = decoded == nil
         }
     }
 }

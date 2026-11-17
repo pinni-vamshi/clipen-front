@@ -8,6 +8,8 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
 
     private var hideCalledAt: Date?
     private static let hideAttributionWindow: TimeInterval = 1.0
+    /// The pending close after a fade-out, kept so a re-show can cancel it.
+    private var fadeOutWork: DispatchWorkItem?
 
     func popoverDidShow(_ notification: Notification) {
         popover.contentViewController?.view.window?.sharingType = .none
@@ -70,6 +72,12 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
 
     func show() {
 
+        // Re-opened while the last dismissal was still fading: cancel that
+        // close and restore the window before showing again.
+        fadeOutWork?.cancel()
+        fadeOutWork = nil
+        popover.clipenCancelAnimateOut()
+
         hideCalledAt = nil
         wantsVisible = true
         showAnchored(to: NSEvent.mouseLocation)
@@ -80,15 +88,42 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
         let wasVisible = wantsVisible
         hideCalledAt = Date()
         wantsVisible = false
+        fadeOutWork?.cancel()
+        fadeOutWork = nil
+        hintOverlay.hide()
 
+        // `isVisible` is already false, and `onHide` fires below straight
+        // away, so the rest of the app treats the popup as gone at once —
+        // the fade is only what the eye sees. Dismissals fade; pastes (which
+        // never set `PopoverClose.animated`) still close instantly so focus
+        // is back in the target app before the simulated Cmd-V.
+        if PopoverClose.animated, popover.isShown {
+            fadeOutWork = popover.clipenAnimateOut { [weak self] in self?.finishHide() }
+        } else {
+            finishHide()
+        }
+        if wasVisible { onHide?() }
+    }
+
+    private func finishHide() {
+        fadeOutWork = nil
+        // Shown again during the fade: nothing left to close.
+        guard !wantsVisible else { return }
+        popover.clipenCancelAnimateOut()
         if popover.isShown {
             popover.animates = false
             popover.performClose(nil)
             popover.animates = true
         }
+        // `performClose` can be refused — while the popover is still
+        // animating in, for one — and then the popup stayed on screen after
+        // a paste, though `isVisible` already said it was gone. `close()`
+        // isn't refused; the window is taken down too in case it lingers.
+        if popover.isShown { popover.close() }
+        if let window = popover.contentViewController?.view.window, window.isVisible {
+            window.orderOut(nil)
+        }
         anchorPanel.orderOut(nil)
-        hintOverlay.hide()
-        if wasVisible { onHide?() }
     }
 
     private func showAnchored(to anchor: NSPoint) {
@@ -119,8 +154,12 @@ final class PreviewOverlayWindow: NSObject, NSPopoverDelegate {
             popover.contentViewController = NSHostingController(rootView: popoverView)
         }
 
+        // Instant, then show — a system-animated close followed straight away
+        // by a show can leave the show swallowed by the close still finishing.
         if popover.isShown {
+            popover.animates = false
             popover.performClose(nil)
+            popover.animates = true
         }
 
         anchorPanel.setFrame(NSRect(x: anchor.x, y: anchor.y, width: 1, height: 1), display: false)
@@ -228,7 +267,33 @@ struct PopoverPreviewView: View {
 
     private static let rowH: CGFloat = 72
 
+    /// Which of the stacked banners are currently showing. Mirrors each
+    /// banner's own condition; it only has to change when one of them
+    /// appears or disappears.
+    private var bannerSignature: [Bool] {
+        [
+            manager.availableUpdateVersion != nil,
+            manager.aiSetupNotice != nil,
+            pro.paywallApplies && !pro.isPro && pro.trialDaysRemaining > 0,
+            manager.showFirstCycleHint,
+            manager.activeCollection.map { name in
+                manager.rememberForeverBannerOpensRemaining > 0
+                    && !manager.rememberForeverCollections.contains(name)
+            } ?? false,
+        ]
+    }
+
+    // No keyboard-focus ring on Clipen's own windows. With macOS "Keyboard
+    // navigation" on, AppKit put a ring on the first button of every window
+    // (How to Use, the tutorial's close button, the popup's Recents tab)
+    // the moment it opened. Clipen is driven by its own shortcuts, so the
+    // ring read as a stuck selection, not as a focus cue.
     var body: some View {
+        popoverBody.focusEffectDisabled().tracksWindowVisibility()
+    }
+
+    @ViewBuilder
+    private var popoverBody: some View {
 
         if !pro.isUnlocked {
             SubscribeGateView()
@@ -248,6 +313,16 @@ struct PopoverPreviewView: View {
                 Divider()
                 SelectionScope(selection: manager.selection) { footer(selectedIndex: $0) }
             }
+            // Gives the banners' `.transition(.opacity)` something to run
+            // under. Every one of them is a plain `if` over state that is
+            // assigned without any animation, so those transitions were
+            // inert: a banner appearing mid-session — an update landing, the
+            // AI setup notice after pressing D, the keep-this-collection
+            // prompt on switching collection — popped in and shoved the whole
+            // list down in one frame. Keyed on the banners' visibility only,
+            // so it cannot animate anything else, and the popup's fixed
+            // height means the list simply eases to its shorter size.
+            .animation(.easeOut(duration: 0.18), value: bannerSignature)
             .onPreferenceChange(SelectedRowFramePreferenceKey.self) { frame in
 
                 let previous = manager.selectedRowMeasuredFrame
@@ -579,7 +654,8 @@ struct PopoverPreviewView: View {
                                                showColorSwatches: manager.showColorSwatches,
                                                selectionNamespace: selectionNamespace,
                                                shakeGeneration: manager.editDeniedShake?.itemID == item.id
-                                                   ? manager.editDeniedShake?.generation ?? 0 : 0)
+                                                   ? manager.editDeniedShake?.generation ?? 0 : 0,
+                                               isSystemClipboard: manager.systemClipboardItemID == item.id)
                                         .equatable()
                                         .id(item.id)
 
@@ -796,15 +872,18 @@ struct ImageRunRow: View, Equatable {
             }
 
             .frame(width: Self.lineWidth, alignment: .leading)
-
-            .transaction { $0.animation = nil }
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
-
-        .selectionHighlight(isSelected: isAnySelected,
-                            namespace: selectionNamespace,
-                            inset: SelectionHighlightStyle.rowInset,
-                            appearance: .rowSurface)
+        // No row-level selection fill, and no nil transaction round the run.
+        //
+        // The row used to fill with accent as a whole (a separate effect with
+        // no shared geometry) while the chosen image sprang its own ring on
+        // top, and a nil transaction over the entire run stopped the shared
+        // box from gliding at all. The selection is now one box that lives on
+        // the chosen member — see `SelectionHighlightAppearance.cellBox` — so
+        // the row itself only needs the horizontal inset `.rowSurface` used to
+        // supply, which `lineWidth` is computed against.
+        .padding(.horizontal, SelectionHighlightStyle.rowInset)
 
         .background(
             GeometryReader { geo in
@@ -840,6 +919,7 @@ struct ImageRunRow: View, Equatable {
     }
 
     @State private var analysisRingWidth: CGFloat = 1
+    @Environment(\.isWindowVisible) private var windowVisible
 
     private func startOrStopRingAnimation(running: Bool, resumeMidCycle: Bool = false) {
         // Stepping between images in a run changes the badge's item, which
@@ -868,6 +948,9 @@ struct ImageRunRow: View, Equatable {
                     if analysing {
                         Circle()
                             .strokeBorder(Color.pink, lineWidth: analysisRingWidth)
+                            // New identity when the popup hides: the only thing
+                            // that actually stops a running repeatForever.
+                            .id(windowVisible)
                             .frame(width: 20, height: 20)
                     } else if hasAnalysis {
                         Circle()
@@ -876,13 +959,16 @@ struct ImageRunRow: View, Equatable {
                     }
                 }
                 .onChange(of: analysing) { _, running in
-                    startOrStopRingAnimation(running: running)
+                    startOrStopRingAnimation(running: running && windowVisible)
                 }
                 .onChange(of: selectedEntry.item.id) { _, _ in
-                    startOrStopRingAnimation(running: analysing, resumeMidCycle: true)
+                    startOrStopRingAnimation(running: analysing && windowVisible, resumeMidCycle: true)
+                }
+                .onChange(of: windowVisible) { _, visible in
+                    startOrStopRingAnimation(running: analysing && visible, resumeMidCycle: true)
                 }
                 .onAppear {
-                    startOrStopRingAnimation(running: analysing, resumeMidCycle: true)
+                    startOrStopRingAnimation(running: analysing && windowVisible, resumeMidCycle: true)
                 }
         } else {
             Text(sourceAppLabelText(for: run))
@@ -910,9 +996,13 @@ struct AnalysisBadgeGlyph: View {
     let hasAnalysis: Bool
 
     private static let period: TimeInterval = 0.3
+    @Environment(\.isWindowVisible) private var windowVisible
 
     var body: some View {
-        if hasAnalysis {
+        // The 0.3s tick only while the popup is on screen: it's the selected
+        // row's badge, and the popup is hidden, not destroyed, so this kept
+        // redrawing three times a second after every close.
+        if hasAnalysis && windowVisible {
             TimelineView(.periodic(from: .now, by: Self.period)) { context in
                 let tick = Int(context.date.timeIntervalSinceReferenceDate / Self.period)
                 glyph(tick % 2 == 1 ? "sparkles" : iconName)
@@ -1002,10 +1092,19 @@ private struct ImageRunCell: View, Equatable {
                 EmptyView()
             }
         }
+        // Applied to the picture only. The nil transaction used to wrap the
+        // whole run, which was needed to stop a thumbnail cross-fading when
+        // its decoded image lands — but it also froze the selection box. On
+        // the content alone, the box (outside it, below) is free to glide.
+        .transaction { $0.animation = nil }
         .frame(width: Self.cellSize, height: Self.cellSize)
         .clipShape(RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous))
+        // Concentric with the clipped thumbnail: its 6pt radius plus the 4pt
+        // the box stands proud of it.
         .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
-                             inset: 0, appearance: .cell)
+                             inset: 0,
+                             appearance: .cellBox(outset: 4,
+                                                  radius: SelectionHighlightStyle.cellCornerRadius + 4))
 
         .overlay(alignment: .topTrailing) {
             if let order = markOrder {
@@ -1191,7 +1290,6 @@ struct TextRunRow: View, Equatable {
                     }
                     TextRunCell(item: entry.item, index: entry.index,
                                 isSelected: entry.index == selectedIndex,
-                                rowSelected: isAnySelected,
                                 selectionNamespace: selectionNamespace,
                                 markOrder: markedItemIDs.firstIndex(of: entry.item.id).map { $0 + 1 },
                                 shakeGeneration: editDeniedShake?.itemID == entry.item.id
@@ -1200,14 +1298,13 @@ struct TextRunRow: View, Equatable {
                 }
             }
             .frame(width: Self.lineWidth, alignment: .leading)
-            .transaction { $0.animation = nil }
         }
         .padding(.horizontal, 9).padding(.vertical, 10)
         .frame(minHeight: 56)
-        .selectionHighlight(isSelected: isAnySelected,
-                            namespace: selectionNamespace,
-                            inset: SelectionHighlightStyle.rowInset,
-                            appearance: .rowSurface)
+        // Same as ImageRunRow: the selection is one box on the chosen chip,
+        // not a fill over the whole row, and nothing wraps the run in a nil
+        // transaction. Only the inset `.rowSurface` supplied is kept.
+        .padding(.horizontal, SelectionHighlightStyle.rowInset)
         .background(
             GeometryReader { geo in
                 Color.clear.preference(
@@ -1239,11 +1336,6 @@ private struct TextRunCell: View, Equatable {
     let item: ClipboardItem
     let index: Int
     let isSelected: Bool
-    /// Whether ANY chip in this row is selected — which turns the whole row
-    /// accent-filled behind every chip, not just the chosen one. The text
-    /// has to lighten to stay legible on that fill even when this
-    /// particular chip isn't the selected one.
-    let rowSelected: Bool
     let selectionNamespace: Namespace.ID
     let markOrder: Int?
     let shakeGeneration: Int
@@ -1252,7 +1344,6 @@ private struct TextRunCell: View, Equatable {
         l.item.id == r.item.id
             && l.index == r.index
             && l.isSelected == r.isSelected
-            && l.rowSelected == r.rowSelected
             && l.markOrder == r.markOrder
             && l.shakeGeneration == r.shakeGeneration
     }
@@ -1262,10 +1353,9 @@ private struct TextRunCell: View, Equatable {
 
     private var displayText: String { TextRunRow.chipText(for: item) ?? "" }
 
-    private var textColor: Color {
-        if isSelected { return .white }
-        return rowSelected ? .white.opacity(0.72) : .primary
-    }
+    /// White only on the chip that carries the box. The row no longer fills
+    /// behind its other chips, so they stay in the ordinary text colour.
+    private var textColor: Color { isSelected ? .white : .primary }
 
     var body: some View {
         Text(displayText)
@@ -1273,10 +1363,18 @@ private struct TextRunCell: View, Equatable {
             .lineLimit(1)
             .foregroundColor(textColor)
             .fixedSize()
+            // On the text alone, so the colour change never cross-fades while
+            // the box (applied after, outside it) is free to glide.
+            .transaction { $0.animation = nil }
             .padding(.horizontal, TextRunRow.chipHPadding)
             .padding(.vertical, TextRunRow.chipVPadding)
+            // The chip already carries its own padding, so the box needs no
+            // outset — it is the chip's own frame, in the same shape the
+            // normal rows use.
             .selectionHighlight(isSelected: isSelected, namespace: selectionNamespace,
-                                 inset: 0, appearance: .textCell)
+                                 inset: 0,
+                                 appearance: .cellBox(outset: 0,
+                                                      radius: SelectionHighlightStyle.cornerRadius))
             .overlay(alignment: .topTrailing) {
                 if let order = markOrder {
                     Text("\(order)")
@@ -1421,8 +1519,13 @@ struct PopoverRow: View, Equatable {
 
     var shakeGeneration: Int = 0
 
+    /// This row is still the live system clipboard and pastes with the
+    /// system's own paste — shown as a small "System default" tag.
+    var isSystemClipboard: Bool = false
+
     static func == (l: PopoverRow, r: PopoverRow) -> Bool {
         l.item.id == r.item.id &&
+        l.isSystemClipboard == r.isSystemClipboard &&
         l.item.contentRevision == r.item.contentRevision &&
         l.index == r.index &&
         l.isSelected == r.isSelected &&
@@ -1497,6 +1600,7 @@ struct PopoverRow: View, Equatable {
 
     private static let markedTint = Color(red: 0.20, green: 0.78, blue: 0.35)
     @State private var analysisRingWidth: CGFloat = 1
+    @Environment(\.isWindowVisible) private var windowVisible
 
     private func startOrStopRingAnimation(running: Bool, resumeMidCycle: Bool = false) {
         // Stepping between images in a run changes the badge's item, which
@@ -1538,6 +1642,9 @@ struct PopoverRow: View, Equatable {
                     if analysing {
                         Circle()
                             .strokeBorder(Color.pink, lineWidth: analysisRingWidth)
+                            // New identity when the popup hides: the only thing
+                            // that actually stops a running repeatForever.
+                            .id(windowVisible)
                             .frame(width: 20, height: 20)
                     } else if hasAnalysis {
                         Circle()
@@ -1547,13 +1654,16 @@ struct PopoverRow: View, Equatable {
                 }
 
                 .onChange(of: analysing) { _, running in
-                    startOrStopRingAnimation(running: running)
+                    startOrStopRingAnimation(running: running && windowVisible)
                 }
                 .onChange(of: item.id) { _, _ in
-                    startOrStopRingAnimation(running: analysing, resumeMidCycle: true)
+                    startOrStopRingAnimation(running: analysing && windowVisible, resumeMidCycle: true)
+                }
+                .onChange(of: windowVisible) { _, visible in
+                    startOrStopRingAnimation(running: analysing && visible, resumeMidCycle: true)
                 }
                 .onAppear {
-                    startOrStopRingAnimation(running: analysing, resumeMidCycle: true)
+                    startOrStopRingAnimation(running: analysing && windowVisible, resumeMidCycle: true)
                 }
         } else if item.isPinned {
             Image(systemName: "pin.fill")
@@ -1587,6 +1697,14 @@ struct PopoverRow: View, Equatable {
     @ViewBuilder
     private var trailingIndicators: some View {
         HStack(spacing: 6) {
+            if isSystemClipboard {
+                Text("System default")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.secondary.opacity(0.75))
+                    .padding(.horizontal, 5).padding(.vertical, 1.5)
+                    .background(Color.secondary.opacity(0.12), in: Capsule())
+                    .help("This is what's on your clipboard right now. Pasting it uses the system's own paste, exactly as it was copied.")
+            }
 
             if item.userNote != nil {
                 Image(systemName: "pencil")
@@ -2141,7 +2259,53 @@ struct FlatHint: View {
 }
 
 extension NSPopover {
+    /// Fades the whole popover window out, then runs `completion` on the
+    /// main thread. The returned work item lets a caller cancel the pending
+    /// completion if the popover is needed again before the fade ends.
+    ///
+    /// The WINDOW's alpha is animated, not the content view's layer: a
+    /// popover's bubble, material and shadow live in AppKit's own frame view,
+    /// outside the content, so fading only the content would leave an empty
+    /// bubble standing for the length of the fade and then snap away.
+    ///
+    /// Only ever used to dress up a dismissal. Every paste path still closes
+    /// instantly — the popup has to be gone before the simulated Cmd-V so
+    /// focus has already returned to the app being pasted into.
+    @discardableResult
+    func clipenAnimateOut(duration: TimeInterval = PopoverClose.fadeDuration,
+                          completion: @escaping () -> Void) -> DispatchWorkItem {
+        let work = DispatchWorkItem(block: completion)
+        guard let window = contentViewController?.view.window else {
+            DispatchQueue.main.async { work.perform() }
+            return work
+        }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            window.animator().alphaValue = 0
+        }, completionHandler: {
+            // `perform()` is a no-op once the item has been cancelled.
+            if !work.isCancelled { work.perform() }
+        })
+        return work
+    }
+
+    /// Stops an in-flight fade-out and puts the window back to fully opaque.
+    /// Setting `alphaValue` directly would leave the running animation
+    /// driving the presentation to 0, so the reset goes through the animator
+    /// with a zero duration, which replaces it.
+    func clipenCancelAnimateOut() {
+        guard let window = contentViewController?.view.window else { return }
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0
+            window.animator().alphaValue = 1
+        })
+        window.alphaValue = 1
+    }
+
     func clipenAnimateIn(duration: TimeInterval = 0.17) {
+        // A window that was faded out and then reused must start opaque.
+        contentViewController?.view.window?.alphaValue = 1
         guard let view = contentViewController?.view else { return }
         view.wantsLayer = true
         guard let layer = view.layer else { return }

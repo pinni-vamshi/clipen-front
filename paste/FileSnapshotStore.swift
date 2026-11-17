@@ -46,7 +46,7 @@ enum FileSnapshotStore {
         }
     }
 
-    private static var baseDirectory: URL {
+    static var baseDirectory: URL {
         let directory = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Clipen/FileCopies", isDirectory: true)
@@ -69,5 +69,60 @@ enum FileSnapshotStore {
         }
 
         return candidate
+    }
+
+    // MARK: Identity
+
+    /// What makes two copies "the same files": name, size and modification
+    /// time of each — of every entry inside, for a folder. A snapshot keeps
+    /// all three (clones and copies preserve modification times), so the
+    /// source being copied can be matched against snapshots already taken
+    /// without reading a byte of content. Editing anything changes it.
+    ///
+    /// nil means "don't know" (unreadable, or a folder too large to walk
+    /// cheaply) and never matches anything.
+    nonisolated static func identity(of urls: [URL]) -> [String]? {
+        var parts: [String] = []
+        for url in urls {
+            guard let part = identity(of: url) else { return nil }
+            parts.append(part)
+        }
+        return parts.isEmpty ? nil : parts
+    }
+
+    nonisolated private static let identityLock = NSLock()
+    nonisolated(unsafe) private static var identityCache: [String: String] = [:]
+
+    nonisolated private static func identity(of url: URL) -> String? {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
+        guard let values = try? url.resourceValues(forKeys: keys),
+              let modified = values.contentModificationDate else { return nil }
+        let name = url.lastPathComponent
+        guard values.isDirectory == true else {
+            return "\(name)|\(values.fileSize ?? -1)|\(modified.timeIntervalSince1970)"
+        }
+        // Folder walks are cached per path + modification date. Snapshot
+        // folders never change, so each is walked once per session.
+        let cacheKey = "\(url.path)|\(modified.timeIntervalSince1970)"
+        identityLock.lock()
+        if let cached = identityCache[cacheKey] { identityLock.unlock(); return cached }
+        identityLock.unlock()
+
+        guard let walker = FileManager.default.enumerator(at: url, includingPropertiesForKeys: Array(keys)) else { return nil }
+        var count = 0
+        var bytes = 0
+        var newest = modified.timeIntervalSince1970
+        for case let entry as URL in walker {
+            count += 1
+            if count > 20_000 { return nil }
+            guard let v = try? entry.resourceValues(forKeys: keys) else { return nil }
+            bytes += v.fileSize ?? 0
+            newest = max(newest, v.contentModificationDate?.timeIntervalSince1970 ?? 0)
+        }
+        let identity = "\(name)/|\(count)|\(bytes)|\(newest)"
+        identityLock.lock()
+        identityCache[cacheKey] = identity
+        identityLock.unlock()
+        return identity
     }
 }

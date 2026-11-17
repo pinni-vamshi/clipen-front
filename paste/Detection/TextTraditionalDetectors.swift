@@ -14,7 +14,13 @@ enum TextTraditionalDetectors {
     private static let maxSingleValueScanLength = 2_048
     private static let maxDocumentScanLength = 50_000
 
-    static func candidates(for text: String, color: NSColor?) -> [DetectionCandidate] {
+    /// - Parameter structuredSource: the text is the flattened plain form of
+    ///   an HTML or rich-text clip. There, list markers and emphasis come
+    ///   from the formatting that was flattened, not from Markdown the user
+    ///   wrote — a web page's numbered list flattens to `1.\titem` — so only
+    ///   unmistakable Markdown (fences, headings, links, pipe tables) counts.
+    static func candidates(for text: String, color: NSColor?,
+                           structuredSource: Bool = false) -> [DetectionCandidate] {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return [] }
 
@@ -52,7 +58,11 @@ enum TextTraditionalDetectors {
             }
         }
 
-        if let table = detectDelimitedTable(t) {
+        // Detected once, up front: the table, Markdown and shell checks
+        // below all need to know whether this already reads as code.
+        let codeLanguage = CodeLanguageDetector.detect(t)
+
+        if let table = detectDelimitedTable(t, looksLikeCode: codeLanguage != nil) {
             candidates.append(.init(type: .table(table), confidence: 0.92, method: .deterministic))
         }
 
@@ -65,11 +75,22 @@ enum TextTraditionalDetectors {
             candidates.append(.init(type: .latex, confidence: 0.72, method: .deterministic))
         }
 
-        if scanDocument, isMarkdown(t) {
-            candidates.append(.init(type: .markdown, confidence: 0.86, method: .deterministic))
+        if scanDocument, let strength = markdownStrength(t, codeLanguage: codeLanguage) {
+            switch strength {
+            case .strong:
+                candidates.append(.init(type: .markdown, confidence: 0.86, method: .deterministic))
+            case .weak where !structuredSource:
+                // Below code (0.84) on purpose: `**kwargs`, `__init__`, a
+                // JSDoc ` * @param` line or a YAML `- item` list are all
+                // "Markdown" by these signals alone, and the code reading
+                // is the right one whenever there is one.
+                candidates.append(.init(type: .markdown, confidence: 0.80, method: .deterministic))
+            case .weak:
+                break
+            }
         }
 
-        if let lang = CodeLanguageDetector.detect(t) {
+        if let lang = codeLanguage {
             candidates.append(.init(type: .code(lang), confidence: 0.84, method: .deterministic))
         }
 
@@ -108,10 +129,20 @@ enum TextTraditionalDetectors {
     private static func lineLooksLikeCommand(_ raw: String) -> Bool {
         var line = raw.trimmingCharacters(in: .whitespaces)
         var startedWithPrompt = false
-        for prompt in ["$ ", "# ", "% ", "❯ ", "➜ ", "PS> ", "> "] where line.hasPrefix(prompt) {
+        // `$ `, `% `, `❯ ` … only ever start a terminal line. `# ` and `> `
+        // also start every Markdown heading, Python comment and quoted email
+        // line, so after those the rest of the line still has to look like
+        // a command — otherwise "> Thanks, see you Monday" was Shell code.
+        for prompt in ["$ ", "% ", "❯ ", "➜ ", "PS> "] where line.hasPrefix(prompt) {
             line = String(line.dropFirst(prompt.count)).trimmingCharacters(in: .whitespaces)
             startedWithPrompt = true
             break
+        }
+        if !startedWithPrompt {
+            for prompt in ["# ", "> "] where line.hasPrefix(prompt) {
+                line = String(line.dropFirst(prompt.count)).trimmingCharacters(in: .whitespaces)
+                break
+            }
         }
         guard let firstToken = line.split(separator: " ").first.map(String.init),
               !firstToken.isEmpty else { return false }
@@ -136,17 +167,50 @@ enum TextTraditionalDetectors {
         return cmdCount >= 2 && Double(cmdCount) >= Double(lines.count) * 0.6
     }
 
-    private static func detectDelimitedTable(_ text: String) -> String? {
+    private static func detectDelimitedTable(_ text: String, looksLikeCode: Bool) -> String? {
         guard text.contains("\n") else { return nil }
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         guard lines.count >= 2, lines.count <= 200 else { return nil }
-        for (delimiter, label) in [("\t", "TSV"), (",", "CSV")] {
-            let counts = lines.map { $0.split(separator: Character(delimiter), omittingEmptySubsequences: false).count }
-            if let first = counts.first, first >= 2, counts.allSatisfy({ $0 == first }) {
-                return label
-            }
+
+        // Statement-shaped lines — `foo(a, b);`, `}`, `if x {` — are code
+        // no matter how evenly their commas or tabs happen to line up.
+        let codeShaped = lines.filter { line in
+            let s = line.trimmingCharacters(in: .whitespaces)
+            return s.hasSuffix(";") || s.hasSuffix("{") || s.hasSuffix("}") || s.hasSuffix(")")
+        }.count
+        if codeShaped * 2 >= lines.count { return nil }
+
+        // TSV. Lines that all START with a tab are indented code (Go, a
+        // Makefile), not a table whose first column happens to be empty.
+        let tabCounts = lines.map { $0.split(separator: "\t", omittingEmptySubsequences: false).count }
+        if let first = tabCounts.first, first >= 2, tabCounts.allSatisfy({ $0 == first }),
+           lines.filter({ $0.hasPrefix("\t") }).count * 2 < lines.count {
+            return "TSV"
         }
-        return nil
+
+        // CSV. Parsed with quotes honoured — the old naive split counted the
+        // comma inside `"Smith, John"` as a separator, so real CSV with a
+        // quoted field was rejected as ragged.
+        guard !looksLikeCode, text.count <= maxDocumentScanLength else { return nil }
+        let rows = DelimitedTableParser.parse(text, delimiter: ",")
+        guard rows.count >= 2, let cols = rows.first?.count, cols >= 2,
+              rows.allSatisfy({ $0.count == cols }) else { return nil }
+
+        let fields = rows.flatMap { $0 }.map { $0.trimmingCharacters(in: .whitespaces) }
+        // Two short lines with one comma each is how a lot of ordinary
+        // writing looks ("Hi Sam, / Thanks, Priya"). At that size, only
+        // accept it when no field has a space in it — `Name,Age / Ana,31`.
+        if rows.count * cols <= 4, fields.contains(where: { $0.contains(" ") }) { return nil }
+        // Sentences, not records: most rows end in sentence punctuation.
+        let sentenceRows = rows.filter { row in
+            let last = row.last?.trimmingCharacters(in: .whitespaces) ?? ""
+            return last.count > 1 && (last.hasSuffix(".") || last.hasSuffix("!") || last.hasSuffix("?"))
+        }.count
+        if sentenceRows * 2 >= rows.count { return nil }
+        // …or long runs of words per field.
+        let words = fields.reduce(0) { $0 + $1.split(separator: " ").count }
+        if Double(words) / Double(max(1, fields.count)) > 6 { return nil }
+        return "CSV"
     }
 
     private static func isLatex(_ text: String) -> Bool {
@@ -154,13 +218,13 @@ enum TextTraditionalDetectors {
         guard !text.contains("\\documentclass"), !text.contains("\\begin{document}") else {
             return false
         }
-        let keywords = ["\\begin{", "\\end{", "\\frac{", "\\sum", "\\int",
-                        "\\alpha", "\\beta", "\\gamma", "\\delta", "\\theta",
-                        "\\lambda", "\\pi", "\\sigma", "\\sqrt{", "\\infty",
-                        "\\text{", "\\mathbf{", "\\cdot", "\\times"]
         let inlineMath = text.hasPrefix("$") && text.hasSuffix("$") && text.count > 2
         let displayMath = text.hasPrefix("\\[") && text.hasSuffix("\\]")
-        return keywords.contains(where: { text.contains($0) }) || inlineMath || displayMath
+        // Commands must END where a command ends. As bare substrings,
+        // `\pi`, `\int` and `\sum` matched Windows paths (`C:\Pictures`,
+        // `D:\internal`, `\summary`) and sent them to the LaTeX renderer.
+        return inlineMath || displayMath
+            || DetectionRegex.matches(#"\\(?:begin|end|frac|sqrt|text|mathbf|mathrm|mathbb)\{|\\(?:sum|int|alpha|beta|gamma|delta|theta|lambda|pi|sigma|infty|cdot|times|partial|nabla|leq|geq|neq)(?![A-Za-z])"#, in: text)
     }
 
     /// Math written as Unicode symbols rather than LaTeX commands.
@@ -192,6 +256,13 @@ enum TextTraditionalDetectors {
                 distinct.insert(ch); total += 1
                 continue
             }
+            // Arrows count toward the totals but can't qualify a clip on
+            // their own: people write "A → B" in ordinary notes, and an
+            // explanation that used → between sentences was labelled LaTeX.
+            if arrowOperators.contains(ch) {
+                distinct.insert(ch); total += 1
+                continue
+            }
             if isMathSymbolCharacter(ch) {
                 distinct.insert(ch); total += 1
             }
@@ -213,11 +284,15 @@ enum TextTraditionalDetectors {
         "\u{2295}", "\u{2297}", "\u{2299}",            // ⊕ ⊗ ⊙
         "\u{2260}", "\u{2264}", "\u{2265}",            // ≠ ≤ ≥
         "\u{2261}", "\u{2248}", "\u{221D}",            // ≡ ≈ ∝
-        "\u{2192}", "\u{21A6}", "\u{21D2}", "\u{21D4}", // → ↦ ⇒ ⇔
         "\u{221A}", "\u{221E}", "\u{2202}", "\u{2207}", // √ ∞ ∂ ∇
         "\u{2286}", "\u{2282}", "\u{222A}", "\u{2229}", // ⊆ ⊂ ∪ ∩
         "\u{2227}", "\u{2228}", "\u{00AC}",            // ∧ ∨ ¬
         "\u{2245}", "\u{2254}", "\u{22A2}", "\u{22A8}", // ≅ ≔ ⊢ ⊨
+    ]
+
+    /// Arrows: maths uses them, but so does plain writing — see `isUnicodeMath`.
+    private static let arrowOperators: Set<Character> = [
+        "\u{2192}", "\u{21A6}", "\u{21D2}", "\u{21D4}", // → ↦ ⇒ ⇔
     ]
 
     /// Counted toward the density thresholds but never sufficient alone:
@@ -237,15 +312,37 @@ enum TextTraditionalDetectors {
         }
     }
 
-    private static func isMarkdown(_ text: String) -> Bool {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard t.count >= 3 else { return false }
-        if t.hasPrefix("# ") || t.hasPrefix("## ") || t.contains("\n# ") { return true }
+    enum MarkdownStrength { case strong, weak }
 
-        if t.contains("```") || DetectionRegex.matches(#"\[[^\]\n]+\]\([^)\n]+\)"#, in: t) { return true }
-        if DetectionRegex.matches(#"(?m)^[ \t]*[-*][ \t]+\S+"#, in: t) ||
-           DetectionRegex.matches(#"(?m)^[ \t]*\d+\.[ \t]+\S+"#, in: t) { return true }
-        return t.contains("**") || t.contains("__")
+    /// How sure the Markdown reading is.
+    ///
+    /// Strong: syntax that only Markdown writes — a fence, a `[text](url)`
+    /// link, a pipe table, a `#` heading. Weak: things plenty of other text
+    /// has too — list markers, `**`, `__`, `> ` quotes.
+    ///
+    /// This used to be one yes/no that also beat code on confidence, so any
+    /// Python with a `# comment`, `**kwargs` or `__init__`, any shell script
+    /// with a comment and any JSDoc block was tagged "MD" and rendered as a
+    /// document instead of highlighted code. In a language whose comments
+    /// start with `#`, a `# ` line is not a heading at all.
+    static func markdownStrength(_ text: String, codeLanguage: String?) -> MarkdownStrength? {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count >= 3 else { return nil }
+
+        if t.contains("```") || t.contains("\n~~~") || t.hasPrefix("~~~") { return .strong }
+        if DetectionRegex.matches(#"\[[^\]\n]+\]\([^)\s]*[/.#:][^)\s]*\)"#, in: t) { return .strong }
+        if DetectionRegex.matches(#"(?m)^\|.*\|[ \t]*\n\|?[ \t]*:?-{3,}"#, in: t) { return .strong }
+        let hashIsComment = codeLanguage.map { CodeLanguageDetector.hashCommentLanguages.contains($0) } ?? false
+        if !hashIsComment, DetectionRegex.matches(#"(?m)^#{1,6}[ \t]+\S"#, in: t) { return .strong }
+
+        if DetectionRegex.matches(#"(?m)^[ \t]*[-*+][ \t]+\S+"#, in: t) ||
+           DetectionRegex.matches(#"(?m)^[ \t]*\d+\.[ \t]+\S+"#, in: t) ||
+           DetectionRegex.matches(#"(?m)^>[ \t]?\S"#, in: t) { return .weak }
+        // `**bold**` — and `__bold__` only with a space inside, so a Python
+        // dunder (`__init__`, `__name__`) doesn't count.
+        if DetectionRegex.matches(#"\*\*[^*\s][^*\n]*\*\*"#, in: t) ||
+           DetectionRegex.matches(#"__[^_\n]*\s[^_\n]*__"#, in: t) { return .weak }
+        return nil
     }
 
     private static func isEmail(_ text: String) -> Bool {

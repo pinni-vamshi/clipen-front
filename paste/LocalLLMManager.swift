@@ -158,6 +158,39 @@ actor LocalModelRuntime {
         containers[tier] = nil
     }
 
+    // MARK: Idle unload
+    //
+    // A loaded model holds its weights in memory — gigabytes — and used to
+    // stay loaded for as long as Clipen ran after its first analysis, though
+    // analyses come in short bursts around copies. It's now released after
+    // `idleUnloadDelay` with nothing running; the next analysis loads it
+    // again (a few seconds, from disk).
+    static let idleUnloadDelay: Duration = .seconds(300)
+    private var inFlight: [LocalModelTier: Int] = [:]
+    private var lastUsed: [LocalModelTier: ContinuousClock.Instant] = [:]
+
+    private func beginUse(_ tier: LocalModelTier) {
+        inFlight[tier, default: 0] += 1
+    }
+
+    private func endUse(_ tier: LocalModelTier) {
+        inFlight[tier, default: 1] -= 1
+        let stamp = ContinuousClock.now
+        lastUsed[tier] = stamp
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.idleUnloadDelay)
+            await self?.unloadIfIdle(tier, usedAt: stamp)
+        }
+    }
+
+    private func unloadIfIdle(_ tier: LocalModelTier, usedAt stamp: ContinuousClock.Instant) {
+        guard inFlight[tier, default: 0] == 0, lastUsed[tier] == stamp,
+              case .ready = containers[tier] else { return }
+        containers[tier] = nil
+        MLX.GPU.clearCache()
+        DebugLog.write("MODEL: \(tier.displayName) — unloaded after idle")
+    }
+
     func cancelLoad(_ tier: LocalModelTier) {
         if case .loading(let task) = containers[tier] {
             task.cancel()
@@ -235,6 +268,8 @@ actor LocalModelRuntime {
         // see concurrent access as long as that remains the only caller —
         // it was dead, misleading machinery, not a real second layer of
         // protection.
+        beginUse(tier)
+        defer { endUse(tier) }
         let container = try await container(for: tier)
         let params = GenerateParameters(maxTokens: maxTokens)
         let session = ChatSession(container, instructions: instructions, generateParameters: params)

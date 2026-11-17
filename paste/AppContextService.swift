@@ -42,8 +42,13 @@ enum AppContextService {
         }
     }
 
+    /// Every script gets a 1-second limit. With none, a busy browser or a
+    /// pending Automation permission prompt held this call — and the serial
+    /// queue behind it — for AppleScript's default two minutes, and every
+    /// app switch in that time was ignored.
     private static func runAppleScript(_ source: String) -> String? {
-        guard let script = NSAppleScript(source: source) else { return nil }
+        let limited = "with timeout of 1 second\n" + source + "\nend timeout"
+        guard let script = NSAppleScript(source: limited) else { return nil }
         var errorDict: NSDictionary?
         let result = script.executeAndReturnError(&errorDict)
         if let errorDict {
@@ -51,60 +56,6 @@ enum AppContextService {
         }
         guard errorDict == nil, let value = result.stringValue, !value.isEmpty else { return nil }
         return value
-    }
-
-    private static let joinScript = "set AppleScript's text item delimiters to (ASCII character 30)\n"
-        + "set joined to out as text\n"
-        + "return joined"
-
-    static func allTabTexts(for bundleID: String) -> [String] {
-        switch bundleID {
-        case "com.apple.Safari":
-            guard let raw = runAppleScript("""
-                tell application "Safari"
-                    set out to {}
-                    repeat with w in windows
-                        repeat with t in tabs of w
-                            set end of out to ((name of t) & " || " & (URL of t))
-                        end repeat
-                    end repeat
-                    \(joinScript)
-                end tell
-                """) else { return [] }
-            return splitList(raw)
-
-        case let id where chromiumBundleIDs.contains(id):
-            guard let appName = NSWorkspace.shared.runningApplications
-                .first(where: { $0.bundleIdentifier == bundleID })?.localizedName
-            else { return [] }
-            guard let raw = runAppleScript("""
-                tell application "\(appName)"
-                    set out to {}
-                    repeat with w in windows
-                        repeat with t in tabs of w
-                            set end of out to ((title of t) & " || " & (URL of t))
-                        end repeat
-                    end repeat
-                    \(joinScript)
-                end tell
-                """) else { return [] }
-            return splitList(raw)
-
-        case "com.apple.finder":
-            guard let raw = runAppleScript("""
-                tell application "Finder"
-                    set out to {}
-                    repeat with w in Finder windows
-                        set end of out to (name of w)
-                    end repeat
-                    \(joinScript)
-                end tell
-                """) else { return [] }
-            return splitList(raw)
-
-        default:
-            return accessibilityWindowTitle(forBundleID: bundleID).map { [$0] } ?? []
-        }
     }
 
     private static func splitList(_ raw: String) -> [String] {

@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import ApplicationServices
 import SwiftUI
 import UniformTypeIdentifiers
@@ -15,32 +16,55 @@ extension ClipboardManager {
 
     func shouldInjectCharacters(to app: NSRunningApplication?) -> Bool {
         if app == nil { return true }
-        // Bundle-ID first: it's a set lookup, while focusedAppIsSpotlight() is
+        // Bundle-ID first: it's a set lookup, while focusedAppIsOverlay() is
         // a synchronous cross-process Accessibility round trip. Same answer
         // either way (the result is an OR), but Raycast/Alfred now skip the
         // AX call entirely.
         if let id = app?.bundleIdentifier, Self.injectionBundleIDs.contains(id) { return true }
-        return Self.focusedAppIsSpotlight()
+        return Self.focusedAppIsOverlay()
     }
 
-    static func focusedAppIsSpotlight() -> Bool {
+    /// System overlays that take typing without ever becoming the frontmost
+    /// app. A paste aimed at "the frontmost app" misses them, so text is
+    /// written straight into their focused field instead. Spotlight was the
+    /// only one handled; macOS 27's new Siri ("Siri AI", com.apple.campo)
+    /// works the same way, and so does the classic Siri panel.
+    static let overlayBundleIDs: Set<String> = [
+        "com.apple.Spotlight",
+        "com.apple.campo",          // Siri AI, macOS 27
+        "com.apple.Siri",
+        "com.apple.siri.launcher",
+    ]
+
+    /// True when the app holding the keyboard focus is an overlay: one of the
+    /// known ones above, or any background (menu-bar style) app that has the
+    /// text cursor while a different app is frontmost — which is exactly the
+    /// situation a normal Cmd-V paste can't reach.
+    static func focusedAppIsOverlay() -> Bool {
+        guard let app = focusedApplication() else { return false }
+        if let id = app.bundleIdentifier, overlayBundleIDs.contains(id) { return true }
+        guard app.bundleIdentifier != Bundle.main.bundleIdentifier,
+              let front = NSWorkspace.shared.frontmostApplication,
+              front.processIdentifier != app.processIdentifier else { return false }
+        return app.activationPolicy == .accessory
+    }
+
+    private static func focusedApplication() -> NSRunningApplication? {
         let systemWide = AXUIElementCreateSystemWide()
         // Every paste of text waits on this. An unresponsive frontmost app
         // makes AX calls hang for the default 6s timeout, which the user
         // experiences as the paste itself being stuck. Nothing here is worth
         // more than a fraction of a second; on timeout we fall through to
-        // "not Spotlight", which is the common answer anyway.
+        // "not an overlay", which is the common answer anyway.
         AXUIElementSetMessagingTimeout(systemWide, 0.25)
         var focusedAppRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedApplicationAttribute as CFString, &focusedAppRef) == .success,
               let focusedAppRef, CFGetTypeID(focusedAppRef) == AXUIElementGetTypeID()
-        else { return false }
+        else { return nil }
         let axApp = unsafeBitCast(focusedAppRef, to: AXUIElement.self)
         var pid: pid_t = 0
-        guard AXUIElementGetPid(axApp, &pid) == .success,
-              let app = NSRunningApplication(processIdentifier: pid)
-        else { return false }
-        return app.bundleIdentifier == "com.apple.Spotlight"
+        guard AXUIElementGetPid(axApp, &pid) == .success else { return nil }
+        return NSRunningApplication(processIdentifier: pid)
     }
 
     func extractTextForInjection(from item: ClipboardItem) -> String? {
@@ -59,11 +83,31 @@ extension ClipboardManager {
             if AXUIElementSetAttributeValue(focused,
                                             kAXSelectedTextAttribute as CFString,
                                             text as CFString) == .success {
-                completion?()
+                // "Success" only means the element accepted the call, not that
+                // it did anything with it — a search field can take the write
+                // and still show nothing, and the paste then fails silently.
+                // So read the field back; type the text in by hand only when
+                // the field is readable and plainly doesn't contain it. An
+                // unreadable field (secure, or no value) is trusted as before.
+                let needle = String(text.prefix(40))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                    var valueRef: CFTypeRef?
+                    let readable = AXUIElementCopyAttributeValue(
+                        focused, kAXValueAttribute as CFString, &valueRef) == .success
+                    if readable, let value = valueRef as? String, !value.contains(needle) {
+                        DebugLog.write("inject: field accepted the text but doesn't show it — typing it instead")
+                        self?.typeCharacters(text, completion: completion)
+                    } else {
+                        completion?()
+                    }
+                }
                 return
             }
         }
+        typeCharacters(text, completion: completion)
+    }
 
+    private func typeCharacters(_ text: String, completion: (() -> Void)?) {
         let src = CGEventSource(stateID: .hidSystemState)
         DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.06) {
             for scalar in text.unicodeScalars {
@@ -434,13 +478,7 @@ extension ClipboardManager {
                     self.abortPaste(token: token); completion?(); return
                 }
 
-                let src  = CGEventSource(stateID: .combinedSessionState)
-                let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-                let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-                down?.flags = .maskCommand; up?.flags = .maskCommand
-                Self.tagSynthetic(down); Self.tagSynthetic(up)
-                down?.post(tap: .cgAnnotatedSessionEventTap)
-                up?.post(tap: .cgAnnotatedSessionEventTap)
+                Self.postCommandV()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                     self?.endPasteSimulation(token: token)
                     completion?()
@@ -463,9 +501,15 @@ extension ClipboardManager {
         recordPasteDestination(for: item.id, app: target)
         let tWrite = Date()
         let pb = NSPasteboard.general
-        pb.clearContents()
-        write(item, to: pb, plainOnly: pastePlainTextByDefault)
-        lastChangeCount = pb.changeCount
+        // The item that is still the live clipboard pastes with the system's
+        // own paste: nothing is cleared or rewritten, so the target app gets
+        // exactly what the source app copied. See `pastesFromSystemClipboard`.
+        let usesSystemClipboard = pastesFromSystemClipboard(item)
+        if !usesSystemClipboard {
+            pb.clearContents()
+            write(item, to: pb, plainOnly: pastePlainTextByDefault)
+            lastChangeCount = pb.changeCount
+        }
         let writeMs = ms(tWrite)
 
         let token = beginPasteSimulation()
@@ -484,7 +528,7 @@ extension ClipboardManager {
                 $0.count <= Self.maxInjectionLength && self.shouldInjectCharacters(to: target)
             } ?? false
             let decideMs = ms(tDecide)
-            DebugLog.write("PASTE-TIME staged=\(ms(tStart))ms write=\(writeMs)ms activate=\(activateMs)ms injectProbe=\(decideMs)ms inject=\(willInject) app=\(target?.bundleIdentifier ?? "nil")")
+            DebugLog.write("PASTE-TIME staged=\(ms(tStart))ms write=\(writeMs)ms activate=\(activateMs)ms injectProbe=\(decideMs)ms inject=\(willInject) system=\(usesSystemClipboard) sidecar=\(item.sidecarTypes?.keys.sorted().joined(separator: ",") ?? "none") app=\(target?.bundleIdentifier ?? "nil")")
 
             if willInject, let text = injectText {
                 let tInject = Date()
@@ -494,13 +538,7 @@ extension ClipboardManager {
                     completion?()
                 }
             } else {
-                let src  = CGEventSource(stateID: .combinedSessionState)
-                let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-                let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-                down?.flags = .maskCommand; up?.flags = .maskCommand
-                Self.tagSynthetic(down); Self.tagSynthetic(up)
-                down?.post(tap: .cgAnnotatedSessionEventTap)
-                up?.post(tap: .cgAnnotatedSessionEventTap)
+                Self.postCommandV()
                 DebugLog.write("PASTE-TIME keystroke posted at \(ms(tStart))ms")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                     self?.endPasteSimulation(token: token)
@@ -570,13 +608,7 @@ extension ClipboardManager {
                     }
                 }
             } else {
-                let src  = CGEventSource(stateID: .combinedSessionState)
-                let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-                let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-                down?.flags = .maskCommand; up?.flags = .maskCommand
-                Self.tagSynthetic(down); Self.tagSynthetic(up)
-                down?.post(tap: .cgAnnotatedSessionEventTap)
-                up?.post(tap: .cgAnnotatedSessionEventTap)
+                Self.postCommandV()
                 let delay: TimeInterval = remaining.isEmpty ? 0.2 : 0.28
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     guard let self else { return }
@@ -597,6 +629,18 @@ extension ClipboardManager {
         for (typeStr, data) in sidecar where !existing.contains(typeStr) {
             pitem.setData(data, forType: .init(typeStr))
         }
+    }
+
+    /// The plain text a formatted item pastes with: the source app's own
+    /// plain-text flavour when it was captured (Markdown from ChatGPT,
+    /// tab-separated rows from Numbers), else the text derived from the
+    /// formatting. Editing an item drops its sidecar, so an edited item
+    /// always uses its new text. See `prunedSidecar`.
+    static func pastePlainText(for item: ClipboardItem, derived: String) -> String {
+        guard let data = item.sidecarTypes?["public.utf8-plain-text"],
+              let original = String(data: data, encoding: .utf8),
+              !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return derived }
+        return original
     }
 
     static func safeRTFData(for attrStr: NSAttributedString, sidecarRTF: Data? = nil) -> Data? {
@@ -657,7 +701,7 @@ extension ClipboardManager {
             } else if let rtfData = Self.safeRTFData(for: attrStr, sidecarRTF: item.sidecarTypes?["public.rtf"]) {
                 pitem.setData(rtfData, forType: .rtf)
             }
-            pitem.setString(plain, forType: .string)
+            pitem.setString(Self.pastePlainText(for: item, derived: plain), forType: .string)
             applySidecar(item, to: pitem)
             pb.writeObjects([pitem])
 
@@ -668,7 +712,7 @@ extension ClipboardManager {
                let rtfData = Self.safeRTFData(for: attrStr) {
                 pitem.setData(rtfData, forType: .rtf)
             }
-            pitem.setString(plain, forType: .string)
+            pitem.setString(Self.pastePlainText(for: item, derived: plain), forType: .string)
             applySidecar(item, to: pitem)
             pb.writeObjects([pitem])
 
@@ -677,7 +721,7 @@ extension ClipboardManager {
             pitem.setData(Data(html.utf8), forType: .init("public.html"))
             pitem.setData(Data(html.utf8), forType: .init("Apple HTML pasteboard type"))
             applySidecar(item, to: pitem)
-            pitem.setString(plain, forType: .string)
+            pitem.setString(Self.pastePlainText(for: item, derived: plain), forType: .string)
             pb.writeObjects([pitem])
 
         case .file(let url):
@@ -763,6 +807,19 @@ extension ClipboardManager {
         return item
     }
 
+    /// Pastes from a Reference panel into the app being worked in. The
+    /// panel never takes focus, so that is the frontmost app. Its buttons
+    /// used `resolvedPasteTarget()`, which prefers the app the POPUP was
+    /// last opened over — often a different one by the time a Reference
+    /// panel is used — so Clipen switched to that app and pasted there.
+    func pasteFromReferencePanel(itemID: UUID) {
+        guard let item = item(id: itemID) else { return }
+        let front = NSWorkspace.shared.frontmostApplication
+        let target = front?.bundleIdentifier == Bundle.main.bundleIdentifier ? capturedPasteTarget : front
+        recordNudgePaste(kind: .single)
+        simulatePaste(item, target: target, position: indexInDisplayItems(id: itemID))
+    }
+
     func pasteItem(at itemsIndex: Int) {
         guard items.indices.contains(itemsIndex) else { return }
         let item = items[itemsIndex]
@@ -772,4 +829,85 @@ extension ClipboardManager {
         simulatePaste(item, target: resolvedPasteTarget(), position: position)
     }
 
+}
+
+// MARK: - Command-V keystroke
+
+extension ClipboardManager {
+
+    /// Presses Command-V the way a person does: Command down, V down, V up,
+    /// Command up, posted at the hardware level with a short gap between.
+    ///
+    /// Clipen used to post only V down/up with a Command FLAG on them, into
+    /// the session (not the hardware) event stream, with no Command key
+    /// event at all. Most apps accept that. Text fields that ask the system
+    /// whether Command is actually held — Spotlight's search field, Finder's
+    /// rename and search fields — see that it isn't and ignore the paste.
+    /// Dictation tools that do paste into those fields send exactly this
+    /// sequence: VoiceInk (CursorPaster.pasteFromClipboard: 0x37 down,
+    /// 0x09 down/up, 0x37 up at .cghidEventTap) and Handy
+    /// (input.rs send_paste_ctrl_v: Meta press, V click, Meta release).
+    ///
+    /// Every event is tagged as Clipen's own, so Clipen's event tap lets it
+    /// through instead of reading it as the user's Command-V.
+    static func postCommandV() {
+        let vKey = commandVKeyCode()
+        let src = CGEventSource(stateID: .privateState)
+        guard let cmdDown = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(kVK_Command), keyDown: true),
+              let vDown = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: true),
+              let vUp = CGEvent(keyboardEventSource: src, virtualKey: vKey, keyDown: false),
+              let cmdUp = CGEvent(keyboardEventSource: src, virtualKey: CGKeyCode(kVK_Command), keyDown: false)
+        else { return }
+        cmdDown.flags = .maskCommand
+        vDown.flags = .maskCommand
+        vUp.flags = .maskCommand
+        cmdUp.flags = []
+        let sequence = [cmdDown, vDown, vUp, cmdUp]
+        sequence.forEach { tagSynthetic($0) }
+        // A few milliseconds apart, as both references do: an app that
+        // reads the modifier state when V arrives must see Command already
+        // down. Off the main thread so the gaps never stall the UI.
+        DispatchQueue.global(qos: .userInteractive).async {
+            for (i, event) in sequence.enumerated() {
+                if i > 0 { usleep(8_000) }
+                event.post(tap: .cghidEventTap)
+            }
+        }
+    }
+
+    /// The key that types "v" while Command is held on the current keyboard
+    /// layout. Key 9 is V only on QWERTY-style layouts: on Dvorak it is
+    /// ".", so a fixed 9 pasted nothing there. Layouts that switch to QWERTY
+    /// under Command ("Dvorak – QWERTY ⌘", most non-Latin layouts) answer 9
+    /// here because the lookup is done with Command held — the same lookup
+    /// Handy's `resolve_command_v_keycode` makes. Falls back to 9.
+    static func commandVKeyCode() -> CGKeyCode {
+        let fallback = CGKeyCode(kVK_ANSI_V)
+        guard Thread.isMainThread,
+              let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+        else { return fallback }
+        let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue()
+        guard let bytes = CFDataGetBytePtr(data) else { return fallback }
+        let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
+        let keyboardType = UInt32(LMGetKbdType())
+        let commandModifier = UInt32((cmdKey >> 8) & 0xFF)
+
+        func types(_ code: UInt16) -> String? {
+            var deadKeys: UInt32 = 0
+            var chars = [UniChar](repeating: 0, count: 4)
+            var length = 0
+            let status = UCKeyTranslate(layout, code, UInt16(kUCKeyActionDisplay), commandModifier,
+                                        keyboardType, OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                                        &deadKeys, chars.count, &length, &chars)
+            guard status == noErr, length == 1 else { return nil }
+            return String(utf16CodeUnits: chars, count: length)
+        }
+        // The usual key first: on almost every layout it is the answer.
+        if types(UInt16(kVK_ANSI_V))?.lowercased() == "v" { return fallback }
+        for code in UInt16(0)..<UInt16(128) where types(code)?.lowercased() == "v" {
+            return CGKeyCode(code)
+        }
+        return fallback
+    }
 }

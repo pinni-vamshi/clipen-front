@@ -6,7 +6,7 @@ private func clipenHTMLTableRow(_ row: [String]) -> String {
     "<tr>" + row.map { "<td>\($0.htmlEscaped)</td>" }.joined() + "</tr>"
 }
 
-private enum HistoryCrypto {
+enum HistoryCrypto {
     static let keychainKey = "historyEncryptionKey"
 
     static var keyFileURL: URL {
@@ -26,14 +26,28 @@ private enum HistoryCrypto {
             if attempt < 2 { Thread.sleep(forTimeInterval: 0.3) }
         }
 
-        if let data = Keychain.get(keychainKey), data.count == 32 {
+        let keyFileExists = FileManager.default.fileExists(atPath: keyFileURL.path)
 
-            writeKeyFile(data)
+        if let data = Keychain.get(keychainKey), data.count == 32 {
+            // Restore the file only when it is genuinely MISSING. A file that
+            // exists but couldn't be read this once may hold a different key
+            // than Keychain does; overwriting it destroyed the only key for
+            // everything it had encrypted.
+            if !keyFileExists { writeKeyFile(data) }
             return SymmetricKey(data: data)
         }
 
+        // No usable key anywhere. Starting a fresh one is unavoidable, but
+        // the old key file is set aside, never overwritten, so history it
+        // encrypted can still be recovered (`decryptWithAnyKnownKey`) once
+        // whatever blocked the read is gone.
+        if keyFileExists {
+            let aside = keyFileURL.deletingLastPathComponent()
+                .appendingPathComponent("history.key.unreadable-\(Int(Date().timeIntervalSince1970))")
+            try? FileManager.default.moveItem(at: keyFileURL, to: aside)
+        }
         if historyFileExists {
-            NSLog("[Clipen] HistoryCrypto: no readable key (file or Keychain) but encrypted history exists — generating a new key means that history is now unrecoverable. This should not happen; if it does, the file read is failing for a reason retries did not cover.")
+            NSLog("[Clipen] HistoryCrypto: no readable key (file or Keychain) but encrypted history exists — starting a new key; the old key file, if any, was kept beside it for recovery.")
         }
         let fresh = SymmetricKey(size: .bits256)
         let freshData = fresh.withUnsafeBytes { Data($0) }
@@ -41,6 +55,38 @@ private enum HistoryCrypto {
         Keychain.set(freshData, for: keychainKey)
         return fresh
     }()
+
+    /// Keys other than the current one that this install has used: the
+    /// Keychain copy when it differs from the file, and any key file set
+    /// aside above. One of these is what a manifest written by a process
+    /// that ran with the wrong key needs. Only consulted when the current
+    /// key fails, so the Keychain isn't touched on the normal path — and
+    /// only once per launch.
+    static let alternateKeys: [SymmetricKey] = {
+        let current = cachedKey.withUnsafeBytes { Data($0) }
+        var seen: Set<Data> = [current]
+        var keys: [SymmetricKey] = []
+        func consider(_ data: Data?) {
+            guard let data, data.count == 32, seen.insert(data).inserted else { return }
+            keys.append(SymmetricKey(data: data))
+        }
+        consider(Keychain.get(keychainKey))
+        let dir = keyFileURL.deletingLastPathComponent()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        for name in names where name.hasPrefix("history.key.") {
+            consider(try? Data(contentsOf: dir.appendingPathComponent(name)))
+        }
+        return keys
+    }()
+
+    static func decryptWithAnyKnownKey(_ ciphertext: Data) -> Data? {
+        if let plain = decrypt(ciphertext) { return plain }
+        guard let box = try? AES.GCM.SealedBox(combined: ciphertext) else { return nil }
+        for key in alternateKeys {
+            if let plain = try? AES.GCM.open(box, using: key) { return plain }
+        }
+        return nil
+    }
 
     static func writeKeyFile(_ data: Data) {
         let url = keyFileURL
@@ -302,7 +348,13 @@ extension ClipboardManager {
         InstantExtractionService.shared.invalidate(id)
     }
 
-    func replaceItemContent(id: UUID, newContent: ClipboardContent) {
+    /// `sidecar` is what the item's extra clipboard formats become. They
+    /// describe the content as it was COPIED (its RTF, its HTML, its
+    /// original plain text), so new content drops them by default: kept,
+    /// an edited item pasted its pre-edit RTF and Word, which prefers RTF,
+    /// showed the old text. Undoing an edit passes the originals back.
+    func replaceItemContent(id: UUID, newContent: ClipboardContent,
+                            sidecar: [String: Data]? = nil) {
         guard let idx = indexOfItem(id: id) else { return }
         let old = items[idx]
         var updated = ClipboardItem(content: newContent, id: old.id,
@@ -320,7 +372,7 @@ extension ClipboardManager {
         updated.pasteCountByApp   = old.pasteCountByApp
         updated.pastedToAppNames  = old.pastedToAppNames
         updated.originalFileURL   = old.originalFileURL
-        updated.sidecarTypes      = old.sidecarTypes
+        updated.sidecarTypes      = sidecar
         updated.ocrText           = old.ocrText
         updated.aiStructuredText  = old.aiStructuredText
         updated.collections       = old.collections
@@ -456,6 +508,7 @@ extension ClipboardManager {
         invalidateContentDerivedCaches(for: id)
 
         inlineEditOriginals.removeValue(forKey: id)
+        inlineEditOriginalSidecars.removeValue(forKey: id)
         // Only ever written, never removed: an item stayed in the mark-order
         // map after being unmarked and after being deleted.
         itemMarkSeq.removeValue(forKey: id)
@@ -729,66 +782,141 @@ extension ClipboardManager {
         return plain
     }
 
-    func purgeOrphanBlobs(referenced: Set<String>) {
+    /// Deletes blob files nothing points at — with two protections the old
+    /// version lacked, both learned from histories that vanished:
+    ///
+    ///  - blobs referenced by a set-aside (`history.clip.corrupt-*`) manifest
+    ///    are kept. Purging used to see only the CURRENT history, so the
+    ///    first save after a history was set aside deleted every image it
+    ///    had, and recovering that manifest later brought back text only.
+    ///  - if a set-aside manifest can't be read at all, its references are
+    ///    unknown; every blob written before it was set aside is kept, since
+    ///    any of them might be its. Blobs written later can't be.
+    private func purgeOrphanBlobs(referenced: Set<String>, quarantine: QuarantineReferences) {
         guard let enumerator = FileManager.default.enumerator(
             at: blobsDir,
-            includingPropertiesForKeys: [.isRegularFileKey],
+            includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]) else { return }
         for case let url as URL in enumerator {
-            guard let isFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile,
-                  isFile else { continue }
-            let parent = url.deletingLastPathComponent().lastPathComponent
-            let name   = url.lastPathComponent
-            let rel    = "\(parent)/\(name)"
-            if !referenced.contains(rel) {
-                try? FileManager.default.removeItem(at: url)
-            }
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
+            guard values?.isRegularFile == true else { continue }
+            let rel = "\(url.deletingLastPathComponent().lastPathComponent)/\(url.lastPathComponent)"
+            if referenced.contains(rel) || quarantine.blobs.contains(rel) { continue }
+            if let cutoff = quarantine.unreadableSince,
+               (values?.contentModificationDate ?? .distantPast) <= cutoff { continue }
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
-    func saveHistory(snapshot: [ClipboardItem]? = nil) {
+    /// Same job for `FileCopies/`: every copied file is snapshotted into its
+    /// own folder there, and only removing an item ever deleted one — a
+    /// snapshot whose item never made it into history (a crash, a duplicate,
+    /// a failed capture) stayed forever. Folders touched in the last ten
+    /// minutes are left alone: a snapshot is written before its item exists.
+    private func purgeOrphanFileCopies(referenced: Set<String>, quarantine: QuarantineReferences) {
+        let base = FileSnapshotStore.baseDirectory
+        guard let folders = try? FileManager.default.contentsOfDirectory(
+            at: base, includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]) else { return }
+        let recent = Date().addingTimeInterval(-600)
+        for folder in folders {
+            let name = folder.lastPathComponent
+            if referenced.contains(name) || quarantine.fileCopyFolders.contains(name) { continue }
+            let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate ?? .distantFuture
+            if modified > recent { continue }
+            if let cutoff = quarantine.unreadableSince, modified <= cutoff { continue }
+            try? FileManager.default.removeItem(at: folder)
+        }
+    }
 
-        guard snapshot != nil || isHistoryFullyLoaded else { return }
+    /// `FileCopies/<folder>` names an item's files live in, group members
+    /// and pre-edit originals included.
+    static func fileCopyFolders(of items: [ClipboardItem]) -> Set<String> {
+        var folders = Set<String>()
+        func add(_ url: URL?) {
+            guard let path = url?.path, let range = path.range(of: "/Clipen/FileCopies/") else { return }
+            if let folder = path[range.upperBound...].split(separator: "/").first { folders.insert(String(folder)) }
+        }
+        func walk(_ item: ClipboardItem) {
+            switch item.content {
+            case .file(let url):   add(url)
+            case .files(let urls): urls.forEach(add)
+            case .group(let kids): kids.forEach(walk)
+            default: break
+            }
+            add(item.originalFileURL)
+        }
+        items.forEach(walk)
+        return folders
+    }
 
-        guard historyDirty else { return }
+    // MARK: Saving
+
+    /// The ONE way to save history. Main thread.
+    ///
+    /// Several call sites used to call `saveHistory(snapshot:)` straight
+    /// onto the save queue, and a snapshot skipped the "has history finished
+    /// loading" guard. With more than 40 unpinned items the oldest load a
+    /// moment after launch; a collection rename/move/delete in that moment
+    /// saved a history WITHOUT them and then purged their images.
+    func persistHistory() {
+        guard isHistoryFullyLoaded else { return }
+        let snapshot = items
+        let revision = itemsRevision
+        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot, revision: revision) }
+    }
+
+    /// Save-queue only. `revision` is the `itemsRevision` the snapshot was
+    /// taken at; it replaces a `historyDirty` flag that was set on the main
+    /// thread, cleared on this queue, and cleared BEFORE the write — so a
+    /// failed write (full disk) was marked done and never retried.
+    func saveHistory(snapshot: [ClipboardItem], revision: Int) {
+        latestRequestedSaveRevision = revision
+        saveEmbeddingsIfDirty(snapshot: snapshot)
+        saveAIEmbeddingsIfDirty(snapshot: snapshot)
+        guard revision != lastSavedRevision else { return }
+
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         var referencedBlobs: Set<String> = []
-
-        let itemsToSave = (snapshot ?? items).filter { !$0.isUncaptured }
-        let persisted: [PersistedItem] = itemsToSave.compactMap { item in
-            var p = persistedBase(for: item, referencedBlobs: &referencedBlobs)
-            if p != nil, let sidecar = item.sidecarTypes {
-                if let cached = sidecarBlobCache[item.id],
-                   FileManager.default.fileExists(atPath: blobsDir.appendingPathComponent(cached).path) {
-                    referencedBlobs.insert(cached)
-                    p?.sidecarBlob = cached
-                } else if let json = try? JSONEncoder().encode(sidecar),
-                          let rel = writeBlob(json, primaryTag: item.primaryTag) {
-                    sidecarBlobCache[item.id] = rel
-                    referencedBlobs.insert(rel)
-                    p?.sidecarBlob = rel
-                }
-            }
-            return p
-        }
+        let itemsToSave = snapshot.filter { !$0.isUncaptured }
+        let persisted = itemsToSave.compactMap { persistedBase(for: $0, referencedBlobs: &referencedBlobs) }
         guard let plain = try? enc.encode(persisted),
               let cipher = HistoryCrypto.encrypt(plain) else { return }
-        historyDirty = false
-        try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
-        if historyLoadedCleanly, !itemsToSave.isEmpty {
-            try? cipher.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
-        }
 
-        let head = Self.historyPrioritySlice(persisted)
-        if let headPlain = try? enc.encode(head),
+        // `.bak` is the PREVIOUS good history, not a second copy of the one
+        // being written. Rewriting it with the same bytes as the main file
+        // (what it was) meant it could never hold anything the main file
+        // didn't, which is the only moment a backup is worth having.
+        if historyLoadedCleanly,
+           let previous = try? Data(contentsOf: historyFileURL),
+           HistoryCrypto.decrypt(previous) != nil {
+            try? previous.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
+        }
+        do {
+            try cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
+        } catch {
+            DebugLog.write("saveHistory: write failed (\(error.localizedDescription)) — retrying in 15s")
+            saveQueue.asyncAfter(deadline: .now() + 15) { [weak self] in
+                guard let self, self.latestRequestedSaveRevision == revision else { return }
+                self.saveHistory(snapshot: snapshot, revision: revision)
+            }
+            return
+        }
+        lastSavedRevision = revision
+
+        // Written only after the main file succeeded, so the fast-launch
+        // head can never be newer than the history it summarises.
+        if let headPlain = try? enc.encode(Self.historyPrioritySlice(persisted)),
            let headCipher = HistoryCrypto.encrypt(headPlain) {
             try? headCipher.write(to: historyHeadURL, options: [.atomic, .completeFileProtection])
         }
-        saveEmbeddingsIfDirty(snapshot: itemsToSave)
-        saveAIEmbeddingsIfDirty(snapshot: itemsToSave)
+
         if blobPurgeNeeded && historyLoadedCleanly {
-            purgeOrphanBlobs(referenced: referencedBlobs)
+            let quarantine = quarantineReferences()
+            purgeOrphanBlobs(referenced: referencedBlobs, quarantine: quarantine)
+            purgeOrphanFileCopies(referenced: Self.fileCopyFolders(of: itemsToSave), quarantine: quarantine)
             blobPurgeNeeded = false
         }
     }
@@ -819,21 +947,7 @@ extension ClipboardManager {
         case "group":
             guard let kids = p.groupChildren else { return nil }
             let items = kids.prefix(Self.maxGroupItems).compactMap { child -> ClipboardItem? in
-                guard let c = decodeContent(child) else { return nil }
-                var item = ClipboardItem(content: c, id: child.id, timestamp: child.timestamp,
-                                     urlTitle: child.urlTitle, sourceAppName: child.sourceAppName,
-                                     userNote: child.userNote, ocrText: child.ocrText)
-                item.aiStructuredText = child.aiStructuredText
-                item.isPinned = child.isPinned
-                item.collections = Set(child.collections ?? [])
-                if let orig = child.originalFilePath { item.originalFileURL = URL(fileURLWithPath: orig) }
-                item.sourceBundleID = child.sourceBundleID
-                if let rel = child.sidecarBlob, let raw = readBlob(rel),
-                   let sidecar = try? JSONDecoder().decode([String: Data].self, from: raw),
-                   !sidecar.isEmpty {
-                    item.sidecarTypes = sidecar
-                }
-                return item
+                decodeContent(child).map { makeItem(from: child, content: $0) }
             }
             return items.isEmpty ? nil : .group(Array(items))
         default:
@@ -841,8 +955,30 @@ extension ClipboardManager {
         }
     }
 
+    /// One item's record, sidecar included. The sidecar used to be attached
+    /// by `saveHistory` to top-level items only, so a group's members lost
+    /// their extra clipboard formats on every relaunch even though loading
+    /// them was already supported.
     private func persistedBase(for item: ClipboardItem,
                                referencedBlobs: inout Set<String>) -> PersistedItem? {
+        guard var record = persistedContent(for: item, referencedBlobs: &referencedBlobs) else { return nil }
+        if let sidecar = item.sidecarTypes {
+            if let cached = sidecarBlobCache[item.id],
+               FileManager.default.fileExists(atPath: blobsDir.appendingPathComponent(cached).path) {
+                referencedBlobs.insert(cached)
+                record.sidecarBlob = cached
+            } else if let json = try? JSONEncoder().encode(sidecar),
+                      let rel = writeBlob(json, primaryTag: item.primaryTag) {
+                sidecarBlobCache[item.id] = rel
+                referencedBlobs.insert(rel)
+                record.sidecarBlob = rel
+            }
+        }
+        return record
+    }
+
+    private func persistedContent(for item: ClipboardItem,
+                                  referencedBlobs: inout Set<String>) -> PersistedItem? {
             switch item.content {
             case .text(let str):
                 return .make(from: item, type: "text", text: str, urlTitle: item.urlTitle)
@@ -905,79 +1041,209 @@ extension ClipboardManager {
         historyDir.appendingPathComponent("history.clip.bak")
     }
 
-    private func pruneQuarantineFiles(in dir: URL, keeping keep: Int) {
-        guard let all = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
-        let quarantines = all
+    /// A live item from its record. Top-level items and group members used
+    /// to be built by two separate copies of this, and the group copy left
+    /// out paste history and counts.
+    private func makeItem(from p: PersistedItem, content: ClipboardContent) -> ClipboardItem {
+        var item = ClipboardItem(content: content, id: p.id, timestamp: p.timestamp,
+                                 urlTitle: p.urlTitle, sourceAppName: p.sourceAppName,
+                                 userNote: p.userNote, ocrText: p.ocrText)
+        item.aiStructuredText = p.aiStructuredText
+        item.isPinned = p.isPinned
+        item.collections = Set(p.collections ?? [])
+        if let orig = p.originalFilePath { item.originalFileURL = URL(fileURLWithPath: orig) }
+        item.sourceBundleID   = p.sourceBundleID
+        item.pastedToAppName  = p.pastedToAppName
+        item.pastedToBundleID = p.pastedToBundleID
+        item.lastPastedAt     = p.lastPastedAt
+        item.pasteCount       = p.pasteCount ?? 0
+        item.pasteCountByApp  = p.pasteCountByApp ?? [:]
+        if let names = p.pastedToAppNames, !names.isEmpty {
+            item.pastedToAppNames = names
+        } else if let bid = p.pastedToBundleID, let name = p.pastedToAppName {
+            item.pastedToAppNames = [bid: name]
+        }
+        if let rel = p.sidecarBlob, let raw = readBlob(rel),
+           let sidecar = try? JSONDecoder().decode([String: Data].self, from: raw),
+           !sidecar.isEmpty {
+            item.sidecarTypes = sidecar
+        }
+        return item
+    }
+
+    // MARK: Set-aside histories
+
+    /// Manifests the loader couldn't read and moved aside, oldest first.
+    /// They are never deleted automatically: until one is recovered, it may
+    /// be the only copy of that history.
+    private func quarantineFiles() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: historyDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        return files
             .filter { $0.lastPathComponent.hasPrefix("history.clip.corrupt-") }
-            .sorted { a, b in
-                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                return da > db
-            }
-        for stale in quarantines.dropFirst(keep) {
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private func pruneFiles(withPrefix prefix: String, keeping keep: Int) {
+        guard let all = try? FileManager.default.contentsOfDirectory(
+            at: historyDir, includingPropertiesForKeys: nil) else { return }
+        let matching = all.filter { $0.lastPathComponent.hasPrefix(prefix) }
+            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        for stale in matching.dropFirst(keep) {
             try? FileManager.default.removeItem(at: stale)
         }
     }
 
-    private func readManifest(at url: URL, dec: JSONDecoder) -> [PersistedItem]? {
-        guard let cipher    = try? Data(contentsOf: url),
-              let plain     = HistoryCrypto.decrypt(cipher),
+    private func readManifest(at url: URL, dec: JSONDecoder, anyKnownKey: Bool = false) -> [PersistedItem]? {
+        guard let cipher = try? Data(contentsOf: url),
+              let plain  = anyKnownKey ? HistoryCrypto.decryptWithAnyKnownKey(cipher)
+                                       : HistoryCrypto.decrypt(cipher),
               let persisted = try? dec.decode([PersistedItem].self, from: plain) else { return nil }
         return persisted
     }
 
-    private func recoverFromQuarantineIfBetter(current: [PersistedItem],
-                                               dec: JSONDecoder) -> [PersistedItem]? {
-        let attemptedKey = "clipen.recoveryAttemptedQuarantines"
-        let d = UserDefaults.standard
-        var attempted = Set(d.stringArray(forKey: attemptedKey) ?? [])
-
-        guard let files = try? FileManager.default.contentsOfDirectory(
-                at: historyDir, includingPropertiesForKeys: nil) else { return nil }
-        let candidates = files.filter {
-            $0.lastPathComponent.hasPrefix("history.clip.corrupt-")
-                && !attempted.contains($0.lastPathComponent)
-        }
-        guard !candidates.isEmpty else { return nil }
-
-        var best: [PersistedItem] = []
-        for f in candidates {
-            attempted.insert(f.lastPathComponent)
-            if let items = readManifest(at: f, dec: dec), items.count > best.count {
-                best = items
-            }
-        }
-
-        guard best.count > current.count else {
-            d.set(Array(attempted), forKey: attemptedKey)
-            return nil
-        }
-
-        let currentIDs = Set(current.map(\.id))
-        let merged = current + best.filter { !currentIDs.contains($0.id) }
-
-        let ringSize = min(max(1, d.object(forKey: "preferredRingSize") as? Int ?? 20), 500)
-        var capped: [PersistedItem] = []
-        var unpinnedKept = 0
-        for item in merged {
-            if item.isPinned {
-                capped.append(item)
-            } else if unpinnedKept < ringSize {
-                capped.append(item); unpinnedKept += 1
-            }
-        }
-
-        let enc = JSONEncoder()
-        enc.dateEncodingStrategy = .iso8601
-        guard let plain = try? enc.encode(capped),
-              let cipher = HistoryCrypto.encrypt(plain) else { return nil }
-        try? cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
-        try? cipher.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
-        d.set(Array(attempted), forKey: attemptedKey)
-        NSLog("[Clipen] loadHistory: auto-recovered \(capped.count) items from quarantine (previously had \(current.count))")
-        return capped
+    struct QuarantineReferences {
+        var blobs = Set<String>()
+        var fileCopyFolders = Set<String>()
+        /// Modification date of the newest set-aside manifest that can't be
+        /// read. Anything it references was written before then.
+        var unreadableSince: Date?
     }
+
+    private func quarantineReferences() -> QuarantineReferences {
+        var refs = QuarantineReferences()
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        func walk(_ p: PersistedItem) {
+            if let b = p.imageBlob { refs.blobs.insert(b) }
+            if let b = p.sidecarBlob { refs.blobs.insert(b) }
+            for path in (p.filePaths ?? []) + [p.filePath, p.originalFilePath].compactMap({ $0 }) {
+                if let r = path.range(of: "/Clipen/FileCopies/"),
+                   let folder = path[r.upperBound...].split(separator: "/").first {
+                    refs.fileCopyFolders.insert(String(folder))
+                }
+            }
+            p.groupChildren?.forEach(walk)
+        }
+        for file in quarantineFiles() {
+            if let records = readManifest(at: file, dec: dec, anyKnownKey: true) {
+                records.forEach(walk)
+            } else {
+                let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? Date()
+                refs.unreadableSince = max(refs.unreadableSince ?? .distantPast, modified)
+            }
+        }
+        return refs
+    }
+
+    static let recoveredCollectionName = "Recovered"
+
+    /// Whether a set-aside record would come back as something usable —
+    /// an image whose file is gone would only come back as a dead row.
+    private func isRestorable(_ p: PersistedItem) -> Bool {
+        let fm = FileManager.default
+        func blobExists(_ rel: String?) -> Bool {
+            rel.map { fm.fileExists(atPath: blobsDir.appendingPathComponent($0).path) } ?? false
+        }
+        switch p.type {
+        case "image": return blobExists(p.imageBlob) || p.imageData != nil
+        case "blob":  return blobExists(p.imageBlob)
+        case "file":  return p.filePath.map { fm.fileExists(atPath: $0) } ?? false
+        case "files": return (p.filePaths ?? []).contains { fm.fileExists(atPath: $0) }
+        case "group": return (p.groupChildren ?? []).contains(where: isRestorable)
+        default:      return true
+        }
+    }
+
+    /// Brings back every item a set-aside history holds that the current
+    /// one doesn't.
+    ///
+    /// What this replaces compared item COUNTS — "is the old file bigger?" —
+    /// and gave up for good after one look. With a full ring the answer is
+    /// always "no" (50 vs 50), so a history set aside at the ring limit was
+    /// never merged, whatever it contained, and was marked as tried so it
+    /// was never looked at again. Merging by missing ids is correct at any
+    /// size; files that still can't be read are retried every launch.
+    ///
+    /// Recovered items go into a "Recovered" collection that is kept
+    /// forever, or the ring limit would trim them straight back out. A
+    /// file is retired (renamed `recovered-`) only after the merged history
+    /// is safely on disk.
+    private func recoverQuarantinedItems(current: [PersistedItem],
+                                         dec: JSONDecoder) -> (items: [PersistedItem], recovered: Int)? {
+        UserDefaults.standard.removeObject(forKey: "clipen.recoveryAttemptedQuarantines")
+        let files = quarantineFiles()
+        guard !files.isEmpty else { return nil }
+
+        var known = Set(current.map(\.id))
+        // Same text/markup already in history under a different id is the
+        // same thing copied again — not something to bring back twice.
+        func contentKey(_ p: PersistedItem) -> String? {
+            switch p.type {
+            case "text", "svg": return p.text.map { "\(p.type):\($0)" }
+            case "html":        return p.html.map { "html:\($0)" }
+            case "richText", "rtfd": return p.plainText.map { "rich:\($0)" }
+            default:            return nil
+            }
+        }
+        var knownContent = Set(current.compactMap(contentKey))
+        var recovered: [PersistedItem] = []
+        var settled: [URL] = []
+        for file in files {
+            guard let records = readManifest(at: file, dec: dec, anyKnownKey: true) else { continue }
+            settled.append(file)
+            for var record in records where !known.contains(record.id) && isRestorable(record) {
+                known.insert(record.id)
+                if let key = contentKey(record), !knownContent.insert(key).inserted { continue }
+                var names = Set(record.collections ?? [])
+                names.insert(Self.recoveredCollectionName)
+                record.collections = names.sorted()
+                recovered.append(record)
+            }
+        }
+        guard !settled.isEmpty else { return nil }
+
+        var merged = current
+        if !recovered.isEmpty {
+            merged += recovered.sorted { $0.timestamp > $1.timestamp }
+            let enc = JSONEncoder()
+            enc.dateEncodingStrategy = .iso8601
+            guard let plain = try? enc.encode(merged),
+                  let cipher = HistoryCrypto.encrypt(plain) else { return nil }
+            if let previous = try? Data(contentsOf: historyFileURL), HistoryCrypto.decrypt(previous) != nil {
+                try? previous.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
+            }
+            do {
+                try cipher.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
+            } catch {
+                DebugLog.write("recovery: couldn't write merged history — will retry next launch")
+                return nil
+            }
+        }
+        let recoveredIDs = recovered.map(\.id)
+        DispatchQueue.main.async { AIStructuringService.shared.markAutoAttempted(recoveredIDs) }
+        for file in settled {
+            let name = file.lastPathComponent.replacingOccurrences(of: "corrupt-", with: "recovered-")
+            try? FileManager.default.moveItem(at: file, to: historyDir.appendingPathComponent(name))
+        }
+        pruneFiles(withPrefix: "history.clip.recovered-", keeping: 3)
+        DebugLog.write("recovery: restored \(recovered.count) items from \(settled.count) set-aside histories")
+        return (merged, recovered.count)
+    }
+
+    /// Main thread. Shows the recovered items somewhere and keeps them out
+    /// of ring trimming.
+    private func registerRecoveredCollection(count: Int) {
+        let name = Self.recoveredCollectionName
+        rememberForeverCollections.insert(name)
+        if !collections.contains(name), collections.count < Self.maxCollections {
+            collections.append(name)
+        }
+        flashStatus(String(localized: "Recovered \(count) items from an earlier history — they're in “\(name)”."))
+    }
+
+    // MARK: Loading
 
     func loadHistory() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -1001,75 +1267,29 @@ extension ClipboardManager {
         var seedPayload: [UUID: String] = [:]
         var seedSidecar: [UUID: String] = [:]
         var migratedInlineEmbedding = false
+
+        // Tell the save path which blob already holds each payload — group
+        // members included. Members were never seeded, so every save wrote
+        // their images out again as brand-new files and purged the old ones.
+        func seed(_ p: PersistedItem, _ item: ClipboardItem) {
+            if let rel = p.imageBlob {
+                switch item.content {
+                case .image(_, let raw, _): seedImage[p.id] = (rel, raw.count, Self.blobFingerprint(raw))
+                case .blob:                 seedPayload[p.id] = rel
+                default: break
+                }
+            }
+            if let rel = p.sidecarBlob, item.sidecarTypes != nil { seedSidecar[p.id] = rel }
+            if case .group(let kids) = item.content, let records = p.groupChildren {
+                let byID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                for kid in kids { if let record = byID[kid.id] { seed(record, kid) } }
+            }
+        }
+
         let loaded = batch.compactMap { p -> ClipboardItem? in
-            let content: ClipboardContent
-            switch p.type {
-            case "text":
-                guard let str = p.text else { return nil }
-                content = .text(str)
-            case "image":
-                let raw: Data? = {
-                    if let rel = p.imageBlob, let d = self.readBlob(rel) { return d }
-                    return p.imageData
-                }()
-                guard let raw,
-                      let imageContent = ClipboardContent.imageContent(
-                          rawData: raw, dataType: .init(p.imageType ?? "public.png"),
-                          fallback: NSImage(data: raw))
-                else { return nil }
-                if let rel = p.imageBlob { seedImage[p.id] = (rel, raw.count, Self.blobFingerprint(raw)) }
-                content = imageContent
-            case "richText":
-                guard let rtf = p.rtfData,
-                      let attrStr = NSAttributedString(rtf: rtf, documentAttributes: nil) else { return nil }
-                content = .richText(attrStr, plain: p.plainText ?? attrStr.string)
-            case "html":
-                guard let html = p.html else { return nil }
-                content = .html(html, plain: p.plainText ?? "")
-            case "rtfd":
-                guard let rtfd = p.rtfData else { return nil }
-                content = .rtfd(rtfd, plain: p.plainText ?? "")
-            case "file":
-                guard let path = p.filePath else { return nil }
-                content = .file(URL(fileURLWithPath: path))
-            case "files":
-                guard let paths = p.filePaths, !paths.isEmpty else { return nil }
-                content = .files(paths.map { URL(fileURLWithPath: $0) })
-            case "svg":
-                guard let str = p.text else { return nil }
-                content = .svg(str)
-            case "blob":
-                guard let rel = p.imageBlob, let raw = self.readBlob(rel),
-                      let typeMap = try? JSONDecoder().decode([String: Data].self, from: raw),
-                      !typeMap.isEmpty else { return nil }
-                seedPayload[p.id] = rel
-                content = .blob(typeMap)
-            case "group":
-                guard let groupContent = self.decodeContent(p) else { return nil }
-                content = groupContent
-            default:
-                return nil
-            }
-            var item = ClipboardItem(content: content, id: p.id, timestamp: p.timestamp,
-                                     urlTitle: p.urlTitle, sourceAppName: p.sourceAppName,
-                                     userNote: p.userNote, ocrText: p.ocrText)
-            item.aiStructuredText = p.aiStructuredText
-            item.isPinned = p.isPinned
-
-            item.collections = Set(p.collections ?? [])
-
-            if let orig = p.originalFilePath { item.originalFileURL = URL(fileURLWithPath: orig) }
-            item.sourceBundleID = p.sourceBundleID
-            item.pastedToAppName  = p.pastedToAppName
-            item.pastedToBundleID = p.pastedToBundleID
-            item.lastPastedAt     = p.lastPastedAt
-            item.pasteCount       = p.pasteCount ?? 0
-            item.pasteCountByApp  = p.pasteCountByApp ?? [:]
-            if let names = p.pastedToAppNames, !names.isEmpty {
-                item.pastedToAppNames = names
-            } else if let bid = p.pastedToBundleID, let name = p.pastedToAppName {
-                item.pastedToAppNames = [bid: name]
-            }
+            guard let content = decodeContent(p) else { return nil }
+            var item = makeItem(from: p, content: content)
+            seed(p, item)
             if schemaIsCurrent {
                 if let fromDict = loadedEmbeddings[p.id.uuidString] {
                     item.embedding = fromDict
@@ -1078,12 +1298,6 @@ extension ClipboardManager {
                     migratedInlineEmbedding = true
                 }
                 item.aiEmbedding = loadedAIEmbeddings[p.id.uuidString]
-            }
-            if let rel = p.sidecarBlob, let raw = self.readBlob(rel),
-               let sidecar = try? JSONDecoder().decode([String: Data].self, from: raw),
-               !sidecar.isEmpty {
-                item.sidecarTypes = sidecar
-                seedSidecar[p.id] = rel
             }
             return item
         }
@@ -1116,12 +1330,19 @@ extension ClipboardManager {
         let loadedEmbeddings = readEmbeddingsFile()
         let loadedAIEmbeddings = readAIEmbeddingsFile()
 
-        var shownHeadIDs = Set<UUID>()
+        // Records compared byte-for-byte below, so a head item is reused
+        // only when the full history holds exactly the same record.
+        let recordEncoder = JSONEncoder()
+        recordEncoder.dateEncodingStrategy = .iso8601
+
+        var headItemsByID: [UUID: ClipboardItem] = [:]
+        var headRecords: [UUID: Data] = [:]
         if let headPersisted = readManifest(at: historyHeadURL, dec: dec), !headPersisted.isEmpty {
             let headBatch = decodeHistoryBatch(headPersisted, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings, schemaIsCurrent: schemaIsCurrent)
             if !headBatch.items.isEmpty {
                 mergeHistoryBlobCaches(headBatch)
-                shownHeadIDs = Set(headBatch.items.map(\.id))
+                for item in headBatch.items { headItemsByID[item.id] = item }
+                for record in headPersisted { headRecords[record.id] = try? recordEncoder.encode(record) }
                 let headItems = headBatch.items
                 DispatchQueue.main.async { [weak self] in
                     guard let self, !self.hasLoadedHistoryOnce else { return }
@@ -1136,6 +1357,7 @@ extension ClipboardManager {
                 }
             }
         }
+        let shownHeadIDs = Set(headItemsByID.keys)
 
         let primaryExisted = FileManager.default.fileExists(atPath: historyFileURL.path)
 
@@ -1158,23 +1380,26 @@ extension ClipboardManager {
             let stamp = Int(Date().timeIntervalSince1970)
             let quarantine = historyDir.appendingPathComponent("history.clip.corrupt-\(stamp)")
             try? FileManager.default.moveItem(at: historyFileURL, to: quarantine)
-            pruneQuarantineFiles(in: historyDir, keeping: 3)
-            NSLog("[Clipen] loadHistory: primary manifest unreadable — quarantined to \(quarantine.lastPathComponent), trying backup")
+            DebugLog.write("loadHistory: main history unreadable — set aside as \(quarantine.lastPathComponent), trying backup")
             if let fromBackup = readManifest(at: historyBackupURL, dec: dec) {
                 persisted = fromBackup
                 if let bakBytes = try? Data(contentsOf: historyBackupURL) {
                     try? bakBytes.write(to: historyFileURL, options: [.atomic, .completeFileProtection])
                 }
-                NSLog("[Clipen] loadHistory: restored \(fromBackup.count) items from history.clip.bak")
+                DebugLog.write("loadHistory: restored \(fromBackup.count) items from history.clip.bak")
             }
         }
 
-        if let recovered = recoverFromQuarantineIfBetter(current: persisted ?? [], dec: dec) {
-            persisted = recovered
+        var recoveredCount = 0
+        if let recovery = recoverQuarantinedItems(current: persisted ?? [], dec: dec) {
+            persisted = recovery.items
+            recoveredCount = recovery.recovered
         }
 
         guard let persisted else {
             DispatchQueue.main.async { [weak self] in
+                // Nothing readable although a history file existed: don't let
+                // the first save purge blobs, which may still belong to it.
                 self?.historyLoadedCleanly = !primaryExisted
                 self?.hasLoadedHistoryOnce = true
                 self?.isHistoryFullyLoaded = true
@@ -1183,17 +1408,26 @@ extension ClipboardManager {
             }
             return
         }
-        let cleanLoad = true
-        if !persisted.isEmpty, let goodBytes = try? Data(contentsOf: historyFileURL) {
-            try? goodBytes.write(to: historyBackupURL, options: [.atomic, .completeFileProtection])
-        }
         let unpinnedPersisted  = persisted.filter { !$0.isPinned }
         let priorityPersisted  = Self.historyPrioritySlice(persisted)
         let deferredPersisted  = Array(unpinnedPersisted.dropFirst(Self.historyPriorityUnpinnedCount))
 
-        let firstBatch = decodeHistoryBatch(priorityPersisted, loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings, schemaIsCurrent: schemaIsCurrent)
+        // The head file is this same slice; whatever it already decoded
+        // (images included) isn't decoded a second time.
+        let reusable = Set(priorityPersisted.compactMap { record -> UUID? in
+            guard headItemsByID[record.id] != nil, let headData = headRecords[record.id],
+                  (try? recordEncoder.encode(record)) == headData else { return nil }
+            return record.id
+        })
+        let firstBatch = decodeHistoryBatch(priorityPersisted.filter { !reusable.contains($0.id) },
+                                            loadedEmbeddings: loadedEmbeddings, loadedAIEmbeddings: loadedAIEmbeddings,
+                                            schemaIsCurrent: schemaIsCurrent)
         mergeHistoryBlobCaches(firstBatch)
-        let publish = firstBatch.items.filter(\.isPinned) + firstBatch.items.filter { !$0.isPinned }
+        let decodedByID = Dictionary(firstBatch.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let ordered = priorityPersisted.compactMap { record in
+            reusable.contains(record.id) ? headItemsByID[record.id] : decodedByID[record.id]
+        }
+        let publish = ordered.filter(\.isPinned) + ordered.filter { !$0.isPinned }
         let publishIDs = Set(publish.map(\.id))
 
         var knownIDs: Set<UUID> = []
@@ -1201,13 +1435,14 @@ extension ClipboardManager {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.historyLoadedCleanly = cleanLoad
+            self.historyLoadedCleanly = true
 
             let liveCaptures = self.items.filter {
                 !shownHeadIDs.contains($0.id) && !publishIDs.contains($0.id)
             }
             self.items = liveCaptures + publish
             self.purgeLegacyDefaultCollection()
+            if recoveredCount > 0 { self.registerRecoveredCollection(count: recoveredCount) }
             self.embeddedItemCount = self.items.reduce(0) { $1.embedding == nil ? $0 : $0 + 1 }
             knownIDs = Set(self.items.map(\.id))
             knownEmbeddedCount = self.embeddedItemCount
@@ -1268,7 +1503,7 @@ extension ClipboardManager {
             return
         }
         DispatchQueue.main.async { [weak self] in
-            self?.saveHistory()
+            self?.persistHistory()
             UserDefaults.standard.set(true, forKey: key)
         }
     }

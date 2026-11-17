@@ -2,13 +2,10 @@ import SwiftUI
 
 enum SelectionHighlightStyle {
     static let scale: CGFloat = 1.12
-    static let cellScale: CGFloat = 1.22
     static let cornerRadius: CGFloat = 8
+    /// Corner radius of an image thumbnail inside a run (the clip shape on
+    /// the picture itself, not the selection box around it).
     static let cellCornerRadius: CGFloat = 6
-    static let cellBorderWidth: CGFloat = 4.0
-    /// Thin enough to sit around text without crowding it — see
-    /// `SelectionHighlightAppearance.textCell`.
-    static let textCellBorderWidth: CGFloat = 1.5
     static let spring = Animation.spring(response: 0.35, dampingFraction: 0.75)
 
     static let rowRailSpacing: CGFloat = 8
@@ -17,23 +14,32 @@ enum SelectionHighlightStyle {
 }
 
 enum SelectionHighlightAppearance {
+    /// A whole row: the accent box fills the row and the row pops slightly.
     case row
 
-    case rowSurface
-    case cell
-    /// The `.cell` treatment retuned for text rather than a thumbnail.
+    /// One member of a run — an image thumbnail or a short-text chip — which
+    /// is selected on its own inside a row that holds several.
     ///
-    /// `.cell` is built for a 51pt image: a 4pt white stroke on the content's
-    /// exact bounds reads as a ring around a picture, and a 1.22x pop is free
-    /// because the cell is fixed-size with space around it. Applied to a text
-    /// chip both are wrong — the stroke lands directly on the glyphs instead
-    /// of around them, and scaling a chip inside a width-packed row pushes its
-    /// neighbours out of the line it was measured to fit. This keeps the same
-    /// visual language (white outline marking the selected member of an
-    /// accent-filled row) at a weight text can survive: thinner stroke, no
-    /// scale, and the chip supplies its own padding so the outline has
-    /// somewhere to sit.
-    case textCell
+    /// This used to be three separate effects layered on top of each other:
+    /// the run's whole ROW filled with accent (`.rowSurface`, with no shared
+    /// geometry, so it faded in where it stood), a white ring springing in
+    /// on the chosen image (`.cell`), and a `nil` transaction wrapped round
+    /// the run that stopped either of them gliding. Stepping from a text row
+    /// onto an image run therefore ran two unrelated animations at once —
+    /// the normal rows' shared box faded out with nowhere to go, while the
+    /// run's own fill and ring appeared by themselves — which is the
+    /// "duplicated, coming back" look.
+    ///
+    /// Now there is exactly one selection box. A run member joins the same
+    /// `matchedGeometryEffect` group the normal rows use, so the one box
+    /// glides from a row, onto the chosen image or chip, along the run, and
+    /// back out to the next row.
+    ///
+    /// `outset` grows the box past the member's own bounds without changing
+    /// its layout size (an image needs room around it; a chip already
+    /// carries its own padding). `radius` is set per member so the box stays
+    /// concentric with a clipped thumbnail.
+    case cellBox(outset: CGFloat, radius: CGFloat)
 }
 
 struct SelectionHighlight: ViewModifier {
@@ -60,75 +66,28 @@ struct SelectionHighlight: ViewModifier {
 
                 .scaleEffect(isSelected ? SelectionHighlightStyle.scale : 1.0)
                 .animation(SelectionHighlightStyle.spring, value: isSelected)
-        case .rowSurface:
+
+        case .cellBox(let outset, let radius):
+            // Same chain, in the same order, as `.row` — fill, opacity,
+            // matched geometry, shadow, then scale, then the spring bound to
+            // `isSelected` last so it governs everything above it. The order
+            // is what makes the glide animate: both ends of a move (the box
+            // leaving one member, the box arriving at another) run under
+            // their own member's spring.
+            //
+            // The negative padding sits BEFORE the matched-geometry modifier
+            // so the group's frame is the grown box, not the bare member.
             content
                 .background {
-                    RoundedRectangle(cornerRadius: SelectionHighlightStyle.cornerRadius, style: .continuous)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .fill(Color.accentColor)
+                        .padding(-outset)
                         .opacity(isSelected ? 1 : 0)
-
+                        .matchedGeometryEffect(id: "selectionBox", in: namespace, isSource: isSelected)
                         .shadow(color: Color.accentColor.opacity(isSelected ? 0.22 : 0),
                                 radius: isSelected ? 4 : 0, x: 0, y: isSelected ? 1.5 : 0)
                 }
-                .padding(.horizontal, inset)
                 .scaleEffect(isSelected ? SelectionHighlightStyle.scale : 1.0)
-                .animation(SelectionHighlightStyle.spring, value: isSelected)
-        case .cell:
-            // Deliberately NO matchedGeometryEffect here. The cells this is
-            // applied to live inside an HStack carrying
-            // `.transaction { $0.animation = nil }` (ImageRunRow), and a
-            // matched-geometry frame change animates with the *ambient*
-            // transaction — which that modifier had just set to nil. The
-            // result was the highlight box teleporting to the next image
-            // while the `.animation(_:value:)` below still sprang its scale
-            // and opacity over 0.35s: two halves of one effect on different
-            // clocks, which is what read as jerky when stepping through a
-            // row of images. Each cell now animates its own highlight in
-            // and out, which `.animation(_:value:)` drives correctly even
-            // under a nil ambient transaction.
-            //
-            // The stroke is also a solid colour rather than
-            // `.ultraThinMaterial`: a material is a live backdrop blur that
-            // has to be re-sampled and re-composited every frame, and two
-            // of them animated simultaneously (outgoing shrinking, incoming
-            // growing) on every keystroke.
-            content
-                .overlay {
-                    RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous)
-                        .stroke(Color.white.opacity(0.85), lineWidth: SelectionHighlightStyle.cellBorderWidth)
-                        .opacity(isSelected ? 1 : 0)
-                        .shadow(color: Color.black.opacity(isSelected ? 0.3 : 0),
-                                radius: isSelected ? 6 : 0, x: 0, y: isSelected ? 2 : 0)
-                }
-
-                .scaleEffect(isSelected ? SelectionHighlightStyle.cellScale : 1.0)
-                .animation(SelectionHighlightStyle.spring, value: isSelected)
-        case .textCell:
-            // Identical to `.cell` in every animated property — same spring,
-            // same scale, same shadow — and differs ONLY in stroke width.
-            // A selected member of a packed row has to travel and lift the
-            // same way whether that row holds thumbnails or text; anything
-            // else reads as two different selection systems in one list.
-            //
-            // The scale is emphatically not a layout problem: `scaleEffect`
-            // is a render transform, so the chip's frame — which is what
-            // the row was width-packed against — does not change, and its
-            // neighbours do not move.
-            //
-            // No matchedGeometryEffect, for exactly the reason `.cell`
-            // documents above: these live inside an HStack that nils the
-            // ambient transaction, so a matched frame change would jump
-            // while the spring below was still running.
-            content
-                .overlay {
-                    RoundedRectangle(cornerRadius: SelectionHighlightStyle.cellCornerRadius, style: .continuous)
-                        .stroke(Color.white.opacity(0.85),
-                                lineWidth: SelectionHighlightStyle.textCellBorderWidth)
-                        .opacity(isSelected ? 1 : 0)
-                        .shadow(color: Color.black.opacity(isSelected ? 0.3 : 0),
-                                radius: isSelected ? 6 : 0, x: 0, y: isSelected ? 2 : 0)
-                }
-                .scaleEffect(isSelected ? SelectionHighlightStyle.cellScale : 1.0)
                 .animation(SelectionHighlightStyle.spring, value: isSelected)
         }
     }

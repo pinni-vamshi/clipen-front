@@ -25,6 +25,9 @@ struct ClipenSettingsView: View {
     @ObservedObject private var proGate = ProGate.shared
     @ObservedObject private var localLLM = LocalLLMManager.shared
     @ObservedObject private var aiStructuring = AIStructuringService.shared
+    @ObservedObject private var aiPrompts = AIPromptStore.shared
+    @State private var promptsExpanded = false
+    @State private var editingPrompt: AIPromptKind? = nil
 
     @Binding var showResetConfirm: Bool
 
@@ -45,7 +48,7 @@ struct ClipenSettingsView: View {
     @State private var showOpenDelayPicker = false
     @State private var showPinPositionPicker = false
 
-    private enum FeedbackSendState { case idle, sent, failed }
+    private enum FeedbackSendState { case idle, sent, offline, rateLimited, rejected }
     @State private var feedbackText = ""
     @State private var feedbackSending = false
     @State private var feedbackSendState: FeedbackSendState = .idle
@@ -221,9 +224,10 @@ struct ClipenSettingsView: View {
                             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.border, lineWidth: 1))
 
                         HStack {
-                            if feedbackSendState == .failed {
-                                Text("Couldn't send — check your connection and try again.")
+                            if let failure = feedbackFailureText {
+                                Text(failure)
                                     .font(.system(size: 10)).foregroundColor(.red.opacity(0.8))
+                                    .fixedSize(horizontal: false, vertical: true)
                             } else if feedbackSendState == .sent {
                                 Text("Sent — expect a reply within a week. Didn't hear back? Send another one.")
                                     .font(.system(size: 10)).foregroundColor(.textDim)
@@ -383,6 +387,17 @@ struct ClipenSettingsView: View {
         .padding(14)
     }
 
+    /// Each failure says what actually happened. Every one used to read
+    /// "check your connection", including the server refusing the message.
+    private var feedbackFailureText: LocalizedStringKey? {
+        switch feedbackSendState {
+        case .offline:     return "Couldn't send — check your connection and try again."
+        case .rateLimited: return "You've sent a lot of messages today — please try again tomorrow."
+        case .rejected:    return "The server couldn't accept this message. Please try again, or shorten it."
+        case .idle, .sent: return nil
+        }
+    }
+
     private func sendFeedback() {
         let trimmed = feedbackText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !feedbackSending else { return }
@@ -390,14 +405,16 @@ struct ClipenSettingsView: View {
         feedbackSendState = .idle
 
         let dateKey = TrackingService.dateKey(Date())
-        TrackingService.shared.sendFeedback(trimmed) { success in
+        TrackingService.shared.sendFeedback(trimmed) { result in
             feedbackSending = false
-            if success {
+            switch result {
+            case .sent:
                 feedbackText = ""
                 feedbackSendState = .sent
                 proGate.recordSentFeedback(trimmed, date: dateKey)
-            } else {
-                feedbackSendState = .failed
+            case .offline:     feedbackSendState = .offline
+            case .rateLimited: feedbackSendState = .rateLimited
+            case .rejected:    feedbackSendState = .rejected
             }
         }
     }
@@ -1437,6 +1454,8 @@ struct ClipenSettingsView: View {
             }
 
             rowCard {
+                popupTriggerRow(0)
+                rowDivider()
                 openDelayRow(1)
 
                 rowDivider()
@@ -1528,7 +1547,10 @@ struct ClipenSettingsView: View {
             .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            promptsCard
         }
+        .sheet(item: $editingPrompt) { AIPromptEditorSheet(kind: $0) }
         // Anchor for the scroll, plus a temporary outline so it's obvious
         // which section the user was just sent to.
         .id(Self.aiSectionAnchor)
@@ -1539,6 +1561,91 @@ struct ClipenSettingsView: View {
                         lineWidth: manager.highlightedSettingsRoute == .aiStructuring ? 2 : 0)
         )
         .animation(.easeOut(duration: 0.3), value: manager.highlightedSettingsRoute)
+    }
+
+    /// The fifteen analysis prompts, collapsed by default — most people will
+    /// never open it, and fifteen rows would bury the two settings above it.
+    private var promptsCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { promptsExpanded.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "text.alignleft").font(.system(size: 11))
+                        .foregroundColor(.textDim).frame(width: 16)
+                    Text("Analysis prompts").font(.system(size: 13)).foregroundColor(.textPri)
+                    if aiPrompts.editedCount > 0 {
+                        Text("\(aiPrompts.editedCount) edited")
+                            .font(.system(size: 9, weight: .semibold)).foregroundColor(.accent)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.accentDim, in: Capsule())
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold)).foregroundColor(.textDim)
+                        .rotationEffect(.degrees(promptsExpanded ? 90 : 0))
+                }
+                .padding(.horizontal, 14).padding(.vertical, 16)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if promptsExpanded {
+                ForEach(AIPromptKind.allCases) { kind in
+                    rowDivider(leading: 14)
+                    promptRow(kind)
+                }
+                rowDivider(leading: 14)
+                HStack(alignment: .top, spacing: 10) {
+                    Text("Each prompt is sent exactly as written. Changes apply to new analyses — use Regenerate All to redo ones you already have.")
+                        .font(.system(size: 10)).foregroundColor(.textDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if aiPrompts.editedCount > 0 {
+                        Button { aiPrompts.resetAll() } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.uturn.backward").font(.system(size: 9, weight: .bold))
+                                Text("Reset all").font(.system(size: 9, weight: .semibold))
+                            }
+                            .foregroundColor(.accent)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(Color.accentDim, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Put every prompt back to the version Clipen ships with")
+                    }
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+            }
+        }
+        .background(Color.surfaceHi.opacity(0.35), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.border, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func promptRow(_ kind: AIPromptKind) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(kind.title).font(.system(size: 13)).foregroundColor(.textPri)
+                Text(kind.coverage).font(.system(size: 10)).foregroundColor(.textDim)
+            }
+            Spacer()
+            if aiPrompts.isEdited(kind) {
+                Text("Edited")
+                    .font(.system(size: 9, weight: .semibold)).foregroundColor(.accent)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color.accentDim, in: Capsule())
+            }
+            Button { editingPrompt = kind } label: {
+                Text("Edit").font(.system(size: 9, weight: .semibold)).foregroundColor(.textSec)
+                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .background(Color.white.opacity(0.06), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture { editingPrompt = kind }
     }
 
     private func byteProgressText(_ tier: LocalModelTier) -> String {
@@ -1632,6 +1739,58 @@ struct ClipenSettingsView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 26)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 16)
+        .frame(maxHeight: .infinity)
+    }
+
+    /// Which key opens Clipen — the first row of MAIN BEHAVIOUR, because it
+    /// decides how everything below it is reached.
+    private func popupTriggerRow(_ n: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(systemName: "keyboard").font(.system(size: 11)).foregroundColor(.textDim).frame(width: 16)
+                Text("Open Clipen with").font(.system(size: 13)).foregroundColor(.textPri)
+                Spacer()
+                HStack(spacing: 4) {
+                    ForEach(ClipboardManager.PopupTrigger.allCases, id: \.self) { trigger in
+                        let isOn = manager.popupTrigger == trigger
+                        Button {
+                            manager.popupTrigger = trigger
+                        } label: {
+                            Text(trigger.keys)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(isOn ? .white : .textSec)
+                                .padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(isOn ? Color.accent : Color.surfaceHi,
+                                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(trigger.accessibilityName)
+                        .accessibilityAddTraits(isOn ? .isSelected : [])
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill").font(.system(size: 8)).foregroundColor(.accent)
+                    Text("⌘V is recommended — it blends seamlessly with the system paste.")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.textSec)
+                }
+                Text("It doesn't replace the system paste, it works alongside it: a quick ⌘V still pastes your latest copy exactly as macOS would, and Clipen only steps in when you go further back.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.textDim.opacity(0.75))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let tradeOff = manager.popupTrigger.tradeOff {
+                    Text(LocalizedStringKey(tradeOff))
+                        .font(.system(size: 10))
+                        .foregroundColor(.orange.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.leading, 26)
         }
         .padding(.horizontal, 14).padding(.vertical, 16)
         .frame(maxHeight: .infinity)
@@ -1820,10 +1979,11 @@ struct ClipenSettingsView: View {
                     guard hasDemo else { return }
                     hovered = hovering
                 }
-                .onAppear {
-                    guard hasDemo else { return }
-                    withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
-                }
+                // Every demo key pulses — about fifteen at once — so this one
+                // mattered most: closing Settings left them all running.
+                .loopWhileVisible($pulse,
+                                  animation: .easeInOut(duration: 1.1).repeatForever(autoreverses: true),
+                                  enabled: hasDemo)
         }
     }
 
@@ -2198,9 +2358,8 @@ struct ClipenSettingsView: View {
             .animation(.easeOut(duration: 0.15), value: isActive)
             .animation(.easeOut(duration: 0.15), value: hovered)
             .animation(.easeOut(duration: 0.15), value: dimmed)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
-            }
+            .loopWhileVisible($pulse,
+                              animation: .easeInOut(duration: 1.1).repeatForever(autoreverses: true))
         }
     }
 
@@ -2252,5 +2411,119 @@ struct ClipenSettingsView: View {
         Button(LocalizedStringKey(title)) { NSWorkspace.shared.open(URL(string: urlString)!) }
             .buttonStyle(.plain)
             .font(.system(size: 11)).foregroundColor(.textSec)
+    }
+}
+
+// MARK: - Prompt editor
+
+/// Edits one of the fifteen analysis prompts.
+///
+/// Edits are held in `text` and only written to the store on Save, so a
+/// half-finished rewrite never reaches an analysis that happens to run while
+/// the sheet is open. Reset is the exception on purpose: it is an explicit
+/// "undo everything" and takes effect at once.
+private struct AIPromptEditorSheet: View {
+    let kind: AIPromptKind
+
+    @ObservedObject private var store = AIPromptStore.shared
+    @State private var text: String
+    @Environment(\.dismiss) private var dismiss
+
+    init(kind: AIPromptKind) {
+        self.kind = kind
+        _text = State(initialValue: AIPromptStore.shared.prompt(for: kind))
+    }
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var defaultTrimmed: String {
+        kind.defaultPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var isDefault: Bool { trimmed == defaultTrimmed }
+    private var isEmpty: Bool { trimmed.isEmpty }
+    private var tooLong: Bool { trimmed.count > AIPromptStore.maxPromptCharacters }
+    /// Differs from what is currently in effect, so Save has something to do.
+    private var hasChange: Bool {
+        trimmed != store.prompt(for: kind).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    /// The reset is offered when there is anything to put back: a saved edit,
+    /// or unsaved typing that has drifted from the default.
+    private var canReset: Bool { store.isEdited(kind) || !isDefault }
+
+    /// The prompt's own instruction that everything between these markers is
+    /// data to extract from, never instructions — the line that stops copied
+    /// text from steering the model.
+    private var lostDataMarkers: Bool { !text.contains("<<<CLIPBOARD_DATA_TO_CONVERT>>>") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(kind.title) prompt").font(.system(size: 15, weight: .semibold))
+                if store.isEdited(kind) {
+                    Text("Edited")
+                        .font(.system(size: 9, weight: .semibold)).foregroundColor(.accent)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Color.accentDim, in: Capsule())
+                }
+                Spacer()
+            }
+            Text(kind.coverage).font(.system(size: 11)).foregroundColor(.textDim)
+                .padding(.top, -8)
+
+            TextEditor(text: $text)
+                .font(.system(size: 11, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(Color.surfaceHi.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(tooLong ? Color.red.opacity(0.7) : Color.border, lineWidth: 1))
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("\(trimmed.count.formatted()) / \(AIPromptStore.maxPromptCharacters.formatted())")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(tooLong ? .red : .textDim)
+                    Spacer()
+                }
+                if tooLong {
+                    note("Too long. The prompt shares the model's limited context window with the text being analysed, so a longer one would leave no room for it.", .red)
+                } else if isEmpty {
+                    note("A prompt can't be empty — reset it to restore the default.", .red)
+                } else if lostDataMarkers {
+                    note("This no longer mentions the <<<CLIPBOARD_DATA_TO_CONVERT>>> markers. Without that instruction the model may follow commands it finds inside copied text.", .orange)
+                }
+                note("Applies to new analyses. Items already analysed keep their result until you use Regenerate All.", .textDim)
+            }
+
+            HStack(spacing: 10) {
+                if canReset {
+                    Button {
+                        store.reset(kind)
+                        text = kind.defaultPrompt
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.uturn.backward").font(.system(size: 10, weight: .bold))
+                            Text("Reset to default").font(.system(size: 12, weight: .medium))
+                        }
+                    }
+                    .help("Throw away the edits and use the prompt Clipen ships with")
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    if store.save(text, for: kind) { dismiss() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(tooLong || isEmpty || !hasChange)
+            }
+        }
+        .padding(20)
+        .frame(width: 680, height: 560)
+    }
+
+    private func note(_ message: String, _ color: Color) -> some View {
+        Text(message)
+            .font(.system(size: 10)).foregroundColor(color)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

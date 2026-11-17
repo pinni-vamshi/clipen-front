@@ -45,9 +45,25 @@ extension ClipboardManager {
         RunLoop.main.add(pollTimer!, forMode: .common)
     }
 
+    /// A foreign app just pressed Cmd-V on text it put on the clipboard.
+    ///
+    /// Two things happen here. The text is captured NOW: it is on the
+    /// pasteboard at this instant and is about to be overwritten when the
+    /// tool restores the user's clipboard, and a poller that has backed off
+    /// to 2Hz would otherwise miss it entirely. And the moment is recorded,
+    /// so the restore that follows can be recognised (`pollClipboard`).
+    func noteForeignInsertion() {
+        lastForeignInsertionAt = Date()
+        foreignInsertionChangeCount = NSPasteboard.general.changeCount
+        if foreignInsertionChangeCount != lastChangeCount {
+            DispatchQueue.main.async { [weak self] in self?.pollClipboard() }
+        }
+    }
+
     func pollClipboard() {
 
         purgeUncapturedPlaceholderIfSuperseded()
+        refreshSystemClipboardLink()
 
         guard !isCapturingPaused else { return }
 
@@ -55,6 +71,8 @@ extension ClipboardManager {
         let pb = NSPasteboard.general
         guard pb.changeCount != lastChangeCount else { return }
         lastPollActivityAt = Date()
+        captureIsPostPasteWrite = pb.changeCount > foreignInsertionChangeCount
+            && Date().timeIntervalSince(lastForeignInsertionAt) < Self.postPasteRestoreWindow
         // Stamped for `pasteLooksLikeForeignTextInsertion`: a foreign Cmd-V
         // riding just behind a real clipboard write is an app inserting its
         // own text, not a relayed keypress.
@@ -105,12 +123,30 @@ extension ClipboardManager {
     }
 
     func processCapturedPasteboard(_ pb: NSPasteboard) {
+        // Stamped BEFORE anything is read: if the clipboard changes while
+        // this capture is still being built, the counter won't match at the
+        // end and the item is simply not linked to the live clipboard.
+        let captureChangeCount = pb.changeCount
         let sidecarSnapshot = Self.allPasteboardTypes(from: pb)
 
         if captureFiles {
             let urls = fileURLs(from: pb)
             if !urls.isEmpty {
+            // Match against what's already captured BEFORE copying: a folder
+            // copied twice used to be snapshotted in full twice.
+            // (This runs on the capture queue; `items` belongs to main.)
+            let readCaptured = { self.items.compactMap { item in item.fileURLsForIdentity.map { (item.id, $0) } } }
+            let captured = Thread.isMainThread ? readCaptured() : DispatchQueue.main.sync(execute: readCaptured)
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                if let identity = FileSnapshotStore.identity(of: urls),
+                   let match = captured.first(where: { FileSnapshotStore.identity(of: $0.1) == identity }) {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, let idx = self.indexOfItem(id: match.0) else { return }
+                        self.captureAttemptGeneration &+= 1
+                        self.bringToTop(at: idx, recopied: ClipboardItem(content: .files(urls)))
+                    }
+                    return
+                }
                 let snapshots = FileSnapshotStore.snapshot(urls)
                 guard !snapshots.isEmpty else {
                     DispatchQueue.main.async { CopyFeedbackPanel.shared.show() }
@@ -119,7 +155,7 @@ extension ClipboardManager {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.addCaptured(ClipboardItem(content: snapshots.count == 1
-                        ? .file(snapshots[0]) : .files(snapshots)), sidecar: sidecarSnapshot)
+                        ? .file(snapshots[0]) : .files(snapshots)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                 }
             }
             return
@@ -145,17 +181,17 @@ extension ClipboardManager {
                         let plainText = TableCellExtractor.tabSeparatedPlainText(from: attrStr) ?? attrStr.string
                         if Self.isImageOnlyAttributedString(attrStr) {
                             if case .image = fallback?.content {
-                                self.addCaptured(fallback!, sidecar: sidecarSnapshot)
+                                self.addCaptured(fallback!, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                             } else if let extracted = Self.imageItem(fromAttachmentIn: attrStr) {
-                                self.addCaptured(extracted, sidecar: sidecarSnapshot)
+                                self.addCaptured(extracted, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                             } else {
-                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: plainText)), sidecar: sidecarSnapshot)
+                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: plainText)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                             }
                         } else {
-                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: plainText)), sidecar: sidecarSnapshot)
+                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdData, plain: plainText)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                         }
                     } else if let fallback {
-                        self.addCaptured(fallback, sidecar: sidecarSnapshot)
+                        self.addCaptured(fallback, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                     } else {
                         CopyFeedbackPanel.shared.show()
                     }
@@ -169,7 +205,7 @@ extension ClipboardManager {
             if case .image = fallback?.content, Self.isImageOnlyHTML(html) {
                 if let fallback {
                     DispatchQueue.main.async { [weak self] in
-                        self?.addCaptured(fallback, sidecar: sidecarSnapshot)
+                        self?.addCaptured(fallback, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                     }
                 }
                 return
@@ -186,12 +222,12 @@ extension ClipboardManager {
                         if !htmlMustSurvive,
                            let pasteboardPlain, !pasteboardPlain.isEmpty,
                            pasteboardPlain == plain {
-                            self.addCaptured(ClipboardItem(content: .text(pasteboardPlain)), sidecar: sidecarSnapshot)
+                            self.addCaptured(ClipboardItem(content: .text(pasteboardPlain)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                         } else {
-                            self.addCaptured(ClipboardItem(content: .html(html, plain: plain)), sidecar: sidecarSnapshot)
+                            self.addCaptured(ClipboardItem(content: .html(html, plain: plain)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                         }
                     } else if let fallback {
-                        self.addCaptured(fallback, sidecar: sidecarSnapshot)
+                        self.addCaptured(fallback, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                     } else {
                         CopyFeedbackPanel.shared.show()
                     }
@@ -217,21 +253,21 @@ extension ClipboardManager {
                         let plainText = TableCellExtractor.tabSeparatedPlainText(from: attrStr) ?? attrStr.string
                         if Self.isImageOnlyAttributedString(attrStr) {
                             if case .image = fallback?.content {
-                                self.addCaptured(fallback!, sidecar: sidecarSnapshot)
+                                self.addCaptured(fallback!, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                             } else if let extracted = Self.imageItem(fromAttachmentIn: attrStr) {
-                                self.addCaptured(extracted, sidecar: sidecarSnapshot)
+                                self.addCaptured(extracted, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                             } else if let rtfdUpgrade {
-                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: plainText)), sidecar: sidecarSnapshot)
+                                self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: plainText)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                             } else {
-                                self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: plainText)), sidecar: sidecarSnapshot)
+                                self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: plainText)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                             }
                         } else if let rtfdUpgrade {
-                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: plainText)), sidecar: sidecarSnapshot)
+                            self.addCaptured(ClipboardItem(content: .rtfd(rtfdUpgrade, plain: plainText)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                         } else {
-                            self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: plainText)), sidecar: sidecarSnapshot)
+                            self.addCaptured(ClipboardItem(content: .richText(attrStr, plain: plainText)), sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                         }
                     } else if let fallback {
-                        self.addCaptured(fallback, sidecar: sidecarSnapshot)
+                        self.addCaptured(fallback, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                     } else {
                         CopyFeedbackPanel.shared.show()
                     }
@@ -246,7 +282,7 @@ extension ClipboardManager {
                 guard let self else { return }
                 let item = ClipboardItem(content: .text(str))
                 DispatchQueue.main.async {
-                    self.addCaptured(item, sidecar: sidecar)
+                    self.addCaptured(item, sidecar: sidecar, changeCount: captureChangeCount)
                     if self.fetchURLTitles {
                         let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
                         if let url = URL(string: trimmed),
@@ -261,7 +297,7 @@ extension ClipboardManager {
 
         if let item = basicItem(from: pb) {
             DispatchQueue.main.async { [weak self] in
-                self?.addCaptured(item, sidecar: sidecarSnapshot)
+                self?.addCaptured(item, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
             }
         } else if !(pb.types ?? []).isEmpty {
 
@@ -272,7 +308,7 @@ extension ClipboardManager {
                 guard pb.changeCount == ccAtFailure else { return }
                 if let retryItem = self.basicItem(from: pb) {
                     DispatchQueue.main.async {
-                        self.addCaptured(retryItem, sidecar: sidecarSnapshot)
+                        self.addCaptured(retryItem, sidecar: sidecarSnapshot, changeCount: captureChangeCount)
                     }
                 } else {
                     let typeList = pb.types?.map(\.rawValue) ?? []
@@ -372,14 +408,17 @@ extension ClipboardManager {
         return map
     }
 
-    func addCaptured(_ item: ClipboardItem, sidecar: [String: Data]) {
+    func addCaptured(_ item: ClipboardItem, sidecar: [String: Data], changeCount: Int? = nil) {
         var enriched = item
         enriched.sidecarTypes = Self.prunedSidecar(sidecar, for: item.content)
         AuthManager.shared.registerActionUsage(actionID: "capture.\(item.primaryTag.folderName)")
         if let sourceApp = item.sourceAppName ?? NSWorkspace.shared.frontmostApplication?.localizedName {
             AuthManager.shared.registerActionUsage(actionID: "action.copy-from-app", value: sourceApp)
         }
-        addItem(enriched)
+        let representedID = addItem(enriched)
+        if let changeCount, let representedID {
+            markSystemClipboard(itemID: representedID, changeCount: changeCount)
+        }
     }
 
     static func prunedSidecar(_ all: [String: Data],
@@ -391,6 +430,19 @@ extension ClipboardManager {
 
             "public.tiff", "NSTIFFPboardType",
         ]
+        switch content {
+        case .richText, .rtfd, .html:
+            // Formatted copies keep the source's OWN plain-text flavour. The
+            // item's `plain` is derived from the formatting (HTML → text,
+            // RTF → string), which is not what the source app wrote: ChatGPT
+            // and Claude write Markdown there, Numbers writes tab-separated
+            // rows. Apps that read plain text (Obsidian, editors, terminals)
+            // got the derived text instead, so a paste through Clipen lost
+            // the formatting a paste without it kept. See `write(_:to:)`.
+            excluded.remove("public.utf8-plain-text")
+        default:
+            break
+        }
         switch content {
         case .richText(let attrStr, _):
             excluded.formUnion(["NSRTFPboardType"])
@@ -807,10 +859,24 @@ extension ClipboardManager {
         }
     }
 
-    func addItem(_ item: ClipboardItem) {
+    /// Returns the id of the history item that now stands for this copy —
+    /// the new item, or the existing one a duplicate was folded into.
+    @discardableResult
+    func addItem(_ item: ClipboardItem) -> UUID? {
         captureAttemptGeneration &+= 1
-        if let first = items.first(where: { !$0.isPinned }),
-           item.isDuplicate(of: first) { return }
+        // Copying something already in history brings THAT entry back to the
+        // top — with its notes, collections and analysis — instead of adding
+        // a second one. Only the newest item used to be checked, so anything
+        // re-copied from further down was stored twice.
+        if let existing = items.firstIndex(where: { !$0.isUncaptured && item.isDuplicate(of: $0) }) {
+            // The old clipboard being put back after a dictation or snippet
+            // paste is not a copy — leave the order exactly as it is.
+            let existingID = items[existing].id
+            if captureIsPostPasteWrite,
+               Date().timeIntervalSince(lastForeignInsertionAt) < Self.postPasteRestoreWindow { return existingID }
+            bringToTop(at: existing, recopied: item)
+            return existingID
+        }
 
         let preservedSelectionID: UUID? = previewWindow.isVisible
             ? (displayItems.indices.contains(selectedIndex) ? displayItems[selectedIndex].id : nil)
@@ -836,19 +902,7 @@ extension ClipboardManager {
             items.insert(item, at: 0)
         }
 
-        let trimmable = items.indices.filter { !items[$0].isPinned && !isRememberProtected(items[$0]) }
-        if trimmable.count > maxItems, let oldest = trimmable.last {
-            evictFileSnapshots(for: items[oldest])
-            // This is the ring's most common removal path by far — one item
-            // ages out on every capture once the ring is full — and it was
-            // the only one of the three that skipped evictCaches, so every
-            // per-item cache (blobs, diff splits, table cells, importance
-            // breakdowns, mark order) kept its entry for an item that no
-            // longer exists.
-            evictCaches(for: items[oldest].id)
-            items.remove(at: oldest)
-            markBlobPurgeNeeded()
-        }
+        trimRingToLimit()
 
         if let preservedSelectionID,
            let newIdx = indexInDisplayItems(id: preservedSelectionID) {
@@ -930,6 +984,7 @@ extension ClipboardManager {
                 }
             }
         }
+        return item.id
     }
 
     func prewarmPreviewCaches(for item: ClipboardItem) {
@@ -953,11 +1008,14 @@ extension ClipboardManager {
 
         guard let plainText = content.plainText, !plainText.isEmpty else { return }
 
+        // Only what CodeSyntaxPreview will actually colour. LaTeX — both the
+        // `.latex` type and code detected as "LaTeX" — is drawn by the maths
+        // renderers, never highlighted, so prewarming it ran the highlighter
+        // twice per copy for a result nothing ever read.
         let language: String? = {
             switch item.detectedType {
-            case .code(let lang): return lang
+            case .code(let lang) where lang != "LaTeX": return lang
             case .json:           return "json"
-            case .latex:          return "latex"
             default:              return nil
             }
         }()
@@ -966,6 +1024,51 @@ extension ClipboardManager {
             _ = CodeHighlighter.shared.highlightSync(capped, languageDisplayName: language, dark: false)
             _ = CodeHighlighter.shared.highlightSync(capped, languageDisplayName: language, dark: true)
         }
+    }
+
+    /// A re-copied item moves to the top as the newest copy. Pinned items
+    /// keep their place — they're already where the user put them.
+    func bringToTop(at index: Int, recopied: ClipboardItem) {
+        adoptRecopiedFormats(at: index, from: recopied)
+        var existing = items[index]
+        if let activeCollection { existing.collections.insert(activeCollection) }
+        guard !existing.isPinned else {
+            items[index] = existing
+            return
+        }
+        existing.timestamp = recopied.timestamp
+        if let app = recopied.sourceAppName ?? NSWorkspace.shared.frontmostApplication?.localizedName {
+            existing.sourceAppName = app
+            existing.sourceBundleID = recopied.sourceBundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        }
+        items.remove(at: index)
+        items.insert(existing, at: 0)
+        selectedIndex = 0
+    }
+
+    /// A re-copy matches an entry by its text, not by its formats. The same
+    /// words copied again from a richer source (a ChatGPT answer that was
+    /// first copied as plain text) kept the OLD entry's formats, so a later
+    /// paste from history was plain where the copy was not. The entry keeps
+    /// its identity, notes and collections and takes the newest formats.
+    private func adoptRecopiedFormats(at index: Int, from recopied: ClipboardItem) {
+        let existing = items[index]
+        switch recopied.content {
+        case .text, .html, .richText, .rtfd: break
+        default: return   // file re-copies carry no formats of their own
+        }
+        if case .richText = recopied.content, case .richText = existing.content {
+            // Same plain text, possibly different styling: the styling is
+            // the content here.
+            replaceItemContent(id: existing.id, newContent: recopied.content,
+                               sidecar: recopied.sidecarTypes)
+            return
+        }
+        guard existing.sidecarTypes != recopied.sidecarTypes else { return }
+        items[index].sidecarTypes = recopied.sidecarTypes
+        let id = existing.id
+        saveQueue.async { [weak self] in self?.sidecarBlobCache[id] = nil }
+        markBlobPurgeNeeded()
     }
 
     func fetchURLTitle(for itemID: UUID, url: URL) {

@@ -110,73 +110,177 @@ struct MarkdownTextPreview: View {
     private var parsedBlocks: [Block] {
         var blocks: [Block] = []
         var inCodeBlock = false
+        var fence = "```"
         var codeBuffer: [String] = []
         var codeLang: String? = nil
+        var tableLines: [String] = []
 
         func flushCode() {
-            guard !codeBuffer.isEmpty else { return }
             let joined = codeBuffer.joined(separator: "\n")
-            blocks.append(Block(view: AnyView(
-                CodeSyntaxPreview(text: joined, language: codeLang)
-                    .padding(8)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
-            )))
+            if !codeBuffer.isEmpty {
+                blocks.append(Block(view: AnyView(
+                    CodeSyntaxPreview(text: joined, language: codeLang, embedded: true)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                )))
+            }
             codeBuffer = []
             codeLang = nil
+        }
+
+        // A pipe table only counts once its second line is the `|---|` rule;
+        // anything else that starts with `|` is just text.
+        func flushTable() {
+            guard !tableLines.isEmpty else { return }
+            defer { tableLines = [] }
+            guard tableLines.count >= 2, Self.isTableRule(tableLines[1]) else {
+                tableLines.forEach { blocks.append(Block(view: AnyView(inlineText($0)))) }
+                return
+            }
+            let rows = ([tableLines[0]] + tableLines.dropFirst(2)).map { Self.tableCells($0) }
+            // StyledTablePreview scrolls in both directions, so inside this
+            // document it has no height of its own; give it its rows' worth
+            // (same row metrics PreviewSizing uses), capped.
+            let height = min(320, CGFloat(rows.count) * (11 * 1.3 + 10 + 1) + 10)
+            blocks.append(Block(view: AnyView(
+                StyledTablePreview(rows: rows).frame(height: height))))
         }
 
         for rawLine in text.components(separatedBy: "\n") {
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
 
-            if trimmed.hasPrefix("```") {
-                if inCodeBlock {
+            if inCodeBlock {
+                if trimmed.hasPrefix(fence) {
                     flushCode()
                     inCodeBlock = false
                 } else {
-                    inCodeBlock = true
-                    let lang = trimmed.dropFirst(3).trimmingCharacters(in: .whitespaces)
-                    codeLang = lang.isEmpty ? nil : String(lang)
+                    codeBuffer.append(rawLine)
                 }
                 continue
             }
-            if inCodeBlock { codeBuffer.append(rawLine); continue }
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                flushTable()
+                inCodeBlock = true
+                fence = String(trimmed.prefix(3))
+                // "```swift title=App.swift" → "swift"
+                let info = trimmed.drop(while: { $0 == "`" || $0 == "~" })
+                codeLang = info.split(separator: " ").first.map(String.init)
+                continue
+            }
 
-            if trimmed.hasPrefix("### ") {
+            if trimmed.hasPrefix("|") {
+                tableLines.append(trimmed)
+                continue
+            }
+            flushTable()
+
+            let indent = CGFloat(rawLine.prefix(while: { $0 == " " || $0 == "\t" })
+                .reduce(0) { $0 + ($1 == "\t" ? 4 : 1) } / 2) * 8
+
+            if let heading = Self.heading(trimmed) {
                 blocks.append(Block(view: AnyView(
-                    Text(String(trimmed.dropFirst(4))).font(.system(size: 15, weight: .semibold)))))
-            } else if trimmed.hasPrefix("## ") {
+                    inlineText(heading.title, size: Self.headingSize(heading.level), weight: heading.level <= 2 ? .bold : .semibold)
+                        .padding(.top, heading.level <= 2 ? 4 : 2))))
+            } else if Self.isHorizontalRule(trimmed) {
+                blocks.append(Block(view: AnyView(Divider().padding(.vertical, 4))))
+            } else if trimmed.hasPrefix(">") {
+                let quoted = String(trimmed.drop(while: { $0 == ">" || $0 == " " }))
                 blocks.append(Block(view: AnyView(
-                    Text(String(trimmed.dropFirst(3))).font(.system(size: 17, weight: .bold)))))
-            } else if trimmed.hasPrefix("# ") {
+                    HStack(alignment: .top, spacing: 8) {
+                        RoundedRectangle(cornerRadius: 1).fill(Color.secondary.opacity(0.4)).frame(width: 3)
+                        inlineText(quoted).foregroundColor(.secondary)
+                    }
+                    .fixedSize(horizontal: false, vertical: true))))
+            } else if let task = Self.taskItem(trimmed) {
                 blocks.append(Block(view: AnyView(
-                    Text(String(trimmed.dropFirst(2))).font(.system(size: 20, weight: .bold)))))
-            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Image(systemName: task.done ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 12))
+                            .foregroundColor(task.done ? .accentColor : .secondary)
+                        inlineText(task.text)
+                    }
+                    .padding(.leading, indent))))
+            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
                 let content = String(trimmed.dropFirst(2))
                 blocks.append(Block(view: AnyView(
-                    HStack(alignment: .top, spacing: 6) { Text("\u{2022}").font(.system(size: 13)); inlineText(content) })))
-            } else if let range = trimmed.range(of: #"^\d+\.\s"#, options: .regularExpression) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(indent > 0 ? "\u{25E6}" : "\u{2022}").font(.system(size: 13))
+                        inlineText(content)
+                    }
+                    .padding(.leading, indent))))
+            } else if let range = trimmed.range(of: #"^\d+[.)]\s"#, options: .regularExpression) {
                 let marker = String(trimmed[trimmed.startIndex..<range.upperBound])
                 let listContent = String(trimmed[range.upperBound...])
                 blocks.append(Block(view: AnyView(
-                    HStack(alignment: .top, spacing: 6) {
-                        Text(marker.trimmingCharacters(in: .whitespaces)).font(.system(size: 13)); inlineText(listContent)
-                    })))
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(marker.trimmingCharacters(in: .whitespaces)).font(.system(size: 13).monospacedDigit())
+                        inlineText(listContent)
+                    }
+                    .padding(.leading, indent))))
             } else if trimmed.isEmpty {
                 blocks.append(Block(view: AnyView(Spacer().frame(height: 4))))
             } else {
                 blocks.append(Block(view: AnyView(inlineText(trimmed))))
             }
         }
+        flushTable()
         if inCodeBlock { flushCode() }
         return blocks
     }
 
-    private func inlineText(_ s: String) -> some View {
+    private static func heading(_ line: String) -> (level: Int, title: String)? {
+        let hashes = line.prefix(while: { $0 == "#" }).count
+        guard (1...6).contains(hashes), line.dropFirst(hashes).first == " " else { return nil }
+        var title = line.dropFirst(hashes + 1).trimmingCharacters(in: .whitespaces)
+        // Closing hashes are optional decoration: "## Title ##".
+        while title.hasSuffix("#") { title.removeLast() }
+        return (hashes, title.trimmingCharacters(in: .whitespaces))
+    }
+
+    private static func headingSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1:  return 20
+        case 2:  return 17
+        case 3:  return 15
+        default: return 13.5
+        }
+    }
+
+    private static func isHorizontalRule(_ line: String) -> Bool {
+        let compact = line.filter { !$0.isWhitespace }
+        guard compact.count >= 3, let first = compact.first, "-*_".contains(first) else { return false }
+        return compact.allSatisfy { $0 == first }
+    }
+
+    private static func taskItem(_ line: String) -> (done: Bool, text: String)? {
+        for prefix in ["- [ ] ", "* [ ] ", "- [x] ", "* [x] ", "- [X] ", "* [X] "] where line.hasPrefix(prefix) {
+            return (!prefix.contains(" ] "), String(line.dropFirst(prefix.count)))
+        }
+        return nil
+    }
+
+    private static func isTableRule(_ line: String) -> Bool {
+        let cells = tableCells(line)
+        return !cells.isEmpty && cells.allSatisfy { cell in
+            let c = cell.trimmingCharacters(in: .whitespaces)
+            return c.count >= 3 && c.allSatisfy { $0 == "-" || $0 == ":" } && c.contains("-")
+        }
+    }
+
+    private static func tableCells(_ line: String) -> [String] {
+        var body = line.trimmingCharacters(in: .whitespaces)
+        if body.hasPrefix("|") { body.removeFirst() }
+        if body.hasSuffix("|") { body.removeLast() }
+        return body.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func inlineText(_ s: String, size: CGFloat = 13, weight: Font.Weight = .regular) -> some View {
         let attributed = (try? AttributedString(
             markdown: s,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(s)
         return Text(attributed)
-            .font(.system(size: 13))
+            .font(.system(size: size, weight: weight))
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -722,8 +826,7 @@ struct LaTeXDocumentPreview: View {
                     codeLines.append(raw)
                 }
                 blocks.append(Block(view: AnyView(
-                    CodeSyntaxPreview(text: codeLines.joined(separator: "\n"), language: nil)
-                        .frame(minHeight: 20)
+                    CodeSyntaxPreview(text: codeLines.joined(separator: "\n"), language: nil, embedded: true)
                         .padding(8)
                         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
                 )))
@@ -1043,18 +1146,40 @@ struct LaTeXDocumentPreview: View {
 struct CodeSyntaxPreview: View {
     let text: String
     let language: String?
+    /// Set when the code sits INSIDE another scrolling document — a fenced
+    /// block in Markdown, a verbatim block in LaTeX. The standalone view is
+    /// an NSScrollView, which has no height of its own; dropped into a
+    /// vertical ScrollView it collapsed to a sliver (one call site had
+    /// already been patched with `minHeight: 20`), and it swallowed the
+    /// scroll wheel so the document stopped scrolling over it. Embedded,
+    /// the block is plain SwiftUI text at its natural height, scrolling
+    /// only sideways.
+    var embedded: Bool = false
 
     @State private var highlighted: NSAttributedString? = nil
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Group {
-            if let highlighted {
+            if embedded {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Group {
+                        if let highlighted {
+                            Text(CodeHighlighter.swiftUIText(from: highlighted))
+                        } else {
+                            Text(text).font(.system(size: CodeHighlighter.fontSize, design: .monospaced))
+                        }
+                    }
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: true)
+                    .padding(4)
+                }
+            } else if let highlighted {
                 HighlightedCodeTextView(attributed: highlighted)
             } else {
                 ScrollView([.horizontal, .vertical]) {
                     Text(text)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: CodeHighlighter.fontSize, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(4)
@@ -1071,12 +1196,12 @@ struct CodeSyntaxPreview: View {
     }
 
     private struct HighlightKey: Equatable {
-        let fingerprint: String
+        let fingerprint: Int
         let language: String?
         let dark: Bool
 
         init(text: String, language: String?, dark: Bool) {
-            self.fingerprint = "\(text.count)|\(text.prefix(48))|\(text.suffix(48))"
+            self.fingerprint = text.hashValue
             self.language = language
             self.dark = dark
         }
@@ -1096,8 +1221,29 @@ final class CodeHighlighter {
 
     private init() { cache.countLimit = 200 }
 
+    /// The same size the plain fallback and `PreviewSizing` use, so the view
+    /// doesn't change font — and height — the moment colouring arrives.
+    static let fontSize: CGFloat = 12
+
+    // Length + both ends alone collided whenever an edit landed in the
+    // middle of a snippet and kept its length, showing the stale colouring.
     private static func cacheKey(_ code: String, languageDisplayName: String?, dark: Bool) -> NSString {
-        "\(code.count)|\(code.prefix(48))|\(code.suffix(48))|\(languageDisplayName ?? "-")|\(dark ? "d" : "l")" as NSString
+        "\(code.count)|\(code.hashValue)|\(languageDisplayName ?? "-")|\(dark ? "d" : "l")" as NSString
+    }
+
+    /// Highlightr's NSAttributedString as SwiftUI text, for the embedded
+    /// (non-NSView) code block. Only colour and font are carried — that is
+    /// all a highlight.js theme sets.
+    static func swiftUIText(from ns: NSAttributedString) -> AttributedString {
+        var out = AttributedString()
+        let string = ns.string as NSString
+        ns.enumerateAttributes(in: NSRange(location: 0, length: ns.length)) { attrs, range, _ in
+            var piece = AttributedString(string.substring(with: range))
+            if let color = attrs[.foregroundColor] as? NSColor { piece.foregroundColor = Color(nsColor: color) }
+            if let font = attrs[.font] as? NSFont { piece.font = Font(font as CTFont) }
+            out.append(piece)
+        }
+        return out
     }
 
     func highlight(_ code: String, languageDisplayName: String?, dark: Bool) async -> NSAttributedString? {
@@ -1142,6 +1288,10 @@ final class CodeHighlighter {
         let theme = dark ? "atom-one-dark" : "atom-one-light"
         if currentTheme != theme {
             highlightr.setTheme(to: theme)
+            // A new theme starts at Highlightr's default, Courier 14 — a
+            // different face and size from everything else in the preview,
+            // and from what the panel was sized for.
+            highlightr.theme.setCodeFont(.monospacedSystemFont(ofSize: Self.fontSize, weight: .regular))
             currentTheme = theme
         }
         let hljsID = CodeLanguageDetector.hljsIdentifier(for: languageDisplayName)

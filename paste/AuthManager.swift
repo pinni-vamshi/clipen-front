@@ -11,6 +11,8 @@ final class TrackingService {
     static let retentionDays = 150
 
     static let flushDelayDays = 0
+    /// How often unsent usage goes to the backend. See AuthManager.init.
+    static let flushInterval: TimeInterval = 3 * 60 * 60
     // Internal, not private: ProGate.swift's /clipen/entitlement call shares
     // this same backend host — previously a second copy-pasted URL literal.
     static let baseURL = URL(string: "https://clipen-backend.onrender.com")!
@@ -122,30 +124,18 @@ final class TrackingService {
         lock.lock(); store.totalPastes += 1; let total = store.totalPastes; lock.unlock()
         maybeTriggerUpdateCheck(totalPastes: total)
 
-        var firebaseProps: [String: Any] = ["count": 1]
-        var postHogProps: [String: Any] = ["count": 1]
-        if let position, position >= 0 {
-            firebaseProps["position"] = position
-            postHogProps["position"] = position
+        // Counted above and reported in `usage_summary`, not sent one
+        // request per paste. See `isRealtime`.
+        if let markedCount, markedCount > 1 {
+            mutateToday { $0.actions["multi_paste", default: 0] += 1 }
         }
-        if let markedCount, markedCount > 0 {
-            firebaseProps["marked_count"] = markedCount
-            postHogProps["marked_count"] = markedCount
-        }
-        if let markedPositions, !markedPositions.isEmpty {
-            firebaseProps["marked_positions"] = markedPositions.map(String.init).joined(separator: ",")
-            postHogProps["marked_positions"] = markedPositions
-        }
-        Analytics.logEvent("paste", parameters: firebaseProps)
-        PostHogTracking.capture("paste", properties: postHogProps)
+        _ = markedPositions
         persistSoon()
     }
 
     func recordFastPaste() {
         mutateToday { $0.fastPastes += 1 }
         lock.lock(); store.totalFastPastes += 1; lock.unlock()
-        Analytics.logEvent("fast_paste", parameters: ["count": 1])
-        PostHogTracking.capture("fast_paste", properties: ["count": 1])
         persistSoon()
     }
 
@@ -164,8 +154,6 @@ final class TrackingService {
     func recordPopupOutcome(_ outcome: String) {
         guard !outcome.isEmpty else { return }
         mutateToday { $0.popupOutcomes[outcome, default: 0] += 1 }
-        Analytics.logEvent("popup_outcome", parameters: ["outcome": outcome, "count": 1])
-        PostHogTracking.capture("popup_outcome", properties: ["outcome": outcome, "count": 1])
         persistSoon()
     }
 
@@ -180,27 +168,19 @@ final class TrackingService {
         store.toolBuckets["\(id)|\(bucket)", default: 0] += count
         store.globalBuckets[bucket, default: 0] += count
         lock.unlock()
-        var props: [String: Any] = ["tool_id": id, "count": count]
-        if let via { props["via"] = via }
-        Analytics.logEvent("tool_used", parameters: props)
-        PostHogTracking.capture("tool_used", properties: props)
+        _ = via   // the tool is counted per id; how it was reached isn't kept
         persistSoon()
     }
 
     func recordToolVariant(id: String) {
         guard !id.isEmpty else { return }
         mutateToday { $0.toolUses[id, default: 0] += 1 }
-
-        Analytics.logEvent("tool_used", parameters: ["tool_id": id, "count": 1])
-        PostHogTracking.capture("tool_used", properties: ["tool_id": id, "count": 1])
         persistSoon()
     }
 
     func recordMarkedBatch(id: String, size: Int) {
         guard !id.isEmpty, size > 0 else { return }
         mutateToday { $0.markedBatches[id, default: []].append(size) }
-        Analytics.logEvent("marked_batch", parameters: ["id": id, "size": size])
-        PostHogTracking.capture("marked_batch", properties: ["id": id, "size": size])
         persistSoon()
     }
 
@@ -235,13 +215,40 @@ final class TrackingService {
     /// event lets PostHog filter/breakdown by version with no indirection.
     private static func logToFirebaseAnalytics(id: String, count: Int, value: CustomStringConvertible? = nil,
                                                extraProperties: [String: Any] = [:]) {
-        guard var (event, properties) = analyticsEvent(for: id, count: count) else { return }
+        guard isRealtime(id: id),
+              var (event, properties) = analyticsEvent(for: id, count: count) else { return }
         if let value { properties["value"] = value.description }
         for (k, v) in extraProperties { properties[k] = v }
         properties["app_version"] = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
         properties["os_version"] = ProcessInfo.processInfo.operatingSystemVersionString
         Analytics.logEvent(event, parameters: properties)
         PostHogTracking.capture(event, properties: properties)
+    }
+
+    /// Whether an event is sent the moment it happens. Only rare events that
+    /// matter on their own are: a setting changed, a failure, onboarding,
+    /// the paywall, an update, a collection or group made. Everything a
+    /// user does many times a minute (copies, pastes, popup opens, every
+    /// arrow, mark and preview, the Reference panel following app switches)
+    /// was one PostHog request plus one Firebase event per keystroke. Those
+    /// are counted in today's totals and reported in `usage_summary`, a
+    /// handful of events a day instead of hundreds.
+    static func isRealtime(id: String) -> Bool {
+        if id.hasPrefix("setting.") || id.hasPrefix("fail.") { return true }
+        let realtimeActions: Set<String> = [
+            "action.paywall_shown", "action.paywall_subscribe_click", "action.trial_exhausted",
+            "action.accessibility-granted", "action.accessibility-not-granted",
+            "action.sparkle_update_confirmed", "action.sparkle_update_installed",
+            "action.onboarding-started", "action.onboarding-completed-tips-on",
+            "action.onboarding-completed-tips-off",
+            "action.collection-create", "action.collection-delete", "action.collection-rename",
+            "action.collection-share", "action.collection-move",
+            "action.group", "action.ungroup",
+            "action.ai-prompt-edited", "action.ai-prompt-reset", "action.regenerate-all",
+            "action.details-routed-to-ai-settings",
+        ]
+        if realtimeActions.contains(id) { return true }
+        return id.hasPrefix("action.onboarding-abandoned-page-") || id.hasPrefix("action.onboarding-demo-")
     }
 
     private static func analyticsEvent(for id: String, count: Int) -> (String, [String: Any])? {
@@ -474,6 +481,7 @@ final class TrackingService {
                       let data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       json["recorded"] as? Bool == true else { return }
+                Self.sendUsageSummaries(pendingDays, today: today)
                 self.lock.lock()
                 for date in sentDates { self.store.days.removeValue(forKey: date) }
                 self.store.lastLivenessSent = today
@@ -481,6 +489,48 @@ final class TrackingService {
                 DispatchQueue.global(qos: .utility).async { self.persistNow() }
             }
         }.resume()
+    }
+
+    /// One `usage_summary` event per day just accepted by the backend: the
+    /// counts that used to arrive as one event per paste, copy, popup and
+    /// keystroke. Sent only after the backend accepts the same days, the
+    /// moment they leave the local store, so a day is summarised exactly
+    /// once. Today goes out in parts (one per upload); counts add up.
+    private static func sendUsageSummaries(_ days: [String: DayData], today: String) {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        for (date, day) in days where !day.isEmpty {
+            var p: [String: Any] = [
+                "date": date,
+                "pastes": day.cmdVPastes,
+                "fast_pastes": day.fastPastes,
+                "popup_opens": day.popup["opens", default: 0],
+                "popup_searches": day.popup["searches", default: 0],
+                "copies": day.captures.values.reduce(0, +),
+                "actions": day.actions.values.reduce(0, +),
+                "tool_uses": day.toolUses.values.reduce(0, +),
+                "failures": day.failures.values.reduce(0, +),
+                "app_version": version,
+            ]
+            // Firebase takes at most 25 flat parameters, so it gets the
+            // totals above; PostHog also gets the breakdowns.
+            let firebase = p
+            for (k, v) in day.captures      { p["copy_\(k)"] = v }
+            for (k, v) in day.actions       { p["action_\(k)"] = v }
+            for (k, v) in day.toolUses      { p["tool_\(k)"] = v }
+            for (k, v) in day.popupOutcomes { p["outcome_\(k)"] = v }
+            for (k, v) in day.failures      { p["fail_\(k)"] = v }
+            let at = date == today ? Date() : (noon(of: date) ?? Date())
+            Analytics.logEvent("usage_summary", parameters: firebase)
+            PostHogTracking.capture("usage_summary", properties: p, at: at)
+        }
+    }
+
+    private static func noon(of dateKey: String) -> Date? {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f.date(from: dateKey + " 12:00")
     }
 
     private static func stateSnapshot() -> [String: Any] {
@@ -548,7 +598,13 @@ final class TrackingService {
         let buttonLabel: String
     }
 
-    func checkForRemoteMessage() {
+    private static let remoteMessageInterval: TimeInterval = 6 * 60 * 60
+    private var lastRemoteMessageCheck: Date?
+
+    func checkForRemoteMessage(force: Bool = false) {
+        if !force, let last = lastRemoteMessageCheck,
+           Date().timeIntervalSince(last) < Self.remoteMessageInterval { return }
+        lastRemoteMessageCheck = Date()
         var request = URLRequest(url: Self.baseURL.appendingPathComponent("clipen/message"),
                                  timeoutInterval: 20)
         request.httpMethod = "GET"
@@ -572,10 +628,58 @@ final class TrackingService {
         }.resume()
     }
 
-    func sendFeedback(_ message: String, completion: @escaping (Bool) -> Void) {
-        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { DispatchQueue.main.async { completion(false) }; return }
+    enum FeedbackResult {
+        case sent
+        /// No connection, timeout, or the server is down — worth retrying.
+        case offline
+        /// Too many messages today (the server allows 20 a day).
+        case rateLimited
+        /// The server refused the message itself.
+        case rejected
+    }
 
+    /// The server takes at most 2,000 characters per message
+    /// (`MAX_FEEDBACK_MESSAGE_LEN`). Anything longer was refused with a 422,
+    /// and the form reported every failure as "check your connection" — so
+    /// a long, detailed bug report (exactly the kind worth having) could
+    /// never be sent, and the sender was told their internet was the
+    /// problem. Long messages now go as numbered parts that each fit.
+    static let feedbackPartLimit = 1_900
+
+    static func feedbackParts(_ text: String) -> [String] {
+        guard text.count > feedbackPartLimit else { return [text] }
+        var parts: [String] = []
+        var rest = Substring(text)
+        while !rest.isEmpty {
+            if rest.count <= feedbackPartLimit { parts.append(String(rest)); break }
+            let window = rest.prefix(feedbackPartLimit)
+            // Break at a paragraph, then a line, then a space — never mid-word.
+            let cut = window.range(of: "\n\n", options: .backwards)?.upperBound
+                ?? window.range(of: "\n", options: .backwards)?.upperBound
+                ?? window.range(of: " ", options: .backwards)?.upperBound
+                ?? window.endIndex
+            let piece = rest[..<cut].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !piece.isEmpty { parts.append(piece) }
+            rest = rest[cut...]
+        }
+        guard parts.count > 1 else { return parts }
+        return parts.enumerated().map { "(\($0.offset + 1)/\(parts.count)) \($0.element)" }
+    }
+
+    func sendFeedback(_ message: String, completion: @escaping (FeedbackResult) -> Void) {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { DispatchQueue.main.async { completion(.rejected) }; return }
+        sendFeedbackParts(Self.feedbackParts(trimmed), full: trimmed, completion: completion)
+    }
+
+    /// One part at a time, in order, stopping at the first failure.
+    private func sendFeedbackParts(_ parts: [String], full: String,
+                                   completion: @escaping (FeedbackResult) -> Void) {
+        guard let part = parts.first else {
+            PostHogTracking.capture("feedback_sent", properties: ["message": full])
+            DispatchQueue.main.async { completion(.sent) }
+            return
+        }
         var request = URLRequest(url: Self.baseURL.appendingPathComponent("clipen/feedback"),
                                  timeoutInterval: 20)
         request.httpMethod = "POST"
@@ -583,20 +687,27 @@ final class TrackingService {
         let now = Date()
         let body: [String: Any] = [
             "hardware_uuid": DeviceIdentity.installKey,
-            "message": trimmed,
+            "message": part,
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
             "client_today": Self.dateKey(now),
             "client_time": Self.timeKey(now),
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            let ok = error == nil
-                && (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } == true
-            if ok {
-                PostHogTracking.capture("feedback_sent", properties: ["message": trimmed])
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
+            let status = (response as? HTTPURLResponse)?.statusCode
+            let result: FeedbackResult?
+            switch (error, status) {
+            case (nil, .some(200..<300)): result = nil   // this part went through
+            case (nil, .some(429)):       result = .rateLimited
+            case (nil, .some(400..<500)): result = .rejected
+            default:                      result = .offline
             }
-            DispatchQueue.main.async { completion(ok) }
+            if let result {
+                DispatchQueue.main.async { completion(result) }
+                return
+            }
+            self?.sendFeedbackParts(Array(parts.dropFirst()), full: full, completion: completion)
         }.resume()
     }
 
@@ -722,17 +833,24 @@ final class AuthManager: ObservableObject {
         Analytics.setUserProperty(ProcessInfo.processInfo.operatingSystemVersionString, forName: "os_version")
 
         DispatchQueue.main.async { AuthManager.shared.syncPersonPropertiesToPostHog(setFirstSeen: true) }
-        flushTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { _ in
+        // Every running copy used to call the backend three times every 30
+        // minutes (usage, message, entitlement), each one a Firestore read
+        // or write. Usage is kept on disk until it is accepted, so sending
+        // it less often loses nothing; the message and the entitlement
+        // throttle themselves to six hours (a locked gate still re-checks
+        // quickly, see ProGate.refresh).
+        flushTimer = Timer.scheduledTimer(withTimeInterval: TrackingService.flushInterval, repeats: true) { _ in
             DispatchQueue.main.async {
                 TrackingService.shared.flushToBackend()
                 TrackingService.shared.checkForRemoteMessage()
                 ProGate.shared.refresh()
             }
         }
+        flushTimer?.tolerance = 10 * 60
         DispatchQueue.main.async {
             TrackingService.shared.flushToBackend()
-            TrackingService.shared.checkForRemoteMessage()
-            ProGate.shared.refresh()
+            TrackingService.shared.checkForRemoteMessage(force: true)
+            ProGate.shared.refresh(maxAge: 0)
         }
     }
 
@@ -782,13 +900,23 @@ final class AuthManager: ObservableObject {
     /// itself often rapid-fire. Coalescing means a burst of ten copies in
     /// two seconds sends one `$set` shortly after the burst ends, not ten
     /// individual requests.
+    /// The counts only need to be roughly current on PostHog, and this was
+    /// called on every copy, delete and pin: one `$set` request per copy
+    /// for anyone copying more than every few seconds apart. Now at most one
+    /// every 30 minutes, always carrying the latest values; a change during
+    /// the wait is folded into the one already scheduled.
+    private static let livePersonSyncInterval: TimeInterval = 30 * 60
+    private var lastPersonPropertiesSyncAt: Date?
+
     func scheduleLivePersonPropertiesSync() {
-        livePersonPropertiesSyncWork?.cancel()
+        guard livePersonPropertiesSyncWork == nil else { return }
+        let sinceLast = lastPersonPropertiesSyncAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        let delay = max(3, Self.livePersonSyncInterval - sinceLast)
         let work = DispatchWorkItem { [weak self] in
             self?.syncPersonPropertiesToPostHog()
         }
         livePersonPropertiesSyncWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Re-sends the current-state person properties (item/pin/group/
@@ -802,6 +930,8 @@ final class AuthManager: ObservableObject {
         // resend still pending from `scheduleLivePersonPropertiesSync`
         // would only repeat the same $set a few seconds later.
         livePersonPropertiesSyncWork?.cancel()
+        livePersonPropertiesSyncWork = nil
+        lastPersonPropertiesSyncAt = Date()
         let m = ClipboardManager.shared
         let groupCount = m.items.filter {
             if case .group = $0.content { return true }

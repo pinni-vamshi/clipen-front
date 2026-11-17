@@ -415,6 +415,8 @@ struct TutorialSheet: View {
         .frame(maxWidth: .infinity, minHeight: Self.copyGateMinHeight,
                maxHeight: .infinity, alignment: .topLeading)
         .onAppear { startIntroChoreography() }
+        .loopWhileVisible($promptPulse,
+                          animation: .easeInOut(duration: 1.0).repeatForever(autoreverses: true))
         .onChange(of: canAdvance) { _, done in
 
             guard done, page == 0 else { return }
@@ -427,11 +429,6 @@ struct TutorialSheet: View {
 
     private func startIntroChoreography() {
         guard wordsShown == 0, !introRevealed else { return }
-        if !promptPulse {
-            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
-                promptPulse = true
-            }
-        }
 
         let wordGap = 0.32
         for i in 1...philosophyWordCount {

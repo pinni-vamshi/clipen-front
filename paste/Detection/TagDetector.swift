@@ -2,15 +2,21 @@ import AppKit
 import Foundation
 
 enum TagDetector {
-    static func tags(for content: ClipboardContent, color: NSColor?) -> [ClipboardTag] {
-        [tag(for: content, color: color)]
+    /// `textCandidates`: the detector results for a `.text` clip when the
+    /// caller already has them — `ClipboardItem` computes them once and uses
+    /// them for both its type and its tag, instead of running every detector
+    /// (including the language scan over up to 50k characters) twice.
+    static func tags(for content: ClipboardContent, color: NSColor?,
+                     textCandidates: [DetectionCandidate]? = nil) -> [ClipboardTag] {
+        [tag(for: content, color: color, textCandidates: textCandidates)]
     }
 
     static func primaryTag(from tags: [ClipboardTag]) -> ClipboardTag {
         tags.first ?? .text
     }
 
-    static func tag(for content: ClipboardContent, color: NSColor?) -> ClipboardTag {
+    static func tag(for content: ClipboardContent, color: NSColor?,
+                    textCandidates: [DetectionCandidate]? = nil) -> ClipboardTag {
         switch content {
         case .group:              return .group
         case .svg:                return .svg
@@ -41,30 +47,36 @@ enum TagDetector {
         // must not retag the whole clip. See `htmlIsDominantDataTable`.
         case .html(let html, plain: let plain):
             if TableCellExtractor.htmlIsDominantDataTable(html) { return .table }
-            return textTag(for: plain, color: nil) ?? .html
+            return textTag(for: plain, color: nil, structuredSource: true) ?? .html
 
         case .richText(let attr, plain: let plain):
             if TableCellExtractor.attributedIsDominantDataTable(attr) { return .table }
-            return textTag(for: plain, color: nil) ?? .richText
+            return textTag(for: plain, color: nil, structuredSource: true) ?? .richText
 
         case .rtfd(let data, plain: let plain):
             if let attr = NSAttributedString(rtfd: data, documentAttributes: nil),
                TableCellExtractor.attributedIsDominantDataTable(attr) {
                 return .table
             }
-            return textTag(for: plain, color: nil) ?? .richText
+            return textTag(for: plain, color: nil, structuredSource: true) ?? .richText
 
         case .text(let s):
             if let url = resolvedLocalFileURL(from: s) {
                 return fileTag(for: url)
             }
+            if let textCandidates {
+                return textCandidates.max(by: { $0.confidence < $1.confidence })
+                    .flatMap { ClipboardTag.from($0.type) } ?? .text
+            }
             return textTag(for: s, color: color) ?? .text
         }
     }
 
-    private static func textTag(for plain: String, color: NSColor?) -> ClipboardTag? {
+    private static func textTag(for plain: String, color: NSColor?,
+                                structuredSource: Bool = false) -> ClipboardTag? {
         guard !plain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        let candidates = TextTraditionalDetectors.candidates(for: plain, color: color)
+        let candidates = TextTraditionalDetectors.candidates(for: plain, color: color,
+                                                             structuredSource: structuredSource)
         guard let best = candidates.max(by: { $0.confidence < $1.confidence }),
               let tag = ClipboardTag.from(best.type) else { return nil }
         return tag

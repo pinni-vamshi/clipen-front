@@ -13,6 +13,8 @@ import WebKit
 final class NudgeLessonPanel: NSObject, NSWindowDelegate {
     private let panel: NSWindow
     private static let size = NSSize(width: 820, height: 500)
+    private static let minSize = NSSize(width: 680, height: 440)
+    private static let sizeKey = "clipenTipPanelSize"
     private var onLater: (() -> Void)?
 
     private var shownFeature: NudgeFeature?
@@ -24,15 +26,32 @@ final class NudgeLessonPanel: NSObject, NSWindowDelegate {
 
         panel = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.size),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
+        // Resizable, and it keeps whatever size the user gives it — across
+        // tips and across launches. It used to be fixed at 820×500 and was
+        // forced back to that size every time a tip opened. The size is
+        // stored by hand (`windowDidEndLiveResize`): `setFrameAutosaveName`
+        // aborted the app here.
+        panel.contentMinSize = Self.minSize
+        if let saved = UserDefaults.standard.string(forKey: Self.sizeKey) {
+            let size = NSSizeFromString(saved)
+            if size.width >= Self.minSize.width, size.height >= Self.minSize.height {
+                panel.setContentSize(size)
+            }
+        }
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
         super.init()
         panel.delegate = self
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        let size = panel.contentRect(forFrameRect: panel.frame).size
+        UserDefaults.standard.set(NSStringFromSize(size), forKey: Self.sizeKey)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -65,7 +84,6 @@ final class NudgeLessonPanel: NSObject, NSWindowDelegate {
         let localizedDemoTitle = String(localized: String.LocalizationValue(feature.demo.title))
         panel.title = String(localized: "Tip: \(localizedDemoTitle)")
         panel.subtitle = String(localized: "\(learnedCount) of \(total) learned")
-        panel.setContentSize(Self.size)
         centerOnMainScreen()
 
         NSApp.activate(ignoringOtherApps: true)
@@ -97,9 +115,10 @@ final class NudgeLessonPanel: NSObject, NSWindowDelegate {
     private func centerOnMainScreen() {
         guard let screen = NSScreen.main else { return }
         let screenFrame = screen.visibleFrame
+        let current = panel.frame.size
         let origin = NSPoint(
-            x: screenFrame.midX - Self.size.width / 2,
-            y: screenFrame.midY - Self.size.height / 2
+            x: screenFrame.midX - current.width / 2,
+            y: screenFrame.midY - current.height / 2
         )
         panel.setFrameOrigin(origin)
     }
@@ -118,6 +137,11 @@ private struct NudgeCalloutView: View {
     @FocusState private var practiceFocused: Bool
 
     var body: some View {
+        // See the note on PopoverPreviewView.body.
+        calloutBody.focusEffectDisabled().tracksWindowVisibility()
+    }
+
+    private var calloutBody: some View {
         VStack(spacing: 0) {
 
             HStack(alignment: .top, spacing: 44) {

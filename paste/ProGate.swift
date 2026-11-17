@@ -110,10 +110,19 @@ final class ProGate: ObservableObject {
     }
 
     private static let minRefreshInterval: TimeInterval = 15
+    /// How stale the entitlement may be before an ordinary trigger (opening
+    /// the popup) asks the server again. Each check reads the user's whole
+    /// Firestore document; the popup opens hundreds of times a day, and it
+    /// used to re-check every 15 seconds of use. Pro status and the trial
+    /// only change on a purchase or once a day, so while unlocked six hours
+    /// is plenty; while LOCKED it stays at 15s so a purchase unlocks at once.
+    static let unlockedRefreshInterval: TimeInterval = 6 * 60 * 60
     private var lastRefreshAt: Date?
 
-    func refresh() {
-        if let lastRefreshAt, Date().timeIntervalSince(lastRefreshAt) < Self.minRefreshInterval { return }
+    /// `maxAge` nil: the trigger decides nothing, use the gate's own policy.
+    func refresh(maxAge: TimeInterval? = nil) {
+        let limit = maxAge ?? (isUnlocked ? Self.unlockedRefreshInterval : Self.minRefreshInterval)
+        if let lastRefreshAt, Date().timeIntervalSince(lastRefreshAt) < max(limit, Self.minRefreshInterval) { return }
         lastRefreshAt = Date()
 
         var comps = URLComponents(url: Self.baseURL.appendingPathComponent("clipen/entitlement"),
@@ -135,6 +144,10 @@ final class ProGate: ObservableObject {
             else { return }
 
             let d = UserDefaults.standard
+            // What the last check said, to report only a CHANGE below.
+            let wasEverChecked = d.bool(forKey: Key.everChecked)
+            let wasPro = d.bool(forKey: Key.serverIsPro)
+            let wasGated = d.bool(forKey: Key.paywallApplies) && !wasPro
             d.set(result.paywall, forKey: Key.paywallApplies)
             d.set(result.pro, forKey: Key.serverIsPro)
             if let days = result.trial_days_remaining { d.set(days, forKey: Key.trialDaysRemaining) }
@@ -151,10 +164,16 @@ final class ProGate: ObservableObject {
             // business-critical, paywall-conversion-funnel events never
             // showed up in PostHog's dashboards at all. Firing condition
             // deliberately left exactly as Firebase's already was here.
-            if result.pro {
+            //
+            // Only on a change. This fired on EVERY check, and the popup ran
+            // a check every 15 seconds of use, so one Pro user produced
+            // hundreds of "pro_unlocked" a day and the funnel counted
+            // nothing real.
+            let isGated = result.paywall && !result.pro
+            if result.pro, !(wasEverChecked && wasPro) {
                 Analytics.logEvent("pro_unlocked", parameters: nil)
                 PostHogTracking.capture("pro_unlocked")
-            } else if result.paywall {
+            } else if isGated, !(wasEverChecked && wasGated) {
                 Analytics.logEvent("paywall_gated", parameters: nil)
                 PostHogTracking.capture("paywall_gated")
             }

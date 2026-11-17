@@ -159,14 +159,19 @@ struct MainWindowView: View {
         .toolbarBackground(.visible, for: .windowToolbar)
         .sheet(isPresented: $showTutorial) {
             TutorialSheet(isPresented: $showTutorial, onSeeMore: { mainTab = .settings })
+                .focusEffectDisabled()
+                .tracksWindowVisibility()
         }
         // Somewhere outside this window asked to put the user in Settings —
         // pressing D with nothing able to analyse, for instance. Switch tabs
         // here and leave the route set: SettingsView clears it once it has
         // scrolled to the section.
         .onChange(of: manager.pendingSettingsRoute) { _, route in
-            guard route != nil else { return }
+            guard let route else { return }
             mainTab = .settings
+            // Plain "show Settings" (Cmd+,) has no section to scroll to, so
+            // nothing downstream will clear it.
+            if route == .general { manager.pendingSettingsRoute = nil }
         }
         .alert("Heads up",
                isPresented: Binding(get: { auth.lastError != nil },
@@ -214,8 +219,9 @@ struct MainWindowView: View {
             toolbarSegment("Dashboard", active: mainTab == .dashboard) { mainTab = .dashboard }
             toolbarSegment("Settings",  active: mainTab == .settings)  {
                 mainTab = .settings
-
-                ProGate.shared.refresh()
+                // Settings shows the feedback thread; a minute-old copy of
+                // the replies is fresh enough.
+                ProGate.shared.refresh(maxAge: 60)
             }
         }
         .padding(3)
@@ -452,7 +458,7 @@ struct MainWindowView: View {
             Spacer()
 
             if !manager.items.isEmpty {
-                Button { manager.clearAll() } label: {
+                Button { confirmClearAll() } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "trash").font(.system(size: 9))
                         Text("Clear all").font(.system(size: 11))
@@ -466,6 +472,23 @@ struct MainWindowView: View {
                 .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.textDim)
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    /// One click used to delete the whole history — pinned items, every
+    /// collection, "remember forever" ones and their file copies — with no
+    /// way back.
+    private func confirmClearAll() {
+        let count = manager.items.filter { !$0.isUncaptured }.count
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Delete all \(count) items?")
+        alert.informativeText = String(localized: "This removes your whole history, including pinned items and everything in collections. It can't be undone.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "Delete All"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.buttons.first?.hasDestructiveAction = true
+        if alert.runModal() == .alertFirstButtonReturn {
+            manager.clearAll()
+        }
     }
 
     private func performFactoryReset() {
@@ -1251,6 +1274,7 @@ private struct CompactItemRow: View, Equatable {
 
     @State private var isHovered = false
     @State private var borderPulse: Double = 0.15
+    @Environment(\.isWindowVisible) private var windowVisible
     @ObservedObject private var aiService = AIStructuringService.shared
 
     private static let iconZoneWidth: CGFloat = 20 + 4 + 20 + 4 + 20 + 12
@@ -1293,9 +1317,17 @@ private struct CompactItemRow: View, Equatable {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.purple, lineWidth: 1.5)
                     .opacity(isProcessing ? borderPulse : 0)
+                    .id(windowVisible)
             )
             .onChange(of: isProcessing) { _, running in
-                startOrStopAnalysisPulse($borderPulse, active: running,
+                startOrStopAnalysisPulse($borderPulse, active: running && windowVisible,
+                                         restValue: 0.15, activeValue: 0.85,
+                                         activeDuration: 0.9, restDuration: 0.25)
+            }
+            // An analysis can run for a minute after the window is closed;
+            // the pulse stops with the window and resumes when it's back.
+            .onChange(of: windowVisible) { _, visible in
+                startOrStopAnalysisPulse($borderPulse, active: isProcessing && visible,
                                          restValue: 0.15, activeValue: 0.85,
                                          activeDuration: 0.9, restDuration: 0.25)
             }
@@ -1355,11 +1387,12 @@ private struct CompactItemRow: View, Equatable {
                 .foregroundColor(.white)
                 .frame(width: 20, height: 20)
                 .background(Color.blue, in: Circle())
-                .rotationEffect(.degrees(isProcessing ? 360 : 0))
-                .animation(isProcessing
+                .rotationEffect(.degrees(isProcessing && windowVisible ? 360 : 0))
+                .animation(isProcessing && windowVisible
                            ? .linear(duration: 0.9).repeatForever(autoreverses: false)
                            : .default,
-                           value: isProcessing)
+                           value: isProcessing && windowVisible)
+                .id(windowVisible)
         }
         .buttonStyle(.plain)
         .help(isProcessing ? "Analyzing\u{2026}" : "Analyze this item with AI")

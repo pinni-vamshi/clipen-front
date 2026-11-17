@@ -690,6 +690,14 @@ extension ClipboardManager {
         }
         selectedIndex = 0
         setSidePanelStage(.none)
+        // A quick Cmd-V is a normal paste: it pastes what is on the
+        // clipboard. The top row is not always that — pins sit above the
+        // newest copy by default, and re-copying a pinned item leaves it
+        // where it is — so the item linked to the live clipboard wins.
+        if let liveID = systemClipboardItemID, let live = item(id: liveID),
+           pastesFromSystemClipboard(live) {
+            pendingPasteItemID = liveID
+        }
         AuthManager.shared.registerFastPasteAction()
         commitPaste(countsAsFastPaste: true)
         showFastPasteHintIfNeeded()
@@ -849,6 +857,14 @@ extension ClipboardManager {
     }
 
     func dismissPreview() {
+        // The only place popovers are told to fade rather than snap. Every
+        // caller of this is a "closed without pasting" path — Escape, a
+        // click outside, the auto-dismiss timer, opening Settings — whereas
+        // the paste paths call `hide()` directly and must stay instant. The
+        // flag covers exactly this synchronous call, which includes the side
+        // panels hidden through `setSidePanelStage(.none)` below.
+        PopoverClose.animated = true
+        defer { PopoverClose.animated = false }
         if isInlineEditing { inlineEditItemID = nil; itemPreviewPanel.hide() }
         if previewWindow.isVisible {
             if let openedAt = popupOpenedAt {
@@ -917,66 +933,85 @@ extension ClipboardManager {
             for item in orderedItems {
                 openQuickClipPanel(for: item)
             }
+            closePopupAfterSendingToReference()
             return
         }
 
         guard let item = selectedItemForQuickClip() else { return }
         openQuickClipPanel(for: item)
+        closePopupAfterSendingToReference()
+    }
+
+    /// The tip promises "the popup closes, the preview stays" — but the popup
+    /// stayed open on top of the new Reference panel, and letting go of
+    /// Command to look at the panel then PASTED the item. Closing it here
+    /// takes it out of the Command-release paste path at once
+    /// (`isVisible` turns false immediately, before the fade finishes).
+    private func closePopupAfterSendingToReference() {
+        guard previewWindow.isVisible else { return }
+        markedItemIDs = []
+        dismissPreview()
     }
 
     func openQuickClipPanel(for item: ClipboardItem, focusContent: Bool = false) {
         let ownerBundleID = capturedPasteTarget?.bundleIdentifier
             ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
 
-        // The owning app's live context (front tab URL, Finder path, etc.)
-        // used to be fetched here via a synchronous AppleScript/AX
-        // round-trip before the panel was even created — that's
-        // cross-process IPC on the main thread, blocking the popup UI for
-        // however long the target app takes to answer. The panel opens
-        // immediately without it now; the context attaches to this
-        // specific page a moment later, off-main, same pattern already
-        // used by fetchReferenceContext.
-        if let ownerBundleID {
-            referenceContextQueue.async { [weak self] in
-                let context = AppContextService.currentContext(for: ownerBundleID)
-                guard let context else { return }
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    guard let panel = self.quickClipPanels.first(where: { panel in
-                        panel.carousel.pages.contains(where: { $0.id == item.id })
-                    }) else { return }
-                    panel.carousel.attachContext(context, toPage: item.id, bundleID: ownerBundleID)
-                }
-            }
-        }
-
-        if let panel = sharedCarouselPanel {
+        // The panel this page lands in: the one already showing the item
+        // (sending it again links the new app to that same page instead of
+        // opening a duplicate), else the shared panel, else a new one.
+        let panel: QuickClipPanel
+        if let showing = quickClipPanels.first(where: { p in p.carousel.pages.contains { $0.id == item.id } }) {
+            panel = showing
             panel.addPage(item, focusContent: focusContent, ownerBundleID: ownerBundleID)
             panel.orderFrontRegardless()
-            return
+        } else if let shared = sharedCarouselPanel {
+            panel = shared
+            panel.addPage(item, focusContent: focusContent, ownerBundleID: ownerBundleID)
+            panel.orderFrontRegardless()
+        } else {
+            if quickClipPanels.count >= 5 {
+                let oldest = quickClipPanels.removeFirst()
+                oldest.close()
+            }
+            panel = QuickClipPanel(item: item, offset: 0, focusContent: focusContent,
+                                   ownerBundleID: ownerBundleID)
+            panel.orderFrontRegardless()
+            quickClipPanels.append(panel)
+            startReferenceSurfaceMonitoring()
+            sharedCarouselPanel = panel
+            surfaceAllPanelsAgainstFrontmostApp()
         }
 
-        if quickClipPanels.count >= 5 {
-            let oldest = quickClipPanels.removeFirst()
-            oldest.close()
+        // The owning app's live context (front tab URL, Finder path, etc.)
+        // is fetched off the main thread — AppleScript/AX round trips can
+        // take a while — and attached a moment later to THIS panel's page.
+        // It used to go to the first panel that happened to contain the
+        // item, which with the item open in two panels was the wrong one.
+        guard let ownerBundleID else { return }
+        referenceContextQueue.async { [weak self, weak panel] in
+            let context = AppContextService.currentContext(for: ownerBundleID)
+            guard let context else { return }
+            DispatchQueue.main.async {
+                guard self != nil, let panel else { return }
+                panel.carousel.attachContext(context, toPage: item.id, bundleID: ownerBundleID)
+            }
         }
-        let panel = QuickClipPanel(item: item, offset: 0, focusContent: focusContent,
-                                   ownerBundleID: ownerBundleID)
-        panel.orderFrontRegardless()
-        quickClipPanels.append(panel)
-        sharedCarouselPanel = panel
-        surfaceAllPanelsAgainstFrontmostApp()
     }
 
-    func openStandaloneQuickClipPanel(for item: ClipboardItem) {
+    func openStandaloneQuickClipPanel(for item: ClipboardItem,
+                                      owners: [(bundleID: String, context: String?)] = []) {
         if quickClipPanels.count >= 5 {
             let oldest = quickClipPanels.removeFirst()
             oldest.close()
         }
         let offset = CGFloat(quickClipPanels.count * 30)
-        let panel = QuickClipPanel(item: item, offset: offset)
+        let panel = QuickClipPanel(item: item, offset: offset,
+                                   ownerBundleID: owners.first?.bundleID, ownerContext: owners.first?.context)
+        panel.carousel.adoptOwners(Array(owners.dropFirst()), forPage: item.id)
         panel.orderFrontRegardless()
         quickClipPanels.append(panel)
+        startReferenceSurfaceMonitoring()
         surfaceAllPanelsAgainstFrontmostApp()
     }
 
@@ -996,6 +1031,7 @@ extension ClipboardManager {
     func quickClipPanelDidClose(_ panel: NSPanel) {
         quickClipPanels.removeAll { $0 === panel }
         if sharedCarouselPanel === panel { sharedCarouselPanel = nil }
+        if quickClipPanels.isEmpty { stopReferenceSurfaceMonitoring() }
     }
 
     /// `logRanking`: prints each result's lexical/semantic/recency
@@ -1336,36 +1372,6 @@ extension ClipboardManager {
         }
         guard sqA > 0, sqB > 0 else { return 0 }
         return dot / (sqrt(sqA) * sqrt(sqB))
-    }
-
-    func semanticBestMatch(forBundleID bundleID: String, in panels: [QuickClipPanel],
-                           tabTexts: [String]) -> (panel: QuickClipPanel, pageID: UUID)? {
-        guard ClipenEmbedder.shared.isAvailable else { return nil }
-        guard !tabTexts.isEmpty else { return nil }
-        let tabVectors: [[Float]] = tabTexts.compactMap { text in
-            ClipenEmbedder.shared.vector(for: text)
-        }
-        guard !tabVectors.isEmpty else { return nil }
-
-        let historyBoost: Float = 0.03
-
-        var best: (panel: QuickClipPanel, pageID: UUID, score: Float)?
-        for panel in panels {
-            for page in panel.carousel.pages {
-                var pageScore: Float = 0
-                for tabVec in tabVectors {
-                    pageScore = max(pageScore, Self.semanticComponent(queryVec: tabVec, itemVec: page.embedding))
-                }
-                guard pageScore > 0 else { continue }
-                if page.sourceBundleID == bundleID || (page.pasteCountByApp[bundleID] ?? 0) > 0 {
-                    pageScore += historyBoost
-                }
-                if best == nil || pageScore > best!.score {
-                    best = (panel, page.id, pageScore)
-                }
-            }
-        }
-        return best.map { ($0.panel, $0.pageID) }
     }
 
     func similarItems(to item: ClipboardItem, count: Int = 7) -> [ClipboardItem] {

@@ -12,6 +12,9 @@ struct pasteApp: App {
         Window("Clipen", id: "main") {
             MainWindowView()
                 .background(WindowOpenBridge())
+                // See the note on PopoverPreviewView.body.
+                .focusEffectDisabled()
+                .tracksWindowVisibility()
         }
         .defaultSize(width: 820, height: 680)
         .windowResizability(.contentMinSize)
@@ -19,12 +22,17 @@ struct pasteApp: App {
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             CommandGroup(replacing: .newItem) {}
+            // Cmd+, used to open an empty system Settings scene. Settings
+            // lives in the main window's tab, so point the shortcut there.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { AppDelegate.shared?.openSettingsTab() }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
             CommandGroup(replacing: .appTermination) {
                 Button("Quit Clipen") { NSApp.terminate(nil) }
                     .keyboardShortcut("q", modifiers: .command)
             }
         }
-        Settings { EmptyView() }
     }
 }
 
@@ -181,8 +189,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Must actually finish before the process exits, but still needs to run
         // on saveQueue — the same queue every other save/blob-cache mutation
         // uses — so it can't race a save already in flight there.
-        ClipboardManager.shared.saveQueue.sync {
-            ClipboardManager.shared.saveHistory()
+        let manager = ClipboardManager.shared
+        if manager.isHistoryFullyLoaded {
+            let snapshot = manager.items
+            let revision = manager.itemsRevision
+            manager.saveQueue.sync {
+                manager.saveHistory(snapshot: snapshot, revision: revision)
+            }
         }
         pendingUpdateInstall?()
         pendingUpdateInstall = nil
@@ -258,6 +271,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             for dir in dirs {
                 try? FileManager.default.removeItem(at: dir)
             }
+        }
+    }
+
+    func openSettingsTab() {
+        openMainWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            ClipboardManager.shared.pendingSettingsRoute = .general
         }
     }
 

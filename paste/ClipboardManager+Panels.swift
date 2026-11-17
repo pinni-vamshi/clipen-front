@@ -729,15 +729,17 @@ extension ClipboardManager {
         guard inlineEditOriginals[id] == nil,
               let item = item(id: id) else { return }
         inlineEditOriginals[id] = item.content
+        inlineEditOriginalSidecars[id] = item.sidecarTypes
     }
 
     func revertInlineEdit(id: UUID) {
         guard let original = inlineEditOriginals.removeValue(forKey: id) else { return }
+        let originalSidecar = inlineEditOriginalSidecars.removeValue(forKey: id) ?? nil
         // `replaceItemContent` now invalidates the content-derived caches
         // itself, so the hand-written copy that used to sit here is gone —
         // it was the only place that ever did this, which is exactly why
         // undoing an edit refreshed those caches and making one did not.
-        replaceItemContent(id: id, newContent: original)
+        replaceItemContent(id: id, newContent: original, sidecar: originalSidecar)
         invalidateCachesAfterContentEdit()
         flashStatus("Edit reverted.")
     }
@@ -974,13 +976,7 @@ extension ClipboardManager {
             return
         }
 
-        let src  = CGEventSource(stateID: .combinedSessionState)
-        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-        let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-        down?.flags = .maskCommand; up?.flags = .maskCommand
-        Self.tagSynthetic(down); Self.tagSynthetic(up)
-        down?.post(tap: .cgAnnotatedSessionEventTap)
-        up?.post(tap: .cgAnnotatedSessionEventTap)
+        Self.postCommandV()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self else { return }
             restoreSource()
@@ -1019,6 +1015,13 @@ extension ClipboardManager {
                 } else if openOnSecondTap {
                     selectedIndex = 0
                     pendingFirstOpen = true
+                    // A quick Cmd-V in this mode pastes WITHOUT the popup ever
+                    // opening, and the paste goes to `capturedPasteTarget` —
+                    // which only `openPopupNow` used to set. So it pointed at
+                    // whatever app the popup was last opened over (often the
+                    // tutorial, or an app since quit), and the paste went
+                    // there or was cancelled: "⌘V doesn't paste at all".
+                    capturedPasteTarget = NSWorkspace.shared.frontmostApplication
                     // Armed with no expiry, this flag outlived the gesture
                     // that set it: any later modifier release fired
                     // fastPasteFront() out of nowhere. It's normally cleared
@@ -1036,6 +1039,9 @@ extension ClipboardManager {
                 } else if firstOpenDelay > 0 {
                     selectedIndex = 0
                     pendingFirstOpen = true
+                    // Same as above: a release before the delay pastes
+                    // without opening, so the target is taken now.
+                    capturedPasteTarget = NSWorkspace.shared.frontmostApplication
                     pendingFirstOpenTimer?.invalidate()
                     let t = Timer(timeInterval: firstOpenDelay, repeats: false) { [weak self] _ in
                         DispatchQueue.main.async { self?.openPopoverAfterDelay() }
@@ -1531,13 +1537,7 @@ extension ClipboardManager {
         let token = beginPasteSimulation()
         popupSessionPasted = true
         finalizePopupOutcome()
-        let src  = CGEventSource(stateID: .combinedSessionState)
-        let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)
-        let up   = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: false)
-        down?.flags = .maskCommand; up?.flags = .maskCommand
-        Self.tagSynthetic(down); Self.tagSynthetic(up)
-        down?.post(tap: .cgAnnotatedSessionEventTap)
-        up?.post(tap: .cgAnnotatedSessionEventTap)
+        Self.postCommandV()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.endPasteSimulation(token: token)
         }
@@ -1726,8 +1726,7 @@ extension ClipboardManager {
         if activeCollection == old { activeCollection = new }
         _displayItems = nil
         AuthManager.shared.registerActionUsage(actionID: "action.collection-rename")
-        let snapshot = items
-        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot) }
+        persistHistory()
     }
 
     func deleteCollection(_ name: String) {
@@ -1742,8 +1741,7 @@ extension ClipboardManager {
         _displayItems = nil
         AuthManager.shared.registerActionUsage(actionID: "action.collection-delete")
         AuthManager.shared.syncPersonPropertiesToPostHog()
-        let snapshot = items
-        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot) }
+        persistHistory()
     }
 
     func moveItem(_ id: UUID, toCollection target: String) {
@@ -1751,8 +1749,7 @@ extension ClipboardManager {
         if let activeCollection { items[idx].collections.remove(activeCollection) }
         items[idx].collections.insert(target)
         _displayItems = nil
-        let snapshot = items
-        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot) }
+        persistHistory()
         AuthManager.shared.registerActionUsage(actionID: "action.collection-move")
     }
 
@@ -1760,8 +1757,7 @@ extension ClipboardManager {
         guard let idx = indexOfItem(id: id) else { return }
         items[idx].collections.insert(target)
         _displayItems = nil
-        let snapshot = items
-        saveQueue.async { [weak self] in self?.saveHistory(snapshot: snapshot) }
+        persistHistory()
         AuthManager.shared.registerActionUsage(actionID: "action.collection-share")
     }
 

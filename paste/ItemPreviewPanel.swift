@@ -43,6 +43,12 @@ enum PreviewSizing {
         clamp(chromeHeight + naturalContentHeight(for: item))
     }
 
+    /// Just the content's height at this width, unclamped and without the
+    /// popup's chrome — the Reference panel adds its own.
+    static func contentHeight(for item: ClipboardItem) -> CGFloat {
+        naturalContentHeight(for: item)
+    }
+
     private static func clamp(_ h: CGFloat) -> CGFloat {
         min(maxHeight, max(minHeight, h.rounded()))
     }
@@ -52,9 +58,9 @@ enum PreviewSizing {
         case .text(let text):
             return textCaseHeight(text, detected: item.detectedType)
 
-        case .svg(let src):
-            // textPreview(_:monospaced: true) at plainFontSize (13).
-            return wrappedHeight(src, font: .monospacedSystemFont(ofSize: 13, weight: .regular))
+        case .svg:
+            // SVGPreview: the drawn graphic plus a strip of source beneath.
+            return maxHeight
 
         case .richText(let attrStr, _):
             return attributedHeight(attrStr)
@@ -200,6 +206,8 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private var shownStrip: NSRect? = nil
     private var wantsVisible = false
+    /// The pending close after a fade-out, kept so a re-present can cancel it.
+    private var fadeOutWork: DispatchWorkItem?
 
     var onVisibilityChange: ((Bool) -> Void)?
 
@@ -375,6 +383,12 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         let localY = max(0, min(stripHeight - 1, anchorY - desiredStrip.minY))
         let rowRect = NSRect(x: 0, y: localY, width: 1, height: 1)
 
+        // Needed again before a fade-out finished: stop the close and bring
+        // the window back first.
+        fadeOutWork?.cancel()
+        fadeOutWork = nil
+        popover.clipenCancelAnimateOut()
+
         let wasVisible = wantsVisible
         wantsVisible = true
         if !wasVisible { onVisibilityChange?(true) }
@@ -383,7 +397,12 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
             return
         }
 
-        if popover.isShown { popover.performClose(nil) }
+        // Instant, then show — see AnchoredPopoverPanel.present.
+        if popover.isShown {
+            popover.animates = false
+            popover.performClose(nil)
+            popover.animates = true
+        }
         anchorPanel.setFrame(desiredStrip, display: false)
         if !anchorPanel.isVisible { anchorPanel.orderFront(nil) }
         shownStrip = desiredStrip
@@ -402,18 +421,35 @@ final class ItemPreviewPanel: NSObject, NSPopoverDelegate {
         let wasVisible = wantsVisible
         wantsVisible = false
         if wasVisible { onVisibilityChange?(false) }
+        shownStrip = nil
+        lastShownContentKey = nil
+        fadeOutWork?.cancel()
+        fadeOutWork = nil
+        if PopoverClose.animated, popover.isShown {
+            fadeOutWork = popover.clipenAnimateOut { [weak self] in self?.finishHide() }
+            return
+        }
+        finishHide()
+    }
+
+    private func finishHide() {
+        fadeOutWork = nil
+        // Shown again during the fade: leave the new content alone.
+        guard !wantsVisible else { return }
+        popover.clipenCancelAnimateOut()
+        // Cleared only now, not at the start of hide(): it exists to release
+        // heavy content (images, video) once the panel is really gone, and
+        // clearing it first would have the preview blank itself while it was
+        // still on screen fading out.
         if let hostingController = popover.contentViewController as? NSHostingController<AnyView> {
             hostingController.rootView = AnyView(EmptyView())
         }
         if popover.isShown {
-
             popover.animates = false
             popover.performClose(nil)
             popover.animates = true
         }
         anchorPanel.orderOut(nil)
-        shownStrip = nil
-        lastShownContentKey = nil
     }
 }
 
